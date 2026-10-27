@@ -34,7 +34,7 @@ use termide_agent_core::{
 pub use client::{McpClient, McpToolInfo, McpTransport, OnMessage, PROTOCOL_VERSION};
 pub use http::HttpClient;
 pub use oauth::{Grant, TokenStore};
-pub use server::{CallIds, McpServer, RunningCall, SERVER_NAME};
+pub use server::{CallIds, Finished, McpServer, RunningCall, SERVER_NAME};
 pub use tool::{tool_name, McpTool};
 
 /// Above this many tools from one server without a `tools` filter, the

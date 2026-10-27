@@ -66,9 +66,9 @@ struct Shared {
     /// Each call in flight, by its JSON-RPC id: its cancel token, for
     /// `notifications/cancelled`, and what it is.
     running: Arc<Mutex<HashMap<String, Running>>>,
-    /// The details of finished calls — for termide's UI, never sent to the
-    /// agent — as name, arguments and details, oldest first.
-    details: Mutex<VecDeque<(String, Value, Value)>>,
+    /// What finished calls leave for termide's UI beside their reply, as
+    /// name, arguments and what is kept, oldest first.
+    details: Mutex<VecDeque<(String, Value, Finished)>>,
     stop: AtomicBool,
     /// [`KEEPALIVE`]; shorter in tests.
     keepalive: Duration,
@@ -100,6 +100,16 @@ pub struct RunningCall {
     pub name: String,
     pub arguments: Value,
     pub elapsed: Duration,
+}
+
+/// What a finished call leaves for termide's UI, which the agent does not
+/// pass on when it reports the call: its details, never sent to the agent,
+/// and its pictures, which the agent reports as text at most.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Finished {
+    pub details: Option<Value>,
+    /// As `(media type, base64 data)`.
+    pub images: Vec<(String, String)>,
 }
 
 /// A running server; dropping it stops it.
@@ -194,11 +204,10 @@ impl McpServer {
         self.shared.changed.notify_all();
     }
 
-    /// The details of a finished call of `name` with `arguments`, which the
-    /// MCP reply leaves out: the agent reports the call to termide with the
-    /// reply's text only. Taken once; with no exact match, the one call of
-    /// `name` kept, if just one is.
-    pub fn take_details(&self, name: &str, arguments: &Value) -> Option<Value> {
+    /// What a finished call of `name` with `arguments` left for the UI: the
+    /// agent reports the call to termide with the reply's text only. Taken
+    /// once; with no exact match, the one call of `name` kept, if just one is.
+    pub fn take_finished(&self, name: &str, arguments: &Value) -> Option<Finished> {
         let mut kept = self
             .shared
             .details
@@ -212,7 +221,7 @@ impl McpServer {
                 let first = same.next()?.0;
                 same.next().is_none().then_some(first)
             })?;
-        kept.remove(index).map(|(.., details)| details)
+        kept.remove(index).map(|(.., finished)| finished)
     }
 
     /// Whether a call is running. The agent may have stopped waiting on it:
@@ -734,7 +743,14 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
         .remove(&key);
-    if let Some(details) = result.details.clone() {
+    let finished = Finished {
+        details: result.details.clone(),
+        images: result
+            .images()
+            .map(|(media_type, data)| (media_type.to_string(), data.to_string()))
+            .collect(),
+    };
+    if finished != Finished::default() {
         let mut kept = shared
             .details
             .lock()
@@ -742,7 +758,7 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         if kept.len() == KEPT_DETAILS {
             kept.pop_front();
         }
-        kept.push_back((call.name.clone(), call.arguments.clone(), details));
+        kept.push_back((call.name.clone(), call.arguments.clone(), finished));
     }
     let mut content = vec![json!({ "type": "text", "text": result.plain_text() })];
     content.extend(result.images().map(
@@ -884,19 +900,63 @@ mod tests {
         assert!(!body.contains("said"), "details stay out of the reply");
         post(&server, &token, &call(2, "two"));
         let args = |text: &str| json!({ "text": text });
-        assert_eq!(
-            server.take_details("echo", &args("two")),
-            Some(json!({ "said": "two" }))
-        );
+        let details = |text: &str| {
+            server
+                .take_finished("echo", &args(text))
+                .map(|finished| finished.details)
+        };
+        assert_eq!(details("two"), Some(Some(json!({ "said": "two" }))));
         // No exact match, but the one call of the name kept.
-        assert_eq!(
-            server.take_details("echo", &args("other")),
-            Some(json!({ "said": "one" }))
+        assert_eq!(details("other"), Some(Some(json!({ "said": "one" }))));
+        assert_eq!(details("one"), None, "taken once");
+    }
+
+    /// Shows a picture, as `read` does an image file.
+    struct Picture;
+
+    impl Tool for Picture {
+        fn name(&self) -> &str {
+            "picture"
+        }
+        fn description(&self) -> &str {
+            "Show a picture"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            ToolResultMessage::text(call, "Image a.png")
+                .with_images(vec![("image/png".into(), "AAAA".into())])
+        }
+    }
+
+    /// The agent reports a call's picture as text at most: the server keeps
+    /// it for termide to draw, as it keeps the details.
+    #[test]
+    fn a_call_keeps_its_pictures_for_termide_to_take() {
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(Picture));
+        let server = McpServer::start(tools, Box::new(Guard), ToolContext::new("/tmp")).unwrap();
+        let token = server.token().to_string();
+        let (_, body) = post(
+            &server,
+            &token,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "picture", "arguments": {} } }),
         );
+        assert!(body.contains("\"image\""), "the agent gets the picture");
         assert_eq!(
-            server.take_details("echo", &args("one")),
-            None,
-            "taken once"
+            server.take_finished("picture", &json!({})),
+            Some(Finished {
+                details: None,
+                images: vec![("image/png".into(), "AAAA".into())],
+            })
         );
     }
 
