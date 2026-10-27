@@ -1,6 +1,6 @@
-//! Destinations recently confirmed in the path prompts (copy, move, pack,
-//! unpack, Save As), per project. Kept for this run only: nothing is
-//! written to disk.
+//! The quick destinations of the path prompts (copy, move, pack, unpack,
+//! Save As), among them the destinations recently confirmed, per project.
+//! Those are kept for this run only: nothing is written to disk.
 
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
@@ -87,16 +87,28 @@ fn with_slash(dir: String) -> String {
 
 impl App {
     /// The quick destinations of a path prompt: the panels' directories,
-    /// then this project's recent destinations not among them.
+    /// this project's recent destinations, then the drives (Windows) or
+    /// mount points (Unix: the root, disks, removable media, network
+    /// shares), each once.
     pub(super) fn destination_roots(&self) -> Vec<String> {
         let mut roots: Vec<String> = self
             .find_all_other_panel_paths()
             .into_iter()
             .map(|option| option.value)
             .collect();
-        for dir in self.recent_destinations.of(&self.project_root) {
-            if !roots.contains(dir) {
-                roots.push(dir.clone());
+        let mounts = termide_vfs::drive_roots()
+            .into_iter()
+            .chain(termide_system_monitor::browsable_mount_points())
+            .map(|path| with_slash(path.display().to_string()));
+        for dir in self
+            .recent_destinations
+            .of(&self.project_root)
+            .iter()
+            .cloned()
+            .chain(mounts)
+        {
+            if !roots.contains(&dir) {
+                roots.push(dir);
             }
         }
         roots
