@@ -1636,6 +1636,8 @@ pub trait Translation: Send + Sync {
     fn op_error_not_found(&self) -> &str;
     fn op_error_already_exists(&self) -> &str;
     fn op_error_archive(&self) -> &str;
+    /// Label of the pack modal's archive format row.
+    fn pack_format_label(&self) -> &str;
     /// Label of the pack modal's compression level row.
     fn pack_compression_label(&self) -> &str;
     fn pack_level_store(&self) -> &str;

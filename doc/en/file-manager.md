@@ -73,15 +73,44 @@ Copy and move work between panels the way they do in two-pane file managers:
 open a second file manager beside the first, select files in one and press
 `C` / `F5` or `M` / `F6`. The destination is pre-filled with the directory of
 the nearest other file manager (another panel's directory when there is none);
-the source directory is offered only when no panel sits anywhere else. When the
-panels span more than one directory, a dropdown under the field lists them all;
-the path stays editable.
+the source directory is offered only when no panel sits anywhere else. The
+path stays editable, and `Tab` opens a [directory tree](#destination-path)
+under it that starts with the other panels' directories.
 
 Copying or pasting an item into the directory it already lives in makes a
 copy next to it named `name (1).ext` (the next free number) instead of
 asking to overwrite the original; moving an item onto itself does nothing.
 A directory cannot be copied or moved into itself or any of its
 subdirectories — the operation is refused before anything is written.
+
+### Destination path
+
+Copy, move, [pack](vfs.md#packing), [unpack](vfs.md#unpacking) and Save As
+ask for a path in a field that opens a directory tree under it: press `Tab`
+or click the `▼` at its right end. While the field still holds the suggested
+path, the tree lists the other panels' directories. Once the path is edited,
+it lists the directory the path names up to its last `/`, narrowed fuzzily by
+what follows; a name starting with `.` brings in hidden directories.
+
+| Key                                  | In the tree                                             |
+|--------------------------------------|---------------------------------------------------------|
+| `↓` (in the field)                   | Move into the tree                                      |
+| `↑` `↓` `PgUp` `PgDn` `Home` `End`   | Move; the directory under the cursor goes into the field |
+| `→` / `←`                            | Expand / collapse, or step to the parent row            |
+| `.`                                  | Show or hide hidden directories                         |
+| `F7`                                 | Create a directory beside the one under the cursor      |
+| `F2`                                 | Rename the directory under the cursor                   |
+| `F8` / `Delete`                      | Delete the directory under the cursor if it is empty    |
+| `Enter`                              | Close the tree, keeping the path                        |
+| `Esc`                                | Close the tree, restoring the path it opened with       |
+| any other key                        | Typed into the field                                    |
+
+When the path names a file — copying a single item, packing, Save As —
+picking a directory keeps the file name. The directory keys are the file
+manager's own (`toggle_hidden`, `create_dir`, `rename`, `delete`); bindings
+that are plain letters, such as `D` and `R`, are typed into the field
+instead. The other panels' directories at the top of the tree are not
+renamed or deleted, and remote ones are listed but not expanded.
 
 ## Search
 

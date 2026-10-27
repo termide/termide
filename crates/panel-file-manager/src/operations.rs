@@ -379,7 +379,8 @@ impl FileManager {
     }
 
     /// Ask where to pack the selection (P). The archive defaults to the
-    /// selection's own directory; the dropdown offers each writable format.
+    /// selection's own directory; a row picks its format among the writable
+    /// ones.
     pub(crate) fn request_pack(&mut self) {
         let t = termide_i18n::t();
         if self.vfs.is_remote() {
@@ -403,17 +404,10 @@ impl FileManager {
                     .unwrap_or_else(|| "archive".to_string()),
             ),
         };
-        let options: Vec<termide_modal::SelectOption> = PACK_EXTENSIONS
-            .iter()
-            .map(|ext| {
-                let value = dir.join(format!("{stem}{ext}")).display().to_string();
-                termide_modal::SelectOption {
-                    display: value.clone(),
-                    value,
-                }
-            })
-            .collect();
-        let default = options[0].value.clone();
+        let default = dir
+            .join(format!("{stem}{}", PACK_EXTENSIONS[0]))
+            .display()
+            .to_string();
         let level = termide_vfs::archive::pack::CompressionLevel::default();
         let levels = termide_vfs::archive::pack::CompressionLevel::ALL;
         let level_names = levels
@@ -422,7 +416,15 @@ impl FileManager {
             .collect();
         let selected = levels.iter().position(|l| *l == level).unwrap_or(0);
         let modal =
-            termide_modal::EditableSelectModal::new(t.modal_pack_title(), prompt, default, options)
+            termide_modal::EditableSelectModal::new(t.modal_pack_title(), prompt, default, vec![])
+                .with_base_dir(dir)
+                .keeping_file_name()
+                .with_keybindings(&self.cached_config.keybindings)
+                .with_extension_choice(
+                    t.pack_format_label().to_string(),
+                    PACK_EXTENSIONS.iter().map(|e| e.to_string()).collect(),
+                    0,
+                )
                 .with_choice(
                     t.pack_compression_label().to_string(),
                     level_names,

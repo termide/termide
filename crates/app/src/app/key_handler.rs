@@ -394,6 +394,23 @@ impl App {
             )));
         }
 
+        // Save As offers the panels' directories, as copy does.
+        if let (
+            PendingAction::SaveFileAs { directory }
+            | PendingAction::SaveContentAs { directory, .. },
+            ActiveModal::SaveAs(save_as),
+        ) = (&action, &mut modal)
+        {
+            save_as.set_base_dir(directory.clone());
+            save_as.set_keybindings(&self.state.config.file_manager.keybindings);
+            save_as.set_quick_destinations(
+                self.find_all_other_panel_paths()
+                    .into_iter()
+                    .map(|opt| opt.value)
+                    .collect(),
+            );
+        }
+
         // Handle navigation actions without modal window
         match action {
             PendingAction::NextPanel => {
@@ -434,9 +451,8 @@ impl App {
         // Get source directory to exclude from default selection
         let source_dir = sources[0].parent().map(|p| p.display().to_string());
 
-        // Find all unique paths from other panels
+        // The directories of the panels are the quick destinations.
         let options = self.find_all_other_panel_paths();
-        let unique_paths_count = options.len();
 
         let panel_dirs: Vec<String> = options.iter().map(|opt| opt.value.clone()).collect();
         let dest_dir = default_destination_dir(
@@ -445,28 +461,19 @@ impl App {
             &panel_dirs,
         )
         .map(str::to_string)
-        .or(source_dir)
+        .or(source_dir.clone())
         .unwrap_or_else(|| "/".to_string());
 
-        // For single file: append filename to each option so dropdown shows full paths
+        // A single file keeps its name: the path names the copy.
         let file_name = match sources {
             [source] => source.file_name().and_then(|n| n.to_str()),
             _ => None,
         };
-        let join = |dir: &str| match file_name {
-            Some(name) => format!("{}/{}", dir.trim_end_matches('/'), name),
-            None if dir.ends_with('/') => dir.to_string(),
-            None => format!("{}/", dir),
+        let default_dest = match file_name {
+            Some(name) => format!("{}/{}", dest_dir.trim_end_matches('/'), name),
+            None if dest_dir.ends_with('/') => dest_dir,
+            None => format!("{}/", dest_dir),
         };
-        let options: Vec<_> = options
-            .into_iter()
-            .map(|mut opt| {
-                opt.value = join(&opt.value);
-                opt.display = opt.value.clone();
-                opt
-            })
-            .collect();
-        let default_dest = join(&dest_dir);
 
         *target_directory = Some(std::path::PathBuf::from(default_dest.trim_end_matches('/')));
 
@@ -501,28 +508,21 @@ impl App {
             )
         };
 
-        // Choose modal based on number of unique paths
-        if unique_paths_count >= 2 {
-            let mut new_modal =
-                termide_modal::EditableSelectModal::new(title, prompt, &default_dest, options);
-            if is_copy {
-                let t = i18n::t();
-                new_modal = new_modal.with_checkbox(t.checkbox_create_symlink().to_string());
-                new_modal =
-                    new_modal.with_conditional_checkbox(t.checkbox_relative_symlink().to_string());
-            }
-            ActiveModal::EditableSelect(Box::new(new_modal))
-        } else {
-            let mut new_modal =
-                termide_modal::InputModal::with_default(title, prompt, &default_dest);
-            if is_copy {
-                let t = i18n::t();
-                new_modal = new_modal.with_checkbox(t.checkbox_create_symlink().to_string());
-                new_modal =
-                    new_modal.with_conditional_checkbox(t.checkbox_relative_symlink().to_string());
-            }
-            ActiveModal::Input(Box::new(new_modal))
+        let mut modal =
+            termide_modal::EditableSelectModal::new(title, prompt, default_dest, options)
+                .with_keybindings(&self.state.config.file_manager.keybindings);
+        if let Some(dir) = source_dir {
+            modal = modal.with_base_dir(std::path::PathBuf::from(dir));
         }
+        if file_name.is_some() {
+            modal = modal.keeping_file_name();
+        }
+        if is_copy {
+            modal = modal
+                .with_checkbox(t.checkbox_create_symlink().to_string())
+                .with_conditional_checkbox(t.checkbox_relative_symlink().to_string());
+        }
+        ActiveModal::EditableSelect(Box::new(modal))
     }
 }
 

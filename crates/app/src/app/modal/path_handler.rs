@@ -19,9 +19,6 @@ impl App {
             return;
         }
         let (create_symlink_checked, create_relative_checked) = match &self.state.active_modal {
-            Some(ActiveModal::Input(m)) => {
-                (m.is_checkbox_checked(), m.is_secondary_checkbox_checked())
-            }
             Some(ActiveModal::EditableSelect(m)) => {
                 (m.is_checkbox_checked(), m.is_secondary_checkbox_checked())
             }

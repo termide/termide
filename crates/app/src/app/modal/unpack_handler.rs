@@ -80,12 +80,16 @@ impl App {
                 value,
             })
             .collect();
-        ActiveModal::EditableSelect(Box::new(termide_modal::EditableSelectModal::new(
-            t.modal_unpack_title(),
-            prompt,
-            default,
-            options,
-        )))
+        ActiveModal::EditableSelect(Box::new(
+            termide_modal::EditableSelectModal::new(
+                t.modal_unpack_title(),
+                prompt,
+                default,
+                options,
+            )
+            .with_base_dir(PathBuf::from(&source_dir))
+            .with_keybindings(&self.state.config.file_manager.keybindings),
+        ))
     }
 
     /// Answer to the destination prompt. A relative path is taken from the
