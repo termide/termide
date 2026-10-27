@@ -55,6 +55,9 @@ use termide_core::{
     CommandResult, InputAction, KeyChord, Panel, PanelCommand, PanelEvent, RenderContext,
     ScrollAxis, ScrollBars, SelectAction, StatusSegment, ThemeColors, TitleCut, WidthPreference,
 };
+use termide_panel_image::inline::{Graphics, InlinePictures};
+
+use crate::render::PictureMotion;
 use termide_theme::Theme;
 use termide_ui::{ClickTracker, CompletionList, InputBar};
 
@@ -1102,6 +1105,15 @@ pub struct AgentPanel {
     /// Rebuilt every render; empty once the session has content and the
     /// banner is gone.
     banner_hits: Vec<(Rect, BannerHit)>,
+    /// The terminal's graphics, for the pictures in the transcript; asked
+    /// for once the first picture is laid out (see `ask_graphics`).
+    graphics: Option<Graphics>,
+    graphics_asked: bool,
+    /// The pictures encoded for the terminal, kept across frames.
+    pictures: InlinePictures,
+    /// Where each picture on screen was last framed or drawn, and since
+    /// when it has stood there (see `draw_pictures`).
+    picture_spots: HashMap<u64, PictureMotion>,
 }
 
 impl AgentPanel {
@@ -1413,6 +1425,10 @@ impl AgentPanel {
             input_area: Rect::default(),
             scrollbars: ScrollBars::default(),
             banner_hits: Vec::new(),
+            graphics: None,
+            graphics_asked: false,
+            pictures: InlinePictures::default(),
+            picture_spots: HashMap::new(),
         };
         // Names defined twice and definitions with what nothing reads are
         // reported once, when the panel opens; under

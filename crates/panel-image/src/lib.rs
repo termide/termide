@@ -7,6 +7,7 @@
 //! `+`/`-` (or the mouse wheel) zoom around the centre of the visible part,
 //! the arrow keys pan a zoomed image and `0` returns to the fitted view.
 
+pub mod inline;
 mod view;
 
 use std::any::Any;

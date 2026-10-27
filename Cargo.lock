@@ -5599,8 +5599,10 @@ dependencies = [
 name = "termide-panel-agent"
 version = "0.46.0"
 dependencies = [
+ "base64",
  "chrono",
  "crossterm",
+ "image",
  "log",
  "ratatui",
  "serde_json",
@@ -5609,6 +5611,7 @@ dependencies = [
  "termide-config",
  "termide-core",
  "termide-i18n",
+ "termide-panel-image",
  "termide-panel-markdown",
  "termide-richtext",
  "termide-theme",
@@ -5843,6 +5846,7 @@ name = "termide-panel-image"
 version = "0.46.0"
 dependencies = [
  "anyhow",
+ "base64",
  "crossterm",
  "image",
  "ratatui",

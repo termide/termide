@@ -11,9 +11,11 @@ use ratatui::layout::Rect;
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
 use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
+use termide_panel_image::inline::Graphics;
 use termide_ui::ScrollBar;
 
 use crate::toolset::TOOLSET_ACTION;
+use crate::transcript::{PictureLayout, PICTURE_INDENT};
 use crate::{
     format_tokens, provider_label, shorten_path, single_line, transcript, truncate_title,
     AgentEntry, AgentPanel, BannerHit, Phase, RunButton, ViewButton, AGENT_ACTION,
@@ -67,7 +69,112 @@ pub(crate) fn context_bar(percent: u64) -> String {
     bar
 }
 
+/// How long a picture stands still before it is drawn where moving it
+/// costs sending it again.
+pub(crate) const PICTURE_SETTLE: Duration = Duration::from_millis(150);
+
+/// Where a picture was last framed or drawn on screen, since when it has
+/// stood there, and whether it was a frame.
+pub(crate) struct PictureMotion {
+    rect: Rect,
+    since: Instant,
+    framed: bool,
+}
+
+/// A box of `rect`'s size where a picture goes, drawn while it moves.
+fn draw_picture_frame(rect: Rect, style: Style, buf: &mut Buffer) {
+    let (right, bottom) = (
+        rect.right().saturating_sub(1),
+        rect.bottom().saturating_sub(1),
+    );
+    for y in rect.top()..rect.bottom() {
+        for x in rect.left()..rect.right() {
+            let symbol = match (x == rect.left(), x == right, y == rect.top(), y == bottom) {
+                _ if rect.width == 1 || rect.height == 1 => "░",
+                (true, _, true, _) => "┌",
+                (_, true, true, _) => "┐",
+                (true, _, _, true) => "└",
+                (_, true, _, true) => "┘",
+                (_, _, true, _) | (_, _, _, true) => "─",
+                (true, _, _, _) | (_, true, _, _) => "│",
+                _ => " ",
+            };
+            buf[(x, y)].set_symbol(symbol).set_style(style);
+        }
+    }
+}
+
 impl AgentPanel {
+    /// Ask the terminal for its graphics, once, when the transcript first
+    /// lays out a picture. Called on a tick: the query writes to the terminal
+    /// and reads its answer, which it must not do while a frame is drawn.
+    /// Returns whether the pictures can now be drawn.
+    pub(crate) fn ask_graphics(&mut self) -> bool {
+        if self.graphics_asked || !self.transcript.has_pictures() {
+            return false;
+        }
+        self.graphics_asked = true;
+        self.graphics = Graphics::detect();
+        self.graphics.is_some()
+    }
+
+    /// Whether a picture shown as a frame while it moved has now stood
+    /// still long enough to be drawn, so the panel redraws.
+    pub(crate) fn pictures_settled(&self) -> bool {
+        self.picture_spots
+            .values()
+            .any(|motion| motion.framed && motion.since.elapsed() >= PICTURE_SETTLE)
+    }
+
+    /// Draw the transcript's pictures over the rows held for them, each one
+    /// only while all of its rows are on screen: a picture cut by the edge
+    /// is where terminal graphics leave debris, so it shows its placeholder.
+    /// Where moving a picture means sending it again (Sixel, iTerm2), one
+    /// that has moved since the last frame — scrolled, or pushed up by what
+    /// the agent writes — is a frame until it stands still for
+    /// [`PICTURE_SETTLE`], so a scroll sends rows of text, not pictures.
+    fn draw_pictures(&mut self, area: Rect, height: u16, buf: &mut Buffer) {
+        let Some(graphics) = self.graphics.as_ref() else {
+            return;
+        };
+        self.pictures.next_frame();
+        let (top, bottom) = (self.top, self.top + height as usize);
+        let before = std::mem::take(&mut self.picture_spots);
+        let frame_style = Style::default().fg(self.colors.disabled);
+        for spot in self.transcript.pictures() {
+            if spot.line < top || spot.line + spot.rows as usize > bottom {
+                continue;
+            }
+            let Some(data) = self.transcript.picture_data(spot.item, spot.ordinal) else {
+                continue;
+            };
+            let rect = Rect {
+                x: area.x + PICTURE_INDENT,
+                y: area.y + (spot.line - top) as u16,
+                width: spot.cols,
+                height: spot.rows,
+            };
+            let since = match before.get(&spot.key) {
+                Some(motion) if motion.rect == rect => motion.since,
+                _ => Instant::now(),
+            };
+            let framed = !graphics.moves_cheaply() && since.elapsed() < PICTURE_SETTLE;
+            if framed {
+                draw_picture_frame(rect, frame_style, buf);
+            } else {
+                self.pictures.draw(graphics, spot.key, data, rect, buf);
+            }
+            self.picture_spots.insert(
+                spot.key,
+                PictureMotion {
+                    rect,
+                    since,
+                    framed,
+                },
+            );
+        }
+    }
+
     /// The active goal as a sentence (`Goal: … — turn 3`), for a bare
     /// `/goal`; `None` without one.
     pub(crate) fn goal_status(&self) -> Option<String> {
@@ -885,6 +992,14 @@ impl AgentPanel {
         // the last block while the agent works, animating on the ~10 fps redraw.
         let footer = self.live_footer_lines(text_width);
         self.transcript.set_live_footer(footer);
+        // A picture takes at most half the panel: the work around it stays
+        // in sight. The panel's height rather than the transcript's, which
+        // the input and the strip change as one types.
+        let layout = self.graphics.as_ref().map(|graphics| PictureLayout {
+            cell_px: graphics.cell_px(),
+            max_rows: (area.height / 2).max(1),
+        });
+        self.transcript.set_picture_layout(layout);
         let mut total = self.transcript.lines(text_width, &colors, is_light).len();
         let mut max_top = total.saturating_sub(transcript_height as usize);
         if self.follow {
@@ -895,7 +1010,7 @@ impl AgentPanel {
         // An answer's diagrams fold to a card once the answer is wholly
         // above the view. Every row that goes was above the view, so moving
         // the view up by as many keeps what is on screen where it was.
-        if self.transcript.fold_diagrams_above(self.top) {
+        if self.transcript.fold_artifacts_above(self.top) {
             let folded = self.transcript.lines(text_width, &colors, is_light).len();
             let gone = total - folded;
             total = folded;
@@ -995,6 +1110,9 @@ impl AgentPanel {
                     }
                 }
             }
+        }
+        if !banner {
+            self.draw_pictures(area, transcript_height, buf);
         }
         self.scrollbars.vertical = ScrollBar::render_tracked(
             buf,
