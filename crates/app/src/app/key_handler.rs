@@ -394,7 +394,8 @@ impl App {
             )));
         }
 
-        // Save As offers the panels' directories, as copy does.
+        // Save As offers the panels' directories and the recent
+        // destinations, as copy does.
         if let (
             PendingAction::SaveFileAs { directory }
             | PendingAction::SaveContentAs { directory, .. },
@@ -403,12 +404,14 @@ impl App {
         {
             save_as.set_base_dir(directory.clone());
             save_as.set_keybindings(&self.state.config.file_manager.keybindings);
-            save_as.set_quick_destinations(
-                self.find_all_other_panel_paths()
-                    .into_iter()
-                    .map(|opt| opt.value)
-                    .collect(),
-            );
+            save_as.set_quick_destinations(self.destination_roots());
+        }
+
+        // Pack offers them as well; the panel asking knows none.
+        if let (PendingAction::PackPaths { .. }, ActiveModal::EditableSelect(pack)) =
+            (&action, &mut modal)
+        {
+            pack.set_quick_destinations(self.destination_roots());
         }
 
         // Handle navigation actions without modal window
@@ -451,10 +454,21 @@ impl App {
         // Get source directory to exclude from default selection
         let source_dir = sources[0].parent().map(|p| p.display().to_string());
 
-        // The directories of the panels are the quick destinations.
-        let options = self.find_all_other_panel_paths();
-
-        let panel_dirs: Vec<String> = options.iter().map(|opt| opt.value.clone()).collect();
+        // The directories of the panels and the recent destinations are the
+        // quick destinations; the default is one of the panels'.
+        let panel_dirs: Vec<String> = self
+            .find_all_other_panel_paths()
+            .into_iter()
+            .map(|opt| opt.value)
+            .collect();
+        let options = self
+            .destination_roots()
+            .into_iter()
+            .map(|dir| termide_modal::SelectOption {
+                display: dir.clone(),
+                value: dir,
+            })
+            .collect();
         let dest_dir = default_destination_dir(
             source_dir.as_deref(),
             &self.other_file_manager_paths(),

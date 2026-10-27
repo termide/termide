@@ -16,7 +16,9 @@ impl App {
     /// Build the destination prompt for unpacking `archives`.
     ///
     /// The default is the nearest other file manager's directory, as for
-    /// copy, falling back to the archive's own. A single archive is offered
+    /// copy, falling back to the archive's own; the candidates are it, the
+    /// panels' directories, the archive's and the recent local destinations.
+    /// A single archive is offered
     /// a directory named after it in each candidate as well as the candidate
     /// itself; several archives always get a directory each, so only the
     /// parent is asked for.
@@ -47,10 +49,12 @@ impl App {
             .cloned()
             .unwrap_or_else(|| source_dir.clone());
 
+        let quick: Vec<String> = self.destination_roots().into_iter().filter(local).collect();
         let mut dirs: Vec<String> = Vec::new();
         for dir in std::iter::once(&default_dir)
             .chain(&panel_dirs)
             .chain(std::iter::once(&source_dir))
+            .chain(&quick)
         {
             let dir = dir.trim_end_matches('/').to_string();
             if !dirs.contains(&dir) {
