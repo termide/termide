@@ -104,11 +104,18 @@ impl SaveAsModal {
         let t = i18n::t();
         let title_width = self.title.len() as u16 + 2;
         let buttons_width = 21u16; // "[ OK ]    [ Cancel ]"
-        let input_width = self.field.text().chars().count() as u16 + 20;
+        let input_width = self.field.text_width() as u16 + 20;
         let checkbox_width = max_line_width(&format!("[✓] {}", t.checkbox_executable()));
 
         let width = calculate_modal_width(
-            [title_width, buttons_width, input_width, checkbox_width].into_iter(),
+            std::iter::once(
+                self.field.hold_width(
+                    title_width
+                        .max(buttons_width)
+                        .max(input_width)
+                        .max(checkbox_width),
+                ),
+            ),
             screen_width,
             ModalWidthConfig {
                 wide: false,

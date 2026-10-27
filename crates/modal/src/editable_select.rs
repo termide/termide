@@ -344,9 +344,9 @@ impl EditableSelectModal {
     fn calculate_modal_size(&self, screen_width: u16, screen_height: u16) -> (u16, u16) {
         let title_width = self.title.width() as u16 + 2;
         let prompt_width = self.prompt.lines().map(|l| l.width()).max().unwrap_or(0) as u16;
-        // The field fits the widest quick destination and the first value,
-        // and its arrow.
-        let input_width = self.widest_option.max(self.field.text().width()) as u16 + 5;
+        // The field fits the widest quick destination and its path, and its
+        // arrow.
+        let input_width = self.widest_option.max(self.field.text_width()) as u16 + 5;
         // Buttons width: "[ OK ]    [ Cancel ]" = ~21 characters
         let buttons_width = 21;
         let choice_width = self
@@ -364,7 +364,9 @@ impl EditableSelectModal {
             .max(input_width)
             .max(buttons_width)
             .max(choice_width);
-        let total_width = content_width + MODAL_PADDING_WITH_DOUBLE_BORDER;
+        let total_width = self
+            .field
+            .hold_width(content_width + MODAL_PADDING_WITH_DOUBLE_BORDER);
         let max_width = (screen_width as f32 * MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT) as u16;
         let width = total_width
             .max(MODAL_MIN_WIDTH_WIDE)
@@ -774,6 +776,39 @@ mod tests {
                 line.trim_end().to_string() + "\n"
             })
             .collect()
+    }
+
+    #[test]
+    fn moving_through_the_open_tree_keeps_the_width() {
+        let dir = project();
+        let long = dir.path().join("a".repeat(90));
+        std::fs::create_dir_all(long.join("inner")).unwrap();
+        let mut modal = EditableSelectModal::new(
+            "Copy",
+            "",
+            format!("{}/", dir.path().display()),
+            vec![option(dir.path())],
+        );
+        let width = |modal: &EditableSelectModal| modal.calculate_modal_size(300, 60).0;
+        let closed = width(&modal);
+
+        press(&mut modal, KeyCode::Tab);
+        let open = width(&modal);
+        assert!(open >= closed, "opening the tree may widen, never narrow");
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+        let mut passed_the_long_one = false;
+        for _ in 0..6 {
+            press(&mut modal, KeyCode::Down);
+            assert_eq!(width(&modal), open, "at {}", modal.value());
+            passed_the_long_one |= modal.value().contains(&"a".repeat(90));
+        }
+        assert!(passed_the_long_one);
+
+        press(&mut modal, KeyCode::Enter);
+        assert!(width(&modal) >= open, "closing keeps the width it had");
+        press(&mut modal, KeyCode::Backspace);
+        assert!(width(&modal) >= open, "a shorter path does not narrow it");
     }
 
     #[test]
