@@ -1471,11 +1471,14 @@ fn wrapped_row_with_meta(
 }
 
 /// What a tool call's headline subject links to: the file a read, write or
-/// edit touched, the page a fetch loaded.
+/// edit touched, the page a fetch loaded, the file a debug breakpoint or
+/// launch names.
 fn headline_href(call: &ToolCall) -> Option<String> {
     let key = match call.name.as_str() {
         "read" | "write" | "edit" => "path",
         "fetch" => "url",
+        // A launch by command names no file, and links nothing.
+        "debug" if call.arguments.get("command").is_none() => "file",
         _ => return None,
     };
     let href = call.arguments.get(key)?.as_str()?.trim();
@@ -1838,6 +1841,49 @@ fn tool_headline(
             "" => action("&", t.agent_tool_jobs(), String::new()),
             id => action("&", t.agent_tool_jobs_stop(), id.to_string()),
         },
+        // The debugger, in the editor gutter's marks: `●` for a breakpoint,
+        // `→` for whatever moves the program or reads where it is.
+        "debug" => {
+            let breakpoint = || match call.arguments["line"].as_u64() {
+                Some(line) => format!("{}:{line}", arg("file")),
+                None => arg("file"),
+            };
+            match arg("action").as_str() {
+                "start" => {
+                    let target = match arg("command") {
+                        command if command.is_empty() => arg("file"),
+                        command => command,
+                    };
+                    action("→", t.agent_tool_debug_start(), target)
+                }
+                "breakpoint" if call.arguments["set"] == false => {
+                    action("●", t.agent_tool_debug_clear_breakpoint(), breakpoint())
+                }
+                "breakpoint" => action("●", t.agent_tool_debug_set_breakpoint(), breakpoint()),
+                "continue" => action("→", t.agent_tool_debug_continue(), String::new()),
+                "step_over" => action("→", t.agent_tool_debug_step_over(), String::new()),
+                "step_in" => action("→", t.agent_tool_debug_step_in(), String::new()),
+                "step_out" => action("→", t.agent_tool_debug_step_out(), String::new()),
+                "pause" => action("→", t.agent_tool_debug_pause(), String::new()),
+                "stop" => action("→", t.agent_tool_debug_stop(), String::new()),
+                "evaluate" => action(
+                    "→",
+                    t.agent_tool_debug_evaluate(),
+                    arg("expression").replace('\n', " ").trim().to_string(),
+                ),
+                "frame" => action(
+                    "→",
+                    t.agent_tool_debug_frame(),
+                    call.arguments["frame"]
+                        .as_u64()
+                        .map(|n| n.to_string())
+                        .unwrap_or_default(),
+                ),
+                "state" => action("→", t.agent_tool_debug_state(), String::new()),
+                // An action the tool will refuse, named as it was asked.
+                other => action("→", t.agent_tool_debug_start(), other.to_string()),
+            }
+        }
         // Another agent's message to this one: from whom, what it is, and
         // its first line; the rest folds under it.
         PEER_MESSAGE_TOOL if is_peer_message(call) => {
@@ -4209,6 +4255,64 @@ mod tests {
         assert_eq!(
             text(&call("recall", json!({ "open": "commit:.@08c2e3b1" }))),
             format!("↺ {} commit:.@08c2e3b1", t.agent_tool_recall())
+        );
+    }
+
+    /// `debug` heads with a localized verb per action, never the raw
+    /// arguments, and links the file a breakpoint names.
+    #[test]
+    fn debug_calls_head_with_their_action() {
+        let colors = ThemeColors::default();
+        let text = |args: Value| -> String {
+            tool_headline(&call("debug", args), None, 80, colors.info, &colors)
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        };
+        let t = termide_i18n::t();
+        assert_eq!(
+            text(json!({ "action": "start", "command": "debug-server" })),
+            format!("→ {} debug-server", t.agent_tool_debug_start())
+        );
+        assert_eq!(
+            text(json!({ "action": "start", "file": "main.py" })),
+            format!("→ {} main.py", t.agent_tool_debug_start())
+        );
+        assert_eq!(
+            text(json!({ "action": "breakpoint", "file": "src/a.rs", "line": 42 })),
+            format!("● {} src/a.rs:42", t.agent_tool_debug_set_breakpoint())
+        );
+        assert_eq!(
+            text(json!({ "action": "breakpoint", "file": "src/a.rs", "line": 42, "set": false })),
+            format!("● {} src/a.rs:42", t.agent_tool_debug_clear_breakpoint())
+        );
+        assert_eq!(
+            text(json!({ "action": "step_over" })),
+            format!("→ {} ", t.agent_tool_debug_step_over())
+        );
+        assert_eq!(
+            text(json!({ "action": "evaluate", "expression": " a\n+ 1 " })),
+            format!("→ {} a + 1", t.agent_tool_debug_evaluate())
+        );
+        assert_eq!(
+            text(json!({ "action": "frame", "frame": 2 })),
+            format!("→ {} 2", t.agent_tool_debug_frame())
+        );
+        assert!(!text(json!({ "action": "state" })).contains('{'));
+        assert_eq!(
+            headline_href(&call(
+                "debug",
+                json!({ "action": "breakpoint", "file": "src/a.rs", "line": 4 })
+            ))
+            .as_deref(),
+            Some("src/a.rs")
+        );
+        assert_eq!(
+            headline_href(&call(
+                "debug",
+                json!({ "action": "start", "command": "debug-server" })
+            )),
+            None
         );
     }
 

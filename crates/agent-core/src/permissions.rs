@@ -187,6 +187,25 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
     }
 }
 
+/// Whether a `debug` call only moves on or looks at a program already
+/// launched: anything but `start` and `evaluate`.
+fn debug_moves_only(call: &ToolCall) -> bool {
+    matches!(
+        call.arguments["action"].as_str(),
+        Some(
+            "state"
+                | "breakpoint"
+                | "continue"
+                | "step_over"
+                | "step_in"
+                | "step_out"
+                | "pause"
+                | "stop"
+                | "frame"
+        )
+    )
+}
+
 /// Refuses every call that could change something while the shared mode is
 /// [`Mode::Plan`]. It sits first in the hook chain, ahead of command hooks,
 /// so nothing — not even a hook's approval — lets a change through in plan
@@ -853,6 +872,11 @@ impl PermissionHooks {
             // `jobs` lists and stops only what the agent itself set going:
             // its own work, which it is not asked about in any mode.
             (_, "jobs") => Decision::Allow,
+            // Stepping, pausing or stopping a program, setting a breakpoint,
+            // reading the session: the program's launch was the decision, and
+            // these only move it on or look at it. `start`, and `evaluate`,
+            // which can call the program's own functions, stay with the mode.
+            (mode, "debug") if mode != Mode::Plan && debug_moves_only(call) => Decision::Allow,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
             // The subagent is held to plan mode too, so it only reads.
             (Mode::Plan, "task") => Decision::Allow,
@@ -1231,6 +1255,24 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
             .trim()
             .to_string(),
         "web_search" => call.arguments["query"].as_str().unwrap_or("").to_string(),
+        // What runs: `start debug-server`, `start src/main.py` (the file as
+        // the file tools give it), `evaluate len(items)`; the bare action
+        // otherwise.
+        "debug" => {
+            let arg = |key: &str| call.arguments[key].as_str().unwrap_or("").trim();
+            let action = arg("action");
+            let what = match action {
+                "start" if !arg("command").is_empty() => arg("command").to_string(),
+                "start" if !arg("file").is_empty() => relative_to_project(arg("file"), &ctx.cwd),
+                "evaluate" => arg("expression").replace('\n', " "),
+                _ => String::new(),
+            };
+            if what.is_empty() {
+                action.to_string()
+            } else {
+                format!("{action} {what}")
+            }
+        }
         _ => match &call.arguments {
             Value::Object(map) => map
                 .values()
@@ -2605,6 +2647,60 @@ mod tests {
             let got: Vec<Decision> = calls.iter().map(|c| hooks.decide(c, &ctx())).collect();
             assert_eq!(got, expected, "{mode:?}");
         }
+    }
+
+    /// Moving on a launched program asks no one outside plan mode; a launch
+    /// and an evaluation stay with the mode, and a rule still wins. Their
+    /// subject names what runs, so "allow always" trusts that command.
+    #[test]
+    fn debug_steps_go_through_and_launches_stay_with_the_mode() {
+        let step = call("debug", json!({ "action": "step_over" }));
+        let start = call(
+            "debug",
+            json!({ "action": "start", "command": "debug-server", "params": { "port": "1" } }),
+        );
+        let evaluate = call(
+            "debug",
+            json!({ "action": "evaluate", "expression": "f(\n1)" }),
+        );
+        for (mode, expected) in [
+            (Mode::Ask, [Decision::Allow, Decision::Ask, Decision::Ask]),
+            (Mode::Auto, [Decision::Allow, Decision::Ask, Decision::Ask]),
+            (Mode::Plan, [Decision::Deny, Decision::Deny, Decision::Deny]),
+        ] {
+            let (hooks, _) = hooks(
+                PermissionRules {
+                    mode,
+                    ..Default::default()
+                },
+                vec![],
+            );
+            let got = [&step, &start, &evaluate].map(|c| hooks.decide(c, &ctx()));
+            assert_eq!(got, expected, "{mode:?}");
+        }
+        let mut rules = PermissionRules {
+            mode: Mode::Configured,
+            ..Default::default()
+        };
+        rules.add("debug", "step_over", Decision::Deny);
+        rules.add("debug", "start debug-server", Decision::Allow);
+        let (hooks, _) = hooks(rules, vec![]);
+        assert_eq!(hooks.decide(&step, &ctx()), Decision::Deny);
+        assert_eq!(hooks.decide(&start, &ctx()), Decision::Allow);
+
+        assert_eq!(subject_of(&start, &ctx()), "start debug-server");
+        assert_eq!(
+            subject_of(
+                &call(
+                    "debug",
+                    json!({ "action": "start", "file": "/proj/app/main.py" })
+                ),
+                &ctx()
+            ),
+            "start app/main.py"
+        );
+        assert_eq!(subject_of(&evaluate, &ctx()), "evaluate f( 1)");
+        assert_eq!(subject_of(&step, &ctx()), "step_over");
     }
 
     #[test]

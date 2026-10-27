@@ -431,7 +431,9 @@ The conversation is a stack of blocks, each opened by a mark:
 `› ` for your message and for the agent's answer, `@ ` for its reasoning, `$ `
 for a shell call or a command offered for you to run, `< ` for a file read, `> ` for a write, `± ` for an edit,
 `/ ` for a skill, `& ` for a subagent and every message to or from another
-agent, `* ` for an MCP tool, `¿ ` for a question to you, `# ` for the system prompt. The marks are in the accent,
+agent, `* ` for an MCP tool, `¿ ` for a question to you, `● ` for a
+breakpoint and `→ ` for any other debugger step, as the editor gutter marks
+them, `# ` for the system prompt. The marks are in the accent,
 except the system prompt's `#`, dim like the prompt itself. The answer is shown in full;
 a user message or the system prompt longer than five lines is
 folded to a preview that keeps the first line and the last few, with a
@@ -469,7 +471,9 @@ the query (`↓ Fetching https://docs.rs`, `? Searching ratatui scrollbar`), a
 skill with its name and arguments (`/ Using skill review src/x.rs`), a
 subagent with its name and the first line of the task (`& Delegating to
 reviewer · check the diff`), an MCP tool with its server, name and arguments as
-`key=value` (`* Using MCP github: create_issue title=Crash`); any other tool
+`key=value` (`* Using MCP github: create_issue title=Crash`), the debugger
+with its action and what it acts on (`→ Debugging debug-server`,
+`● Setting breakpoint src/main.rs:42`, `→ Stepping over`); any other tool
 as its name and a summary. The reasoning is its own block above the
 answer, and its text wraps to the width. Only the system prompt
 opens with a dim dashed rule that sets it apart from the block before; an
@@ -1189,7 +1193,7 @@ with **debug** as the user does in the debug panel (see
 
 | Action | What it does |
 |--------|--------------|
-| `start` | Debug `command` — the identifier or label of a command with a debug adapter in `commands.toml` — or `file`, a Python script, the Go package of a file's directory or the Cargo binary a Rust file belongs to, with the project's breakpoints set; waits up to 10 minutes, a build included, for the first stop or the end |
+| `start` | Debug `command` — the identifier or label of a command with a debug adapter in `commands.toml` — or `file`, a Python script, the Go package of a file's directory or the Cargo binary a Rust file belongs to, with the project's breakpoints set; waits up to 10 minutes, a build included, for the first stop or the end. A command's parameters take `params`, values by name; the rest take what its form opens with |
 | `breakpoint` | Set the breakpoint at `file`:`line`, or remove it with `set: false`; editors show it at once, and a running session gets it |
 | `continue`, `step_over`, `step_in`, `step_out` | Resume the stopped program and wait up to a minute for the next stop or the end |
 | `pause`, `stop` | Stop the running program where it is; end the session and the program |
@@ -1204,10 +1208,21 @@ that runs out says the program still runs; `state` or `pause` follow it up.
 A session the agent starts opens the debug panel beside the others without
 taking the focus, and is the same session the user sees there: either can
 step it. Only debug adapters can be driven: a command whose `debugger` is a
-command-line debugger in a terminal, or one that asks for parameters, is
-refused with the reason, as is a file whose adapter (debugpy, Delve, lldb-dap
-or GDB's) is not installed. The session ends when the panel is closed, `stop`
-is called or another launch starts.
+command-line debugger in a terminal, or one that takes `{file}` or another
+value from the focused panel, is refused with the reason, as is a file whose
+adapter (debugpy, Delve, lldb-dap or GDB's) is not installed. A command's
+parameters get the values the form would: those in `params`, each one its field
+could hold — one of a `select`'s options, a number, `true` or `false` — and
+the rest what the form opens with. The session ends when the panel is closed,
+`stop` is called or another launch starts.
+
+`start` and `evaluate`, which can call the program's own functions, are
+decided as any tool call is, by the rules and the mode; their subject for a
+rule names what runs (`start debug-server`, `start app/main.py`,
+`evaluate len(items)`), so "Allow always" trusts that command. Everything
+else — stepping, pausing, stopping, breakpoints, frames, `state` — only moves
+on or looks at a program whose launch was already decided, and asks no one,
+outside plan mode; a `deny` rule still refuses it.
 
 ## Permissions
 

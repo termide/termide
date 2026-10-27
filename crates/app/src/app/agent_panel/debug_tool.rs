@@ -4,6 +4,7 @@
 //! tick and answers once the program has got where the action leads — the
 //! next stop, the end, an evaluated value — or a deadline passes.
 
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -212,8 +213,12 @@ impl App {
         };
         match action {
             DebugAction::State => Ok(Taken::Now(None)),
-            DebugAction::Start { command, file } => {
-                self.agent_start_debug(command.as_deref(), file.as_deref())?;
+            DebugAction::Start {
+                command,
+                file,
+                params,
+            } => {
+                self.agent_start_debug(command.as_deref(), file.as_deref(), &params)?;
                 Ok(Taken::Wait(Until::Settled, START_WAIT))
             }
             DebugAction::Breakpoint { file, line, set } => {
@@ -273,11 +278,13 @@ impl App {
     }
 
     /// Start a DAP session for an agent, beside the panels it does not take
-    /// the focus from.
+    /// the focus from. A command's parameters take `params`, and the rest
+    /// what its form opens with.
     fn agent_start_debug(
         &mut self,
         command: Option<&str>,
         file: Option<&Path>,
+        params: &BTreeMap<String, String>,
     ) -> Result<(), String> {
         let spec = match (command, file) {
             (Some(name), _) => {
@@ -304,16 +311,14 @@ impl App {
                         )
                     });
                 };
-                if command
+                let declared = command
                     .metadata
                     .as_ref()
-                    .is_some_and(|m| !m.params.is_empty())
-                {
-                    return Err(format!(
-                        "`{}` asks the user for parameters; ask the user to start it",
-                        command.name
-                    ));
-                }
+                    .map_or(&[][..], |m| m.params.as_slice());
+                let given: HashMap<String, String> =
+                    params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+                let values = termide_config::commands::param_values(declared, &given)
+                    .map_err(|e| format!("`{}`: {e}", command.name))?;
                 let texts = [
                     command.command.as_deref(),
                     command.metadata.as_ref().and_then(|m| m.build.as_deref()),
@@ -322,7 +327,12 @@ impl App {
                     .into_iter()
                     .flatten()
                     .flat_map(termide_config::placeholder_names)
-                    .find(|name| termide_config::CONTEXT_PLACEHOLDERS.contains(name))
+                    // A parameter named like a panel placeholder takes its
+                    // place, as it does for the user.
+                    .find(|name| {
+                        termide_config::CONTEXT_PLACEHOLDERS.contains(name)
+                            && !values.contains_key(*name)
+                    })
                 {
                     return Err(format!(
                         "`{}` takes {{{name}}} from the panel the user has focused; ask the user \
@@ -340,7 +350,8 @@ impl App {
                         command.name
                     ));
                 }
-                self.dap_spec(command, &[])?
+                let (command, env) = App::debug_command_with_params(command, &values);
+                self.dap_spec(&command, &env)?
             }
             (None, Some(file)) => {
                 let launches = self.file_launches(file)?;
