@@ -993,6 +993,7 @@ impl Translation for RuntimeTranslation {
         op_error_not_found,
         op_error_already_exists,
         op_error_archive,
+        pack_format_label,
         pack_compression_label,
         pack_level_store,
         pack_level_fast,

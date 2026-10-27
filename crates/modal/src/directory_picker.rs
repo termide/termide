@@ -10,64 +10,23 @@
 //! under the cursor, never inside it.
 
 use anyhow::Result;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Modifier, Style},
-    text::{Line, Span},
-    widgets::{List, ListItem, Widget},
 };
 
-use crate::base::{drag_field, press_field, render_modal_block, render_text_input};
-use crate::input_keys::handle_input_key;
-use std::path::{Path, PathBuf};
+use crate::base::render_modal_block;
+use crate::dir_tree::DirTree;
+use std::path::PathBuf;
 use unicode_width::UnicodeWidthStr;
 
 use termide_config::FileManagerKeybindings;
 use termide_core::HotkeyTable;
 use termide_theme::Theme;
 
-use crate::{
-    calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig,
-    TextInputHandler,
-};
-
-/// Directory entry for tree display
-#[derive(Debug, Clone)]
-struct DirEntry {
-    name: String,
-    full_path: PathBuf,
-    depth: usize,
-    /// `Some(true)` = expanded, `Some(false)` = collapsed, `None` = ".." entry
-    expanded: Option<bool>,
-}
-
-/// What an inline row edit does on Enter.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum EditKind {
-    /// The row is a placeholder for a directory still to be created.
-    Create,
-    /// The row is an existing directory being renamed.
-    Rename,
-}
-
-/// A name being typed into a tree row.
-#[derive(Debug)]
-struct RowEdit {
-    kind: EditKind,
-    /// Index into `entries` of the edited row.
-    row: usize,
-    /// Directory the name is created or renamed in.
-    parent: PathBuf,
-    /// Cursor to return to when a create is cancelled.
-    prev_cursor: usize,
-    input: TextInputHandler,
-    /// The field as last drawn in its row, for the mouse.
-    area: Option<Rect>,
-    /// A press landed in the field and the button is still down.
-    dragging: bool,
-}
+use crate::{calculate_modal_width, centered_rect_with_size, Modal, ModalResult, ModalWidthConfig};
 
 /// Button order in the bottom row.
 const BUTTON_CONFIRM: usize = 0;
@@ -78,18 +37,9 @@ const BUTTON_CANCEL: usize = 2;
 #[derive(Debug)]
 pub struct DirectoryPickerModal {
     title: String,
-    current_dir: PathBuf,
-    entries: Vec<DirEntry>,
-    visible_indices: Vec<usize>,
-    tree_prefixes: Vec<String>,
-    /// Cursor position (index into visible_indices)
-    cursor: usize,
-    scroll_offset: usize,
-    /// Whether directories whose name starts with `.` are listed.
-    show_hidden: bool,
+    tree: DirTree,
     button_focused: bool,
     selected_button: usize,
-    last_list_area: Option<Rect>,
     last_buttons_area: Option<Rect>,
     create_label: String,
     new_folder_label: String,
@@ -97,9 +47,6 @@ pub struct DirectoryPickerModal {
     cached_width: Option<u16>,
     /// `create_dir`, `rename` and `delete`, as bound in the file manager.
     hotkeys: HotkeyTable,
-    edit: Option<RowEdit>,
-    /// An error shown in place of the path line until the next key.
-    message: Option<String>,
 }
 
 const MAX_VISIBLE_ITEMS: usize = 15;
@@ -108,18 +55,11 @@ impl DirectoryPickerModal {
     /// Create a new directory picker modal with custom title and confirm button
     pub fn new(initial_dir: PathBuf, title: String, confirm_label: String) -> Self {
         let t = termide_i18n::t();
-        let mut modal = Self {
+        Self {
             title,
-            current_dir: initial_dir,
-            entries: Vec::new(),
-            visible_indices: Vec::new(),
-            tree_prefixes: Vec::new(),
-            cursor: 0,
-            scroll_offset: 0,
-            show_hidden: false,
+            tree: DirTree::new(initial_dir, MAX_VISIBLE_ITEMS),
             button_focused: false,
             selected_button: 0,
-            last_list_area: None,
             last_buttons_area: None,
             create_label: confirm_label,
             new_folder_label: t.directory_picker_new_folder().to_string(),
@@ -130,11 +70,7 @@ impl DirectoryPickerModal {
                 kb.with_defaults();
                 kb
             }),
-            edit: None,
-            message: None,
-        };
-        modal.load_root();
-        modal
+        }
     }
 
     /// Use the file manager's keys as configured instead of the defaults.
@@ -145,390 +81,13 @@ impl DirectoryPickerModal {
 
     /// Get the currently selected path
     fn selected_path(&self) -> PathBuf {
-        if let Some(&tree_idx) = self.visible_indices.get(self.cursor) {
-            let entry = &self.entries[tree_idx];
-            if entry.expanded.is_none() {
-                // ".." entry — return current dir (going up = selecting parent)
-                self.current_dir.clone()
-            } else {
-                entry.full_path.clone()
-            }
-        } else {
-            self.current_dir.clone()
-        }
+        self.tree.selected_path()
     }
 
-    /// Load root directory entries (top-level)
-    fn load_root(&mut self) {
-        self.entries.clear();
-        self.cursor = 0;
-        self.scroll_offset = 0;
-        self.cached_width = None;
-
-        // Add ".." entry if not at filesystem root
-        if self.current_dir.parent().is_some() {
-            self.entries.push(DirEntry {
-                name: "..".to_string(),
-                full_path: self.current_dir.clone(),
-                depth: 0,
-                expanded: None,
-            });
-        }
-
-        // Read subdirectories
-        self.load_children_into(&self.current_dir.clone(), 0, self.entries.len());
-        self.recompute_visible();
-    }
-
-    /// Read child directories and insert into entries at given position
-    fn load_children_into(&mut self, dir: &PathBuf, depth: usize, insert_at: usize) {
-        let mut dirs: Vec<DirEntry> = Vec::new();
-
-        if let Ok(read_dir) = std::fs::read_dir(dir) {
-            for entry in read_dir.filter_map(|e| e.ok()) {
-                let path = entry.path();
-                if !path.is_dir() {
-                    continue;
-                }
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if !self.show_hidden && name.starts_with('.') {
-                    continue;
-                }
-                dirs.push(DirEntry {
-                    name,
-                    full_path: path,
-                    depth,
-                    expanded: Some(false),
-                });
-            }
-        }
-
-        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-
-        // Insert children at position (after parent)
-        for (i, d) in dirs.into_iter().enumerate() {
-            self.entries.insert(insert_at + i, d);
-        }
-    }
-
-    /// Expand directory at visible index
-    fn expand_dir(&mut self, vis_idx: usize) {
-        let Some(&tree_idx) = self.visible_indices.get(vis_idx) else {
-            return;
-        };
-        if self.entries[tree_idx].expanded != Some(false) {
-            return;
-        }
-
-        let dir_path = self.entries[tree_idx].full_path.clone();
-        let depth = self.entries[tree_idx].depth;
-
-        self.entries[tree_idx].expanded = Some(true);
-
-        // Check if children already loaded
-        let has_children = self
-            .entries
-            .get(tree_idx + 1)
-            .is_some_and(|e| e.depth > depth);
-
-        if !has_children {
-            self.load_children_into(&dir_path, depth + 1, tree_idx + 1);
-        }
-
-        self.recompute_visible();
-    }
-
-    /// Collapse directory at visible index
-    fn collapse_dir(&mut self, vis_idx: usize) {
-        let Some(&tree_idx) = self.visible_indices.get(vis_idx) else {
-            return;
-        };
-        if self.entries[tree_idx].expanded != Some(true) {
-            return;
-        }
-
-        self.entries[tree_idx].expanded = Some(false);
-        self.recompute_visible();
-    }
-
-    /// Jump cursor to parent directory in tree (for Left on non-expanded item)
-    fn jump_to_parent(&mut self) {
-        let Some(&tree_idx) = self.visible_indices.get(self.cursor) else {
-            return;
-        };
-        let depth = self.entries[tree_idx].depth;
-        if depth == 0 {
-            return;
-        }
-
-        // Search backwards in visible for entry with depth - 1
-        for (vi, &ti) in self.visible_indices.iter().enumerate().rev() {
-            if self.entries[ti].depth < depth {
-                self.cursor = vi;
-                self.adjust_scroll();
-                return;
-            }
-        }
-    }
-
-    /// Show or hide the hidden directories, keeping the expanded branches
-    /// and the cursor where they still exist.
-    fn toggle_hidden(&mut self) {
-        self.show_hidden = !self.show_hidden;
-        let expanded = self.expanded_paths();
-        let under_cursor = self
-            .visible_indices
-            .get(self.cursor)
-            .map(|&i| self.entries[i].full_path.clone());
-        self.reload(&expanded, under_cursor.as_deref());
-    }
-
-    /// Paths of the expanded branches.
-    fn expanded_paths(&self) -> Vec<PathBuf> {
-        self.entries
-            .iter()
-            .filter(|e| e.expanded == Some(true))
-            .map(|e| e.full_path.clone())
-            .collect()
-    }
-
-    /// Read the tree from disk again with the `expanded` branches open, the
-    /// cursor on `select` — or else on its closest ancestor still listed, or
-    /// else at the top.
-    fn reload(&mut self, expanded: &[PathBuf], select: Option<&Path>) {
-        self.load_root();
-        // Parents precede their children, so one pass re-expands nested
-        // branches in order.
-        let mut i = 0;
-        while i < self.entries.len() {
-            if self.entries[i].expanded == Some(false)
-                && expanded.contains(&self.entries[i].full_path)
-            {
-                if let Some(vis) = self.visible_indices.iter().position(|&t| t == i) {
-                    self.expand_dir(vis);
-                }
-            }
-            i += 1;
-        }
-
-        // The cursor stays on its entry, or else on its closest ancestor
-        // still listed (a hidden directory it was inside of).
-        if let Some(path) = select {
-            let found = path.ancestors().find_map(|ancestor| {
-                self.visible_indices.iter().position(|&t| {
-                    let entry = &self.entries[t];
-                    entry.expanded.is_some() && entry.full_path == ancestor
-                })
-            });
-            self.cursor = found.unwrap_or(0);
-            self.adjust_scroll();
-        }
-    }
-
-    /// Index just past `tree_idx` and every entry loaded below it.
-    fn subtree_end(&self, tree_idx: usize) -> usize {
-        let depth = self.entries[tree_idx].depth;
-        let mut end = tree_idx + 1;
-        while self.entries.get(end).is_some_and(|e| e.depth > depth) {
-            end += 1;
-        }
-        end
-    }
-
-    /// The directory under the cursor (not `..`) and its tree index.
-    fn dir_under_cursor(&self) -> Option<usize> {
-        let &tree_idx = self.visible_indices.get(self.cursor)?;
-        self.entries[tree_idx]
-            .expanded
-            .is_some()
-            .then_some(tree_idx)
-    }
-
-    /// Open an empty name row beside the entry under the cursor: after it
-    /// and its subtree, at its depth, so the new directory becomes its
-    /// sibling. On `..` or an empty list the row goes to the top level.
+    /// Open a name row for a new directory; the cursor leaves the buttons.
     fn start_create(&mut self) {
         self.button_focused = false;
-        let (parent, depth, row) = match self.dir_under_cursor() {
-            Some(tree_idx) => {
-                let entry = &self.entries[tree_idx];
-                let parent = entry
-                    .full_path
-                    .parent()
-                    .map_or_else(|| self.current_dir.clone(), Path::to_path_buf);
-                (parent, entry.depth, self.subtree_end(tree_idx))
-            }
-            None => {
-                let row = usize::from(self.entries.first().is_some_and(|e| e.expanded.is_none()));
-                (self.current_dir.clone(), 0, row)
-            }
-        };
-        self.entries.insert(
-            row,
-            DirEntry {
-                name: String::new(),
-                full_path: parent.clone(),
-                depth,
-                expanded: Some(false),
-            },
-        );
-        let prev_cursor = self.cursor;
-        self.recompute_visible();
-        self.cursor = self
-            .visible_indices
-            .iter()
-            .position(|&t| t == row)
-            .unwrap_or(0);
-        self.adjust_scroll();
-        self.edit = Some(RowEdit {
-            kind: EditKind::Create,
-            row,
-            parent,
-            prev_cursor,
-            input: TextInputHandler::new(),
-            area: None,
-            dragging: false,
-        });
-    }
-
-    /// Turn the row under the cursor into a field holding its name.
-    fn start_rename(&mut self) {
-        let Some(tree_idx) = self.dir_under_cursor() else {
-            return;
-        };
-        let entry = &self.entries[tree_idx];
-        let Some(parent) = entry.full_path.parent() else {
-            return;
-        };
-        self.button_focused = false;
-        self.edit = Some(RowEdit {
-            kind: EditKind::Rename,
-            row: tree_idx,
-            parent: parent.to_path_buf(),
-            prev_cursor: self.cursor,
-            input: TextInputHandler::with_text(entry.name.clone()),
-            area: None,
-            dragging: false,
-        });
-    }
-
-    /// Drop the edit; a create also takes its placeholder row away.
-    fn cancel_edit(&mut self) {
-        let Some(edit) = self.edit.take() else {
-            return;
-        };
-        if edit.kind == EditKind::Create {
-            self.entries.remove(edit.row);
-            self.recompute_visible();
-            self.cursor = edit
-                .prev_cursor
-                .min(self.visible_indices.len().saturating_sub(1));
-            self.adjust_scroll();
-        }
-    }
-
-    /// Create or rename with the typed name. On failure the field stays
-    /// open with the reason shown above the tree.
-    fn commit_edit(&mut self) {
-        let Some(edit) = self.edit.as_ref() else {
-            return;
-        };
-        let name = edit.input.text().to_string();
-        if let Err(message) = validate_name(&name) {
-            self.message = Some(message);
-            return;
-        }
-        let target = edit.parent.join(&name);
-        let t = termide_i18n::t();
-
-        match edit.kind {
-            EditKind::Create => {
-                if target.symlink_metadata().is_ok() {
-                    self.message = Some(t.directory_picker_exists(&name));
-                    return;
-                }
-                if let Err(e) = std::fs::create_dir(&target) {
-                    self.message = Some(e.to_string());
-                    return;
-                }
-                let row = edit.row;
-                self.edit = None;
-                self.entries.remove(row);
-                let expanded = self.expanded_paths();
-                self.reload(&expanded, Some(&target));
-            }
-            EditKind::Rename => {
-                let old = self.entries[edit.row].full_path.clone();
-                if target == old {
-                    self.edit = None;
-                    return;
-                }
-                // A case-only rename on a case-insensitive file system finds
-                // the directory itself under the new name.
-                if target.symlink_metadata().is_ok() && !same_entry(&old, &target) {
-                    self.message = Some(t.directory_picker_exists(&name));
-                    return;
-                }
-                if let Err(e) = std::fs::rename(&old, &target) {
-                    self.message = Some(e.to_string());
-                    return;
-                }
-                self.edit = None;
-                let expanded: Vec<PathBuf> = self
-                    .expanded_paths()
-                    .into_iter()
-                    .map(|p| match p.strip_prefix(&old) {
-                        Ok(rest) => target.join(rest),
-                        Err(_) => p,
-                    })
-                    .collect();
-                self.reload(&expanded, Some(&target));
-            }
-        }
-    }
-
-    /// Remove the directory under the cursor if it is empty; a directory
-    /// with anything in it is left alone with a message.
-    fn delete_under_cursor(&mut self) {
-        let Some(tree_idx) = self.dir_under_cursor() else {
-            return;
-        };
-        let path = self.entries[tree_idx].full_path.clone();
-        match std::fs::remove_dir(&path) {
-            Ok(()) => {
-                let cursor = self.cursor;
-                let expanded = self.expanded_paths();
-                self.reload(&expanded, None);
-                self.cursor = cursor.min(self.visible_indices.len().saturating_sub(1));
-                self.adjust_scroll();
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::DirectoryNotEmpty => {
-                self.message = Some(termide_i18n::t().directory_picker_not_empty().to_string());
-            }
-            Err(e) => self.message = Some(e.to_string()),
-        }
-    }
-
-    /// Keys while a name is being typed: Enter commits, Esc cancels, the
-    /// rest edit the field. The raw event is used so letters arrive as typed
-    /// on any layout.
-    fn handle_edit_key(&mut self, key: KeyEvent) {
-        match key.code {
-            KeyCode::Esc => self.cancel_edit(),
-            KeyCode::Enter => self.commit_edit(),
-            // The row stays put while it is edited.
-            KeyCode::Tab
-            | KeyCode::BackTab
-            | KeyCode::Up
-            | KeyCode::Down
-            | KeyCode::PageUp
-            | KeyCode::PageDown => {}
-            _ => {
-                if let Some(edit) = self.edit.as_mut() {
-                    handle_input_key(&mut edit.input, key);
-                }
-            }
-        }
+        self.tree.start_create();
     }
 
     /// Start and width of each button, left to right, centred in `area`.
@@ -547,22 +106,9 @@ impl DirectoryPickerModal {
         })
     }
 
-    /// Recompute visible indices and tree prefixes
-    fn recompute_visible(&mut self) {
-        self.visible_indices = compute_visible(&self.entries);
-        self.tree_prefixes = compute_prefixes(&self.entries, &self.visible_indices);
-    }
-
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
         let title_width = self.title.len() as u16 + 4;
-
-        let max_entry_display = self
-            .entries
-            .iter()
-            .map(|e| e.depth * 3 + e.name.len() + 5) // gutter + prefix + icon + name
-            .max()
-            .unwrap_or(0);
-        let path_width = self.current_dir.to_string_lossy().len() as u16 + 5;
+        let path_width = self.tree.dir().to_string_lossy().len() as u16 + 5;
 
         let buttons_width = (self.create_label.width()
             + self.new_folder_label.width()
@@ -573,7 +119,7 @@ impl DirectoryPickerModal {
             [
                 title_width,
                 path_width,
-                max_entry_display as u16 + 2,
+                self.tree.content_width() as u16 + 2,
                 buttons_width,
             ]
             .into_iter(),
@@ -583,49 +129,15 @@ impl DirectoryPickerModal {
     }
 
     fn get_modal_width(&mut self, screen_width: u16) -> u16 {
+        if self.tree.take_reloaded() {
+            self.cached_width = None;
+        }
         if let Some(width) = self.cached_width {
             return width;
         }
         let width = self.calculate_modal_width(screen_width);
         self.cached_width = Some(width);
         width
-    }
-
-    fn cursor_up(&mut self) {
-        if self.cursor > 0 {
-            self.cursor -= 1;
-            self.adjust_scroll();
-        }
-    }
-
-    fn cursor_down(&mut self) {
-        if self.cursor < self.visible_indices.len().saturating_sub(1) {
-            self.cursor += 1;
-            self.adjust_scroll();
-        }
-    }
-
-    fn cursor_home(&mut self) {
-        self.cursor = 0;
-        self.adjust_scroll();
-    }
-
-    fn cursor_end(&mut self) {
-        self.cursor = self.visible_indices.len().saturating_sub(1);
-        self.adjust_scroll();
-    }
-
-    fn adjust_scroll(&mut self) {
-        self.scroll_offset =
-            termide_ui::ensure_offset_visible(self.scroll_offset, self.cursor, MAX_VISIBLE_ITEMS);
-    }
-
-    /// Go to parent directory (reload tree root)
-    fn go_parent(&mut self) {
-        if let Some(parent) = self.current_dir.parent() {
-            self.current_dir = parent.to_path_buf();
-            self.load_root();
-        }
     }
 }
 
@@ -635,7 +147,7 @@ impl Modal for DirectoryPickerModal {
     fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let modal_width = self.get_modal_width(area.width);
 
-        let visible_count = self.visible_indices.len().clamp(3, MAX_VISIBLE_ITEMS);
+        let visible_count = self.tree.visible_len().clamp(3, MAX_VISIBLE_ITEMS);
         let list_height = visible_count as u16;
         let modal_height = 6 + list_height;
 
@@ -644,14 +156,11 @@ impl Modal for DirectoryPickerModal {
 
         // Path line: an error if there is one, else the path the edited
         // name or the cursor stands for (truncated on the left).
-        if let Some(message) = &self.message {
+        if let Some(message) = &self.tree.message {
             let text = termide_ui::path_utils::truncate_left(message, inner.width as usize);
             buf.set_string(inner.x, inner.y, &text, Style::default().fg(theme.error));
         } else {
-            let selected = match &self.edit {
-                Some(edit) => edit.parent.join(edit.input.text()),
-                None => self.selected_path(),
-            };
+            let selected = self.tree.shown_path();
             let path_str = selected.to_string_lossy();
             let display_path =
                 termide_ui::path_utils::truncate_left(&path_str, inner.width as usize);
@@ -677,88 +186,8 @@ impl Modal for DirectoryPickerModal {
             width: inner.width,
             height: list_height,
         };
-
-        let prefix_style = Style::default().fg(theme.disabled);
-        let mut list_items: Vec<ListItem> = Vec::new();
-        let edit_row = self.edit.as_ref().map(|e| e.row);
-        // Where the name field goes: (x, y, width) inside the edited row.
-        let mut field_at: Option<(u16, u16, u16)> = None;
-
-        for (vis_pos, &tree_idx) in self
-            .visible_indices
-            .iter()
-            .enumerate()
-            .skip(self.scroll_offset)
-            .take(MAX_VISIBLE_ITEMS)
-        {
-            let entry = &self.entries[tree_idx];
-            let is_edited = edit_row == Some(tree_idx);
-            let is_selected = vis_pos == self.cursor && !self.button_focused && !is_edited;
-
-            // Tree prefix (├─, └─, etc.)
-            let tree_prefix = self
-                .tree_prefixes
-                .get(vis_pos)
-                .map(|s| s.as_str())
-                .unwrap_or("");
-
-            // Icon: ".." = special, expanded = ▼, collapsed = ▶
-            let icon = if entry.expanded.is_none() {
-                " "
-            } else if entry.expanded == Some(true) {
-                "▼"
-            } else {
-                "▶"
-            };
-
-            // Cursor style: invert fg/bg like file manager
-            let (row_style, prefix_row_style) = if is_selected {
-                (
-                    Style::default()
-                        .fg(theme.bg)
-                        .bg(theme.fg)
-                        .add_modifier(Modifier::BOLD),
-                    Style::default()
-                        .fg(theme.bg)
-                        .bg(theme.fg)
-                        .add_modifier(Modifier::BOLD),
-                )
-            } else {
-                (Style::default().fg(theme.fg), prefix_style)
-            };
-
-            let text = if is_edited {
-                let x = 1 + tree_prefix.width() as u16 + icon.width() as u16 + 1;
-                let y = list_area.y + (vis_pos - self.scroll_offset) as u16;
-                field_at = Some((inner.x + x, y, inner.width.saturating_sub(x + 1)));
-                format!("{} ", icon)
-            } else {
-                format!("{} {}", icon, entry.name)
-            };
-            let line_width = 1 + tree_prefix.width() + text.width();
-            let padding = " ".repeat((inner.width as usize).saturating_sub(line_width));
-
-            let line = Line::from(vec![
-                // A one-column gutter before the tree, as in the file manager.
-                Span::styled(" ", row_style),
-                Span::styled(tree_prefix, prefix_row_style),
-                Span::styled(text, row_style),
-                Span::styled(padding, row_style),
-            ]);
-
-            list_items.push(ListItem::new(line));
-        }
-
-        let list = List::new(list_items).style(Style::default().bg(theme.bg));
-        list.render(list_area, buf);
-        self.last_list_area = Some(list_area);
-
-        if let Some(edit) = self.edit.as_mut() {
-            edit.area = field_at.map(|(x, y, width)| Rect::new(x, y, width, 1));
-            if let Some(area) = edit.area {
-                render_text_input(buf, area, &mut edit.input, true, theme);
-            }
-        }
+        self.tree
+            .render(list_area, buf, theme, !self.button_focused);
 
         // Separator before buttons
         let sep2_y = list_area.y + list_area.height;
@@ -802,9 +231,9 @@ impl Modal for DirectoryPickerModal {
         &mut self,
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        self.message = None;
-        if self.edit.is_some() {
-            self.handle_edit_key(chord.raw);
+        self.tree.message = None;
+        if self.tree.is_editing() {
+            self.tree.handle_edit_key(chord.raw);
             return Ok(None);
         }
 
@@ -816,17 +245,20 @@ impl Modal for DirectoryPickerModal {
             return Ok(None);
         }
         if self.hotkeys.matches_canonical("rename", &key) {
-            self.start_rename();
+            self.tree.start_rename();
+            if self.tree.is_editing() {
+                self.button_focused = false;
+            }
             return Ok(None);
         }
         if self.hotkeys.matches_canonical("delete", &key) {
-            self.delete_under_cursor();
+            self.tree.delete_under_cursor();
             return Ok(None);
         }
         match key.code {
             KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
             KeyCode::Char('.') => {
-                self.toggle_hidden();
+                self.tree.toggle_hidden();
                 Ok(None)
             }
             KeyCode::Tab | KeyCode::BackTab => {
@@ -835,35 +267,29 @@ impl Modal for DirectoryPickerModal {
             }
             // List navigation
             KeyCode::Up | KeyCode::Char('k') if !self.button_focused => {
-                self.cursor_up();
+                self.tree.cursor_up();
                 Ok(None)
             }
             KeyCode::Down | KeyCode::Char('j') if !self.button_focused => {
-                self.cursor_down();
+                self.tree.cursor_down();
                 Ok(None)
             }
             KeyCode::Home if !self.button_focused => {
-                self.cursor_home();
+                self.tree.cursor_home();
                 Ok(None)
             }
             KeyCode::End if !self.button_focused => {
-                self.cursor_end();
+                self.tree.cursor_end();
                 Ok(None)
             }
             // Expand directory
             KeyCode::Right | KeyCode::Char('l') if !self.button_focused => {
-                self.expand_dir(self.cursor);
+                self.tree.expand();
                 Ok(None)
             }
             // Collapse directory or jump to parent in tree
             KeyCode::Left | KeyCode::Char('h') if !self.button_focused => {
-                if let Some(&tree_idx) = self.visible_indices.get(self.cursor) {
-                    if self.entries[tree_idx].expanded == Some(true) {
-                        self.collapse_dir(self.cursor);
-                    } else if self.entries[tree_idx].depth > 0 {
-                        self.jump_to_parent();
-                    }
-                }
+                self.tree.collapse_or_parent();
                 Ok(None)
             }
             // Button navigation
@@ -877,7 +303,7 @@ impl Modal for DirectoryPickerModal {
             }
             // Go to parent directory (reload tree root)
             KeyCode::Backspace if !self.button_focused => {
-                self.go_parent();
+                self.tree.go_parent();
                 Ok(None)
             }
             // Ctrl+Enter to confirm from anywhere
@@ -896,16 +322,7 @@ impl Modal for DirectoryPickerModal {
                     }
                 } else {
                     // Enter = cd into directory (reload tree from selected dir)
-                    if let Some(&tree_idx) = self.visible_indices.get(self.cursor) {
-                        if self.entries[tree_idx].expanded.is_none() {
-                            // ".." — go to parent
-                            self.go_parent();
-                        } else {
-                            // Navigate into: make selected dir the new root
-                            self.current_dir = self.entries[tree_idx].full_path.clone();
-                            self.load_root();
-                        }
-                    }
+                    self.tree.enter();
                     Ok(None)
                 }
             }
@@ -918,34 +335,22 @@ impl Modal for DirectoryPickerModal {
         mouse: MouseEvent,
         _modal_area: Rect,
     ) -> Result<Option<ModalResult<Self::Result>>> {
-        use crate::{check_mouse_click, MouseClickResult};
-
-        // A name being typed keeps its row; Enter or Esc ends it first. A
-        // press in its field places the cursor, a drag from there selects.
-        if let Some(edit) = self.edit.as_mut() {
-            match mouse.kind {
-                MouseEventKind::Down(MouseButton::Left) => {
-                    edit.dragging = press_field(&mut edit.input, edit.area, &mouse);
-                }
-                MouseEventKind::Drag(MouseButton::Left) if edit.dragging => {
-                    drag_field(&mut edit.input, edit.area, &mouse);
-                }
-                MouseEventKind::Up(MouseButton::Left) => edit.dragging = false,
-                _ => {}
-            }
+        // A name being typed keeps its row; Enter or Esc ends it first.
+        if self.tree.is_editing() {
+            self.tree.handle_edit_mouse(&mouse);
             return Ok(None);
         }
 
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 for _ in 0..3 {
-                    self.cursor_up();
+                    self.tree.cursor_up();
                 }
                 return Ok(None);
             }
             MouseEventKind::ScrollDown => {
                 for _ in 0..3 {
-                    self.cursor_down();
+                    self.tree.cursor_down();
                 }
                 return Ok(None);
             }
@@ -981,46 +386,15 @@ impl Modal for DirectoryPickerModal {
         }
 
         // Check list click
-        match check_mouse_click(
-            mouse.column,
-            mouse.row,
-            None,
-            self.last_list_area,
-            self.scroll_offset,
-        ) {
-            MouseClickResult::OnListItem(clicked_vis_idx) => {
-                if clicked_vis_idx < self.visible_indices.len() {
-                    self.button_focused = false;
-                    if self.cursor == clicked_vis_idx {
-                        // Click on already-selected item: toggle expand/collapse
-                        if let Some(&tree_idx) = self.visible_indices.get(clicked_vis_idx) {
-                            match self.entries[tree_idx].expanded {
-                                Some(false) => self.expand_dir(clicked_vis_idx),
-                                Some(true) => self.collapse_dir(clicked_vis_idx),
-                                None => {
-                                    // ".." — go parent
-                                    self.go_parent();
-                                }
-                            }
-                        }
-                    } else {
-                        self.cursor = clicked_vis_idx;
-                    }
-                }
-                Ok(None)
-            }
-            _ => Ok(None),
+        if self.tree.click(mouse.column, mouse.row) {
+            self.button_focused = false;
         }
+        Ok(None)
     }
 
     /// A paste goes into the name being typed, on one line.
     fn handle_paste(&mut self, text: &str) -> bool {
-        let Some(edit) = self.edit.as_mut() else {
-            return false;
-        };
-        let line: String = text.chars().filter(|c| !matches!(c, '\n' | '\r')).collect();
-        edit.input.paste(&line);
-        true
+        self.tree.paste(text)
     }
 }
 
@@ -1031,120 +405,6 @@ fn picker_hotkeys(keybindings: &FileManagerKeybindings) -> HotkeyTable {
     table.insert("rename", &keybindings.rename);
     table.insert("delete", &keybindings.delete);
     table
-}
-
-/// A single path component: not empty, no separator, not `.` or `..`.
-fn validate_name(name: &str) -> std::result::Result<(), String> {
-    let t = termide_i18n::t();
-    if name.trim().is_empty() {
-        return Err(t.directory_picker_name_empty().to_string());
-    }
-    if name == "."
-        || name == ".."
-        || name.contains(['/', '\0'])
-        || name.contains(std::path::MAIN_SEPARATOR)
-    {
-        return Err(t.directory_picker_name_invalid().to_string());
-    }
-    Ok(())
-}
-
-/// Whether `a` and `b` name the same file system entry.
-fn same_entry(a: &Path, b: &Path) -> bool {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::MetadataExt;
-        match (a.symlink_metadata(), b.symlink_metadata()) {
-            (Ok(x), Ok(y)) => x.dev() == y.dev() && x.ino() == y.ino(),
-            _ => false,
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        // Without inode numbers, trust a case-insensitive spelling match.
-        a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
-    }
-}
-
-// === Tree utilities (same algorithm as panel-file-manager/src/tree.rs) ===
-
-/// Compute indices of visible nodes, skipping children of collapsed directories.
-fn compute_visible(entries: &[DirEntry]) -> Vec<usize> {
-    let mut visible = Vec::new();
-    let mut skip_below_depth: Option<usize> = None;
-
-    for (i, entry) in entries.iter().enumerate() {
-        if let Some(max_depth) = skip_below_depth {
-            if entry.depth > max_depth {
-                continue;
-            }
-            skip_below_depth = None;
-        }
-
-        visible.push(i);
-
-        if entry.expanded == Some(false) {
-            skip_below_depth = Some(entry.depth);
-        }
-    }
-
-    visible
-}
-
-/// Compute tree-drawing prefixes for visible nodes.
-fn compute_prefixes(entries: &[DirEntry], visible: &[usize]) -> Vec<String> {
-    if visible.is_empty() {
-        return Vec::new();
-    }
-
-    let max_depth = visible
-        .iter()
-        .map(|&idx| entries[idx].depth)
-        .max()
-        .unwrap_or(0);
-
-    if max_depth == 0 {
-        return vec![String::new(); visible.len()];
-    }
-
-    let mut has_next_at_level = vec![false; max_depth + 1];
-    let mut prefixes: Vec<String> = Vec::with_capacity(visible.len());
-
-    for &tree_idx in visible.iter().rev() {
-        let depth = entries[tree_idx].depth;
-
-        if depth == 0 {
-            has_next_at_level.fill(false);
-            has_next_at_level[0] = true;
-            prefixes.push(String::new());
-            continue;
-        }
-
-        let mut prefix = String::with_capacity(depth * 3);
-        for (lvl, has_next) in has_next_at_level[1..=depth].iter().enumerate() {
-            let lvl = lvl + 1;
-            if lvl == depth {
-                if *has_next {
-                    prefix.push_str(" ├─");
-                } else {
-                    prefix.push_str(" └─");
-                }
-            } else if *has_next {
-                prefix.push_str(" │ ");
-            } else {
-                prefix.push_str("   ");
-            }
-        }
-        prefixes.push(prefix);
-
-        for val in &mut has_next_at_level[(depth + 1)..] {
-            *val = false;
-        }
-        has_next_at_level[depth] = true;
-    }
-
-    prefixes.reverse();
-    prefixes
 }
 
 #[cfg(test)]
@@ -1164,9 +424,10 @@ mod tests {
 
     fn names(modal: &DirectoryPickerModal) -> Vec<&str> {
         modal
+            .tree
             .visible_indices
             .iter()
-            .map(|&i| modal.entries[i].name.as_str())
+            .map(|&i| modal.tree.entries[i].name.as_str())
             .collect()
     }
 
@@ -1182,26 +443,31 @@ mod tests {
         use crate::base::test_mouse::{drag, press as down, release};
         let root = scratch("mouse");
         let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
-        modal.cursor = 2; // `target`
-        modal.start_rename();
+        modal.tree.cursor = 2; // `target`
+        modal.tree.start_rename();
         let area = Rect::new(0, 0, 100, 40);
         modal.render(area, &mut Buffer::empty(area), &Theme::default());
-        let field = modal.edit.as_ref().and_then(|e| e.area).expect("drawn");
+        let field = modal
+            .tree
+            .edit
+            .as_ref()
+            .and_then(|e| e.area)
+            .expect("drawn");
         modal
             .handle_mouse(down(field.x + 2, field.y), area)
             .unwrap();
-        let input = &modal.edit.as_ref().unwrap().input;
+        let input = &modal.tree.edit.as_ref().unwrap().input;
         assert_eq!(input.cursor_pos(), 2);
         // Down over the next rows the drag keeps selecting in the field.
         modal
             .handle_mouse(drag(field.x + 5, field.y + 2), area)
             .unwrap();
         assert_eq!(
-            modal.edit.as_ref().unwrap().input.selected_text(),
+            modal.tree.edit.as_ref().unwrap().input.selected_text(),
             Some("rge")
         );
         modal.handle_mouse(release(field.x, field.y), area).unwrap();
-        assert!(modal.edit.is_some(), "still renaming");
+        assert!(modal.tree.edit.is_some(), "still renaming");
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1240,7 +506,7 @@ mod tests {
         press(&mut modal, KeyCode::Down);
         assert_eq!(modal.selected_path(), root.join(".git/objects"));
         press(&mut modal, KeyCode::Char('.'));
-        assert_eq!(modal.cursor, 0);
+        assert_eq!(modal.tree.cursor, 0);
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1264,7 +530,7 @@ mod tests {
         press(&mut modal, KeyCode::Enter);
 
         assert!(root.join("src/lib").is_dir());
-        assert!(modal.edit.is_none());
+        assert!(modal.tree.edit.is_none());
         assert_eq!(names(&modal), ["..", "src", "bin", "lib", "target"]);
         assert_eq!(modal.selected_path(), root.join("src/lib"));
         std::fs::remove_dir_all(root).unwrap();
@@ -1314,7 +580,7 @@ mod tests {
         type_text(&mut modal, "x");
         press(&mut modal, KeyCode::Esc);
 
-        assert!(modal.edit.is_none());
+        assert!(modal.tree.edit.is_none());
         assert_eq!(names(&modal), ["..", "src", "bin", "target"]);
         assert_eq!(modal.selected_path(), root.join("src/bin"));
         assert!(!root.join("src/x").exists());
@@ -1341,12 +607,12 @@ mod tests {
         press(&mut modal, KeyCode::F(7));
 
         press(&mut modal, KeyCode::Enter);
-        assert!(modal.message.is_some());
-        assert!(modal.edit.is_some());
+        assert!(modal.tree.message.is_some());
+        assert!(modal.tree.edit.is_some());
 
         type_text(&mut modal, "a/b");
         press(&mut modal, KeyCode::Enter);
-        assert!(modal.message.is_some());
+        assert!(modal.tree.message.is_some());
         assert!(!root.join("a").exists());
 
         for _ in 0..3 {
@@ -1354,12 +620,12 @@ mod tests {
         }
         type_text(&mut modal, "target");
         press(&mut modal, KeyCode::Enter);
-        assert!(modal.message.is_some());
-        assert!(modal.edit.is_some());
+        assert!(modal.tree.message.is_some());
+        assert!(modal.tree.edit.is_some());
 
         // The message lasts until the next key.
         press(&mut modal, KeyCode::Esc);
-        assert!(modal.message.is_none());
+        assert!(modal.tree.message.is_none());
         assert_eq!(names(&modal), ["..", "src", "target"]);
         std::fs::remove_dir_all(root).unwrap();
     }
@@ -1390,7 +656,7 @@ mod tests {
         let root = scratch("rename-dotdot");
         let mut modal = DirectoryPickerModal::new(root.clone(), String::new(), String::new());
         press(&mut modal, KeyCode::F(2));
-        assert!(modal.edit.is_none());
+        assert!(modal.tree.edit.is_none());
         std::fs::remove_dir_all(root).unwrap();
     }
 
@@ -1402,7 +668,7 @@ mod tests {
         press(&mut modal, KeyCode::Down);
         press(&mut modal, KeyCode::Delete);
         assert!(root.join("src/bin").is_dir());
-        assert!(modal.message.is_some());
+        assert!(modal.tree.message.is_some());
 
         // `target` is empty: gone, the cursor stays on the row it was on.
         press(&mut modal, KeyCode::Down);
@@ -1420,7 +686,7 @@ mod tests {
         press(&mut modal, KeyCode::Tab);
         press(&mut modal, KeyCode::Right);
         press(&mut modal, KeyCode::Enter);
-        assert!(modal.edit.is_some());
+        assert!(modal.tree.edit.is_some());
         assert!(!modal.button_focused);
         std::fs::remove_dir_all(root).unwrap();
     }

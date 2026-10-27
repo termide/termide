@@ -204,14 +204,14 @@ saved projects like any other VFS URL.
 
 `P` (or `Alt+F5`) packs the selected files and directories (or the entry under the
 cursor) into a new archive. The prompt suggests `<name>.zip` next to
-the selection and lists the other formats in its dropdown; the name's
-suffix picks the format — `.zip`, `.tar`, `.tar.gz`, `.tar.bz2`,
-`.tar.xz` or `.tar.zst`. A relative path is taken from the selection's
+the selection; the name's suffix picks the format — `.zip`, `.tar`,
+`.tar.gz`, `.tar.bz2`, `.tar.xz` or `.tar.zst` — and the **Format** row
+under the name swaps it for another writable one. A relative path is taken from the selection's
 directory, and a directory gets an archive named after the selection
 inside it.
 
-The **Compression** row under the name (reached with `↓`, changed with
-`←`/`→`, `Space` or a click) picks **None**, **Fast**, **Normal** (the
+The **Compression** row under it (reached with `↓`, changed with
+`←`/`→`, `Space` or a click, as is **Format**) picks **None**, **Fast**, **Normal** (the
 default) or **Best**. zip, `.tar.gz`, `.tar.bz2` and `.tar.xz` map them
 to levels 0, 1, 6 and 9; bzip2 and xz have no uncompressed mode, so
 **None** gives their weakest level. `.tar.zst` only tells **None** from
@@ -229,7 +229,8 @@ is never overwritten. Only local files can be packed.
 `Alt+F9` unpacks the archives in the selection, or the archive under the
 cursor; other selected entries are left out. The prompt suggests a
 directory named after the archive in the nearest other file manager's
-directory and lists the other panels' directories in its dropdown. A
+directory and offers the other panels' directories in its
+[directory tree](file-manager.md#destination-path). A
 single archive is unpacked into the directory you give, which is created
 if needed; several archives go into a directory each, named after the
 archive, under it. A relative path is taken from the archive's directory.

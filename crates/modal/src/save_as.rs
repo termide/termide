@@ -1,4 +1,7 @@
 //! Save As modal dialog with executable checkbox.
+//!
+//! The path is a [`PathField`]: Tab opens a directory tree under it, and
+//! picking a directory there keeps the file name.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -7,21 +10,22 @@ use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
 
-use crate::base::{
-    button_style, field_box, field_char_at, press_field_box, render_modal_block, render_text_input,
-};
+use crate::base::{button_style, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
+use crate::path_field::{FieldKey, PathField};
+use std::path::PathBuf;
 
 use termide_config::constants::MODAL_BUTTON_SPACING;
+use termide_config::FileManagerKeybindings;
 use termide_i18n as i18n;
 use termide_theme::Theme;
 
 use crate::{
     calculate_modal_width, centered_rect_with_size, max_line_width, Modal, ModalResult,
-    ModalWidthConfig, TextInputHandler,
+    ModalWidthConfig,
 };
 
 /// Result of Save As modal
@@ -45,28 +49,54 @@ enum FocusArea {
 #[derive(Debug)]
 pub struct SaveAsModal {
     title: String,
-    input_handler: TextInputHandler,
+    field: PathField,
     executable: bool,
     focus: FocusArea,
     selected_button: usize, // 0 = OK, 1 = Cancel
     last_buttons_area: Option<Rect>,
     last_checkbox_area: Option<Rect>,
-    last_input_area: Option<Rect>,
 }
 
 impl SaveAsModal {
     /// Create a new Save As modal window with default value
     pub fn new(title: impl Into<String>, default: impl Into<String>) -> Self {
+        let mut field = PathField::new(default, Vec::new());
+        field.set_keeps_name(true);
         Self {
             title: title.into(),
-            input_handler: TextInputHandler::with_default(default),
+            field,
             executable: false,
             focus: FocusArea::Input,
             selected_button: 0, // OK button selected by default
             last_buttons_area: None,
             last_checkbox_area: None,
-            last_input_area: None,
         }
+    }
+
+    /// Offer `dirs` at the top of the tree while the path is untouched.
+    pub fn set_quick_destinations(&mut self, dirs: Vec<String>) {
+        self.field.set_roots(dirs);
+    }
+
+    /// Take a relative path from `dir`.
+    pub fn set_base_dir(&mut self, dir: PathBuf) {
+        self.field.set_base_dir(dir);
+    }
+
+    /// Use the file manager's directory keys as configured.
+    pub fn set_keybindings(&mut self, keybindings: &FileManagerKeybindings) {
+        self.field.set_keybindings(keybindings);
+    }
+
+    /// Type `key` into the field from a row below it: focus returns there.
+    fn type_into_field(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        match handle_input_key(self.field.input_mut(), key) {
+            InputKeyResult::Handled => {}
+            InputKeyResult::TextModified => self.field.text_edited(),
+            InputKeyResult::NotHandled => return false,
+        }
+        self.focus = FocusArea::Input;
+        true
     }
 
     /// Calculate dynamic modal width and height
@@ -74,7 +104,7 @@ impl SaveAsModal {
         let t = i18n::t();
         let title_width = self.title.len() as u16 + 2;
         let buttons_width = 21u16; // "[ OK ]    [ Cancel ]"
-        let input_width = self.input_handler.text().chars().count() as u16 + 20;
+        let input_width = self.field.text().chars().count() as u16 + 20;
         let checkbox_width = max_line_width(&format!("[✓] {}", t.checkbox_executable()));
 
         let width = calculate_modal_width(
@@ -86,8 +116,8 @@ impl SaveAsModal {
             },
         );
 
-        // Calculate height: border + input(3) + checkbox(1) + buttons(1) + border
-        let height = (1 + 3 + 1 + 1 + 1).min(screen_height);
+        // Border, field (and its tree), checkbox, buttons, border.
+        let height = (1 + self.field.height() + 1 + 1 + 1).min(screen_height);
 
         (width, height)
     }
@@ -112,11 +142,11 @@ impl SaveAsModal {
 
     /// Confirm and return result
     fn confirm(&self) -> Option<ModalResult<SaveAsResult>> {
-        if self.input_handler.is_empty() {
+        if self.field.text().is_empty() {
             Some(ModalResult::Cancelled)
         } else {
             Some(ModalResult::Confirmed(SaveAsResult {
-                path: self.input_handler.text().to_string(),
+                path: self.field.text().to_string(),
                 executable: self.executable,
             }))
         }
@@ -141,34 +171,14 @@ impl Modal for SaveAsModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(3), // Input
-                Constraint::Length(1), // Checkbox
-                Constraint::Length(1), // Buttons
+                Constraint::Length(self.field.height()), // Input
+                Constraint::Length(1),                   // Checkbox
+                Constraint::Length(1),                   // Buttons
             ])
             .split(inner);
 
-        // Render input field with border
-        let input_border_color = if self.focus == FocusArea::Input {
-            theme.accented_fg
-        } else {
-            theme.disabled
-        };
-
-        let input_block = Block::default()
-            .borders(Borders::ALL)
-            .border_style(Style::default().fg(input_border_color));
-        let input_inner = input_block.inner(chunks[0]);
-        input_block.render(chunks[0], buf);
-        self.last_input_area = Some(input_inner);
-
-        // Render input content with cursor and selection
-        render_text_input(
-            buf,
-            input_inner,
-            &mut self.input_handler,
-            self.focus == FocusArea::Input,
-            theme,
-        );
+        self.field
+            .render(chunks[0], buf, theme, self.focus == FocusArea::Input);
 
         // Render checkbox
         let checkbox_char = termide_ui::checkbox_mark(self.executable);
@@ -213,32 +223,31 @@ impl Modal for SaveAsModal {
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
         let key = chord.raw;
-        // Escape always cancels
-        if key.code == KeyCode::Esc {
+        // An open tree takes every key, Esc included, until it closes.
+        if self.field.is_open() {
+            self.focus = FocusArea::Input;
+        } else if key.code == KeyCode::Esc {
             return Ok(Some(ModalResult::Cancelled));
         }
 
-        // Tab navigation (works from any focus)
-        if key.code == KeyCode::Tab {
-            if key.modifiers.contains(KeyModifiers::SHIFT) {
-                self.focus_prev();
-            } else {
-                self.focus_next();
-            }
+        // Shift+Tab steps back from anywhere; Tab steps forward from below
+        // the field, where it opens the tree.
+        let back_tab = key.code == KeyCode::BackTab
+            || (key.code == KeyCode::Tab && key.modifiers.contains(KeyModifiers::SHIFT));
+        if back_tab && !self.field.is_open() {
+            self.focus_prev();
+            return Ok(None);
+        }
+        if key.code == KeyCode::Tab && self.focus != FocusArea::Input {
+            self.focus_next();
             return Ok(None);
         }
 
         match self.focus {
             FocusArea::Input => {
-                // Try common input handling first
-                match handle_input_key(&mut self.input_handler, key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
+                if self.field.handle_key(chord) == FieldKey::Handled {
+                    return Ok(None);
                 }
-
-                // Modal-specific handling
                 match key.code {
                     KeyCode::Down => {
                         self.focus = FocusArea::Checkbox;
@@ -256,12 +265,8 @@ impl Modal for SaveAsModal {
                 }
 
                 // Handle text input keys for quick typing
-                match handle_input_key(&mut self.input_handler, key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        self.focus = FocusArea::Input;
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
+                if self.type_into_field(key) {
+                    return Ok(None);
                 }
 
                 match key.code {
@@ -279,12 +284,8 @@ impl Modal for SaveAsModal {
             }
             FocusArea::Buttons => {
                 // Handle text input keys even when on buttons
-                match handle_input_key(&mut self.input_handler, key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        self.focus = FocusArea::Input;
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
+                if self.type_into_field(key) {
+                    return Ok(None);
                 }
 
                 match key.code {
@@ -320,28 +321,15 @@ impl Modal for SaveAsModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         use crossterm::event::{MouseButton, MouseEventKind};
 
-        // Dragging from the input field extends its selection, also past the
-        // field's edges.
-        if mouse.kind == MouseEventKind::Drag(MouseButton::Left) {
-            if let Some(input_area) = self.last_input_area {
-                if self.focus == FocusArea::Input && mouse.row == input_area.y {
-                    let pos = field_char_at(&self.input_handler, input_area, mouse.column);
-                    self.input_handler.extend_selection_to(pos);
-                }
-            }
+        // The field and its tree: a press places the cursor, a drag
+        // selects, the arrow opens the tree.
+        if self.field.handle_mouse(&mouse) {
+            self.focus = FocusArea::Input;
             return Ok(None);
         }
 
         // Only handle left button press
         if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-            return Ok(None);
-        }
-
-        // A press on the input field's box, its border included, places the
-        // cursor and anchors a selection.
-        let frame = field_box(self.last_input_area, true);
-        if press_field_box(&mut self.input_handler, self.last_input_area, frame, &mouse) {
-            self.focus = FocusArea::Input;
             return Ok(None);
         }
 
@@ -401,7 +389,7 @@ impl Modal for SaveAsModal {
     }
 
     fn handle_paste(&mut self, text: &str) -> bool {
-        self.input_handler.paste(text);
+        self.field.paste(text);
         self.focus = FocusArea::Input;
         true
     }
@@ -421,7 +409,7 @@ mod tests {
     }
 
     fn mouse(modal: &mut SaveAsModal, kind: MouseEventKind, column: u16) {
-        let row = modal.last_input_area.unwrap().y;
+        let row = modal.field.text_area().unwrap().y;
         let event = MouseEvent {
             kind,
             column,
@@ -434,15 +422,15 @@ mod tests {
     #[test]
     fn clicking_and_dragging_in_the_field_selects_text() {
         let mut modal = rendered("/tmp/page.md", 80);
-        let x = modal.last_input_area.unwrap().x;
+        let x = modal.field.text_area().unwrap().x;
         mouse(&mut modal, MouseEventKind::Down(MouseButton::Left), x + 5);
-        assert_eq!(modal.input_handler.cursor_pos(), 5);
-        assert!(!modal.input_handler.has_selection());
+        assert_eq!(modal.field.input_mut().cursor_pos(), 5);
+        assert!(!modal.field.input_mut().has_selection());
         mouse(&mut modal, MouseEventKind::Drag(MouseButton::Left), x + 9);
-        assert_eq!(modal.input_handler.selection_range(), Some((5, 9)));
+        assert_eq!(modal.field.input_mut().selection_range(), Some((5, 9)));
         // Dragging past the left edge selects to the start.
         mouse(&mut modal, MouseEventKind::Drag(MouseButton::Left), 0);
-        assert_eq!(modal.input_handler.selection_range(), Some((0, 5)));
+        assert_eq!(modal.field.input_mut().selection_range(), Some((0, 5)));
     }
 
     fn rerender(modal: &mut SaveAsModal, width: u16) {
@@ -454,18 +442,18 @@ mod tests {
     fn a_click_in_a_scrolled_field_lands_where_it_points_and_the_field_stays() {
         let path = format!("/{}/page.md", "d".repeat(100));
         let mut modal = rendered(&path, 60);
-        let area = modal.last_input_area.unwrap();
-        let scroll = modal.input_handler.scroll();
+        let area = modal.field.text_area().unwrap();
+        let scroll = modal.field.input_mut().scroll();
         assert!(scroll > 0, "the long path scrolls to show its end");
         mouse(
             &mut modal,
             MouseEventKind::Down(MouseButton::Left),
             area.x + 3,
         );
-        assert_eq!(modal.input_handler.cursor_pos(), scroll + 3);
+        assert_eq!(modal.field.input_mut().cursor_pos(), scroll + 3);
         rerender(&mut modal, 60);
         assert_eq!(
-            modal.input_handler.scroll(),
+            modal.field.input_mut().scroll(),
             scroll,
             "the field does not jump"
         );
@@ -475,7 +463,7 @@ mod tests {
             area.x + 7,
         );
         assert_eq!(
-            modal.input_handler.selection_range(),
+            modal.field.input_mut().selection_range(),
             Some((scroll + 3, scroll + 7))
         );
     }
@@ -484,8 +472,8 @@ mod tests {
     fn dragging_past_the_left_edge_scrolls_the_field() {
         let path = format!("/{}/page.md", "d".repeat(100));
         let mut modal = rendered(&path, 60);
-        let area = modal.last_input_area.unwrap();
-        let scroll = modal.input_handler.scroll();
+        let area = modal.field.text_area().unwrap();
+        let scroll = modal.field.input_mut().scroll();
         mouse(
             &mut modal,
             MouseEventKind::Down(MouseButton::Left),
@@ -493,11 +481,42 @@ mod tests {
         );
         mouse(&mut modal, MouseEventKind::Drag(MouseButton::Left), 0);
         rerender(&mut modal, 60);
-        assert_eq!(modal.input_handler.scroll(), scroll - 1);
+        assert_eq!(modal.field.input_mut().scroll(), scroll - 1);
         assert_eq!(
-            modal.input_handler.selection_range(),
+            modal.field.input_mut().selection_range(),
             Some((scroll - 1, scroll + 3))
         );
+    }
+
+    #[test]
+    fn tab_opens_the_tree_and_a_picked_directory_keeps_the_file_name() {
+        let dir = std::env::temp_dir().join(format!("termide-save-as-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("notes")).unwrap();
+        let mut modal = SaveAsModal::new("Save As", format!("{}/page.md", dir.display()));
+        let press = |modal: &mut SaveAsModal, code| {
+            let key = crossterm::event::KeyEvent::new(code, KeyModifiers::NONE);
+            modal
+                .handle_key(termide_core::KeyChord::identity(key))
+                .unwrap()
+        };
+        press(&mut modal, KeyCode::Tab);
+        assert!(modal.field.is_open());
+        press(&mut modal, KeyCode::Down); // `..`
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(
+            modal.field.text(),
+            format!("{}/notes/page.md", dir.display())
+        );
+        // Esc closes the tree first; the path it opened with comes back.
+        assert!(press(&mut modal, KeyCode::Esc).is_none());
+        assert_eq!(modal.field.text(), format!("{}/page.md", dir.display()));
+        // Below the field Tab still moves on.
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.focus, FocusArea::Checkbox);
+        press(&mut modal, KeyCode::Tab);
+        assert_eq!(modal.focus, FocusArea::Buttons);
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
@@ -505,7 +524,7 @@ mod tests {
         let mut modal = SaveAsModal::new("Save As", "a");
         modal.focus = FocusArea::Buttons;
         assert!(modal.handle_paste("bc"));
-        assert_eq!(modal.input_handler.text(), "abc");
+        assert_eq!(modal.field.input_mut().text(), "abc");
         assert_eq!(modal.focus, FocusArea::Input);
     }
 }

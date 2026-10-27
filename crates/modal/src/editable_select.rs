@@ -1,45 +1,40 @@
-//! Editable select (combobox) modal dialog.
+//! Destination path modal: a path field whose dropdown is a directory tree.
 //!
-//! Provides a dropdown-style modal with an editable text input field.
-//! Users can type to filter options or select from the dropdown list.
-//!
-//! Features:
-//! - Text input with cursor navigation
-//! - Dropdown list with keyboard navigation
-//! - Real-time filtering of options
-//! - Tab completion support
+//! The field opens on a default path; its tree starts with quick
+//! destinations (the other panels' directories) and follows the path once it
+//! is edited (see [`crate::path_field`]). Below the field come optional
+//! choice rows, checkboxes and the OK/Cancel buttons.
 
 use anyhow::Result;
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Constraint, Direction, Layout, Rect},
-    style::{Modifier, Style},
+    style::Style,
     text::{Line, Span},
-    widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
+    widgets::{Paragraph, Widget},
 };
+use std::path::PathBuf;
 
-use crate::base::{
-    button_style, drag_field, press_field_box, render_modal_block, render_text_input,
-};
+use crate::base::{button_style, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
+use crate::path_field::{FieldKey, PathField};
 
 use termide_config::constants::{
     MODAL_BUTTON_SPACING, MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_WIDE,
     MODAL_PADDING_WITH_DOUBLE_BORDER,
 };
+use termide_config::FileManagerKeybindings;
 use termide_i18n as i18n;
 use termide_theme::Theme;
-use termide_ui::path_utils::truncate_right;
-use termide_ui::{SuggestionAction, SuggestionInput};
 use unicode_width::UnicodeWidthStr;
 
 use crate::{centered_rect_with_size, Modal, ModalResult};
 
-/// Select option for editable select modal
+/// A quick destination offered at the top of the tree.
 #[derive(Debug, Clone)]
 pub struct SelectOption {
-    /// Value of the option (used for selection result)
+    /// The path written into the field when it is picked.
     pub value: String,
     /// Display text for the option
     pub display: String,
@@ -49,14 +44,24 @@ pub struct SelectOption {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FocusArea {
     Input,
-    Choice,
+    Choice(usize),
     Checkbox(usize),
     Buttons,
+}
+
+/// What a choice row's value does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChoiceKind {
+    /// Read by the host when the modal closes.
+    Plain,
+    /// File extensions: picking one swaps it into the path's file name.
+    Extension,
 }
 
 /// A labelled row picking one of a few values, cycled with Left/Right.
 #[derive(Debug, Clone)]
 struct ModalChoice {
+    kind: ChoiceKind,
     label: String,
     options: Vec<String>,
     selected: usize,
@@ -90,67 +95,99 @@ struct ModalCheckbox {
     visible_when_primary_checked: bool,
 }
 
-/// Editable select modal - combobox with editable input
+/// Destination path modal: a path field with a directory tree dropdown.
 #[derive(Debug)]
 pub struct EditableSelectModal {
     title: String,
     prompt: String,
-    suggestion_input: SuggestionInput,
-    options: Vec<SelectOption>, // Keep for display text mapping
+    field: PathField,
+    /// Widest quick destination, for the modal's width.
+    widest_option: usize,
     focus: FocusArea,
     selected_button: usize, // 0 = OK, 1 = Cancel
-    // Areas for mouse handling
-    last_modal_area: Option<Rect>,
-    last_input_area: Option<Rect>,
-    /// The text of the input as last drawn, left of the arrow, for the mouse.
-    last_text_area: Option<Rect>,
-    /// A press landed in the input's text and the button is still down.
-    dragging: bool,
-    last_dropdown_area: Option<Rect>,
     last_buttons_area: Option<Rect>,
     checkboxes: Vec<ModalCheckbox>,
     last_checkbox_areas: Vec<(usize, Rect)>,
-    choice: Option<ModalChoice>,
-    last_choice_area: Option<Rect>,
+    choices: Vec<ModalChoice>,
+    last_choice_areas: Vec<(usize, Rect)>,
 }
 
 impl EditableSelectModal {
-    /// Create a new editable select modal
+    /// A modal asking for a path, starting at `default_value`, with
+    /// `options` as the quick destinations.
     pub fn new(
         title: impl Into<String>,
         prompt: impl Into<String>,
         default_value: impl Into<String>,
         options: Vec<SelectOption>,
     ) -> Self {
-        let default = default_value.into();
-        // Extract values from options for SuggestionInput
-        let suggestion_values: Vec<String> = options.iter().map(|o| o.value.clone()).collect();
-
+        let widest_option = options
+            .iter()
+            .map(|o| o.value.width().max(o.display.width()))
+            .max()
+            .unwrap_or(0);
+        let roots = options.into_iter().map(|o| o.value).collect();
         Self {
             title: title.into(),
             prompt: prompt.into(),
-            suggestion_input: SuggestionInput::with_text(default, suggestion_values),
-            options,
+            field: PathField::new(default_value, roots),
+            widest_option,
             focus: FocusArea::Input,
             selected_button: 0, // OK button selected by default
-            last_modal_area: None,
-            last_input_area: None,
-            last_text_area: None,
-            dragging: false,
-            last_dropdown_area: None,
             last_buttons_area: None,
             checkboxes: Vec::new(),
             last_checkbox_areas: Vec::new(),
-            choice: None,
-            last_choice_area: None,
+            choices: Vec::new(),
+            last_choice_areas: Vec::new(),
         }
+    }
+
+    /// Take a relative path from `dir`.
+    pub fn with_base_dir(mut self, dir: PathBuf) -> Self {
+        self.field.set_base_dir(dir);
+        self
+    }
+
+    /// The path names a file: picking a directory in the tree keeps the
+    /// name after the last `/`.
+    pub fn keeping_file_name(mut self) -> Self {
+        self.field.set_keeps_name(true);
+        self
+    }
+
+    /// Use the file manager's directory keys as configured.
+    pub fn with_keybindings(mut self, keybindings: &FileManagerKeybindings) -> Self {
+        self.field.set_keybindings(keybindings);
+        self
     }
 
     /// Add a row under the input that picks one of `options`, starting at
     /// `selected`. Left/Right (or a click on an arrow) change it.
-    pub fn with_choice(mut self, label: String, options: Vec<String>, selected: usize) -> Self {
+    pub fn with_choice(self, label: String, options: Vec<String>, selected: usize) -> Self {
+        self.with_choice_of(ChoiceKind::Plain, label, options, selected)
+    }
+
+    /// Add a row picking the file extension of the path, starting at
+    /// `selected`; changing it swaps the extension in the field.
+    pub fn with_extension_choice(
+        self,
+        label: String,
+        extensions: Vec<String>,
+        selected: usize,
+    ) -> Self {
+        self.with_choice_of(ChoiceKind::Extension, label, extensions, selected)
+    }
+
+    fn with_choice_of(
+        mut self,
+        kind: ChoiceKind,
+        label: String,
+        options: Vec<String>,
+        selected: usize,
+    ) -> Self {
         if !options.is_empty() {
-            self.choice = Some(ModalChoice {
+            self.choices.push(ModalChoice {
+                kind,
                 label,
                 selected: selected.min(options.len() - 1),
                 options,
@@ -159,9 +196,12 @@ impl EditableSelectModal {
         self
     }
 
-    /// The index of the value the choice row shows, if there is one.
+    /// The index of the value the plain choice row shows, if there is one.
     pub fn choice_index(&self) -> Option<usize> {
-        self.choice.as_ref().map(|c| c.selected)
+        self.choices
+            .iter()
+            .find(|c| c.kind == ChoiceKind::Plain)
+            .map(|c| c.selected)
     }
 
     /// Add an optional checkbox to the modal
@@ -185,7 +225,7 @@ impl EditableSelectModal {
 
     /// The text in the input, as it would be confirmed.
     pub fn value(&self) -> &str {
-        self.suggestion_input.text()
+        self.field.text()
     }
 
     /// Whether the checkbox is checked
@@ -212,37 +252,53 @@ impl EditableSelectModal {
             .collect()
     }
 
-    fn first_visible_checkbox(&self) -> Option<usize> {
-        self.visible_checkbox_indices().into_iter().next()
-    }
-
-    /// The focus below the input: the choice row, a checkbox or the buttons.
-    fn focus_after_input(&self) -> FocusArea {
-        if self.choice.is_some() {
-            FocusArea::Choice
-        } else {
-            self.focus_after_choice()
+    /// The focus below choice row `after` (or below the input with `None`):
+    /// the next choice row, a checkbox or the buttons.
+    fn focus_below_choices(&self, after: Option<usize>) -> FocusArea {
+        let next = after.map_or(0, |i| i + 1);
+        if next < self.choices.len() {
+            return FocusArea::Choice(next);
         }
-    }
-
-    fn focus_after_choice(&self) -> FocusArea {
-        self.first_visible_checkbox()
-            .map(FocusArea::Checkbox)
+        self.visible_checkbox_indices()
+            .first()
+            .map(|&i| FocusArea::Checkbox(i))
             .unwrap_or(FocusArea::Buttons)
     }
 
-    /// The focus above the first checkbox: the choice row or the input.
+    /// The focus above the first checkbox: the last choice row or the input.
     fn focus_before_checkboxes(&self) -> FocusArea {
-        if self.choice.is_some() {
-            FocusArea::Choice
-        } else {
-            FocusArea::Input
+        match self.choices.len() {
+            0 => FocusArea::Input,
+            n => FocusArea::Choice(n - 1),
         }
+    }
+
+    /// Step choice row `index`; an extension row swaps the path's extension.
+    fn step_choice(&mut self, index: usize, forward: bool) {
+        let Some(choice) = self.choices.get_mut(index) else {
+            return;
+        };
+        let old = choice.options[choice.selected].clone();
+        choice.step(forward);
+        if choice.kind != ChoiceKind::Extension {
+            return;
+        }
+        let new = choice.options[choice.selected].clone();
+        let mut known = choice.options.clone();
+        // The longest extension first, so `.tar.gz` wins over `.gz`.
+        known.sort_by_key(|e| std::cmp::Reverse(e.len()));
+        let text = self.field.text();
+        let stem = known
+            .iter()
+            .chain(std::iter::once(&old))
+            .find_map(|ext| text.strip_suffix(ext.as_str()))
+            .unwrap_or(text);
+        self.field.set_text(format!("{stem}{new}"));
     }
 
     /// Confirm the typed value; an empty one cancels.
     fn confirm(&self) -> ModalResult<String> {
-        let text = self.suggestion_input.text();
+        let text = self.field.text();
         if text.is_empty() {
             ModalResult::Cancelled
         } else {
@@ -269,83 +325,78 @@ impl EditableSelectModal {
             })
     }
 
-    /// Calculate dynamic modal width and height
-    fn calculate_modal_size(&self, screen_width: u16, screen_height: u16) -> (u16, u16) {
-        // 1. Title width
-        let title_width = self.title.len() as u16 + 2;
-
-        // 2. Prompt width
-        let prompt_max_line_width = if self.prompt.is_empty() {
+    fn prompt_lines(&self) -> u16 {
+        if self.prompt.is_empty() {
             0
         } else {
-            self.prompt
-                .lines()
-                .map(|line| line.len())
-                .max()
-                .unwrap_or(0) as u16
-        };
+            self.prompt.lines().count().max(1) as u16
+        }
+    }
 
-        // 3. Calculate max option width ALWAYS (stable width regardless of state)
-        let max_option_len = self
-            .options
-            .iter()
-            .map(|s| s.value.chars().count().max(s.display.chars().count()))
-            .max()
-            .unwrap_or(0) as u16;
-
-        // 4. Input field width based on max option (not current input)
-        let min_input_width = max_option_len + 5; // +5 for arrow and padding
-
-        // 5. Options list width, with one column of padding (the row under
-        // the cursor is inverted, so it needs no `▶` marker)
-        let max_option_width = max_option_len + 1;
-
-        // 6. Buttons width: "[ OK ]    [ Cancel ]" = ~21 characters
+    /// Calculate dynamic modal width and height
+    fn calculate_modal_size(&self, screen_width: u16, screen_height: u16) -> (u16, u16) {
+        let title_width = self.title.width() as u16 + 2;
+        let prompt_width = self.prompt.lines().map(|l| l.width()).max().unwrap_or(0) as u16;
+        // The field fits the widest quick destination and the first value,
+        // and its arrow.
+        let input_width = self.widest_option.max(self.field.text().width()) as u16 + 5;
+        // Buttons width: "[ OK ]    [ Cancel ]" = ~21 characters
         let buttons_width = 21;
+        let choice_width = self
+            .choices
+            .iter()
+            .map(|c| {
+                let widest = c.options.iter().map(|o| o.width()).max();
+                (c.prefix().width() + widest.unwrap_or(0) + 2) as u16
+            })
+            .max()
+            .unwrap_or(0);
 
-        // 7. Choice row at its widest value
-        let choice_width = self.choice.as_ref().map_or(0, |c| {
-            let widest = c.options.iter().map(|o| o.width()).max();
-            (c.prefix().width() + widest.unwrap_or(0) + 2) as u16
-        });
-
-        // Take maximum
         let content_width = title_width
-            .max(prompt_max_line_width)
-            .max(min_input_width)
-            .max(max_option_width)
+            .max(prompt_width)
+            .max(input_width)
             .max(buttons_width)
             .max(choice_width);
-
-        // Add padding and borders
         let total_width = content_width + MODAL_PADDING_WITH_DOUBLE_BORDER;
-
-        // Apply width constraints
         let max_width = (screen_width as f32 * MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT) as u16;
         let width = total_width
             .max(MODAL_MIN_WIDTH_WIDE)
             .min(max_width)
             .min(screen_width);
 
-        // Calculate height
-        let prompt_lines = if self.prompt.is_empty() {
-            0
-        } else {
-            self.prompt.lines().count().max(1) as u16
-        };
-        let list_height = if self.suggestion_input.is_expanded() && !self.options.is_empty() {
-            self.options.len().min(6) as u16 + 1 // Limit to 6 items + bottom border
-        } else {
-            0
-        };
+        // Borders, prompt, field (and tree), choices, checkboxes, buttons.
+        let height = 1
+            + self.prompt_lines()
+            + self.field.height()
+            + self.choices.len() as u16
+            + self.visible_checkbox_indices().len() as u16
+            + 1
+            + 1;
+        (width, height.min(screen_height))
+    }
 
-        // 1 (top border) + prompt_lines + 3 (input) + list + choice + checkboxes + 1 (buttons) + 1 (bottom border)
-        let choice_height = u16::from(self.choice.is_some());
-        let checkbox_height = self.visible_checkbox_indices().len() as u16;
-        let height = (1 + prompt_lines + 3 + list_height + choice_height + checkbox_height + 1 + 1)
-            .min(screen_height);
+    fn ok_or_cancel(&self, button: usize) -> ModalResult<String> {
+        if button == 0 {
+            self.confirm()
+        } else {
+            ModalResult::Cancelled
+        }
+    }
 
-        (width, height)
+    /// Type `key` into the field from a row below it: focus returns there.
+    fn type_into_field(&mut self, key: crossterm::event::KeyEvent) -> bool {
+        match handle_input_key(self.field.input_mut(), key) {
+            InputKeyResult::Handled => {
+                self.focus = FocusArea::Input;
+                true
+            }
+            InputKeyResult::TextModified => {
+                self.focus = FocusArea::Input;
+                self.field.text_edited();
+                true
+            }
+            InputKeyResult::NotHandled => false,
+        }
     }
 }
 
@@ -353,40 +404,17 @@ impl Modal for EditableSelectModal {
     type Result = String;
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
-        // Calculate dynamic dimensions
         let (modal_width, modal_height) = self.calculate_modal_size(area.width, area.height);
-
-        // Create centered area
         let modal_area = centered_rect_with_size(modal_width, modal_height, area);
-
-        // Save modal area for mouse handling
-        self.last_modal_area = Some(modal_area);
-
         let inner = render_modal_block(modal_area, buf, &self.title, theme);
 
-        // Split into sections
-        let prompt_lines = if self.prompt.is_empty() {
-            0
-        } else {
-            self.prompt.lines().count().max(1) as u16
-        };
-
-        let has_prompt = prompt_lines > 0;
-        let has_list = self.suggestion_input.is_expanded() && !self.options.is_empty();
-        let list_height = if has_list {
-            self.options.len().min(6) as u16 + 1
-        } else {
-            0
-        };
+        let prompt_lines = self.prompt_lines();
         let mut constraints = Vec::new();
-        if has_prompt {
+        if prompt_lines > 0 {
             constraints.push(Constraint::Length(prompt_lines));
         }
-        constraints.push(Constraint::Length(3)); // Input
-        if has_list {
-            constraints.push(Constraint::Length(list_height));
-        }
-        if self.choice.is_some() {
+        constraints.push(Constraint::Length(self.field.height()));
+        for _ in &self.choices {
             constraints.push(Constraint::Length(1));
         }
         let visible_checkboxes = self.visible_checkbox_indices();
@@ -399,127 +427,27 @@ impl Modal for EditableSelectModal {
             .direction(Direction::Vertical)
             .constraints(constraints)
             .split(inner);
-
         let mut chunk_idx = 0;
 
-        // Render prompt if not empty
         if prompt_lines > 0 {
-            let prompt = Paragraph::new(self.prompt.clone())
+            Paragraph::new(self.prompt.clone())
                 .alignment(Alignment::Left)
-                .style(Style::default().fg(theme.fg));
-            prompt.render(chunks[chunk_idx], buf);
+                .style(Style::default().fg(theme.fg))
+                .render(chunks[chunk_idx], buf);
             chunk_idx += 1;
         }
 
-        // Render input field with arrow at right edge
-        let arrow_char = if self.suggestion_input.is_expanded() {
-            "▲"
-        } else {
-            "▼"
-        };
-
-        // Choose borders based on state: in Expanded, remove bottom border for visual unity
-        let input_borders = if self.suggestion_input.is_expanded() && !self.options.is_empty() {
-            Borders::LEFT | Borders::TOP | Borders::RIGHT // No bottom border
-        } else {
-            Borders::ALL
-        };
-
-        let input_block = Block::default()
-            .borders(input_borders)
-            .border_style(Style::default().fg(theme.accented_fg));
-        let input_inner = input_block.inner(chunks[chunk_idx]);
-        input_block.render(chunks[chunk_idx], buf);
-
-        // Save input area for mouse handling (the full bordered area)
-        self.last_input_area = Some(chunks[chunk_idx]);
-
-        // Calculate area for text input (excluding arrow)
-        let arrow_width = 2u16; // space + arrow
-        let text_width = input_inner.width.saturating_sub(arrow_width);
-
-        // Render input content with cursor and selection
-        let text_area = Rect::new(input_inner.x, input_inner.y, text_width, 1);
-        render_text_input(
+        self.field.render(
+            chunks[chunk_idx],
             buf,
-            text_area,
-            self.suggestion_input.input_mut(),
-            self.focus == FocusArea::Input,
             theme,
+            self.focus == FocusArea::Input,
         );
-        self.last_text_area = Some(text_area);
-
-        // Render arrow at right edge
-        let arrow_x = input_inner.x + input_inner.width.saturating_sub(1);
-        buf.set_string(
-            arrow_x,
-            input_inner.y,
-            arrow_char,
-            Style::default().fg(theme.disabled),
-        );
-
         chunk_idx += 1;
 
-        // Render options list only in Expanded state
-        if self.suggestion_input.is_expanded() && !self.options.is_empty() {
-            // Save dropdown area for mouse handling
-            self.last_dropdown_area = Some(chunks[chunk_idx]);
-
-            let selected_idx = self.suggestion_input.selected_index();
-            let viewport = self.suggestion_input.viewport();
-            let scroll_offset = viewport.offset;
-            let max_visible = self.suggestion_input.max_visible();
-
-            // Only render items within the visible viewport range
-            let visible_end = (scroll_offset + max_visible).min(self.options.len());
-            let items: Vec<ListItem> = self
-                .options
-                .iter()
-                .enumerate()
-                .skip(scroll_offset)
-                .take(visible_end - scroll_offset)
-                .map(|(idx, option)| {
-                    let prefix = " ";
-
-                    let style = if idx == selected_idx {
-                        Style::default()
-                            .fg(theme.bg)
-                            .bg(theme.fg)
-                            .add_modifier(Modifier::BOLD)
-                    } else {
-                        Style::default().fg(theme.fg)
-                    };
-
-                    // Truncate long text
-                    let max_text_width = modal_width as usize - 10;
-                    let display_text = truncate_right(&option.display, max_text_width);
-
-                    ListItem::new(Line::from(vec![
-                        Span::styled(prefix, style),
-                        Span::styled(display_text, style),
-                    ]))
-                })
-                .collect();
-
-            // Remove top border and title for visual unity with input field
-            let list = List::new(items)
-                .block(
-                    Block::default()
-                        .borders(Borders::LEFT | Borders::BOTTOM | Borders::RIGHT) // No top border
-                        .border_style(Style::default().fg(theme.accented_fg)),
-                )
-                .style(Style::default().bg(theme.bg));
-
-            list.render(chunks[chunk_idx], buf);
-            chunk_idx += 1;
-        } else {
-            self.last_dropdown_area = None;
-        }
-
-        // Render the choice row if present
-        self.last_choice_area = None;
-        if let Some(choice) = &self.choice {
-            let style = if self.focus == FocusArea::Choice {
+        self.last_choice_areas.clear();
+        for (i, choice) in self.choices.iter().enumerate() {
+            let style = if self.focus == FocusArea::Choice(i) {
                 Style::default().fg(theme.accented_fg).bg(theme.bg)
             } else {
                 Style::default().fg(theme.fg).bg(theme.bg)
@@ -528,11 +456,10 @@ impl Modal for EditableSelectModal {
                 .style(style)
                 .alignment(Alignment::Left)
                 .render(chunks[chunk_idx], buf);
-            self.last_choice_area = Some(chunks[chunk_idx]);
+            self.last_choice_areas.push((i, chunks[chunk_idx]));
             chunk_idx += 1;
         }
 
-        // Render checkbox if present
         self.last_checkbox_areas.clear();
         for checkbox_idx in visible_checkboxes {
             let checkbox = &self.checkboxes[checkbox_idx];
@@ -542,19 +469,16 @@ impl Modal for EditableSelectModal {
             } else {
                 Style::default().fg(theme.fg).bg(theme.bg)
             };
-            let checkbox_text = format!("[{}] {}", checkbox_char, checkbox.label);
-            let checkbox = Paragraph::new(checkbox_text)
+            Paragraph::new(format!("[{}] {}", checkbox_char, checkbox.label))
                 .style(checkbox_style)
-                .alignment(Alignment::Left);
-            checkbox.render(chunks[chunk_idx], buf);
+                .alignment(Alignment::Left)
+                .render(chunks[chunk_idx], buf);
             self.last_checkbox_areas
                 .push((checkbox_idx, chunks[chunk_idx]));
             chunk_idx += 1;
         }
 
-        // Render buttons
         let t = i18n::t();
-
         let ok_style = button_style(
             self.focus == FocusArea::Buttons && self.selected_button == 0,
             theme,
@@ -563,17 +487,14 @@ impl Modal for EditableSelectModal {
             self.focus == FocusArea::Buttons && self.selected_button == 1,
             theme,
         );
-
         let buttons = Line::from(vec![
             Span::styled(format!("[ {} ]", t.ui_ok()), ok_style),
             Span::raw("    "),
             Span::styled(format!("[ {} ]", t.ui_cancel()), cancel_style),
         ]);
-
-        let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
-        buttons_paragraph.render(chunks[chunk_idx], buf);
-
-        // Save buttons area for mouse handling
+        Paragraph::new(buttons)
+            .alignment(Alignment::Center)
+            .render(chunks[chunk_idx], buf);
         self.last_buttons_area = Some(chunks[chunk_idx]);
     }
 
@@ -582,96 +503,66 @@ impl Modal for EditableSelectModal {
         chord: termide_core::KeyChord,
     ) -> Result<Option<ModalResult<Self::Result>>> {
         let key = chord.raw;
-        // Escape handling depends on state
-        if key.code == KeyCode::Esc {
-            if self.suggestion_input.is_expanded() {
-                // Collapse and rollback changes
-                self.suggestion_input.rollback();
-                self.focus = FocusArea::Input;
-                return Ok(None);
-            } else {
-                // Cancel operation
-                return Ok(Some(ModalResult::Cancelled));
-            }
+        // An open tree takes every key, Esc included, until it closes.
+        if self.field.is_open() {
+            self.focus = FocusArea::Input;
         }
 
         match self.focus {
             FocusArea::Input => {
-                // First try suggestion input handling (Tab, Up/Down when expanded, Enter when expanded)
-                match self.suggestion_input.handle_key(key) {
-                    SuggestionAction::Handled => return Ok(None),
-                    SuggestionAction::Confirmed => return Ok(None), // Just collapsed, don't confirm modal
-                    SuggestionAction::Cancelled => return Ok(None), // Already handled by Esc above
-                    SuggestionAction::TextModified => return Ok(None),
-                    SuggestionAction::NotHandled => {}
+                if self.field.handle_key(chord) == FieldKey::Handled {
+                    return Ok(None);
                 }
-
-                // Try common input handling
-                match handle_input_key(self.suggestion_input.input_mut(), key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
-                }
-
-                // Modal-specific handling
                 match key.code {
-                    // Move focus down (only when collapsed)
-                    KeyCode::Down | KeyCode::Tab => {
-                        self.focus = self.focus_after_input();
+                    KeyCode::Esc => Ok(Some(ModalResult::Cancelled)),
+                    KeyCode::Down => {
+                        self.focus = self.focus_below_choices(None);
                         Ok(None)
                     }
-                    // Confirm current value (only when collapsed)
                     KeyCode::Enter => Ok(Some(self.confirm())),
                     _ => Ok(None),
                 }
             }
-            FocusArea::Choice => {
+            FocusArea::Choice(index) => {
                 match key.code {
+                    KeyCode::Esc => return Ok(Some(ModalResult::Cancelled)),
                     KeyCode::Left | KeyCode::Right | KeyCode::Char(' ') => {
-                        if let Some(choice) = &mut self.choice {
-                            choice.step(key.code != KeyCode::Left);
-                        }
+                        self.step_choice(index, key.code != KeyCode::Left);
                         return Ok(None);
                     }
                     KeyCode::Up | KeyCode::BackTab => {
-                        self.focus = FocusArea::Input;
+                        self.focus = match index {
+                            0 => FocusArea::Input,
+                            i => FocusArea::Choice(i - 1),
+                        };
                         return Ok(None);
                     }
                     KeyCode::Down | KeyCode::Tab => {
-                        self.focus = self.focus_after_choice();
+                        self.focus = self.focus_below_choices(Some(index));
                         return Ok(None);
                     }
                     KeyCode::Enter => return Ok(Some(self.confirm())),
                     _ => {}
                 }
                 // Typing goes back to the input, as from a checkbox.
-                match handle_input_key(self.suggestion_input.input_mut(), key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        self.focus = FocusArea::Input;
-                    }
-                    InputKeyResult::NotHandled => {}
-                }
+                self.type_into_field(key);
                 Ok(None)
             }
             FocusArea::Checkbox(checkbox_idx) => {
-                // Space toggles checkbox — must come before handle_input_key which would eat it
+                if key.code == KeyCode::Esc {
+                    return Ok(Some(ModalResult::Cancelled));
+                }
+                // Space toggles checkbox — must come before typing, which
+                // would eat it
                 if key.code == KeyCode::Char(' ') {
                     if let Some(checkbox) = self.checkboxes.get_mut(checkbox_idx) {
                         checkbox.checked = !checkbox.checked;
                     }
                     return Ok(None);
                 }
-
-                // Handle text input keys for quick typing
-                match handle_input_key(self.suggestion_input.input_mut(), key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        self.focus = FocusArea::Input;
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
+                if self.type_into_field(key) {
+                    return Ok(None);
                 }
-
                 match key.code {
                     KeyCode::Up | KeyCode::BackTab => {
                         self.focus = self
@@ -687,37 +578,20 @@ impl Modal for EditableSelectModal {
                             .unwrap_or(FocusArea::Buttons);
                         Ok(None)
                     }
-                    KeyCode::Enter => {
-                        let text = self.suggestion_input.text();
-                        if text.is_empty() {
-                            Ok(Some(ModalResult::Cancelled))
-                        } else {
-                            Ok(Some(ModalResult::Confirmed(text.to_string())))
-                        }
-                    }
+                    KeyCode::Enter => Ok(Some(self.confirm())),
                     _ => Ok(None),
                 }
             }
             FocusArea::Buttons => {
-                // Handle text input keys even when on buttons
-                match handle_input_key(self.suggestion_input.input_mut(), key) {
-                    InputKeyResult::Handled | InputKeyResult::TextModified => {
-                        // Switch back to input when typing
-                        self.focus = FocusArea::Input;
-                        return Ok(None);
-                    }
-                    InputKeyResult::NotHandled => {}
+                if key.code == KeyCode::Esc {
+                    return Ok(Some(ModalResult::Cancelled));
                 }
-
+                if self.type_into_field(key) {
+                    return Ok(None);
+                }
                 match key.code {
-                    KeyCode::Left => {
-                        // Move to previous button (wrap around)
-                        self.selected_button = if self.selected_button == 0 { 1 } else { 0 };
-                        Ok(None)
-                    }
-                    KeyCode::Right => {
-                        // Move to next button (wrap around)
-                        self.selected_button = if self.selected_button == 1 { 0 } else { 1 };
+                    KeyCode::Left | KeyCode::Right => {
+                        self.selected_button = 1 - self.selected_button;
                         Ok(None)
                     }
                     KeyCode::Up | KeyCode::BackTab => {
@@ -727,21 +601,7 @@ impl Modal for EditableSelectModal {
                         };
                         Ok(None)
                     }
-                    KeyCode::Enter => {
-                        // Execute selected button action
-                        if self.selected_button == 0 {
-                            // OK button
-                            let text = self.suggestion_input.text();
-                            if text.is_empty() {
-                                Ok(Some(ModalResult::Cancelled))
-                            } else {
-                                Ok(Some(ModalResult::Confirmed(text.to_string())))
-                            }
-                        } else {
-                            // Cancel button
-                            Ok(Some(ModalResult::Cancelled))
-                        }
-                    }
+                    KeyCode::Enter => Ok(Some(self.ok_or_cancel(self.selected_button))),
                     _ => Ok(None),
                 }
             }
@@ -755,171 +615,60 @@ impl Modal for EditableSelectModal {
     ) -> Result<Option<ModalResult<Self::Result>>> {
         use crossterm::event::{MouseButton, MouseEventKind};
 
-        match mouse.kind {
-            MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
-                drag_field(
-                    self.suggestion_input.input_mut(),
-                    self.last_text_area,
-                    &mouse,
-                );
-                return Ok(None);
-            }
-            MouseEventKind::Up(MouseButton::Left) => self.dragging = false,
-            _ => {}
-        }
-
-        if self.suggestion_input.is_expanded() {
-            match mouse.kind {
-                MouseEventKind::ScrollUp => {
-                    for _ in 0..3 {
-                        self.suggestion_input.select_up();
-                    }
-                    return Ok(None);
-                }
-                MouseEventKind::ScrollDown => {
-                    for _ in 0..3 {
-                        self.suggestion_input.select_down();
-                    }
-                    return Ok(None);
-                }
-                _ => {}
-            }
-        }
-
-        // Only handle left button press
-        if mouse.kind != MouseEventKind::Down(crossterm::event::MouseButton::Left) {
-            return Ok(None);
-        }
-
-        // A press on the input's box, its border included, places the
-        // cursor; its right end, the arrow, opens the list below.
-        let frame = self.last_input_area.map(|area| Rect {
-            width: area.width.saturating_sub(3),
-            ..area
-        });
-        if press_field_box(
-            self.suggestion_input.input_mut(),
-            self.last_text_area,
-            frame,
-            &mouse,
-        ) {
+        if self.field.handle_mouse(&mouse) {
             self.focus = FocusArea::Input;
-            self.dragging = true;
+            return Ok(None);
+        }
+        if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+            return Ok(None);
+        }
+        let point = (mouse.column, mouse.row).into();
+
+        // The choice row: the left arrow steps back, anywhere else forward.
+        let choice_hit = self
+            .last_choice_areas
+            .iter()
+            .find(|(_, area)| area.contains(point))
+            .map(|&(i, area)| (i, area));
+        if let Some((index, area)) = choice_hit {
+            self.focus = FocusArea::Choice(index);
+            // The prefix ends with "◀ ".
+            let arrow = area.x + (self.choices[index].prefix().width() as u16).saturating_sub(2);
+            self.step_choice(index, mouse.column != arrow);
             return Ok(None);
         }
 
-        // Check for click on dropdown arrow
-        if let Some(input_area) = self.last_input_area {
-            // Check if click is within input area
-            if mouse.row >= input_area.y
-                && mouse.row < input_area.y + input_area.height
-                && mouse.column >= input_area.x
-                && mouse.column < input_area.x + input_area.width
-            {
-                // Arrow is at the right edge (last 3 columns: padding + arrow + border)
-                // Check if click is in the arrow region (rightmost 3-4 characters of input area)
-                let arrow_start = input_area.x + input_area.width.saturating_sub(3);
-                if mouse.column >= arrow_start {
-                    // Toggle dropdown state
-                    self.suggestion_input.toggle();
-                    return Ok(None);
-                }
+        if let Some(&(checkbox_idx, _)) = self
+            .last_checkbox_areas
+            .iter()
+            .find(|(_, area)| area.contains(point))
+        {
+            self.focus = FocusArea::Checkbox(checkbox_idx);
+            if let Some(checkbox) = self.checkboxes.get_mut(checkbox_idx) {
+                checkbox.checked = !checkbox.checked;
             }
+            return Ok(None);
         }
 
-        // Check for click on dropdown items
-        if let Some(dropdown_area) = self.last_dropdown_area {
-            if mouse.row >= dropdown_area.y
-                && mouse.row < dropdown_area.y + dropdown_area.height
-                && mouse.column >= dropdown_area.x
-                && mouse.column < dropdown_area.x + dropdown_area.width
-            {
-                // Calculate which item was clicked (account for border and scroll offset)
-                let relative_row = mouse.row.saturating_sub(dropdown_area.y);
-                // First row is inside the list (no top border in this design)
-                // Add scroll offset to get the actual item index
-                let scroll_offset = self.suggestion_input.viewport().offset;
-                let item_index = scroll_offset + relative_row as usize;
-
-                if item_index < self.options.len() {
-                    self.suggestion_input.select_and_confirm(item_index);
-                }
-                return Ok(None);
-            }
-        }
-
-        // Check for click on the choice row: the left arrow steps back,
-        // anywhere else steps forward.
-        if let (Some(area), Some(choice)) = (self.last_choice_area, &mut self.choice) {
-            if mouse.row >= area.y
-                && mouse.row < area.y + area.height
-                && mouse.column >= area.x
-                && mouse.column < area.x + area.width
-            {
-                self.focus = FocusArea::Choice;
-                // The prefix ends with "◀ ".
-                let arrow = area.x + (choice.prefix().width() as u16).saturating_sub(2);
-                choice.step(mouse.column != arrow);
-                return Ok(None);
-            }
-        }
-
-        // Check for click on checkbox
-        for (checkbox_idx, checkbox_area) in &self.last_checkbox_areas {
-            if mouse.row >= checkbox_area.y
-                && mouse.row < checkbox_area.y + checkbox_area.height
-                && mouse.column >= checkbox_area.x
-                && mouse.column < checkbox_area.x + checkbox_area.width
-            {
-                self.focus = FocusArea::Checkbox(*checkbox_idx);
-                if let Some(checkbox) = self.checkboxes.get_mut(*checkbox_idx) {
-                    checkbox.checked = !checkbox.checked;
-                }
-                return Ok(None);
-            }
-        }
-
-        // Check for click on buttons
         if let Some(buttons_area) = self.last_buttons_area {
-            // Check if click is within buttons area
-            if mouse.row >= buttons_area.y
-                && mouse.row < buttons_area.y + buttons_area.height
-                && mouse.column >= buttons_area.x
-                && mouse.column < buttons_area.x + buttons_area.width
-            {
-                // Calculate button positions
+            if buttons_area.contains(point) {
                 // Buttons are centered: "[ OK ]    [ Cancel ]"
                 let t = i18n::t();
-                let ok_text = format!("[ {} ]", t.ui_ok());
-                let cancel_text = format!("[ {} ]", t.ui_cancel());
-                let total_text_width =
-                    ok_text.len() + MODAL_BUTTON_SPACING as usize + cancel_text.len();
-
-                let start_col = buttons_area.x
-                    + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
-                let ok_end = start_col + ok_text.len() as u16;
-                let cancel_start = ok_end + MODAL_BUTTON_SPACING;
-                let cancel_end = cancel_start + cancel_text.len() as u16;
-
-                // Determine which button was clicked
-                if mouse.column >= start_col && mouse.column < ok_end {
-                    // OK button clicked
-                    self.focus = FocusArea::Buttons;
-                    self.selected_button = 0;
-                    // Execute OK action immediately
-                    let text = self.suggestion_input.text();
-                    if text.is_empty() {
-                        return Ok(Some(ModalResult::Cancelled));
-                    } else {
-                        return Ok(Some(ModalResult::Confirmed(text.to_string())));
-                    }
-                } else if mouse.column >= cancel_start && mouse.column < cancel_end {
-                    // Cancel button clicked
-                    self.focus = FocusArea::Buttons;
-                    self.selected_button = 1;
-                    // Execute Cancel action immediately
-                    return Ok(Some(ModalResult::Cancelled));
-                }
+                let ok_width = format!("[ {} ]", t.ui_ok()).width() as u16;
+                let cancel_width = format!("[ {} ]", t.ui_cancel()).width() as u16;
+                let total = ok_width + MODAL_BUTTON_SPACING + cancel_width;
+                let start = buttons_area.x + buttons_area.width.saturating_sub(total) / 2;
+                let cancel_start = start + ok_width + MODAL_BUTTON_SPACING;
+                let button = if (start..start + ok_width).contains(&mouse.column) {
+                    0
+                } else if (cancel_start..cancel_start + cancel_width).contains(&mouse.column) {
+                    1
+                } else {
+                    return Ok(None);
+                };
+                self.focus = FocusArea::Buttons;
+                self.selected_button = button;
+                return Ok(Some(self.ok_or_cancel(button)));
             }
         }
 
@@ -929,20 +678,101 @@ impl Modal for EditableSelectModal {
     /// A paste goes into the input, as typing does: focus returns to it
     /// from the choice row, a checkbox or the buttons.
     fn handle_paste(&mut self, text: &str) -> bool {
-        self.suggestion_input.input_mut().paste(text);
+        self.field.paste(text);
         self.focus = FocusArea::Input;
         true
     }
 }
 
 #[cfg(test)]
+impl EditableSelectModal {
+    /// The field's text area as last drawn.
+    fn field_text_area(&self) -> Rect {
+        self.field.text_area().expect("the field is drawn")
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crossterm::event::{KeyEvent, KeyModifiers};
+
+    fn key(code: KeyCode) -> termide_core::KeyChord {
+        termide_core::KeyChord::identity(KeyEvent::new(code, KeyModifiers::NONE))
+    }
+
+    fn press(modal: &mut EditableSelectModal, code: KeyCode) -> Option<ModalResult<String>> {
+        modal.handle_key(key(code)).unwrap()
+    }
+
+    fn type_text(modal: &mut EditableSelectModal, text: &str) {
+        for c in text.chars() {
+            press(modal, KeyCode::Char(c));
+        }
+    }
+
+    fn levels() -> EditableSelectModal {
+        EditableSelectModal::new("Pack", "", "a.zip", vec![]).with_choice(
+            "Level".to_string(),
+            vec!["None".into(), "Fast".into(), "Normal".into()],
+            2,
+        )
+    }
+
+    /// A scratch directory, removed when dropped.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// A directory with `src/bin`, `docs` and `.git` in it.
+    fn project() -> Scratch {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let dir =
+            std::env::temp_dir().join(format!("termide-path-field-{}-{n}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        for sub in ["src/bin", "docs", ".git"] {
+            std::fs::create_dir_all(dir.join(sub)).unwrap();
+        }
+        Scratch(dir)
+    }
+
+    fn option(path: &std::path::Path) -> SelectOption {
+        let value = format!("{}/", path.display());
+        SelectOption {
+            display: value.clone(),
+            value,
+        }
+    }
+
+    /// The tree's rows as drawn, one string per line, trailing blanks cut.
+    fn screen(modal: &mut EditableSelectModal) -> String {
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        (0..area.height)
+            .map(|y| {
+                let line: String = (0..area.width).map(|x| buf[(x, y)].symbol()).collect();
+                line.trim_end().to_string() + "\n"
+            })
+            .collect()
+    }
 
     #[test]
     fn a_bracketed_paste_lands_in_the_input() {
         let mut modal = levels();
-        modal.focus = FocusArea::Choice;
+        modal.focus = FocusArea::Choice(0);
         assert!(modal.handle_paste("/tmp/b\n"));
         assert_eq!(modal.value(), "a.zip/tmp/b");
         assert_eq!(modal.focus, FocusArea::Input);
@@ -959,46 +789,31 @@ mod tests {
         assert_eq!(modal.visible_checkbox_indices(), vec![0, 1]);
     }
 
-    fn key(code: KeyCode) -> termide_core::KeyChord {
-        termide_core::KeyChord::identity(crossterm::event::KeyEvent::new(
-            code,
-            crossterm::event::KeyModifiers::NONE,
-        ))
-    }
-
-    fn levels() -> EditableSelectModal {
-        EditableSelectModal::new("Pack", "", "a.zip", vec![]).with_choice(
-            "Level".to_string(),
-            vec!["None".into(), "Fast".into(), "Normal".into()],
-            2,
-        )
-    }
-
     #[test]
     fn the_choice_row_is_reached_from_the_input_and_cycled() {
         let mut modal = levels();
         assert_eq!(modal.choice_index(), Some(2));
-        modal.handle_key(key(KeyCode::Down)).unwrap();
-        assert_eq!(modal.focus, FocusArea::Choice);
-        modal.handle_key(key(KeyCode::Right)).unwrap();
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.focus, FocusArea::Choice(0));
+        press(&mut modal, KeyCode::Right);
         assert_eq!(modal.choice_index(), Some(0), "Right wraps around");
-        modal.handle_key(key(KeyCode::Left)).unwrap();
+        press(&mut modal, KeyCode::Left);
         assert_eq!(modal.choice_index(), Some(2), "Left wraps back");
-        modal.handle_key(key(KeyCode::Down)).unwrap();
+        press(&mut modal, KeyCode::Down);
         assert_eq!(modal.focus, FocusArea::Buttons);
-        modal.handle_key(key(KeyCode::Up)).unwrap();
-        assert_eq!(modal.focus, FocusArea::Choice);
-        let result = modal.handle_key(key(KeyCode::Enter)).unwrap();
+        press(&mut modal, KeyCode::Up);
+        assert_eq!(modal.focus, FocusArea::Choice(0));
+        let result = press(&mut modal, KeyCode::Enter);
         assert!(matches!(result, Some(ModalResult::Confirmed(ref v)) if v == "a.zip"));
     }
 
     #[test]
     fn clicking_the_choice_row_steps_it() {
-        use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
         let mut modal = levels();
         let area = Rect::new(0, 0, 60, 20);
         modal.render(area, &mut Buffer::empty(area), &Theme::default());
-        let row = modal.last_choice_area.expect("the choice row is drawn");
+        let row = modal.last_choice_areas[0].1;
         let click = |column| MouseEvent {
             kind: MouseEventKind::Down(MouseButton::Left),
             column,
@@ -1010,7 +825,32 @@ mod tests {
         assert_eq!(modal.choice_index(), Some(1));
         modal.handle_mouse(click(left_arrow + 3), area).unwrap();
         assert_eq!(modal.choice_index(), Some(2));
-        assert_eq!(modal.focus, FocusArea::Choice);
+        assert_eq!(modal.focus, FocusArea::Choice(0));
+    }
+
+    #[test]
+    fn the_extension_row_swaps_the_extension_in_the_path() {
+        let mut modal = EditableSelectModal::new("Pack", "", "/d/a.b.zip", vec![])
+            .keeping_file_name()
+            .with_extension_choice(
+                "Format".to_string(),
+                vec![".zip".into(), ".tar.gz".into(), ".gz".into()],
+                0,
+            )
+            .with_choice("Level".to_string(), vec!["Fast".into()], 0);
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Right);
+        assert_eq!(modal.value(), "/d/a.b.tar.gz");
+        press(&mut modal, KeyCode::Right);
+        assert_eq!(
+            modal.value(),
+            "/d/a.b.gz",
+            "the longest known extension goes"
+        );
+        // The level row is the plain choice the host reads.
+        assert_eq!(modal.choice_index(), Some(0));
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.focus, FocusArea::Choice(1));
     }
 
     #[test]
@@ -1027,24 +867,160 @@ mod tests {
 
     #[test]
     fn a_click_places_the_cursor_and_a_drag_selects_in_the_input() {
-        use crate::base::test_mouse::{drag, press};
+        use crate::base::test_mouse::{drag, press as down};
         let mut modal = levels();
         let area = Rect::new(0, 0, 60, 20);
         modal.render(area, &mut Buffer::empty(area), &Theme::default());
         modal.focus = FocusArea::Buttons;
-        let field = modal.last_text_area.expect("the input is drawn");
+        let field = modal.field_text_area();
         modal
-            .handle_mouse(press(field.x + 1, field.y), area)
+            .handle_mouse(down(field.x + 1, field.y), area)
             .unwrap();
         assert_eq!(modal.focus, FocusArea::Input);
-        assert_eq!(modal.suggestion_input.input().cursor_pos(), 1);
+        assert_eq!(modal.field.input_mut().cursor_pos(), 1);
         modal
             .handle_mouse(drag(field.x + 3, field.y), area)
             .unwrap();
-        assert_eq!(modal.suggestion_input.input().selected_text(), Some(".z"));
+        assert_eq!(modal.field.input_mut().selected_text(), Some(".z"));
         // Past the left side the selection reaches the start of the text.
         modal.handle_mouse(drag(0, field.y + 2), area).unwrap();
-        assert_eq!(modal.suggestion_input.input().selected_text(), Some("a"));
-        assert!(!modal.suggestion_input.is_expanded());
+        assert_eq!(modal.field.input_mut().selected_text(), Some("a"));
+        assert!(!modal.field.is_open());
+    }
+
+    #[test]
+    fn tab_opens_the_quick_destinations_and_down_writes_them_into_the_field() {
+        let a = project();
+        let b = project();
+        let default = format!("{}/", a.path().display());
+        let mut modal = EditableSelectModal::new(
+            "Copy",
+            "",
+            default.clone(),
+            vec![option(a.path()), option(b.path())],
+        );
+        press(&mut modal, KeyCode::Tab);
+        assert!(modal.field.is_open());
+        // A root too long for its row loses its start, not its end.
+        let drawn = screen(&mut modal);
+        let b_name = b.path().file_name().unwrap().to_string_lossy();
+        assert!(drawn.contains(&format!("{b_name}/│")), "{drawn}");
+
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.value(), default);
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.value(), format!("{}/", b.path().display()));
+        // Right opens the root in place; Down steps into it.
+        press(&mut modal, KeyCode::Right);
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(modal.value(), format!("{}/docs/", b.path().display()));
+
+        // Enter closes the tree keeping the path; a second one confirms.
+        assert!(press(&mut modal, KeyCode::Enter).is_none());
+        assert!(!modal.field.is_open());
+        let result = press(&mut modal, KeyCode::Enter);
+        assert!(
+            matches!(result, Some(ModalResult::Confirmed(ref v)) if *v == format!("{}/docs/", b.path().display()))
+        );
+    }
+
+    #[test]
+    fn esc_closes_the_tree_restoring_the_path_and_a_second_esc_cancels() {
+        let a = project();
+        let default = format!("{}/", a.path().display());
+        let mut modal = EditableSelectModal::new("Copy", "", default.clone(), vec![]);
+        press(&mut modal, KeyCode::Tab);
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Down);
+        assert_ne!(modal.value(), default);
+        assert!(press(&mut modal, KeyCode::Esc).is_none());
+        assert_eq!(modal.value(), default);
+        assert!(!modal.field.is_open());
+        assert!(matches!(
+            press(&mut modal, KeyCode::Esc),
+            Some(ModalResult::Cancelled)
+        ));
+    }
+
+    #[test]
+    fn an_edited_path_lists_its_directory_filtered_by_the_name_typed() {
+        let a = project();
+        let default = format!("{}/", a.path().display());
+        let mut modal = EditableSelectModal::new("Copy", "", default, vec![option(a.path())]);
+        press(&mut modal, KeyCode::Tab);
+        type_text(&mut modal, "dc");
+        let drawn = screen(&mut modal);
+        assert!(drawn.contains("▶ docs"), "{drawn}");
+        assert!(!drawn.contains("▶ src"), "{drawn}");
+
+        // A name starting with `.` lists hidden directories.
+        for _ in 0..2 {
+            press(&mut modal, KeyCode::Backspace);
+        }
+        type_text(&mut modal, ".g");
+        let drawn = screen(&mut modal);
+        assert!(drawn.contains("▶ .git"), "{drawn}");
+
+        // From the tree, a letter is typed into the field.
+        press(&mut modal, KeyCode::Down); // `..`
+        press(&mut modal, KeyCode::Down);
+        type_text(&mut modal, "x");
+        assert!(modal.value().ends_with("/.git/x"), "{}", modal.value());
+    }
+
+    #[test]
+    fn picking_a_directory_keeps_the_file_name() {
+        let a = project();
+        let mut modal = EditableSelectModal::new(
+            "Copy",
+            "",
+            format!("{}/report.pdf", a.path().display()),
+            vec![],
+        )
+        .keeping_file_name();
+        press(&mut modal, KeyCode::Tab);
+        // `..`, docs, src
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Down);
+        assert_eq!(
+            modal.value(),
+            format!("{}/docs/report.pdf", a.path().display())
+        );
+    }
+
+    #[test]
+    fn directories_are_created_in_the_tree_and_letters_stay_typing() {
+        let a = project();
+        let mut modal =
+            EditableSelectModal::new("Copy", "", format!("{}/", a.path().display()), vec![]);
+        press(&mut modal, KeyCode::Tab);
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Down); // docs
+                                          // `D` (create_dir as a letter) is typed, not a shortcut.
+        type_text(&mut modal, "D");
+        assert!(modal.value().ends_with("/docs/D"), "{}", modal.value());
+        // The tree now lists `docs`; F7 on its `..` row creates in it.
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::F(7));
+        type_text(&mut modal, "out");
+        press(&mut modal, KeyCode::Enter);
+        let out = a.path().join("docs/out");
+        assert!(out.is_dir());
+        assert_eq!(modal.value(), format!("{}/", out.display()));
+        // Delete takes the empty directory away again.
+        press(&mut modal, KeyCode::Delete);
+        assert!(!out.exists());
+    }
+
+    #[test]
+    fn toggle_hidden_shows_hidden_directories_in_the_tree() {
+        let a = project();
+        let mut modal =
+            EditableSelectModal::new("Copy", "", format!("{}/", a.path().display()), vec![]);
+        press(&mut modal, KeyCode::Tab);
+        assert!(!screen(&mut modal).contains(".git"));
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Char('.'));
+        assert!(screen(&mut modal).contains("▶ .git"));
     }
 }
