@@ -501,6 +501,36 @@ struct Outgoing {
     text: String,
 }
 
+/// Answer the requests as an app would, until `stop`: the run of every panel
+/// got going by `hops` messages, and each background answer's text handed to
+/// `reports`.
+#[cfg(test)]
+pub(super) fn serve_for_test(
+    hops: u32,
+    reports: Sender<String>,
+    stop: termide_agent_core::CancelToken,
+) -> std::thread::JoinHandle<()> {
+    SERVED.store(true, Ordering::Release);
+    std::thread::spawn(move || {
+        while !stop.is_cancelled() {
+            let request = port()
+                .1
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .recv_timeout(Duration::from_millis(20));
+            match request {
+                Ok(Request::Hops { reply, .. }) => {
+                    let _ = reply.send(Ok(hops));
+                }
+                Ok(Request::Report { text, .. }) => {
+                    let _ = reports.send(text);
+                }
+                Ok(_) | Err(_) => {}
+            }
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

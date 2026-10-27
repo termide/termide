@@ -267,6 +267,47 @@ pub fn withdraw(panel: u64, call: &str) -> Withdrawn {
     }
 }
 
+/// The user wrote to panel `panel` while its run waits on tasks it handed
+/// over: ask each such task to move to the background, so the run reads the
+/// message rather than wait the task out. The call waiting on it settles the
+/// move (see [`take_aside`]), and may refuse it. How many tasks were asked.
+pub fn ask_aside(panel: u64) -> usize {
+    let registry = lock();
+    let mut aside = aside_lock();
+    let mut asked = 0;
+    for ((owner, call), live) in registry.iter() {
+        if *owner == panel && !live.background && !live.control.is_done() {
+            aside.insert((panel, call.clone()));
+            asked += 1;
+        }
+    }
+    asked
+}
+
+/// The tasks a run waits on that the user's message asked to move aside.
+fn aside_lock() -> std::sync::MutexGuard<'static, HashSet<(u64, String)>> {
+    static ASIDE: OnceLock<Mutex<HashSet<(u64, String)>>> = OnceLock::new();
+    ASIDE
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// Whether the task the `task` call `call` of panel `panel` waits on was
+/// asked to move to the background. Asked once.
+pub fn take_aside(panel: u64, call: &str) -> bool {
+    aside_lock().remove(&(panel, call.to_string()))
+}
+
+/// The task the `task` call `call` of panel `panel` handed over runs on in
+/// the background from now: no call waits for it any more, so it is listed,
+/// stopped and answered as one handed over so.
+pub fn move_to_background(panel: u64, call: &str) {
+    if let Some(live) = lock().get_mut(&(panel, call.to_string())) {
+        live.background = true;
+    }
+}
+
 /// The background tasks their delegating agent stopped, whose answer is not
 /// to go.
 fn withdrawn_lock() -> std::sync::MutexGuard<'static, HashSet<(u64, String)>> {
@@ -628,6 +669,27 @@ mod tests {
         assert_eq!(withdraw(7015, "c"), Withdrawn::Parked("methodical".into()));
         assert!(parked_of(7015).is_empty());
         assert!(!take_withdrawn(7015, "c"), "nothing runs to answer");
+    }
+
+    /// The user writing while the run waits on a task asks that task, and
+    /// only that one, to move aside; moved, it is the agent's to stop.
+    #[test]
+    fn a_waited_task_moves_aside_when_the_user_writes() {
+        let background = register(task(Some(7017), "a", true));
+        let sync = register(task(Some(7017), "b", false));
+        assert_eq!(ask_aside(7017), 1);
+        assert!(!take_aside(7017, "a"), "already in the background");
+        assert!(take_aside(7017, "b"));
+        assert!(!take_aside(7017, "b"), "asked once");
+        assert!(background_of(7017).iter().all(|task| task.call == "a"));
+
+        move_to_background(7017, "b");
+        let calls: Vec<String> = background_of(7017).into_iter().map(|t| t.call).collect();
+        assert_eq!(calls, ["a", "b"]);
+        assert_eq!(withdraw(7017, "b"), Withdrawn::Running("search".into()));
+        assert!(sync.control().stop_token().is_cancelled());
+        assert!(take_withdrawn(7017, "b"));
+        drop(background);
     }
 
     /// A task parked at a usage limit resetting at `wake_at`.

@@ -654,7 +654,7 @@ impl AgentCatalog for FsCatalog {
                         if task.background {
                             return runner.start_background(&caller, task, ctx).into();
                         }
-                        runner.run(&caller, task, ctx, cancel, on_update)
+                        runner.run_detachable(&caller, task, ctx, cancel, on_update)
                     });
                     tools.insert(Arc::new(TaskTool::new(delegates, run)));
                 }
@@ -867,9 +867,7 @@ static APPLIED_AI: std::sync::RwLock<Option<AiSettings>> = std::sync::RwLock::ne
 
 /// Record `settings` as the applied `[ai]` settings for open panels.
 pub(crate) fn publish_ai_settings(settings: &AiSettings) {
-    *APPLIED_AI
-        .write()
-        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(settings.clone());
+    *APPLIED_AI.write().unwrap_or_else(PoisonError::into_inner) = Some(settings.clone());
     // A limit changed in the settings reaches the requests already queued.
     for (name, connection) in &settings.connections {
         if !connection.is_cli() {
@@ -882,7 +880,7 @@ pub(crate) fn publish_ai_settings(settings: &AiSettings) {
 fn applied_ai_settings(built_with: &AiSettings) -> AiSettings {
     APPLIED_AI
         .read()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(PoisonError::into_inner)
         .clone()
         .unwrap_or_else(|| built_with.clone())
 }
@@ -932,10 +930,7 @@ impl ConnectionCatalog for AiConnections {
     }
 
     fn activate(&self, choice: &ConnectionChoice) {
-        *self
-            .active
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Active {
+        *self.active.write().unwrap_or_else(PoisonError::into_inner) = Active {
             connection: choice.name.clone(),
             kind: choice.kind.clone(),
             provider: Arc::clone(&choice.provider),
@@ -1944,6 +1939,151 @@ impl Subagents {
             .unwrap_or_else(|error| Err(error).into())
     }
 
+    /// Run `task`, which the agent `caller` handed over and waits for, so
+    /// that it can move to the background midway: when the user writes to
+    /// the panel meanwhile (see [`termide_panel_agent::live::ask_aside`]), the call returns at
+    /// once, saying where the task went, and the task runs on out of sight,
+    /// answering as one handed over in the background does. The agent then
+    /// reads the user's message, and may stop the task with `jobs`.
+    fn run_detachable(
+        self: &Arc<Self>,
+        caller: &str,
+        task: &SubagentTask,
+        ctx: &ToolContext,
+        cancel: &CancelToken,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> SubagentOutcome {
+        let Some(parent) = ctx.panel else {
+            return self.run(caller, task, ctx, cancel, on_update);
+        };
+        // The run's stop reaches the task only while the run waits on it.
+        let own = CancelToken::new();
+        let attached = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let (updates_tx, updates) = std::sync::mpsc::channel::<ToolUpdate>();
+        let (done_tx, done) = std::sync::mpsc::channel::<SubagentOutcome>();
+        // Taken by the call that lets go of the task: the outcome then has no
+        // one to go to, and is reported as a background task's.
+        let waiting = Arc::new(std::sync::Mutex::new(Some(done_tx)));
+        let parent_session = ctx.session.as_ref().and_then(|session| session.id.clone());
+        let (this, ctx_owned, thread_own) = (Arc::clone(self), ctx.clone(), own.clone());
+        let thread_attached = Arc::clone(&attached);
+        let thread_waiting = Arc::clone(&waiting);
+        let (thread_caller, agent, prompt, call) = (
+            caller.to_string(),
+            task.agent.to_string(),
+            task.prompt.to_string(),
+            task.call.to_string(),
+        );
+        let spawned = std::thread::Builder::new()
+            .name(format!("task-{agent}"))
+            .spawn(move || {
+                let task = SubagentTask {
+                    agent: &agent,
+                    prompt: &prompt,
+                    call: &call,
+                    background: false,
+                };
+                let outcome = this
+                    .delegate(
+                        &thread_caller,
+                        &task,
+                        &ctx_owned,
+                        &thread_own,
+                        &mut |update| {
+                            if thread_attached.load(std::sync::atomic::Ordering::Acquire) {
+                                let _ = updates_tx.send(update);
+                            }
+                        },
+                    )
+                    .unwrap_or_else(|error| Err(error).into());
+                let waiter = thread_waiting
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .take();
+                if let Some(waiter) = waiter {
+                    let _ = waiter.send(outcome);
+                    return;
+                }
+                // Moved aside: answered as a task handed over in the
+                // background is, once it has really run to its end.
+                if outcome.parked {
+                    return;
+                }
+                let held = termide_panel_agent::live::take_quiet(parent, &call);
+                if termide_panel_agent::live::take_withdrawn(parent, &call) {
+                    return;
+                }
+                let text = background_report(&prompt, &agent, &outcome);
+                peers::report(
+                    &this.project_root,
+                    parent,
+                    parent_session,
+                    &agent,
+                    text,
+                    held,
+                );
+            });
+        if let Err(error) = spawned {
+            return Err(format!("cannot start the task: {error}")).into();
+        }
+        loop {
+            for update in updates.try_iter() {
+                on_update(update);
+            }
+            match done.recv_timeout(DETACH_POLL) {
+                Ok(outcome) => {
+                    for update in updates.try_iter() {
+                        on_update(update);
+                    }
+                    termide_panel_agent::live::take_aside(parent, task.call);
+                    return outcome;
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err("the task's thread ended without an answer".to_string()).into();
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            if cancel.is_cancelled() {
+                own.cancel();
+                continue;
+            }
+            if !termide_panel_agent::live::take_aside(parent, task.call) {
+                continue;
+            }
+            // Its answer starts the agent anew, so it counts among the
+            // messages agents pass one another: past their limit, the task
+            // stays waited for.
+            if peers::may_hand_over(&self.project_root, parent).is_err() {
+                continue;
+            }
+            // Mark it as in the background before the call lets go, so a
+            // stop of the panel's run from here on keeps its answer for the
+            // next request rather than dropping it.
+            termide_panel_agent::live::move_to_background(parent, task.call);
+            let let_go = waiting
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .take();
+            drop(let_go);
+            // It ended just before the call let go: its answer is the call's.
+            if let Ok(outcome) = done.try_recv() {
+                for update in updates.try_iter() {
+                    on_update(update);
+                }
+                return outcome;
+            }
+            attached.store(false, std::sync::atomic::Ordering::Release);
+            return Ok(format!(
+                "The user wrote while {} worked on the task, so it goes on out of sight and you \
+                 can read what they wrote; its id is {}. Its answer comes to you later as a \
+                 message of its own: do not wait for it with tools, and do not hand the same \
+                 task over again. Should you no longer need it, stop it with `jobs`.",
+                task.agent, task.call
+            ))
+            .into();
+        }
+    }
+
     /// `[ai] on_limit` as it stands now: a change in the settings reaches a
     /// delegated task's next limit without the panel being reopened.
     fn on_limit(&self) -> LimitPolicy {
@@ -2047,7 +2187,7 @@ impl Subagents {
         let active = self
             .active
             .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let settings = applied_ai_settings(&self.settings);
         let target = subagent_target(&settings, &active)?;
@@ -2070,22 +2210,17 @@ impl Subagents {
         // What the rules do not settle goes to the user of its parent's
         // panel, on a card headed with its name; with no one there it is
         // refused with a reason the model reads.
-        // A task handed over in the background is no run's to stop: a stop
-        // of its panel's run leaves its cards up, its own takes them back.
+        // Its cards end with its own run, not the panel's: a stop of the
+        // panel's run reaches a task the run waits on through `cancel`, which
+        // ends its budget, and leaves one handed over in the background — or
+        // moved there when the user wrote — with its cards up.
         let prompter = ctx.prompter.as_ref().map(|prompter| {
-            let prompter = prompter
+            prompter
                 .for_delegate(name, budget.clone())
-                .for_task(task.call);
-            if task.background {
-                prompter.detached()
-            } else {
-                prompter
-            }
+                .for_task(task.call)
+                .detached()
         });
-        let asker = match asker {
-            Some(asker) if task.background => Some(asker.detached(budget.clone())),
-            asker => asker,
-        };
+        let asker = asker.map(|asker| asker.detached(budget.clone()));
         let asks: Box<dyn termide_agent_core::PermissionPrompter> = match &prompter {
             Some(prompter) => Box::new(prompter.clone()),
             None => Box::new(AutoDenyPrompter::new(
@@ -2882,6 +3017,8 @@ fn mcp_servers(
 
 /// How often a subagent on a CLI agent is looked at while it runs.
 const CLI_SUBAGENT_POLL: std::time::Duration = std::time::Duration::from_millis(50);
+/// How often a call waiting on a task looks whether the user asked it aside.
+const DETACH_POLL: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// How long a stopped subagent on a CLI agent may take to end its turn.
 const CLI_SUBAGENT_ABORT_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
@@ -3208,7 +3345,7 @@ fn refresh_adapter(package: &'static str) {
 
     let first = REFRESHED
         .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .unwrap_or_else(PoisonError::into_inner)
         .get_or_insert_with(HashSet::new)
         .insert(package);
     if !first {
@@ -3714,9 +3851,7 @@ mod tests {
     static APPLIED_TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn applied_turn() -> std::sync::MutexGuard<'static, ()> {
-        APPLIED_TURN
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+        APPLIED_TURN.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Clears the applied settings when dropped, a failed assertion included.
@@ -3724,9 +3859,7 @@ mod tests {
 
     impl Drop for ClearApplied {
         fn drop(&mut self) {
-            *APPLIED_AI
-                .write()
-                .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+            *APPLIED_AI.write().unwrap_or_else(PoisonError::into_inner) = None;
         }
     }
 
@@ -4652,6 +4785,112 @@ mod tests {
             .filter(|kind| !kind.is_empty())
             .collect();
         assert_eq!(kinds, vec!["start", "end"]);
+    }
+
+    /// Subagents whose model says nothing until stopped.
+    fn silent_subagents(root: &Path) -> Arc<Subagents> {
+        let dirs = AgentDirs::new(root, Some(root), None);
+        let settings = with_cloud();
+        let mut active = active_on(&settings, "local");
+        active.provider = Arc::new(Silent);
+        Arc::new(Subagents {
+            active: Arc::new(std::sync::RwLock::new(active)),
+            settings: settings.clone(),
+            recall: recall_tool(&settings, &dirs, root, root),
+            web: shared_web(&settings.web, &dirs),
+            dirs,
+            mcp: Connections::new(std::collections::BTreeMap::new()),
+            cwd: root.to_path_buf(),
+            project_root: root.to_path_buf(),
+            session_dir: Some(root.join("sessions")),
+            rules: settings.permissions.clone(),
+            mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
+            max_tokens: settings.output_limit(),
+            reasoning: ThinkingLevel::Off,
+            compaction: settings.compaction,
+            refusals: Refusals::default(),
+        })
+    }
+
+    /// The user writing while the agent waits on a task moves the task to
+    /// the background: the call returns, the task runs on in the strip and
+    /// answers as a message — unless the agents have passed too many
+    /// messages already, when the call keeps waiting.
+    #[test]
+    fn a_waited_task_moves_to_the_background_when_the_user_writes() {
+        use termide_panel_agent::live;
+        let tmp = tempfile::tempdir().unwrap();
+        let subagents = silent_subagents(tmp.path());
+        let ctx = ToolContext {
+            panel: Some(7301),
+            ..ToolContext::new(tmp.path().to_path_buf())
+        };
+        let waited = |call: &'static str, cancel: CancelToken| {
+            let (subagents, ctx) = (Arc::clone(&subagents), ctx.clone());
+            let handle = std::thread::spawn(move || {
+                subagents.run_detachable(
+                    "lead",
+                    &SubagentTask {
+                        agent: DEFAULT_AGENT,
+                        prompt: "look around",
+                        call,
+                        background: false,
+                    },
+                    &ctx,
+                    &cancel,
+                    &mut |_| {},
+                )
+            });
+            let started = std::time::Instant::now();
+            while !live::is_running(7301, call) {
+                assert!(started.elapsed() < std::time::Duration::from_secs(5));
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            handle
+        };
+
+        // Past the limit of messages between agents: it stays waited for.
+        let (reports_tx, reports) = std::sync::mpsc::channel();
+        let serving = CancelToken::new();
+        let server = peers::serve_for_test(peers::MAX_HOPS, reports_tx.clone(), serving.clone());
+        let cancel = CancelToken::new();
+        let task = waited("c-kept", cancel.clone());
+        assert_eq!(live::ask_aside(7301), 1);
+        std::thread::sleep(DETACH_POLL * 4);
+        assert!(!task.is_finished(), "the call still waits");
+        assert!(live::background_of(7301).is_empty());
+        cancel.cancel();
+        let outcome = task.join().unwrap();
+        assert_eq!(outcome.answer, Err("the subagent was stopped".to_string()));
+        serving.cancel();
+        server.join().unwrap();
+
+        let serving = CancelToken::new();
+        let server = peers::serve_for_test(0, reports_tx, serving.clone());
+        let cancel = CancelToken::new();
+        let task = waited("c-aside", cancel.clone());
+        assert_eq!(live::ask_aside(7301), 1);
+        let outcome = task.join().unwrap();
+        let words = outcome.answer.unwrap();
+        assert!(words.contains("goes on out of sight"), "{words}");
+        assert!(words.contains("c-aside"), "{words}");
+        let moved: Vec<String> = live::background_of(7301)
+            .into_iter()
+            .map(|task| task.call)
+            .collect();
+        assert_eq!(moved, ["c-aside"]);
+        // The run's stop no longer reaches it through the call...
+        cancel.cancel();
+        std::thread::sleep(DETACH_POLL * 2);
+        assert!(live::is_running(7301, "c-aside"));
+        // ...but a stop of the panel's run does, keeping its answer.
+        live::stop_with_run(7301);
+        let report = reports
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("its answer goes to the panel");
+        assert!(report.contains("look around"), "{report}");
+        serving.cancel();
+        server.join().unwrap();
     }
 
     /// A delegated task stopped by a limit that passes answers nothing: it is

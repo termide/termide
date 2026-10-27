@@ -1797,9 +1797,15 @@ headless run has nowhere to take the answer.
 #### What the agent set going
 
 An agent can set work going that runs on while it does something else: tasks
-it hands over in the background, those of them parked at a limit, and —
-with Claude Code, which moves a long call to the background to take a
-message typed meanwhile — a delegate or a command it was waiting for. Any of
+it hands over in the background, those of them parked at a limit, and a
+delegate or a command it was waiting for when you wrote to it. A message you
+type while the panel's agent waits on a `task` call does not wait for the
+task to end: the task moves to the background — the call returns saying so,
+with the task's id, the task gets a row above the input as one handed over
+in the background has, and its answer comes later as a message — so the
+agent reads what you wrote at once. Past the limit of messages agents pass
+one another without you the task stays waited for, since its answer would be
+one more. Claude Code does the same with a long call of its own. Any of
 it can stop mattering before it ends. **jobs** lists what the agent set going
 that still runs, each with its id (the hand-over of a background task gives
 the id too), what it is and how long it has run (`& Listing background

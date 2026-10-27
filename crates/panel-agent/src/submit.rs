@@ -420,12 +420,19 @@ impl AgentPanel {
         self.follow = true;
         self.count_hops(&message);
         if self.is_busy() {
+            let from_user = message.origin.is_none();
             // The message waits in the state strip until the agent takes it,
             // then shows as a user block.
             self.queued_texts
                 .push_back((message.typed(), Instant::now()));
             self.runtime.steer(message);
             self.set_queued(self.runtime.queue_lens());
+            // A task the run waits on would keep the user's message from
+            // the agent until it ends: it goes on in the background instead.
+            // Another agent's message waits, as it would for any call.
+            if from_user {
+                crate::live::ask_aside(self.panel_id);
+            }
         } else {
             // A new request takes over from a failed one, and from a wait to
             // try it again.
