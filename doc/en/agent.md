@@ -429,7 +429,9 @@ The conversation is a stack of blocks, each opened by a mark:
 `› ` for your message and for the agent's answer, `@ ` for its reasoning, `$ `
 for a shell call or a command offered for you to run, `< ` for a file read, `> ` for a write, `± ` for an edit,
 `/ ` for a skill, `& ` for a subagent and every message to or from another
-agent, `* ` for an MCP tool, `¿ ` for a question to you, `# ` for the system prompt. The marks are in the accent,
+agent, `* ` for an MCP tool, `¿ ` for a question to you, `● ` for a
+breakpoint and `→ ` for any other debugger step, as the editor gutter marks
+them, `# ` for the system prompt. The marks are in the accent,
 except the system prompt's `#`, dim like the prompt itself. The answer is shown in full;
 a user message or the system prompt longer than five lines is
 folded to a preview that keeps the first line and the last few, with a
@@ -467,7 +469,9 @@ the query (`↓ Fetching https://docs.rs`, `? Searching ratatui scrollbar`), a
 skill with its name and arguments (`/ Using skill review src/x.rs`), a
 subagent with its name and the first line of the task (`& Delegating to
 reviewer · check the diff`), an MCP tool with its server, name and arguments as
-`key=value` (`* Using MCP github: create_issue title=Crash`); any other tool
+`key=value` (`* Using MCP github: create_issue title=Crash`), the debugger
+with its action and what it acts on (`→ Debugging debug-server`,
+`● Setting breakpoint src/main.rs:42`, `→ Stepping over`); any other tool
 as its name and a summary. The reasoning is its own block above the
 answer, and its text wraps to the width. Only the system prompt
 opens with a dim dashed rule that sets it apart from the block before; an

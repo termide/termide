@@ -148,7 +148,7 @@ impl Translation for RuntimeTranslation {
         }
     }
 
-    // Generate 405 trivial `fn name(&self) -> &str` wrappers over get_string("name").
+    // Generate 417 trivial `fn name(&self) -> &str` wrappers over get_string("name").
     i18n_get_string_methods! {
         agent_input_placeholder,
         agent_input_placeholder_shell,
@@ -768,6 +768,18 @@ impl Translation for RuntimeTranslation {
         agent_tool_send_question,
         agent_tool_send_reply,
         agent_tool_send_info,
+        agent_tool_debug_start,
+        agent_tool_debug_set_breakpoint,
+        agent_tool_debug_clear_breakpoint,
+        agent_tool_debug_continue,
+        agent_tool_debug_step_over,
+        agent_tool_debug_step_in,
+        agent_tool_debug_step_out,
+        agent_tool_debug_pause,
+        agent_tool_debug_stop,
+        agent_tool_debug_evaluate,
+        agent_tool_debug_frame,
+        agent_tool_debug_state,
         agent_peer_reply,
         agent_peer_question,
         agent_peer_info,

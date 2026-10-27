@@ -1191,6 +1191,31 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: the action words for a `send_message` note, before
     /// the panel number.
     fn agent_tool_send_info(&self) -> &str;
+    /// Agent transcript: the action words for a `debug` call starting a
+    /// session, before the command or file.
+    fn agent_tool_debug_start(&self) -> &str;
+    /// Agent transcript: `debug` setting a breakpoint, before `file:line`.
+    fn agent_tool_debug_set_breakpoint(&self) -> &str;
+    /// Agent transcript: `debug` removing a breakpoint, before `file:line`.
+    fn agent_tool_debug_clear_breakpoint(&self) -> &str;
+    /// Agent transcript: `debug` resuming the stopped program.
+    fn agent_tool_debug_continue(&self) -> &str;
+    /// Agent transcript: `debug` stepping over the current line.
+    fn agent_tool_debug_step_over(&self) -> &str;
+    /// Agent transcript: `debug` stepping into a call.
+    fn agent_tool_debug_step_in(&self) -> &str;
+    /// Agent transcript: `debug` stepping out of the current function.
+    fn agent_tool_debug_step_out(&self) -> &str;
+    /// Agent transcript: `debug` pausing the running program.
+    fn agent_tool_debug_pause(&self) -> &str;
+    /// Agent transcript: `debug` ending the session.
+    fn agent_tool_debug_stop(&self) -> &str;
+    /// Agent transcript: `debug` evaluating an expression, before it.
+    fn agent_tool_debug_evaluate(&self) -> &str;
+    /// Agent transcript: `debug` selecting a stack frame, before its index.
+    fn agent_tool_debug_frame(&self) -> &str;
+    /// Agent transcript: `debug` reading the session as it stands.
+    fn agent_tool_debug_state(&self) -> &str;
     /// Agent transcript: the action words for another agent's answer, before
     /// its name.
     fn agent_peer_reply(&self) -> &str;
