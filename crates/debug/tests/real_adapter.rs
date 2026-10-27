@@ -91,6 +91,48 @@ fn lldb_dap_stops_steps_and_finishes() {
     run(Adapter::LldbDap, &dir, "./m", &source, 4);
 }
 
+/// The launch's environment reaches the program lldb-dap starts, not only
+/// the adapter.
+#[test]
+#[ignore]
+fn lldb_dap_hands_the_environment_to_the_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dunce_like(dir.path());
+    std::fs::write(
+        dir.join("e.c"),
+        "#include <stdio.h>\n#include <stdlib.h>\nint main(void) {\n  const char *v = getenv(\"TERMIDE_PARAM_PORT\");\n  printf(\"port=%s\\n\", v ? v : \"(unset)\");\n  return 0;\n}\n",
+    )
+    .unwrap();
+    assert!(termide_debug::detach(&mut std::process::Command::new("cc"))
+        .args(["-g", "-O0", "e.c", "-o", "e"])
+        .current_dir(&dir)
+        .status()
+        .unwrap()
+        .success());
+    let mut session = Session::start(
+        LaunchSpec {
+            adapter: Adapter::LldbDap,
+            debugger_settings: Default::default(),
+            adapter_args: Vec::new(),
+            program: "./e".into(),
+            args: Vec::new(),
+            cwd: dir.clone(),
+            build: None,
+            env: vec![("TERMIDE_PARAM_PORT".into(), "8091".into())],
+            label: "e".into(),
+            console: Console::Panel,
+            tty: None,
+        },
+        Vec::new(),
+    );
+    wait_until(&mut session, "the end", |s| !s.is_active());
+    std::thread::sleep(Duration::from_millis(200));
+    session.poll();
+    let output: Vec<&str> = session.output.iter().map(|l| l.text.as_str()).collect();
+    println!("output: {output:#?}");
+    assert!(output.iter().any(|l| l.contains("port=8091")), "{output:?}");
+}
+
 #[test]
 #[ignore]
 fn debugpy_stops_steps_and_finishes() {
@@ -105,6 +147,63 @@ fn debugpy_stops_steps_and_finishes() {
         &source,
         2,
     );
+}
+
+/// The launch's environment reaches a program debugpy has started in a
+/// terminal, which gets termide's environment and not the adapter's: the
+/// test starts what debugpy asks for as the app does, with the request's
+/// environment only.
+#[test]
+#[ignore]
+fn debugpy_hands_the_environment_to_a_program_in_a_terminal() {
+    let dir = tempfile::tempdir().unwrap();
+    let dir = dunce_like(dir.path());
+    let source = dir.join("e.py");
+    std::fs::write(
+        &source,
+        "import os\nprint('port=' + os.environ.get('TERMIDE_PARAM_PORT', '(unset)'))\n",
+    )
+    .unwrap();
+    let mut session = Session::start(
+        LaunchSpec {
+            adapter: Adapter::Debugpy,
+            debugger_settings: Default::default(),
+            adapter_args: Vec::new(),
+            program: source.to_string_lossy().into_owned(),
+            args: Vec::new(),
+            cwd: dir.clone(),
+            build: None,
+            env: vec![("TERMIDE_PARAM_PORT".into(), "8091".into())],
+            label: "e.py".into(),
+            console: Console::Terminal,
+            tty: None,
+        },
+        Vec::new(),
+    );
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let request = loop {
+        session.poll();
+        if let Some(request) = session.take_terminal_request() {
+            break request;
+        }
+        assert!(Instant::now() < deadline, "no terminal asked for");
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let child = std::process::Command::new(&request.args[0])
+        .args(&request.args[1..])
+        .current_dir(request.cwd.clone().unwrap_or(dir.clone()))
+        .env_remove("TERMIDE_PARAM_PORT")
+        .envs(request.env.iter().cloned())
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    session.answer_terminal(&request, Ok(child.id()));
+    wait_until(&mut session, "the end", |s| !s.is_active());
+    let out = child.wait_with_output().unwrap();
+    let out = String::from_utf8_lossy(&out.stdout);
+    println!("output: {out}");
+    assert!(out.contains("port=8091"), "{out:?}");
 }
 
 /// The temporary directory by its real name (`/private/var` on macOS), as
