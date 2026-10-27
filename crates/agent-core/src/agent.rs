@@ -242,6 +242,10 @@ pub fn judge_tool_call(
         tool: tool.traits(),
         ..ctx.clone()
     };
+    // A call bound to fail is not worth a prompt or a reviewer's verdict.
+    if let Err(message) = tool.check(call, ctx) {
+        return Judgment::Done(ToolResultMessage::error(call, message));
+    }
     let decision = hooks.before_tool_call(call, ctx);
     let permission = hooks.take_permission().map(Box::new);
     let effective = match decision {
@@ -2469,6 +2473,67 @@ mod tests {
             read_only: true,
         };
         assert_eq!(seen.0, [marked, crate::ToolTraits::default()]);
+    }
+
+    /// A call its tool's check refuses fails at once: no hook is asked, so
+    /// no prompt or reviewer waits on a call bound to fail.
+    #[test]
+    fn a_call_its_tool_refuses_skips_the_hooks() {
+        struct Picky;
+        impl crate::Tool for Picky {
+            fn name(&self) -> &str {
+                "picky"
+            }
+            fn description(&self) -> &str {
+                "Picky"
+            }
+            fn parameters(&self) -> Value {
+                json!({ "type": "object" })
+            }
+            fn check(&self, call: &ToolCall, _ctx: &ToolContext) -> Result<(), String> {
+                match call.arguments["what"].as_str() {
+                    Some("known") => Ok(()),
+                    other => Err(format!("no such thing: {other:?}")),
+                }
+            }
+            fn execute(
+                &self,
+                call: &ToolCall,
+                _ctx: &ToolContext,
+                _on_update: &mut dyn FnMut(ToolUpdate),
+                _cancel: &CancelToken,
+            ) -> ToolResultMessage {
+                ToolResultMessage::text(call, "done")
+            }
+        }
+        struct Asked(usize);
+        impl Hooks for Asked {
+            fn before_tool_call(&mut self, _call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
+                self.0 += 1;
+                ToolDecision::Allow
+            }
+        }
+
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(Picky));
+        let call = |what: &str| ToolCall {
+            id: "c".into(),
+            name: "picky".into(),
+            arguments: json!({ "what": what }),
+            extra_content: None,
+        };
+        let mut asked = Asked(0);
+        let (ctx, cancel) = (ToolContext::new("/"), CancelToken::new());
+        let run = |what: &str, asked: &mut Asked| {
+            execute_tool(&tools, &call(what), asked, &ctx, &cancel, &mut |_| {})
+        };
+        let refused = run("unknown", &mut asked);
+        assert!(refused.is_error);
+        assert!(refused.plain_text().contains("no such thing"));
+        assert_eq!(asked.0, 0);
+        let done = run("known", &mut asked);
+        assert_eq!(done.plain_text(), "done");
+        assert_eq!(asked.0, 1);
     }
 
     #[test]

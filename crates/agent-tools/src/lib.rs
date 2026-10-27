@@ -32,7 +32,7 @@ use termide_agent_core::ToolRegistry;
 
 pub use bash::BashTool;
 pub use clean::{clean_output, Cleaned};
-pub use debug::{parse_action as parse_debug_action, DebugAction, DebugRun, DebugTool};
+pub use debug::{parse_action as parse_debug_action, DebugAction, DebugCheck, DebugRun, DebugTool};
 pub use edit::EditTool;
 pub use jobs::{JobsTool, OwnTasks};
 pub use peers::{AgentsTool, PeerInfo, PeerList, PeerSend, SendMessageTool};

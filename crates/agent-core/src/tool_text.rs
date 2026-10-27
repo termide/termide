@@ -158,6 +158,10 @@ impl Tool for Retexted {
         self.inner.render_description(template)
     }
 
+    fn check(&self, call: &ToolCall, ctx: &ToolContext) -> Result<(), String> {
+        self.inner.check(call, ctx)
+    }
+
     fn execute(
         &self,
         call: &ToolCall,

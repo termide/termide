@@ -1,7 +1,8 @@
 //! `debug`: drive the debugger the way the user does in the debug panel —
 //! start a launch, set breakpoints, step, read the stack and the variables,
 //! evaluate expressions. Like `task`, the tool holds no session machinery:
-//! the app supplies the closure that reaches its debug session.
+//! the app supplies the closure that reaches its debug session, and may
+//! supply one that refuses a launch bound to fail before anyone is asked.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -75,14 +76,30 @@ const ACTIONS: [&str; 11] = [
     "frame",
 ];
 
+/// Refuses an action bound to fail for a reason known before it is taken —
+/// a command that does not exist or cannot be driven, a parameter it does
+/// not declare — without starting anything.
+pub type DebugCheck = Arc<dyn Fn(&ToolContext, &DebugAction) -> Result<(), String> + Send + Sync>;
+
 pub struct DebugTool {
     run: DebugRun,
+    check: Option<DebugCheck>,
 }
 
 impl DebugTool {
     #[must_use]
     pub fn new(run: DebugRun) -> Self {
-        Self { run }
+        Self { run, check: None }
+    }
+
+    /// The tool with `check` run on every action before the permission
+    /// hooks judge it.
+    #[must_use]
+    pub fn with_check(self, check: DebugCheck) -> Self {
+        Self {
+            check: Some(check),
+            ..self
+        }
     }
 }
 
@@ -244,6 +261,14 @@ impl Tool for DebugTool {
         &ToolText::seed("debug").guidelines
     }
 
+    fn check(&self, call: &ToolCall, ctx: &ToolContext) -> Result<(), String> {
+        let action = parse_action(call, ctx)?;
+        match &self.check {
+            Some(check) => check(ctx, &action),
+            None => Ok(()),
+        }
+    }
+
     fn execute(
         &self,
         call: &ToolCall,
@@ -343,5 +368,42 @@ mod tests {
             &CancelToken::new(),
         );
         assert!(!result.is_error);
+    }
+
+    /// Malformed arguments and what the app's check refuses fail before
+    /// the hooks; the check sees the parsed action, and nothing runs.
+    #[test]
+    fn the_check_refuses_before_anything_runs() {
+        let tool = DebugTool::new(Arc::new(|_, _, _| panic!("nothing runs"))).with_check(Arc::new(
+            |_, action| match action {
+                DebugAction::Start {
+                    command: Some(c), ..
+                } if c != "debug-app" => Err(format!("no command `{c}`")),
+                _ => Ok(()),
+            },
+        ));
+        let check = |args| tool.check(&call(args), &ctx());
+        assert_eq!(
+            check(json!({ "action": "start", "command": "nope" })),
+            Err("no command `nope`".into())
+        );
+        assert!(check(json!({ "action": "start" })).is_err());
+        assert_eq!(
+            check(json!({ "action": "start", "command": "debug-app" })),
+            Ok(())
+        );
+        assert_eq!(check(json!({ "action": "step_over" })), Ok(()));
+        // Without a check of the app's, only the arguments are checked.
+        let bare = DebugTool::new(Arc::new(|_, _, _| panic!("nothing runs")));
+        assert_eq!(
+            bare.check(
+                &call(json!({ "action": "start", "command": "nope" })),
+                &ctx()
+            ),
+            Ok(())
+        );
+        assert!(bare
+            .check(&call(json!({ "action": "jump" })), &ctx())
+            .is_err());
     }
 }

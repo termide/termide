@@ -1235,7 +1235,10 @@ rule names what runs (`start debug-server`, `start app/main.py`,
 `evaluate len(items)`), so "Allow always" trusts that command. Everything
 else — stepping, pausing, stopping, breakpoints, frames, `state` — only moves
 on or looks at a program whose launch was already decided, and asks no one,
-outside plan mode; a `deny` rule still refuses it.
+outside plan mode; a `deny` rule still refuses it. A `start` refused for a
+reason known beforehand — no such command, a command-line debugger, a value
+from the focused panel, a parameter the command does not declare or a value
+its field could not hold — fails at once, before any prompt or reviewer.
 
 ## Permissions
 

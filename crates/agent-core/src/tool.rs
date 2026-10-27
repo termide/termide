@@ -154,6 +154,16 @@ pub trait Tool: Send + Sync {
         template.to_string()
     }
 
+    /// Refuse a call bound to fail whatever anyone answers — malformed
+    /// arguments, something named that does not exist — before the hooks
+    /// ask the user or the reviewer about it. Only cheap checks that change
+    /// nothing belong here; `execute` still checks for itself. `Err` is
+    /// returned to the model as the call's error. Nothing is refused by
+    /// default.
+    fn check(&self, _call: &ToolCall, _ctx: &ToolContext) -> Result<(), String> {
+        Ok(())
+    }
+
     /// Run the call. Failures are returned as a result with `is_error`
     /// set, never panicked or propagated, so the model can recover.
     fn execute(

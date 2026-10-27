@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{CancelToken, Tool, ToolContext};
-use termide_agent_tools::{DebugAction, DebugTool};
-use termide_config::commands::CommandsRegistry;
+use termide_agent_tools::{DebugAction, DebugCheck, DebugTool};
+use termide_config::commands::{CommandItem, CommandsRegistry};
 use termide_debug::breakpoints;
 
 use super::super::debug::DebugChoice;
@@ -66,10 +66,23 @@ fn port() -> &'static (Sender<Request>, Mutex<Receiver<Request>>) {
 
 static SERVED: AtomicBool = AtomicBool::new(false);
 
-/// `debug` for an agent of a panel in the project at `project_root`.
+/// `debug` for an agent of a panel in the project at `project_root`. A
+/// `start` of a command the agent cannot launch is refused before the user
+/// or the reviewer is asked about it.
 pub(super) fn debug_tool(project_root: &Path) -> Arc<dyn Tool> {
     let root = project_root.to_path_buf();
-    Arc::new(DebugTool::new(Arc::new(
+    let check_root = root.clone();
+    let check: DebugCheck = Arc::new(
+        move |_ctx: &ToolContext, action: &DebugAction| match action {
+            DebugAction::Start {
+                command: Some(name),
+                params,
+                ..
+            } => agent_debug_command(&check_root, name, params).map(|_| ()),
+            _ => Ok(()),
+        },
+    );
+    let tool = DebugTool::new(Arc::new(
         move |_ctx: &ToolContext, action: DebugAction, cancel: &CancelToken| {
             if !SERVED.load(Ordering::Acquire) {
                 return Err("there is no debugger to drive here".into());
@@ -103,7 +116,8 @@ pub(super) fn debug_tool(project_root: &Path) -> Arc<dyn Tool> {
                 }
             }
         },
-    )))
+    ));
+    Arc::new(tool.with_check(check))
 }
 
 impl App {
@@ -288,69 +302,7 @@ impl App {
     ) -> Result<(), String> {
         let spec = match (command, file) {
             (Some(name), _) => {
-                let registry =
-                    CommandsRegistry::load_merged(Some(&self.project_root)).unwrap_or_default();
-                let commands = registry.debug_commands();
-                let wanted = name.trim();
-                let Some(command) = commands.iter().find(|c| {
-                    c.name.eq_ignore_ascii_case(wanted)
-                        || c.metadata
-                            .as_ref()
-                            .and_then(|m| m.display_name.as_deref())
-                            .is_some_and(|label| label.eq_ignore_ascii_case(wanted))
-                }) else {
-                    let known: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
-                    return Err(if known.is_empty() {
-                        format!(
-                            "no command `{wanted}`: commands.toml has no command with a `debugger`"
-                        )
-                    } else {
-                        format!(
-                            "no command `{wanted}`; the debug commands are {}",
-                            known.join(", ")
-                        )
-                    });
-                };
-                let declared = command
-                    .metadata
-                    .as_ref()
-                    .map_or(&[][..], |m| m.params.as_slice());
-                let given: HashMap<String, String> =
-                    params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-                let values = termide_config::commands::param_values(declared, &given)
-                    .map_err(|e| format!("`{}`: {e}", command.name))?;
-                let texts = [
-                    command.command.as_deref(),
-                    command.metadata.as_ref().and_then(|m| m.build.as_deref()),
-                ];
-                if let Some(name) = texts
-                    .into_iter()
-                    .flatten()
-                    .flat_map(termide_config::placeholder_names)
-                    // A parameter named like a panel placeholder takes its
-                    // place, as it does for the user.
-                    .find(|name| {
-                        termide_config::CONTEXT_PLACEHOLDERS.contains(name)
-                            && !values.contains_key(*name)
-                    })
-                {
-                    return Err(format!(
-                        "`{}` takes {{{name}}} from the panel the user has focused; ask the user \
-                         to start it",
-                        command.name
-                    ));
-                }
-                if termide_debug::dap::Adapter::parse(command.debugger().unwrap_or_default())
-                    .is_none()
-                {
-                    return Err(format!(
-                        "`{}` runs a command-line debugger in a terminal, which is the user's to \
-                         drive; only a debug adapter (lldb-dap, gdb-dap, debugpy, dlv-dap) can be \
-                         driven with `debug`",
-                        command.name
-                    ));
-                }
-                let (command, env) = App::debug_command_with_params(command, &values);
+                let (command, env) = agent_debug_command(&self.project_root, name, params)?;
                 self.dap_spec(&command, &env)?
             }
             (None, Some(file)) => {
@@ -443,5 +395,212 @@ impl App {
                 listed.join(", ")
             }
         ))
+    }
+}
+
+/// The command of `commands.toml` an agent's `start` names, by identifier or
+/// label, ready to launch: its placeholders filled from `params` and the
+/// rest of its parameters' defaults, and the values as its environment.
+/// `Err` says why the agent cannot launch it — no such command, one that
+/// runs a debugger in a terminal or takes a value from the focused panel, a
+/// parameter it does not declare or a value its form could not hold. Reads
+/// only `commands.toml`, so the tool's check runs it before anyone is asked
+/// about the launch, and the launch runs it again.
+fn agent_debug_command(
+    project_root: &Path,
+    name: &str,
+    params: &BTreeMap<String, String>,
+) -> Result<(CommandItem, Vec<(String, String)>), String> {
+    let registry = CommandsRegistry::load_merged(Some(project_root)).unwrap_or_default();
+    let commands = registry.debug_commands();
+    let wanted = name.trim();
+    let Some(command) = commands.iter().find(|c| {
+        c.name.eq_ignore_ascii_case(wanted)
+            || c.metadata
+                .as_ref()
+                .and_then(|m| m.display_name.as_deref())
+                .is_some_and(|label| label.eq_ignore_ascii_case(wanted))
+    }) else {
+        let known: Vec<&str> = commands.iter().map(|c| c.name.as_str()).collect();
+        return Err(if known.is_empty() {
+            format!("no command `{wanted}`: commands.toml has no command with a `debugger`")
+        } else {
+            format!(
+                "no command `{wanted}`; the debug commands are {}",
+                known.join(", ")
+            )
+        });
+    };
+    let declared = command
+        .metadata
+        .as_ref()
+        .map_or(&[][..], |m| m.params.as_slice());
+    let given: HashMap<String, String> =
+        params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+    let values = termide_config::commands::param_values(declared, &given)
+        .map_err(|e| format!("`{}`: {e}", command.name))?;
+    let texts = [
+        command.command.as_deref(),
+        command.metadata.as_ref().and_then(|m| m.build.as_deref()),
+    ];
+    if let Some(name) = texts
+        .into_iter()
+        .flatten()
+        .flat_map(termide_config::placeholder_names)
+        // A parameter named like a panel placeholder takes its
+        // place, as it does for the user.
+        .find(|name| {
+            termide_config::CONTEXT_PLACEHOLDERS.contains(name) && !values.contains_key(*name)
+        })
+    {
+        return Err(format!(
+            "`{}` takes {{{name}}} from the panel the user has focused; ask the user \
+             to start it",
+            command.name
+        ));
+    }
+    if termide_debug::dap::Adapter::parse(command.debugger().unwrap_or_default()).is_none() {
+        return Err(format!(
+            "`{}` runs a command-line debugger in a terminal, which is the user's to \
+             drive; only a debug adapter (lldb-dap, gdb-dap, debugpy, dlv-dap) can be \
+             driven with `debug`",
+            command.name
+        ));
+    }
+    Ok(App::debug_command_with_params(command, &values))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use termide_agent_core::ToolCall;
+
+    const COMMANDS: &str = r#"
+[debug-server]
+name = "Debug server"
+command = "target/debug/server --port {port} --data {data}"
+build = "cargo build --features {features}"
+debugger = "lldb-dap"
+
+[[debug-server.params]]
+name = "port"
+type = "number"
+default = "8090"
+
+[[debug-server.params]]
+name = "data"
+type = "text"
+
+[[debug-server.params]]
+name = "features"
+type = "select"
+options = ["full trace", "none"]
+
+[debug-cli]
+command = "target/debug/cli"
+debugger = "lldb"
+
+[debug-file]
+command = "target/debug/cli {file}"
+debugger = "lldb-dap"
+"#;
+
+    fn project() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".termide")).unwrap();
+        std::fs::write(dir.path().join(".termide/commands.toml"), COMMANDS).unwrap();
+        dir
+    }
+
+    fn params(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    /// A command started with `params` gets them in its line, one word
+    /// each, and in its build, quoted for the shell; the rest of its
+    /// parameters take their defaults; all of them go in the environment.
+    #[test]
+    fn a_started_command_takes_its_params_in_line_build_and_env() {
+        let dir = project();
+        let (command, env) = agent_debug_command(
+            dir.path(),
+            "Debug server",
+            &params(&[("port", "9000"), ("data", "my dir")]),
+        )
+        .unwrap();
+        assert_eq!(
+            termide_debug::dap::split_words(command.command.as_deref().unwrap()).unwrap(),
+            ["target/debug/server", "--port", "9000", "--data", "my dir"]
+        );
+        assert_eq!(
+            command.metadata.as_ref().and_then(|m| m.build.as_deref()),
+            Some("cargo build --features 'full trace'")
+        );
+        assert_eq!(
+            env,
+            [
+                ("TERMIDE_PARAM_DATA", "my dir"),
+                ("TERMIDE_PARAM_FEATURES", "full trace"),
+                ("TERMIDE_PARAM_PORT", "9000"),
+            ]
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+        );
+    }
+
+    /// What no answer can make work is refused by the tool's check, before
+    /// the permission hooks see the call.
+    #[test]
+    fn the_check_refuses_a_launch_bound_to_fail() {
+        let dir = project();
+        let tool = debug_tool(dir.path());
+        let ctx = ToolContext::new(dir.path());
+        let check = |arguments| {
+            tool.check(
+                &ToolCall {
+                    id: "1".into(),
+                    name: "debug".into(),
+                    arguments,
+                    extra_content: None,
+                },
+                &ctx,
+            )
+        };
+        let refused = |arguments, needle: &str| {
+            let message = check(arguments).unwrap_err();
+            assert!(message.contains(needle), "{message}");
+        };
+        refused(
+            json!({ "action": "start", "command": "debug-nope" }),
+            "debug-server",
+        );
+        refused(
+            json!({ "action": "start", "command": "debug-cli" }),
+            "command-line debugger",
+        );
+        refused(
+            json!({ "action": "start", "command": "debug-file" }),
+            "{file}",
+        );
+        refused(
+            json!({ "action": "start", "command": "debug-server", "params": { "prot": 1 } }),
+            "port, data, features",
+        );
+        refused(
+            json!({ "action": "start", "command": "debug-server", "params": { "port": "x" } }),
+            "number",
+        );
+        refused(
+            json!({ "action": "start", "command": "debug-server", "params": { "features": "all" } }),
+            "full trace, none",
+        );
+        assert_eq!(
+            check(json!({ "action": "start", "command": "debug-server", "params": { "port": 1 } })),
+            Ok(())
+        );
+        assert_eq!(check(json!({ "action": "step_over" })), Ok(()));
     }
 }

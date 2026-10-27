@@ -244,6 +244,9 @@ impl Tool for ListedSkills {
     fn parameters(&self) -> Value {
         self.inner.parameters()
     }
+    fn check(&self, call: &ToolCall, ctx: &ToolContext) -> Result<(), String> {
+        self.inner.check(call, ctx)
+    }
     fn execute(
         &self,
         call: &ToolCall,
