@@ -19,6 +19,7 @@ termide-agent-core = { path = "../agent-core" }
 termide-config = { path = "../config" }
 termide-core = { path = "../core" }
 termide-i18n = { path = "../i18n" }
+termide-panel-image = { path = "../panel-image" }
 termide-panel-markdown = { path = "../panel-markdown" }
 termide-richtext = { path = "../richtext" }
 termide-theme = { path = "../theme" }
@@ -26,4 +27,6 @@ termide-ui = { path = "../ui" }
 termide-walk = { path = "../walk" }
 
 [dev-dependencies]
+base64.workspace = true
+image = { version = "0.25", default-features = false, features = ["png"] }
 tempfile.workspace = true

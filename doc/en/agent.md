@@ -486,6 +486,19 @@ stays where it was. Unfold them as any block — `Enter`, `→` or a second clic
 on the answer; an answer folded or unfolded by hand stays that way. With
 `fold_blocks = "never"` diagrams never fold.
 
+Pictures show the same way: one `read` returned, under its headline even
+while the call is folded, and one you pasted, inside your message. A picture
+is drawn with the terminal's graphics (Kitty, Sixel, iTerm2, or half blocks
+where there are none), no larger than itself, as wide as the panel and at
+most half its height. It is drawn only while all of it is on screen; a picture
+cut by the panel's edge shows its placeholder, `PNG 1280×800`, where terminal
+graphics would leave debris. With Sixel or iTerm2, which send a picture
+again wherever it moves, a picture that is moving — scrolled, or pushed up by
+what the agent writes — is an empty frame of its size until it has stood
+still for 150 ms; with Kitty it moves as text does. Once its block has scrolled wholly above the view
+it folds to `▸ PNG 1280×800` with the block, the view keeping its place; unfold
+the block to see it again. Folding a block by hand folds its pictures with it.
+
 While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph
 rather than `🕒` because the figures under each block describe that block

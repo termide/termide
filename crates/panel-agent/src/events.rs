@@ -717,6 +717,8 @@ impl AgentPanel {
         changed |= self.check_held();
         changed |= self.poll_parked();
         changed |= self.drop_withdrawn_card();
+        changed |= self.ask_graphics();
+        changed |= self.pictures_settled();
         if let Some((start, before)) = self.permission_wait {
             if matches!(
                 self.pending,

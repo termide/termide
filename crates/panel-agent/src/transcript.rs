@@ -9,6 +9,7 @@ use termide_agent_core::{
     DecidedBy, Lasting, PermissionNote, ToolCall, ToolResultMessage, UserMessage,
 };
 use termide_core::ThemeColors;
+use termide_panel_image::inline::{fit_cells, picture_key, picture_size};
 use termide_panel_markdown::render_markdown_with;
 use termide_richtext::{Builder, DiagramCard, RowCopy};
 
@@ -84,9 +85,11 @@ fn is_foldable(item: &Item, fold: FoldMode) -> bool {
             command: Some(_),
             ..
         } => !text.trim().is_empty(),
-        Item::User { text, .. } | Item::System { text } => {
-            text.trim().lines().count() > FOLD_THRESHOLD
+        // A picture folds to its card, however short the words with it.
+        Item::User { text, images, .. } => {
+            !images.is_empty() || text.trim().lines().count() > FOLD_THRESHOLD
         }
+        Item::System { text } => text.trim().lines().count() > FOLD_THRESHOLD,
         // Finished reasoning folds to its first line, so any of it has detail
         // worth hiding: the rest of the text and the full cost lines.
         Item::Thinking { text, .. } => !text.trim().is_empty(),
@@ -190,6 +193,10 @@ pub(crate) fn user_item(user: &UserMessage, at: String, duration_ms: Option<u32>
         text: user.plain_text(),
         at,
         command: user.command.clone(),
+        images: user
+            .images()
+            .map(|(media_type, data)| (media_type.to_string(), data.to_string()))
+            .collect(),
     }
 }
 
@@ -278,6 +285,8 @@ pub enum Item {
         /// The `/name args` typed when a template, script or skill produced
         /// `text`: the block's headline, with `text` folded under it.
         command: Option<String>,
+        /// The pictures sent with it, as `(media type, base64 data)`.
+        images: Vec<(String, String)>,
     },
     /// The system prompt in effect, shown (folded by default) at the start of a
     /// session and whenever it changes before a new message. Marked with `#`.
@@ -355,6 +364,71 @@ struct Cached {
     links: Vec<RowLink>,
     /// How each of `lines` reads when copied.
     copy: Vec<RowCopy>,
+    /// The pictures drawn over its lines, on its own lines.
+    pictures: Vec<PictureSpot>,
+}
+
+/// How pictures are laid out: the size of a terminal cell in pixels and the
+/// most rows one takes. Without it (no graphics) a picture is a one-row card.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PictureLayout {
+    pub cell_px: (u16, u16),
+    pub max_rows: u16,
+}
+
+/// Columns a picture is drawn in from, under its block's text.
+pub(crate) const PICTURE_INDENT: u16 = 2;
+
+/// Where a picture goes on the rendered lines: `rows` rows from `line`,
+/// `cols` wide from [`PICTURE_INDENT`]; the rows hold a placeholder the
+/// picture is drawn over.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct PictureSpot {
+    pub line: usize,
+    pub cols: u16,
+    pub rows: u16,
+    /// The picture's [`termide_panel_image::inline::picture_key`].
+    pub key: u64,
+    /// The item it belongs to, and which of the item's pictures it is.
+    pub item: usize,
+    pub ordinal: usize,
+}
+
+/// How an item is shown: what of it is folded, and how pictures lay out.
+#[derive(Clone, Copy)]
+struct ItemView {
+    collapsed: bool,
+    artifacts_folded: bool,
+    fold: FoldMode,
+    pictures: Option<PictureLayout>,
+}
+
+/// The pictures `item` carries, as `(media type, base64 data)`.
+fn item_pictures(item: &Item) -> Vec<(&str, &str)> {
+    match item {
+        Item::Tool {
+            result: Some(result),
+            ..
+        } => result.images().collect(),
+        Item::User { images, .. } => images
+            .iter()
+            .map(|(media_type, data)| (media_type.as_str(), data.as_str()))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// What a picture is called on its card: its format and size, `PNG 1280×800`.
+fn picture_label(media_type: &str, size: Option<(u32, u32)>) -> String {
+    let format = media_type
+        .rsplit('/')
+        .next()
+        .unwrap_or(media_type)
+        .to_uppercase();
+    match size {
+        Some((w, h)) => format!("{format} {w}×{h}"),
+        None => format,
+    }
 }
 
 /// A lit stretch of a link: `(line, start, end)`, a `[start, end)` column
@@ -391,8 +465,17 @@ pub struct Transcript {
     collapsed: Vec<bool>,
     /// Whether each item's fold was set by hand, parallel to `items`: an
     /// answer's diagrams fold by themselves once scrolled out of sight
-    /// ([`Transcript::fold_diagrams_above`]) only while this is unset.
+    /// ([`Transcript::fold_artifacts_above`]) only while this is unset.
     pinned: Vec<bool>,
+    /// Whether each item's diagrams and pictures are folded to cards,
+    /// parallel to `items`. A fresh block shows them whatever its own fold;
+    /// they fold once the block scrolls wholly out of sight, or with the
+    /// block when it is folded by hand.
+    artifacts_folded: Vec<bool>,
+    /// How pictures lay out; `None` shows each as a card.
+    picture_layout: Option<PictureLayout>,
+    /// Whether an item laid out so far carries a picture.
+    any_pictures: bool,
     cache: Vec<Option<Cached>>,
     /// Flattened lines of every item, rebuilt when any cache entry changed.
     flat: Vec<Line<'static>>,
@@ -402,6 +485,8 @@ pub struct Transcript {
     flat_copy: Vec<RowCopy>,
     /// The marked-up links on the flattened lines, with their item.
     flat_links: Vec<(usize, RowLink)>,
+    /// The pictures on the flattened lines.
+    flat_pictures: Vec<PictureSpot>,
     flat_dirty: bool,
     /// Live footer lines appended after the last item while the agent works
     /// (the ticking generation and clock meta with the spinner); empty when
@@ -462,6 +547,7 @@ impl Transcript {
         self.items.push(item);
         self.collapsed.push(collapsed);
         self.pinned.push(false);
+        self.artifacts_folded.push(false);
         self.cache.push(None);
         self.flat_dirty = true;
     }
@@ -470,11 +556,14 @@ impl Transcript {
         self.items.clear();
         self.collapsed.clear();
         self.pinned.clear();
+        self.artifacts_folded.clear();
+        self.any_pictures = false;
         self.cache.clear();
         self.flat.clear();
         self.line_item.clear();
         self.flat_copy.clear();
         self.flat_links.clear();
+        self.flat_pictures.clear();
         self.flat_dirty = true;
     }
 
@@ -597,6 +686,7 @@ impl Transcript {
                 self.items.remove(index);
                 self.collapsed.remove(index);
                 self.pinned.remove(index);
+                self.artifacts_folded.remove(index);
                 self.cache.remove(index);
                 self.flat_dirty = true;
                 return;
@@ -805,18 +895,61 @@ impl Transcript {
         true
     }
 
-    /// Mark item `index`'s fold as set by hand, so nothing refolds it.
+    /// Mark item `index`'s fold as set by hand, so nothing refolds it: its
+    /// diagrams and pictures follow the fold it was given.
     fn pin(&mut self, index: usize) {
         if let Some(slot) = self.pinned.get_mut(index) {
             *slot = true;
         }
+        if let Some(slot) = self.artifacts_folded.get_mut(index) {
+            *slot = self.collapsed[index];
+        }
     }
 
-    /// Fold the diagrams of every answer wholly above flattened line `line`
-    /// (the top of the view) that shows them and was not unfolded by hand.
-    /// Returns whether any folded; the caller lays out again and moves its
-    /// view up by the rows that went, so what is on screen stays put.
-    pub fn fold_diagrams_above(&mut self, line: usize) -> bool {
+    /// Whether item `index` shows diagrams or pictures that fold to cards.
+    fn has_artifacts(&self, index: usize) -> bool {
+        match &self.items[index] {
+            Item::Assistant { .. } => self.foldable(index),
+            item => !item_pictures(item).is_empty(),
+        }
+    }
+
+    /// Whether an item laid out so far carries a picture.
+    #[must_use]
+    pub fn has_pictures(&self) -> bool {
+        self.any_pictures
+    }
+
+    /// Set how pictures lay out, laying out again the items that carry one.
+    pub fn set_picture_layout(&mut self, layout: Option<PictureLayout>) {
+        if self.picture_layout == layout {
+            return;
+        }
+        self.picture_layout = layout;
+        for index in 0..self.items.len() {
+            if !item_pictures(&self.items[index]).is_empty() {
+                self.invalidate(index);
+            }
+        }
+    }
+
+    /// The pictures on the flattened lines, as last laid out.
+    pub(crate) fn pictures(&self) -> &[PictureSpot] {
+        &self.flat_pictures
+    }
+
+    /// The base64 data of picture `ordinal` of item `item`.
+    pub(crate) fn picture_data(&self, item: usize, ordinal: usize) -> Option<&str> {
+        let item = self.items.get(item)?;
+        item_pictures(item).get(ordinal).map(|(_, data)| *data)
+    }
+
+    /// Fold the diagrams and pictures of every block wholly above flattened
+    /// line `line` (the top of the view) that shows them and was not folded
+    /// or unfolded by hand; the block folds with them. Returns whether any
+    /// folded; the caller lays out again and moves its view up by the rows
+    /// that went, so what is on screen stays put.
+    pub fn fold_artifacts_above(&mut self, line: usize) -> bool {
         if self.fold == FoldMode::Never {
             return false;
         }
@@ -827,11 +960,8 @@ impl Transcript {
         };
         let mut folded = false;
         for index in 0..limit {
-            if matches!(self.items[index], Item::Assistant { .. })
-                && !self.collapsed[index]
-                && !self.pinned[index]
-                && self.foldable(index)
-            {
+            if !self.artifacts_folded[index] && !self.pinned[index] && self.has_artifacts(index) {
+                self.artifacts_folded[index] = true;
                 self.collapsed[index] = true;
                 self.invalidate(index);
                 folded = true;
@@ -863,7 +993,7 @@ impl Transcript {
             if is_annotation(&self.items[index]) {
                 continue;
             }
-            if self.collapsed[index] == value {
+            if self.collapsed[index] == value || self.artifacts_folded[index] == value {
                 self.collapsed[index] = !value;
                 self.pin(index);
                 self.invalidate(index);
@@ -963,22 +1093,15 @@ impl Transcript {
                 None => true,
             };
             if stale {
-                let (lines, foldable, links, copy) = render_item(
-                    &self.items[index],
-                    self.collapsed[index],
-                    self.fold,
-                    width,
-                    colors,
-                    is_light,
-                );
-                self.cache[index] = Some(Cached {
-                    width,
-                    is_light,
-                    foldable,
-                    lines,
-                    links,
-                    copy,
-                });
+                let view = ItemView {
+                    collapsed: self.collapsed[index],
+                    artifacts_folded: self.artifacts_folded[index],
+                    fold: self.fold,
+                    pictures: self.picture_layout,
+                };
+                let cached = render_item(&self.items[index], view, width, colors, is_light);
+                self.any_pictures |= !item_pictures(&self.items[index]).is_empty();
+                self.cache[index] = Some(cached);
                 self.flat_dirty = true;
             }
         }
@@ -987,9 +1110,16 @@ impl Transcript {
             self.line_item.clear();
             self.flat_copy.clear();
             self.flat_links.clear();
+            self.flat_pictures.clear();
             for (index, cached) in self.cache.iter().enumerate() {
                 if let Some(cached) = cached {
                     let base = self.flat.len();
+                    self.flat_pictures
+                        .extend(cached.pictures.iter().map(|spot| PictureSpot {
+                            line: base + spot.line,
+                            item: index,
+                            ..*spot
+                        }));
                     self.flat_links.extend(cached.links.iter().map(|link| {
                         let line = base + link.line;
                         (
@@ -1906,18 +2036,17 @@ fn inline_args(arguments: &Value) -> String {
         .join(" ")
 }
 
-/// The lines of `item` at `width`, folded when `collapsed` and the item folds,
+/// The lines of `item` at `width`, folded as `view` says when the item folds,
 /// and whether it does. A block whose unfolded form is a single row has
 /// nothing to fold, so it shows that row with no fold marker.
 fn render_item(
     item: &Item,
-    collapsed: bool,
-    fold: FoldMode,
+    view: ItemView,
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
-) -> (Vec<Line<'static>>, bool, Vec<RowLink>, Vec<RowCopy>) {
-    let mut foldable = is_foldable(item, fold);
+) -> Cached {
+    let mut foldable = is_foldable(item, view.fold);
     // Only reasoning can be foldable yet fit one row unfolded: a foldable tool
     // call has output or a second command line below its headline.
     if foldable && matches!(item, Item::Thinking { .. }) {
@@ -1945,6 +2074,12 @@ fn render_item(
         .diagrams
             > 0;
     }
+    // An answer's fold is its diagrams'.
+    let collapsed = if matches!(item, Item::Assistant { .. }) {
+        view.artifacts_folded
+    } else {
+        view.collapsed
+    };
     let mut marks = Marks::default();
     let mut lines = render_body(
         item,
@@ -1974,7 +2109,73 @@ fn render_item(
             link.line += 1;
         }
     }
-    (lines, foldable, links, copy)
+    // Under the block's text, inside the gap a message of yours ends with.
+    let mut rows = Vec::new();
+    let mut pictures = picture_rows(item, view, width, colors, &mut rows);
+    let at = if matches!(item, Item::User { .. }) {
+        lines.len().saturating_sub(1)
+    } else {
+        lines.len()
+    };
+    for spot in &mut pictures {
+        spot.line += at;
+    }
+    for link in &mut links {
+        if link.line >= at {
+            link.line += rows.len();
+        }
+    }
+    copy.splice(at..at, std::iter::repeat_n(RowCopy::default(), rows.len()));
+    lines.splice(at..at, rows);
+    Cached {
+        width,
+        is_light,
+        foldable,
+        lines,
+        links,
+        copy,
+        pictures,
+    }
+}
+
+/// Put `item`'s pictures under its `lines`: rows held for each picture
+/// shown, a one-row card for each folded one — or each one at all when
+/// there are no graphics to draw it with. Returns where the pictures go.
+fn picture_rows(
+    item: &Item,
+    view: ItemView,
+    width: u16,
+    colors: &ThemeColors,
+    lines: &mut Vec<Line<'static>>,
+) -> Vec<PictureSpot> {
+    let dim = Style::default().fg(colors.disabled);
+    let indent = " ".repeat(PICTURE_INDENT as usize);
+    let mut spots = Vec::new();
+    for (ordinal, (media_type, data)) in item_pictures(item).into_iter().enumerate() {
+        let size = picture_size(data);
+        let label = picture_label(media_type, size);
+        match (view.pictures, size) {
+            (Some(layout), Some(px)) if !view.artifacts_folded => {
+                // The scrollbar gutter stays free.
+                let max_cols = width.saturating_sub(PICTURE_INDENT + 1).max(1);
+                let (cols, rows) = fit_cells(px, layout.cell_px, (max_cols, layout.max_rows));
+                spots.push(PictureSpot {
+                    line: lines.len(),
+                    cols,
+                    rows,
+                    key: picture_key(data),
+                    item: 0,
+                    ordinal,
+                });
+                // Seen only while the picture is not drawn over it.
+                lines.push(Line::styled(format!("{indent}{label}"), dim));
+                lines.extend((1..rows).map(|_| Line::default()));
+            }
+            (Some(_), Some(_)) => lines.push(Line::styled(format!("{indent}▸ {label}"), dim)),
+            _ => lines.push(Line::styled(format!("{indent}{label}"), dim)),
+        }
+    }
+    spots
 }
 
 /// What [`render_body`] marks on the lines it returns: the links, and how
@@ -2000,7 +2201,9 @@ fn render_body(
     let t = termide_i18n::t();
     let dim = Style::default().fg(colors.disabled);
     match item {
-        Item::User { text, at, command } => {
+        Item::User {
+            text, at, command, ..
+        } => {
             let trimmed = text.trim();
             let all: Vec<&str> = trimmed.lines().collect();
             let mark = Style::default()
@@ -2774,6 +2977,7 @@ mod tests {
             text: "Review a.rs.\nQuote the lines.".into(),
             at: String::new(),
             command: Some("/review a.rs".into()),
+            images: Vec::new(),
         });
         let folded = text_of(transcript.lines(40, &colors, false)).join("\n");
         assert!(folded.contains("› /review a.rs"), "{folded}");
@@ -2827,6 +3031,7 @@ mod tests {
             text: "first line\n\n- one\n- two and a much longer tail".into(),
             at: String::new(),
             command: None,
+            images: Vec::new(),
         });
         let rows: Vec<String> = text_of(transcript.lines(20, &colors, false))
             .into_iter()
@@ -2847,6 +3052,7 @@ mod tests {
             text: "hi".into(),
             at: String::new(),
             command: None,
+            images: Vec::new(),
         });
         let base = transcript.lines(40, &colors, false).len();
 
@@ -2942,6 +3148,7 @@ mod tests {
             text: "Fix the bug".into(),
             at: String::new(),
             command: None,
+            images: Vec::new(),
         });
         // Reasoning and the answer stream into their own blocks.
         transcript
@@ -3074,6 +3281,7 @@ mod tests {
             text: "hi".into(),
             at: String::new(),
             command: None,
+            images: Vec::new(),
         });
         // A long output is foldable, so autofold-off keeps it open.
         let body = (1..=8).map(|n| format!("line {n}")).collect::<Vec<_>>();
@@ -3296,6 +3504,7 @@ mod tests {
             text: "go".into(),
             at: String::new(),
             command: None,
+            images: Vec::new(),
         });
         transcript.stream_thinking("a thought\nand more");
         transcript.finish_thinking("12:00:00", None);
@@ -3376,6 +3585,7 @@ mod tests {
             text: "go".into(),
             at: "21:00:00".into(),
             command: None,
+            images: Vec::new(),
         });
         transcript.stream_answer("done");
         transcript.finish_assistant("done".into(), None, None, "21:03:41".into(), false);
@@ -3960,6 +4170,7 @@ mod tests {
             text: "go".into(),
             at: "21:00:00".into(),
             command: None,
+            images: Vec::new(),
         });
         transcript.push(Item::RunEnd {
             elapsed_ms: 221_000,
@@ -4034,6 +4245,7 @@ mod tests {
             text: "next".into(),
             at: String::new(),
             command: None,
+            images: Vec::new(),
         });
         transcript.push(Item::Notice {
             text: "a long notice that has to wrap onto a second row".into(),

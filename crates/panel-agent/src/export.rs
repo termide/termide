@@ -108,7 +108,9 @@ pub(crate) fn chat_from_transcript(items: &[Item], agent: &str) -> Vec<ChatMessa
         .iter()
         .filter_map(|item| {
             let (user, text, at) = match item {
-                Item::User { text, at, command } => (true, command.as_ref().unwrap_or(text), at),
+                Item::User {
+                    text, at, command, ..
+                } => (true, command.as_ref().unwrap_or(text), at),
                 Item::Assistant { text, at, .. } => (false, text, at),
                 _ => return None,
             };
@@ -362,6 +364,7 @@ mod tests {
                 text: "expanded template".into(),
                 at: "10:00:01".into(),
                 command: Some("/review src".into()),
+                images: Vec::new(),
             },
             Item::Thinking {
                 text: "pondering".into(),

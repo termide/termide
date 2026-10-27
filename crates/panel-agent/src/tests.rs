@@ -5317,6 +5317,7 @@ fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
         text: "go".into(),
         at: String::new(),
         command: None,
+        images: Vec::new(),
     });
     // The CLI agent takes the conversation over (told a recap of it).
     assert!(panel.switch_connection("cli"));
@@ -5411,6 +5412,7 @@ fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
         text: "go".into(),
         at: String::new(),
         command: None,
+        images: Vec::new(),
     });
     assert!(!panel.is_fresh());
     panel.apply_toolset(&["read".to_string()]);
@@ -12315,4 +12317,224 @@ fn a_diagram_unfolded_by_hand_stays_unfolded() {
     assert!(panel.transcript.toggle_expanded(answer));
     let _ = render_text(&mut panel, 60, 10);
     assert!(shows_diagram(&panel), "out of view, it is not folded again");
+}
+
+/// A `w`×`h` red PNG as base64.
+fn png(w: u32, h: u32) -> String {
+    use base64::Engine;
+    let image = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+        w,
+        h,
+        image::Rgb([200, 30, 30]),
+    ));
+    let mut bytes = Vec::new();
+    image
+        .write_to(
+            &mut std::io::Cursor::new(&mut bytes),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// A finished `read` that returned a `w`×`h` picture.
+fn picture_read(w: u32, h: u32) -> Item {
+    let call = ToolCall {
+        id: "r1".into(),
+        name: "read".into(),
+        arguments: serde_json::json!({ "path": "shot.png" }),
+        extra_content: None,
+    };
+    let result = ToolResultMessage::text(&call, "Image shot.png")
+        .with_images(vec![("image/png".into(), png(w, h))]);
+    Item::Tool {
+        call,
+        result: Some(result),
+        live: None,
+        at: "12:00:00".into(),
+        duration_ms: Some(10),
+        waited_ms: None,
+        waiting: false,
+    }
+}
+
+/// An answer of 40 short paragraphs, `line 1` to `line 40`.
+fn tall_answer() -> Item {
+    Item::Assistant {
+        text: (1..=40)
+            .map(|n| format!("line {n}"))
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        streaming: false,
+        error: None,
+        at: String::new(),
+        cost: None,
+        run_ms: None,
+    }
+}
+
+/// A panel drawing pictures in half blocks, without asking the terminal.
+fn picture_panel() -> AgentPanel {
+    let mut panel = panel(vec![]);
+    panel.graphics = Some(Graphics::halfblocks());
+    panel.graphics_asked = true;
+    panel
+}
+
+/// Whether any cell in rows `rows` of `buf` is painted with a colour.
+fn painted(buf: &Buffer, rows: std::ops::Range<u16>) -> bool {
+    rows.flat_map(|y| (0..buf.area.width).map(move |x| (x, y)))
+        .any(|(x, y)| matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(..)))
+}
+
+#[test]
+fn a_fresh_picture_shows_under_its_folded_block() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(400, 400));
+    let buf = render_buf(&mut panel, 60, 30);
+    let spots = panel.transcript.pictures().to_vec();
+    assert_eq!(spots.len(), 1);
+    // Half blocks: 10×20 px cells, at most half the panel's 30 rows.
+    assert_eq!(spots[0].rows, 15);
+    assert!(!panel.transcript.is_expanded(0), "the block stays folded");
+    let y = (spots[0].line - panel.top) as u16;
+    assert!(painted(&buf, y..y + spots[0].rows), "the picture is drawn");
+}
+
+#[test]
+fn a_picture_cut_by_the_edge_shows_its_placeholder() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(400, 400));
+    panel.transcript.push(tall_answer());
+    let _ = render_buf(&mut panel, 60, 200);
+    let spot = panel.transcript.pictures()[0];
+    // Its first row just above the view: the picture's block is still on
+    // screen, so nothing folds, but the picture is not wholly in sight.
+    panel.follow = false;
+    panel.top = spot.line + 1;
+    let buf = render_buf(&mut panel, 60, 30);
+    assert_eq!(panel.transcript.pictures().len(), 1, "not folded");
+    assert!(!painted(&buf, 0..spot.rows - 1), "not drawn cut");
+}
+
+#[test]
+fn a_picture_scrolled_away_folds_to_a_card_and_the_view_stays_put() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(400, 200));
+    // 10 rows tall, in a 30-row panel and a 200-row one alike.
+    panel.transcript.push(tall_answer());
+    let _ = render_buf(&mut panel, 60, 200);
+    let anchor = transcript_text(&panel)
+        .iter()
+        .position(|l| l.trim() == "line 20")
+        .unwrap();
+    panel.follow = false;
+    panel.top = anchor;
+    let rows = render_text(&mut panel, 60, 30);
+    assert!(rows[0].trim_start().starts_with("line 20 "), "{rows:?}");
+    assert!(panel.transcript.pictures().is_empty());
+    assert!(
+        transcript_text(&panel)
+            .iter()
+            .any(|l| l.trim() == "▸ PNG 400×200"),
+        "{:?}",
+        transcript_text(&panel)
+    );
+
+    // Unfolded by hand, it shows with the block's detail and stays.
+    assert!(panel.transcript.toggle_expanded(0));
+    let _ = render_buf(&mut panel, 60, 30);
+    assert_eq!(panel.transcript.pictures().len(), 1);
+}
+
+#[test]
+fn without_graphics_a_picture_is_a_card() {
+    let mut panel = panel(vec![]);
+    panel.graphics_asked = true;
+    panel.transcript.push(picture_read(400, 300));
+    let _ = render_buf(&mut panel, 60, 30);
+    assert!(panel.transcript.pictures().is_empty());
+    assert!(transcript_text(&panel)
+        .iter()
+        .any(|l| l.trim() == "PNG 400×300"));
+}
+
+#[test]
+fn the_terminal_is_asked_only_once_a_picture_is_laid_out() {
+    let mut panel = panel(vec![]);
+    let _ = render_buf(&mut panel, 60, 30);
+    assert!(!panel.ask_graphics(), "no picture, no question");
+    assert!(!panel.graphics_asked);
+}
+
+#[test]
+fn a_pasted_picture_shows_inside_the_message() {
+    let mut panel = picture_panel();
+    let user = UserMessage::text("look [#1 pasted image 200×100]")
+        .with_images(vec![("image/png".into(), png(200, 100))]);
+    panel
+        .transcript
+        .push(transcript::user_item(&user, "12:00:00".into(), None));
+    let _ = render_buf(&mut panel, 60, 30);
+    let spot = panel.transcript.pictures()[0];
+    let (first, last) = panel.transcript.content_lines_of(0).unwrap();
+    assert!(
+        spot.line > first && spot.line + (spot.rows as usize) <= last + 1,
+        "{spot:?} in {first}..={last}"
+    );
+    // A short message with a picture still folds, to the picture's card.
+    assert!(panel.transcript.toggle_expanded(0));
+    assert!(panel.transcript.toggle_expanded(0));
+    let _ = render_buf(&mut panel, 60, 30);
+    assert!(panel.transcript.pictures().is_empty());
+}
+
+/// Whether `buf` holds a terminal graphics sequence.
+fn has_graphics(buf: &Buffer) -> bool {
+    buf.content
+        .iter()
+        .any(|cell| cell.symbol().starts_with('\x1b'))
+}
+
+#[test]
+fn where_moving_resends_a_picture_it_is_a_frame_until_it_stands_still() {
+    let mut panel = picture_panel();
+    panel.graphics = Some(Graphics::sixel());
+    panel.transcript.push(picture_read(100, 100));
+    panel.transcript.push(tall_answer());
+    panel.follow = false;
+    let _ = render_buf(&mut panel, 60, 40);
+    // A picture just come into view stands nowhere yet: a frame.
+    let buf = render_buf(&mut panel, 60, 40);
+    let spot = panel.transcript.pictures()[0];
+    let (x, y) = (crate::transcript::PICTURE_INDENT, spot.line as u16);
+    assert!(!has_graphics(&buf));
+    assert_eq!(buf[(x, y)].symbol(), "┌");
+    assert!(!panel.pictures_settled());
+
+    std::thread::sleep(crate::render::PICTURE_SETTLE);
+    assert!(panel.pictures_settled(), "a tick redraws it");
+    let buf = render_buf(&mut panel, 60, 40);
+    assert!(has_graphics(&buf), "standing still, it is drawn");
+
+    // Moved by a row, it is a frame again.
+    panel.top = 1;
+    let buf = render_buf(&mut panel, 60, 40);
+    assert!(!has_graphics(&buf));
+    assert_eq!(buf[(x, y - 1)].symbol(), "┌");
+}
+
+#[test]
+fn where_moving_is_cheap_a_moving_picture_is_drawn() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(100, 100));
+    panel.transcript.push(tall_answer());
+    panel.follow = false;
+    let _ = render_buf(&mut panel, 60, 40);
+    panel.top = 1;
+    let buf = render_buf(&mut panel, 60, 40);
+    let spot = panel.transcript.pictures()[0];
+    let y = (spot.line - 1) as u16;
+    assert!(painted(&buf, y..y + spot.rows));
+    assert!(!panel.pictures_settled());
 }
