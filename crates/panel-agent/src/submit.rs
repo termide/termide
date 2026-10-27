@@ -814,25 +814,9 @@ impl AgentPanel {
         let t = termide_i18n::t();
         let reason = reason.trim();
         match outcome {
-            GoalOutcome::Done => {
+            GoalOutcome::Done | GoalOutcome::Impossible => {
                 self.goal_task = None;
-                let msg = if reason.is_empty() {
-                    t.agent_notice_goal_reached().to_string()
-                } else {
-                    t.agent_notice_goal_reached_reason_fmt(reason)
-                };
-                self.notice(msg, NoticeKind::Info);
-                self.raise_attention(true);
-                return;
-            }
-            GoalOutcome::Impossible => {
-                self.goal_task = None;
-                let msg = if reason.is_empty() {
-                    t.agent_notice_goal_impossible().to_string()
-                } else {
-                    t.agent_notice_goal_impossible_reason_fmt(reason)
-                };
-                self.notice(msg, NoticeKind::Warn);
+                self.notice_goal_ending(outcome, reason);
                 self.raise_attention(true);
                 return;
             }
@@ -861,6 +845,48 @@ impl AgentPanel {
         }
         let prompt = goal_continuation(&goal, reason);
         let _ = self.send_goal_turn(prompt);
+    }
+
+    /// Record what the judge answered in the session log — while the goal
+    /// it judged still goes: one stopped meanwhile takes no verdict, and a
+    /// reopened session must not show it as reached.
+    pub(crate) fn log_goal_verdict(
+        &mut self,
+        verdict: Result<(GoalOutcome, &str), &str>,
+        reply: &str,
+    ) {
+        if self.goal_task.is_none() {
+            return;
+        }
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_goal_verdict(verdict, reply) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
+    /// The notice a goal ends on: reached, or out of reach, with the
+    /// judge's reason when it gave one. Shown when the verdict comes, and
+    /// again when a session whose goal ended so is reopened.
+    pub(crate) fn notice_goal_ending(&mut self, outcome: GoalOutcome, reason: &str) {
+        let t = termide_i18n::t();
+        let reason = reason.trim();
+        let (msg, kind) = match (outcome, reason.is_empty()) {
+            (GoalOutcome::Impossible, true) => (
+                t.agent_notice_goal_impossible().to_string(),
+                NoticeKind::Warn,
+            ),
+            (GoalOutcome::Impossible, false) => (
+                t.agent_notice_goal_impossible_reason_fmt(reason),
+                NoticeKind::Warn,
+            ),
+            (_, true) => (t.agent_notice_goal_reached().to_string(), NoticeKind::Info),
+            (_, false) => (
+                t.agent_notice_goal_reached_reason_fmt(reason),
+                NoticeKind::Info,
+            ),
+        };
+        self.notice(msg, kind);
     }
 
     /// A judge call failed: tried again after a wait, a few times; then the

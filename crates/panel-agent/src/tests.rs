@@ -2513,6 +2513,73 @@ fn goal_works_turn_by_turn_until_the_judge_says_done() {
         ));
 }
 
+/// A judge that echoes its instructions gives no verdict: the goal is not
+/// dropped, the check is tried again, and the answer is in the log.
+#[test]
+fn an_echoed_instruction_from_the_judge_keeps_the_goal() {
+    let dir = tempfile::tempdir().unwrap();
+    let echo = "`DONE` if the goal is fully achieved";
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("working"), reply(echo)])
+    });
+    type_text(&mut panel, "/goal get the build green");
+    panel.submit();
+    settle(&mut panel);
+    panel.goal_task.as_mut().unwrap().judge_at = Some(Instant::now());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while panel.goal_task.as_ref().unwrap().judge_failures == 0 {
+        panel.tick();
+        assert!(Instant::now() < deadline, "the check never came back");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let task = panel.goal_task.as_ref().expect("the goal stays");
+    assert!(task.judge_at.is_some(), "the check is tried again");
+    assert!(!panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if text.contains("goal reached"))));
+    let logged = Session::open_read_only(panel.session.as_ref().unwrap().path()).unwrap();
+    let verdicts: Vec<&EntryKind> = logged
+        .branch()
+        .into_iter()
+        .map(|e| &e.kind)
+        .filter(|k| matches!(k, EntryKind::GoalVerdict { .. }))
+        .collect();
+    assert!(
+        matches!(
+            verdicts.as_slice(),
+            [EntryKind::GoalVerdict { outcome: None, error, reply, .. }]
+                if error.contains("no verdict") && reply == echo
+        ),
+        "{verdicts:?}"
+    );
+}
+
+/// A session whose goal the judge ended shows how it ended when reopened.
+#[test]
+fn a_reached_goal_is_told_again_on_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("working"), reply("DONE\neverything is green")])
+    });
+    type_text(&mut panel, "/goal get the build green");
+    panel.submit();
+    settle_goal(&mut panel);
+    panel.tick();
+    let path = panel.session.as_ref().unwrap().path().to_path_buf();
+    drop(panel);
+    let panel = reopen(&path, dir.path(), vec![]);
+    let reached = termide_i18n::t().agent_notice_goal_reached_reason_fmt("everything is green");
+    assert!(matches!(
+        panel.transcript().items().last(),
+        Some(Item::Notice { text, .. }) if *text == reached
+    ));
+    assert!(panel.goal_task.is_none());
+}
+
 /// A goal's work turn that the judge takes up next rings no bell, however
 /// long it ran; the goal's end does.
 #[test]
@@ -2529,6 +2596,7 @@ fn a_goal_rings_only_when_it_ends() {
     panel.apply(AgentEvent::GoalJudged {
         outcome: termide_agent_core::GoalOutcome::Done,
         reason: "done".into(),
+        reply: "DONE\ndone".into(),
     });
     assert!(panel.goal_task.is_none());
     assert!(panel.rung);
@@ -10154,6 +10222,7 @@ fn a_failing_goal_check_is_tried_again_then_pauses_the_goal() {
     settle(&mut panel);
     let fail = || AgentEvent::GoalJudgeFailed {
         error: "session/prompt: Internal error (code -32603)".into(),
+        reply: String::new(),
     };
     // The first failures wait and try again; the goal stays.
     for attempt in 1..=GOAL_JUDGE_RETRIES {
@@ -10190,6 +10259,7 @@ fn a_goal_paused_by_failing_checks_ends_with_goal_stop() {
     for _ in 0..=GOAL_JUDGE_RETRIES {
         panel.apply(AgentEvent::GoalJudgeFailed {
             error: "boom".into(),
+            reply: String::new(),
         });
     }
     assert!(panel.paused);

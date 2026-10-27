@@ -492,16 +492,21 @@ pub enum AgentEvent {
     },
     /// The autonomous-goal judge ran (`/goal`) and returned its verdict: the
     /// goal is reached, cannot be reached, or more work is needed, with a
-    /// one-line reason.
+    /// one-line reason. `reply` is the judge's answer as it came, for the
+    /// session log.
     GoalJudged {
         outcome: GoalOutcome,
         reason: String,
+        reply: String,
     },
     /// The judge call's stream, for its live progress (`/goal`).
     GoalJudgeUpdate(StreamEvent),
-    /// The judge call did not succeed; the goal loop stops.
+    /// The judge call did not succeed, or its answer held no verdict
+    /// (`reply`, empty when there was no answer): the check is tried again,
+    /// then the goal pauses.
     GoalJudgeFailed {
         error: String,
+        reply: String,
     },
     /// A `/handoff` brief was produced (or the call failed): the forward-looking
     /// brief for a fresh session, or an error to report.
@@ -1485,7 +1490,7 @@ impl Agent {
     /// read-only call on a copy of the transcript with the goal prompts and no
     /// tools; the transcript is untouched. Emits [`AgentEvent::GoalJudged`]
     /// with the verdict, or [`AgentEvent::GoalJudgeFailed`] and an `Err` when
-    /// the call does not succeed.
+    /// the call does not succeed or its answer holds no verdict.
     pub fn judge(
         &self,
         goal: &str,
@@ -1515,15 +1520,28 @@ impl Agent {
                 .unwrap_or_else(|| "the judge call did not complete".to_string());
             emit(AgentEvent::GoalJudgeFailed {
                 error: error.clone(),
+                reply: String::new(),
             });
             return Err(error);
         }
-        let verdict = parse_verdict(&reply.plain_text());
-        emit(AgentEvent::GoalJudged {
-            outcome: verdict.outcome,
-            reason: verdict.reason.clone(),
-        });
-        Ok(verdict)
+        let text = reply.plain_text();
+        match parse_verdict(&text) {
+            Ok(verdict) => {
+                emit(AgentEvent::GoalJudged {
+                    outcome: verdict.outcome,
+                    reason: verdict.reason.clone(),
+                    reply: text,
+                });
+                Ok(verdict)
+            }
+            Err(error) => {
+                emit(AgentEvent::GoalJudgeFailed {
+                    error: error.clone(),
+                    reply: text,
+                });
+                Err(error)
+            }
+        }
     }
 
     /// Write a handoff brief: a forward-looking summary of the unfinished work
@@ -2327,6 +2345,7 @@ mod tests {
             &AgentEvent::GoalJudged {
                 outcome: GoalOutcome::Continue,
                 reason: "the build still fails".into(),
+                reply: "CONTINUE\nthe build still fails".into(),
             }
         );
         assert!(stream
@@ -2351,6 +2370,27 @@ mod tests {
             .expect("judge succeeds");
         assert_eq!(verdict.outcome, GoalOutcome::Done);
         assert_eq!(verdict.reason, "everything compiles and tests pass");
+    }
+
+    #[test]
+    fn an_echoed_instruction_fails_the_check() {
+        let echo = "`DONE` if the goal is fully achieved";
+        let (agent, _provider) = agent(
+            ScriptedProvider::new(vec![text_reply(echo)]),
+            ToolRegistry::new(),
+        );
+        let mut events = Vec::new();
+        let error = agent
+            .judge("ship it", &CancelToken::new(), &mut |e| events.push(e))
+            .expect_err("no verdict");
+        assert!(error.contains("no verdict"), "{error}");
+        assert_eq!(
+            events.last(),
+            Some(&AgentEvent::GoalJudgeFailed {
+                error,
+                reply: echo.into(),
+            })
+        );
     }
 
     #[test]

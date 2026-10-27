@@ -814,17 +814,22 @@ impl Backend for AcpRuntime {
                 shared.goal.request
             );
             let event = match shared.side_query(&text) {
-                Ok(reply) if !reply.trim().is_empty() => {
-                    let verdict = parse_verdict(&reply);
-                    AgentEvent::GoalJudged {
+                Ok(reply) if !reply.trim().is_empty() => match parse_verdict(&reply) {
+                    Ok(verdict) => AgentEvent::GoalJudged {
                         outcome: verdict.outcome,
                         reason: verdict.reason,
-                    }
-                }
+                        reply,
+                    },
+                    Err(error) => AgentEvent::GoalJudgeFailed { error, reply },
+                },
                 Ok(_) => AgentEvent::GoalJudgeFailed {
                     error: "the judge call did not complete".to_string(),
+                    reply: String::new(),
                 },
-                Err(error) => AgentEvent::GoalJudgeFailed { error },
+                Err(error) => AgentEvent::GoalJudgeFailed {
+                    error,
+                    reply: String::new(),
+                },
             };
             let _ = shared.events.send(event);
         });
@@ -5376,7 +5381,8 @@ mod tests {
         let events = events_until(&runtime, |e| matches!(e, AgentEvent::GoalJudged { .. }));
         assert!(events.contains(&AgentEvent::GoalJudged {
             outcome: termide_agent_core::GoalOutcome::Done,
-            reason: "the tests pass".into()
+            reason: "the tests pass".into(),
+            reply: "DONE\nthe tests pass".into(),
         }));
         // Nothing of it reached the transcript.
         assert!(!events

@@ -22,6 +22,7 @@ use crate::compaction::{CompactionCall, CompactionPrompts};
 use crate::context::file_timestamp;
 use crate::failure::Failure;
 use crate::fit::{fit, FitStep};
+use crate::goal::GoalOutcome;
 use crate::message::{now_millis, Message, StopReason, UserMessage};
 use crate::permissions::Mode;
 use crate::provider::ThinkingLevel;
@@ -214,7 +215,26 @@ pub enum EntryKind {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         reports: Vec<UserMessage>,
     },
+    /// What the `/goal` judge answered: the `outcome` read from it with its
+    /// `reason`, or no outcome and the `error` the check failed on — no
+    /// answer, or one holding no verdict. `reply` is the answer as it came,
+    /// cut to [`JUDGE_REPLY_CHARS`]. Changes nothing on the branch; it is
+    /// there to tell afterwards what the judge said, and so a reopened
+    /// session shows how its goal ended, see [`Session::goal_ending`].
+    GoalVerdict {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        outcome: Option<GoalOutcome>,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reason: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        error: String,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        reply: String,
+    },
 }
+
+/// How much of a judge's answer a [`EntryKind::GoalVerdict`] keeps.
+pub const JUDGE_REPLY_CHARS: usize = 4_000;
 
 /// The unattended work a session has going: a `/goal`, a `/loop`, or both.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -1027,6 +1047,7 @@ impl Session {
                 | EntryKind::Retry { .. }
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
+                | EntryKind::GoalVerdict { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1075,6 +1096,7 @@ impl Session {
                 | EntryKind::Retry { .. }
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
+                | EntryKind::GoalVerdict { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1255,6 +1277,7 @@ impl Session {
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. }
+                | EntryKind::GoalVerdict { .. }
                 | EntryKind::Fitted { .. } => None,
             })
     }
@@ -1390,6 +1413,7 @@ impl Session {
                 | EntryKind::Retry { .. }
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
+                | EntryKind::GoalVerdict { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
         }
@@ -1440,6 +1464,48 @@ impl Session {
         self.append(EntryKind::Autorun {
             autorun: autorun.clone(),
         })
+    }
+
+    /// Record what the `/goal` judge answered: the verdict read from `reply`,
+    /// or (`Err`) why the check failed. See [`EntryKind::GoalVerdict`].
+    pub fn append_goal_verdict(
+        &mut self,
+        verdict: Result<(GoalOutcome, &str), &str>,
+        reply: &str,
+    ) -> std::io::Result<String> {
+        let (outcome, reason, error) = match verdict {
+            Ok((outcome, reason)) => (Some(outcome), reason, ""),
+            Err(error) => (None, "", error),
+        };
+        self.append(EntryKind::GoalVerdict {
+            outcome,
+            reason: reason.to_string(),
+            error: error.to_string(),
+            reply: reply.chars().take(JUDGE_REPLY_CHARS).collect(),
+        })
+    }
+
+    /// How the branch's goal ended, when the judge's verdict ending it —
+    /// `DONE` or `IMPOSSIBLE` — is the last word of the conversation, no
+    /// message after it: the outcome and its reason, so a reopened session
+    /// shows the notice the panel showed then.
+    #[must_use]
+    pub fn goal_ending(&self) -> Option<(GoalOutcome, String)> {
+        let branch = self.branch();
+        let last = branch.into_iter().rev().find(|entry| {
+            matches!(
+                entry.kind,
+                EntryKind::GoalVerdict { .. } | EntryKind::Message { .. }
+            )
+        })?;
+        match &last.kind {
+            EntryKind::GoalVerdict {
+                outcome: Some(outcome @ (GoalOutcome::Done | GoalOutcome::Impossible)),
+                reason,
+                ..
+            } => Some((*outcome, reason.clone())),
+            _ => None,
+        }
     }
 
     /// Record a failed request the panel still holds (`None`: it let it go),
@@ -1696,6 +1762,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::HeldReports { .. }
             | EntryKind::Autorun { .. }
             | EntryKind::CompactionFailed { .. }
+            | EntryKind::GoalVerdict { .. }
             | EntryKind::Fitted { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
@@ -2268,6 +2335,84 @@ mod tests {
                 call: call.clone(),
                 reply: "Looking:".into(),
             }));
+    }
+
+    #[test]
+    fn the_judges_answers_are_logged_and_the_ending_one_survives_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("work")))
+            .unwrap();
+        session.append_message(&agent_reply("did it")).unwrap();
+        let before = session.context_messages();
+        // A failed check and a verdict to go on end no goal.
+        session
+            .append_goal_verdict(Err("the judge gave no verdict"), "`DONE` if the goal…")
+            .unwrap();
+        assert_eq!(session.goal_ending(), None);
+        session
+            .append_goal_verdict(
+                Ok((GoalOutcome::Continue, "tests fail")),
+                "CONTINUE\ntests fail",
+            )
+            .unwrap();
+        assert_eq!(session.goal_ending(), None);
+        session
+            .append_goal_verdict(Ok((GoalOutcome::Done, "tests pass")), "DONE\ntests pass")
+            .unwrap();
+        session.append_run_end(false).unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+
+        let mut session = Session::open(&path).unwrap();
+        // The entries change nothing in the context.
+        assert_eq!(session.context_messages(), before);
+        let logged: Vec<&EntryKind> = session
+            .branch()
+            .into_iter()
+            .map(|e| &e.kind)
+            .filter(|kind| matches!(kind, EntryKind::GoalVerdict { .. }))
+            .collect();
+        assert_eq!(
+            logged,
+            [
+                &EntryKind::GoalVerdict {
+                    outcome: None,
+                    reason: String::new(),
+                    error: "the judge gave no verdict".into(),
+                    reply: "`DONE` if the goal…".into(),
+                },
+                &EntryKind::GoalVerdict {
+                    outcome: Some(GoalOutcome::Continue),
+                    reason: "tests fail".into(),
+                    error: String::new(),
+                    reply: "CONTINUE\ntests fail".into(),
+                },
+                &EntryKind::GoalVerdict {
+                    outcome: Some(GoalOutcome::Done),
+                    reason: "tests pass".into(),
+                    error: String::new(),
+                    reply: "DONE\ntests pass".into(),
+                },
+            ]
+        );
+        assert_eq!(
+            session.goal_ending(),
+            Some((GoalOutcome::Done, "tests pass".into()))
+        );
+        // Once the conversation goes on, the ending is behind it.
+        session
+            .append_message(&Message::User(UserMessage::text("more")))
+            .unwrap();
+        assert_eq!(session.goal_ending(), None);
+
+        // On disk, with a stable tag; an older log has none and reads as before.
+        let line = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            line.contains(r#""type":"goal_verdict","outcome":"done""#),
+            "{line}"
+        );
     }
 
     #[test]
