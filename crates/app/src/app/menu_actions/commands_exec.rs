@@ -293,6 +293,20 @@ impl App {
         Ok(())
     }
 
+    /// A debug command run with parameter values and no panel to draw on:
+    /// its placeholders filled from `params` alone, and the values as the
+    /// environment, as a confirmed form gives them.
+    pub(in crate::app) fn debug_command_with_params(
+        command: &CommandItem,
+        params: &HashMap<String, String>,
+    ) -> (CommandItem, Vec<(String, String)>) {
+        let values = params
+            .iter()
+            .map(|(name, value)| (name.clone(), PlaceholderValue::One(value.clone())))
+            .collect();
+        (expand_debug_command(command, &values), param_env(params))
+    }
+
     /// The values of the placeholders `command` uses: its parameters', then
     /// the focused panel's and the project's; the message to show when the
     /// panel has no value for one it uses.

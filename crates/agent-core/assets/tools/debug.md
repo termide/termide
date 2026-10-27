@@ -5,7 +5,7 @@ guideline.2: `start` takes a command with a debug adapter (`lldb-dap`, `gdb-dap`
 guideline.3: `stop` the session when you have what you came for; the program and the debug panel stay with the user otherwise.
 ---
 Drive the debugger, as the user does in the debug panel. `action` says what to do:
-- `start`: debug `command` (the identifier or label of a command with a `debugger` in commands.toml) or `file` (a Python script, the Go package in a file's directory, or the Cargo binary a Rust file belongs to), with the project's breakpoints set; waits until the program stops or ends, through any `build` first.
+- `start`: debug `command` (the identifier or label of a command with a `debugger` in commands.toml) or `file` (a Python script, the Go package in a file's directory, or the Cargo binary a Rust file belongs to), with the project's breakpoints set; waits until the program stops or ends, through any `build` first. A command's parameters take `params` by name, and the rest their defaults.
 - `breakpoint`: set the breakpoint at `file`:`line` (1-based), or remove it with `set: false`; a running session gets it at once.
 - `continue`, `step_over`, `step_in`, `step_out`: resume the stopped program and wait for the next stop or the end.
 - `pause`: stop the running program where it is. `stop`: end the session and the program.

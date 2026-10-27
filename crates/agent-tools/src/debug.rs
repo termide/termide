@@ -3,6 +3,7 @@
 //! evaluate expressions. Like `task`, the tool holds no session machinery:
 //! the app supplies the closure that reaches its debug session.
 
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -19,10 +20,12 @@ pub enum DebugAction {
     /// The session as it stands.
     State,
     /// Start debugging: a command of `commands.toml` by its identifier or
-    /// label, or a file that needs no command.
+    /// label, or a file that needs no command. `params` are values for the
+    /// command's parameters by name; the rest take what its form opens with.
     Start {
         command: Option<String>,
         file: Option<PathBuf>,
+        params: BTreeMap<String, String>,
     },
     /// Set (or, with `set` false, remove) the breakpoint at a 1-based line.
     Breakpoint {
@@ -101,7 +104,15 @@ pub fn parse_action(call: &ToolCall, ctx: &ToolContext) -> Result<DebugAction, S
             if command.is_none() && file.is_none() {
                 return Err("`start` needs `command` (from commands.toml) or `file`".into());
             }
-            DebugAction::Start { command, file }
+            let params = start_params(call)?;
+            if command.is_none() && !params.is_empty() {
+                return Err("`params` go with `command`; a file takes none".into());
+            }
+            DebugAction::Start {
+                command,
+                file,
+                params,
+            }
         }
         "breakpoint" => {
             let file = file(true)?.unwrap_or_default();
@@ -148,6 +159,31 @@ pub fn parse_action(call: &ToolCall, ctx: &ToolContext) -> Result<DebugAction, S
     })
 }
 
+/// The `params` of a `start`: a string, number or boolean by name, each as
+/// the text the command's form would hold.
+fn start_params(call: &ToolCall) -> Result<BTreeMap<String, String>, String> {
+    let map = match call.arguments.get("params") {
+        None | Some(Value::Null) => return Ok(BTreeMap::new()),
+        Some(Value::Object(map)) => map,
+        Some(_) => return Err("`params` must be an object of values by name".into()),
+    };
+    map.iter()
+        .map(|(name, value)| {
+            let text = match value {
+                Value::String(text) => text.clone(),
+                Value::Number(n) => n.to_string(),
+                Value::Bool(b) => b.to_string(),
+                _ => {
+                    return Err(format!(
+                        "`params.{name}` must be a string, number or boolean"
+                    ))
+                }
+            };
+            Ok((name.clone(), text))
+        })
+        .collect()
+}
+
 impl Tool for DebugTool {
     fn name(&self) -> &str {
         "debug"
@@ -169,6 +205,11 @@ impl Tool for DebugTool {
                 "command": {
                     "type": "string",
                     "description": "start: the identifier or label of a command with a `debugger` in commands.toml"
+                },
+                "params": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "start: values for the command's parameters by name; the rest take their defaults"
                 },
                 "file": {
                     "type": "string",
@@ -253,9 +294,29 @@ mod tests {
             parse(json!({ "action": "start", "command": "debug-app" })),
             Ok(DebugAction::Start {
                 command: Some("debug-app".into()),
-                file: None
+                file: None,
+                params: BTreeMap::new()
             })
         );
+        assert_eq!(
+            parse(json!({
+                "action": "start",
+                "command": "debug-app",
+                "params": { "port": 8091, "data": ".run-debug", "trace": true }
+            })),
+            Ok(DebugAction::Start {
+                command: Some("debug-app".into()),
+                file: None,
+                params: [("data", ".run-debug"), ("port", "8091"), ("trace", "true")]
+                    .into_iter()
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect()
+            })
+        );
+        assert!(
+            parse(json!({ "action": "start", "file": "a.py", "params": { "x": "1" } })).is_err()
+        );
+        assert!(parse(json!({ "action": "start", "command": "a", "params": ["x"] })).is_err());
         assert_eq!(
             parse(json!({ "action": "evaluate", "expression": " a + 1 " })),
             Ok(DebugAction::Evaluate {

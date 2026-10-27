@@ -125,6 +125,82 @@ pub struct CommandParam {
     pub default: Option<String>,
 }
 
+impl CommandParam {
+    /// The value the form opens with: the default, else an empty text, an
+    /// unchecked box or the first option.
+    #[must_use]
+    pub fn initial_value(&self) -> String {
+        match self.param_type {
+            CommandParamType::Text | CommandParamType::Number => {
+                self.default.clone().unwrap_or_default()
+            }
+            CommandParamType::Bool => (self.default.as_deref() == Some("true")).to_string(),
+            CommandParamType::Select => self
+                .default
+                .as_ref()
+                .filter(|d| self.options.contains(d))
+                .or_else(|| self.options.first())
+                .cloned()
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Whether `value` is one this parameter can take from its form.
+    fn accepts(&self, value: &str) -> Result<(), String> {
+        let fits = match self.param_type {
+            CommandParamType::Text => true,
+            CommandParamType::Number => value.trim().parse::<f64>().is_ok(),
+            CommandParamType::Bool => matches!(value, "true" | "false"),
+            CommandParamType::Select => self.options.iter().any(|o| o == value),
+        };
+        if fits {
+            return Ok(());
+        }
+        Err(match &self.param_type {
+            CommandParamType::Select => format!(
+                "`{}` is one of {}, not {value}",
+                self.name,
+                self.options.join(", ")
+            ),
+            other => format!("`{}` takes a {}, not {value}", self.name, other.as_str()),
+        })
+    }
+}
+
+/// The values of a command's `params` for a run that has no form to fill:
+/// `given` by name, the rest as the form would open with them (see
+/// [`CommandParam::initial_value`]). A name the command does not declare, or
+/// a value its form could not hold, is an error saying so.
+pub fn param_values(
+    params: &[CommandParam],
+    given: &HashMap<String, String>,
+) -> Result<HashMap<String, String>, String> {
+    if let Some(unknown) = given.keys().find(|k| !params.iter().any(|p| &p.name == *k)) {
+        let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+        return Err(if names.is_empty() {
+            format!("no parameter `{unknown}`: the command takes none")
+        } else {
+            format!(
+                "no parameter `{unknown}`; the command takes {}",
+                names.join(", ")
+            )
+        });
+    }
+    params
+        .iter()
+        .map(|param| {
+            let value = match given.get(&param.name) {
+                Some(value) => {
+                    param.accepts(value)?;
+                    value.clone()
+                }
+                None => param.initial_value(),
+            };
+            Ok((param.name.clone(), value))
+        })
+        .collect()
+}
+
 /// Metadata for a single command, parsed from a [command_name] section in commands.toml.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CommandMetadata {
@@ -780,6 +856,60 @@ impl CommandsRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn param(name: &str, param_type: CommandParamType, default: Option<&str>) -> CommandParam {
+        CommandParam {
+            name: name.into(),
+            label: String::new(),
+            param_type,
+            options: Vec::new(),
+            default: default.map(str::to_string),
+        }
+    }
+
+    /// Without a form, the values are the given ones checked as the form
+    /// would hold them, and the rest what the form opens with.
+    #[test]
+    fn param_values_fill_in_what_the_form_opens_with() {
+        let mut target = param("target", CommandParamType::Select, None);
+        target.options = vec!["staging".into(), "production".into()];
+        let params = vec![
+            param("port", CommandParamType::Number, Some("8090")),
+            param("data", CommandParamType::Text, None),
+            param("verbose", CommandParamType::Bool, None),
+            target,
+        ];
+        let given = |pairs: &[(&str, &str)]| -> HashMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        };
+        let values = param_values(&params, &given(&[])).unwrap();
+        assert_eq!(values["port"], "8090");
+        assert_eq!(values["data"], "");
+        assert_eq!(values["verbose"], "false");
+        assert_eq!(values["target"], "staging");
+
+        let values = param_values(
+            &params,
+            &given(&[("port", "9000"), ("target", "production")]),
+        )
+        .unwrap();
+        assert_eq!(values["port"], "9000");
+        assert_eq!(values["target"], "production");
+
+        assert!(param_values(&params, &given(&[("port", "x")]))
+            .unwrap_err()
+            .contains("number"));
+        assert!(param_values(&params, &given(&[("target", "dev")]))
+            .unwrap_err()
+            .contains("staging, production"));
+        assert!(param_values(&params, &given(&[("verbose", "yes")])).is_err());
+        assert!(param_values(&params, &given(&[("prot", "1")]))
+            .unwrap_err()
+            .contains("port, data, verbose, target"));
+    }
 
     #[test]
     fn test_parse_commands_toml() {
