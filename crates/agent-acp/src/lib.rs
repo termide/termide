@@ -37,6 +37,7 @@ use termide_agent_core::{
     ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage,
     ACP_PROVIDER, RECAP_LIMIT,
 };
+use termide_agent_core::{CompactionCall, CompactionReason};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
 mod provider;
@@ -334,6 +335,24 @@ struct Shared {
     /// answer text and after anything else (milliseconds).
     quiet_after_text_ms: AtomicU64,
     quiet_ms: AtomicU64,
+    /// The compaction of its context the agent reported started
+    /// (`compaction_update`), until it reports how it ended.
+    compaction: Mutex<Option<OpenCompaction>>,
+    /// The id of the compaction that ended last: the agent may repeat its
+    /// end, which must not reach the panel twice.
+    compaction_ended: Mutex<Option<String>>,
+}
+
+/// A compaction the agent runs on its own context, as its
+/// `compaction_update` and `compaction_summary_chunk` reported it so far.
+struct OpenCompaction {
+    id: String,
+    /// The summary that replaces the history, as far as it came.
+    summary: String,
+    /// The context's fill when it began, as `usage_update` last stated it.
+    tokens_before: u64,
+    reason: CompactionReason,
+    started: Instant,
 }
 
 /// How long an agent working by itself must stay quiet after its answer
@@ -578,6 +597,8 @@ impl AcpRuntime {
             unsolicited: AtomicBool::new(false),
             last_update: Mutex::new(Instant::now()),
             last_was_text: AtomicBool::new(false),
+            compaction: Mutex::new(None),
+            compaction_ended: Mutex::new(None),
             quiet_after_text_ms: AtomicU64::new(UNSOLICITED_QUIET_AFTER_TEXT.as_millis() as u64),
             quiet_ms: AtomicU64::new(UNSOLICITED_QUIET.as_millis() as u64),
         });
@@ -1040,7 +1061,10 @@ impl Shared {
                 "protocolVersion": PROTOCOL_VERSION,
                 "clientCapabilities": {
                     "fs": { "readTextFile": true, "writeTextFile": true },
-                    "terminal": false
+                    "terminal": false,
+                    // Its own compactions reported as such, not as a made-up
+                    // "Compact conversation" tool call.
+                    "session": { "compaction": {} }
                 },
                 "clientInfo": { "name": "termide", "version": env!("CARGO_PKG_VERSION") }
             }),
@@ -2612,6 +2636,8 @@ impl Shared {
                     | "tool_call"
                     | "tool_call_update"
                     | "plan"
+                    | "compaction_update"
+                    | "compaction_summary_chunk"
             )
         {
             return;
@@ -2734,6 +2760,28 @@ impl Shared {
                         .unwrap_or_else(PoisonError::into_inner) = rejected_until(limit);
                 }
             }
+            "compaction_update" => self.on_compaction_update(update),
+            "compaction_summary_chunk" => {
+                let text = update["content"]["text"].as_str().unwrap_or("");
+                let Some(id) = update["compactionId"].as_str() else {
+                    return;
+                };
+                if self.open_compaction(id) {
+                    if let Some(open) = self
+                        .compaction
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .as_mut()
+                    {
+                        open.summary.push_str(text);
+                    }
+                    let _ = self
+                        .events
+                        .send(AgentEvent::CompactionUpdate(StreamEvent::TextDelta(
+                            text.to_string(),
+                        )));
+                }
+            }
             "current_model_update" => {
                 if let Some(id) = update["modelId"].as_str() {
                     *self
@@ -2774,6 +2822,137 @@ impl Shared {
             }
             other => log::debug!("acp {}: update {other} ignored", self.name),
         }
+    }
+
+    /// Make the compaction `id` the open one, starting it when it is new;
+    /// `false` for one that already ended, whose late reports are dropped.
+    fn open_compaction(&self, id: &str) -> bool {
+        if self
+            .compaction_ended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_deref()
+            == Some(id)
+        {
+            return false;
+        }
+        if self
+            .compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|open| open.id == id)
+        {
+            return true;
+        }
+        // Text streamed so far is its own message, before the compaction.
+        self.close_message(StopReason::ToolUse, None);
+        let tokens_before = self
+            .context
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .map_or(0, |(used, _)| used);
+        let reason = if self.prompted_compact() {
+            CompactionReason::Manual
+        } else {
+            CompactionReason::Threshold
+        };
+        *self
+            .compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(OpenCompaction {
+            id: id.to_string(),
+            summary: String::new(),
+            tokens_before,
+            reason,
+            started: Instant::now(),
+        });
+        let _ = self.events.send(AgentEvent::CompactionStart {
+            reason,
+            prompt_tokens: tokens_before,
+        });
+        true
+    }
+
+    /// Whether the turn running was asked for with the agent's `/compact`.
+    fn prompted_compact(&self) -> bool {
+        self.last_prompt
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|blocks| blocks.last())
+            .and_then(|block| block["text"].as_str())
+            .and_then(|text| text.trim_start().strip_prefix("/compact"))
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace))
+    }
+
+    /// A `compaction_update`: the compaction it names starts, takes the
+    /// summary it carries, and ends on a final status. A finished one
+    /// replaces the history with its summary, as the built-in loop's does.
+    fn on_compaction_update(&self, update: &Value) {
+        let Some(id) = update["compactionId"].as_str() else {
+            return;
+        };
+        if !self.open_compaction(id) {
+            return;
+        }
+        let mut guard = self
+            .compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let Some(open) = guard.as_mut() else {
+            return;
+        };
+        // A summary given replaces what came in chunks; `null` or `[]`
+        // clears it, and its absence keeps it.
+        if let Some(summary) = update.get("summary") {
+            open.summary = blocks_text(summary);
+        }
+        let status = update["status"].as_str().unwrap_or("");
+        if !matches!(status, "completed" | "failed" | "cancelled") {
+            // `in_progress`, or a status this client does not know.
+            return;
+        }
+        let Some(open) = guard.take() else {
+            return;
+        };
+        drop(guard);
+        *self
+            .compaction_ended
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(open.id.clone());
+        let summary = open.summary.trim().to_string();
+        let event = if status == "completed" {
+            AgentEvent::Compacted {
+                // Claude Code keeps nothing of the history verbatim.
+                kept: 0,
+                tokens_before: open.tokens_before,
+                // Corrected by the `usage_update` that follows.
+                tokens_after: (summary.chars().count() / 4) as u64,
+                call: CompactionCall {
+                    reason: open.reason,
+                    stop_reason: StopReason::Stop,
+                    duration_ms: open.started.elapsed().as_millis() as u64,
+                    usage: Usage::default(),
+                    thinking_chars: 0,
+                    tool_calls: Vec::new(),
+                    input_cut: Vec::new(),
+                },
+                summary,
+            }
+        } else {
+            AgentEvent::CompactionFailed {
+                error: update["error"]
+                    .as_str()
+                    .filter(|error| !error.is_empty())
+                    .unwrap_or(status)
+                    .to_string(),
+                tokens_before: open.tokens_before,
+                call: None,
+                reply: String::new(),
+            }
+        };
+        let _ = self.events.send(event);
     }
 
     /// Show a call that starts, and hold it for the log.
@@ -3287,6 +3466,17 @@ fn content_text(content: &Value) -> String {
     out
 }
 
+/// The text of a list of ACP content blocks, its text blocks one after
+/// another; empty for anything else.
+fn blocks_text(blocks: &Value) -> String {
+    blocks
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|block| block["text"].as_str())
+        .collect()
+}
+
 fn absolute(cwd: &Path, path: &str) -> PathBuf {
     let path = Path::new(path);
     if path.is_absolute() {
@@ -3780,6 +3970,115 @@ mod tests {
             ended.details,
             Some(json!({ "said": "echoed", "call": "t1" }))
         );
+    }
+
+    #[test]
+    fn the_agents_own_compaction_reaches_the_panel_as_a_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        // Asked for, so the agent does not stand a tool call in for it.
+        let init = seen_where(&seen, |m| m["method"] == "initialize").remove(0);
+        assert_eq!(
+            init["params"]["clientCapabilities"]["session"]["compaction"],
+            json!({})
+        );
+        let shared = &runtime.shared;
+        runtime.drain();
+        shared.on_update(
+            &json!({ "sessionUpdate": "usage_update", "used": 230_000, "size": 262_144 }),
+        );
+        shared.on_update(&json!({
+            "sessionUpdate": "agent_message_chunk", "content": { "type": "text", "text": "Reading." },
+        }));
+        // As Claude Code goes about it: the start, the summary streamed,
+        // the end with the summary whole, and the end again.
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "in_progress",
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_summary_chunk", "compactionId": "c1",
+            "content": { "type": "text", "text": "## Kept" },
+        }));
+        let summary = "## Kept\nThe user wants the parser fixed.";
+        let end = json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "completed",
+            "summary": [{ "type": "text", "text": summary }],
+        });
+        shared.on_update(&end);
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "completed",
+        }));
+        let events = runtime.drain();
+        let at = |pick: &dyn Fn(&AgentEvent) -> bool| events.iter().position(pick);
+        let text_end = at(&|e| matches!(e, AgentEvent::MessageEnd(_))).expect("text closed");
+        let start = at(&|e| {
+            matches!(
+                e,
+                AgentEvent::CompactionStart {
+                    reason: CompactionReason::Threshold,
+                    prompt_tokens: 230_000
+                }
+            )
+        })
+        .expect("compaction starts");
+        assert!(text_end < start, "{events:?}");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::CompactionUpdate(StreamEvent::TextDelta(text)) if text == "## Kept"
+        )));
+        let ended: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::Compacted {
+                    summary,
+                    kept,
+                    tokens_before,
+                    ..
+                } => Some((summary.as_str(), *kept, *tokens_before)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ended, [(summary, 0, 230_000)], "{events:?}");
+        // No tool call stands for it.
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+    }
+
+    #[test]
+    fn an_interrupted_compaction_of_the_agent_ends_as_failed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        runtime.drain();
+        // Reported only at its end, as a runtime with no start may.
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c2", "status": "cancelled",
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c3", "status": "failed",
+            "error": "aborted",
+        }));
+        let failed: Vec<String> = runtime
+            .drain()
+            .into_iter()
+            .filter_map(|e| match e {
+                AgentEvent::CompactionFailed { error, .. } => Some(error),
+                AgentEvent::Compacted { .. } => panic!("nothing was compacted"),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(failed, ["cancelled", "aborted"]);
     }
 
     #[test]
