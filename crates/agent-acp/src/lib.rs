@@ -685,8 +685,10 @@ impl Backend for AcpRuntime {
             self.shared.finish_unsolicited(StopReason::Stop, None);
             return;
         }
+        // Held while the agent compacts, see [`Shared::compacting`].
         if self.shared.steering.load(Ordering::Acquire)
             && self.shared.turn_running.load(Ordering::Acquire)
+            && !self.shared.compacting()
         {
             self.shared.steer_now(message);
         }
@@ -2964,7 +2966,7 @@ impl Shared {
     }
 
     /// End the open compaction with `status` (`completed`, `failed` or
-    /// `cancelled`).
+    /// `cancelled`) and hand the turn the messages held while it ran.
     /// `tokens_before` is the agent's own count of the context it began
     /// with, when it gives one.
     fn end_compaction(
@@ -3016,6 +3018,32 @@ impl Shared {
             }
         };
         let _ = self.events.send(event);
+        self.steer_held();
+    }
+
+    /// Whether the agent is compacting its context: a message steered into
+    /// the turn now would abort the compaction (Claude Code delivers a steer
+    /// by interrupting the model call running), so it waits for the end.
+    fn compacting(&self) -> bool {
+        self.compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Hand the running turn the messages that waited for its compaction.
+    fn steer_held(self: &Arc<Self>) {
+        if !self.steering.load(Ordering::Acquire) || !self.turn_running.load(Ordering::Acquire) {
+            return;
+        }
+        let held = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        for message in held {
+            self.steer_now(message);
+        }
     }
 
     /// Show a call that starts, and hold it for the log.
@@ -4341,6 +4369,47 @@ mod tests {
             .drain()
             .iter()
             .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+    }
+
+    #[test]
+    fn a_message_typed_while_the_agent_compacts_joins_the_turn_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shared.session_id().is_err() {
+            assert!(Instant::now() < deadline, "no session");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // A turn of an agent that steers is running.
+        shared.steering.store(true, Ordering::Release);
+        shared.turn_running.store(true, Ordering::Release);
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "in_progress",
+        }));
+        let message = UserMessage::text("more");
+        runtime.steer(message.clone());
+        // Steered now, it would abort the compaction: it waits.
+        assert_eq!(*shared.queue.lock().unwrap(), [message]);
+        assert!(shared.steering_out.lock().unwrap().is_empty());
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "failed",
+            "error": "aborted",
+        }));
+        let steering = loop {
+            let steering = seen_where(&seen, |m| m["method"] == "_session/steering");
+            if !steering.is_empty() {
+                break steering;
+            }
+            assert!(Instant::now() < deadline, "the message never went");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(steering[0]["params"]["prompt"][0]["text"], "more");
     }
 
     #[test]

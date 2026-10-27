@@ -239,7 +239,9 @@ The rest of the panel works with them as with the built-in loop:
 - A message typed while the agent works joins the turn it is running, as a
   steering message joins the built-in loop's, when the agent takes one
   (Claude Code's and Codex's adapters do); otherwise it waits in the state
-  strip and goes as the next request.
+  strip and goes as the next request. While the agent compacts its context
+  the message waits for the compaction to end, since joining the turn then
+  would abort it.
 - The **Model** chip shows the model by the name the agent gives it, with a
   spinner while the agent is still starting. It lists and switches the
   agent's models, the
