@@ -2,8 +2,8 @@
 //!
 //! Collapsed it is a one-line field with `▼` at its right end; Tab or a
 //! press on the arrow opens the tree under it. While the field still holds
-//! its first value the tree lists the quick destinations (the other panels'
-//! directories) as roots; once the path is edited it lists the directory
+//! its first value the tree lists the quick destinations (the panels'
+//! directories, recent destinations, mount points) as roots; once the path is edited it lists the directory
 //! the path names up to its last `/`, filtered fuzzily by what follows.
 //!
 //! Down moves into the tree. Moving the cursor there writes the directory
@@ -20,7 +20,9 @@ use ratatui::{
     style::Style,
     widgets::{Block, Borders, Widget},
 };
+use std::cell::Cell;
 use std::path::{Path, PathBuf};
+use unicode_width::UnicodeWidthStr;
 
 use crate::base::{drag_field, press_field_box, render_text_input};
 use crate::dir_tree::DirTree;
@@ -33,6 +35,10 @@ use termide_ui::path_utils::{expand_tilde, truncate_left};
 
 /// Rows of the tree under the field while it is open.
 pub(crate) const DROPDOWN_ROWS: usize = 10;
+
+/// The narrowest the field's text is laid out with while the tree is open:
+/// room for the tree's rows, so moving through it does not widen the modal.
+const OPEN_TEXT_WIDTH: usize = 64;
 
 /// What the field made of a key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +80,8 @@ pub(crate) struct PathField {
     last_tree_area: Option<Rect>,
     /// A press landed in the text and the button is still down.
     dragging: bool,
+    /// The widest the modal around the field has been, which it keeps.
+    held_width: Cell<u16>,
 }
 
 impl PathField {
@@ -101,7 +109,28 @@ impl PathField {
             last_box_area: None,
             last_tree_area: None,
             dragging: false,
+            held_width: Cell::new(0),
         }
+    }
+
+    /// The width the field's text asks of the modal. While the tree is
+    /// open it is that of the path the tree opened with, and at least
+    /// [`OPEN_TEXT_WIDTH`]: the path the cursor writes scrolls in the field
+    /// instead of resizing the modal at every row.
+    pub(crate) fn text_width(&self) -> usize {
+        if self.is_open() {
+            self.snapshot.width().max(OPEN_TEXT_WIDTH)
+        } else {
+            self.input.text().width()
+        }
+    }
+
+    /// `width` or the widest the modal has been, whichever is wider: a modal
+    /// that only grows does not jump as its path changes.
+    pub(crate) fn hold_width(&self, width: u16) -> u16 {
+        let held = self.held_width.get().max(width);
+        self.held_width.set(held);
+        held
     }
 
     /// Offer `roots` as the quick destinations.

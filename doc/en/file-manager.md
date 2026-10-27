@@ -90,9 +90,10 @@ ask for a path in a field that opens a directory tree under it: press `Tab`
 or click the `▼` at its right end. While the field still holds the suggested
 path, the tree lists the panels' directories, then the directories this
 project's prompts were recently confirmed with (kept until termide quits,
-never written to disk). Once the path is edited,
-it lists the directory the path names up to its last `/`, narrowed fuzzily by
-what follows; a name starting with `.` brings in hidden directories.
+never written to disk), then the drives or mount points: the root, disks,
+removable media and network shares. Once the path is edited, it lists the
+directory the path names up to its last `/`, narrowed fuzzily by what
+follows; a name starting with `.` brings in hidden directories.
 
 | Key                                  | In the tree                                             |
 |--------------------------------------|---------------------------------------------------------|
