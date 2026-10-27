@@ -66,7 +66,13 @@ pub struct Rendered {
     /// Named anchors (`id`/`name` / heading slug) → target line index, for
     /// fragment navigation (`#section`).
     pub anchors: Vec<(String, usize)>,
+    /// How many ```` ```mermaid ```` blocks rendered as diagrams (whole or
+    /// folded to a card, see [`Builder::fold_diagrams`]).
+    pub diagrams: usize,
 }
+
+/// The text of a folded diagram's card, given how many rows the diagram has.
+pub type DiagramCard = fn(usize) -> String;
 
 /// A pending table being collected between its start and end.
 struct Table {
@@ -148,6 +154,11 @@ pub struct Builder<'c> {
     /// How rows read when copied, by line index; a row not listed is a line
     /// of its own with no decoration.
     copy_marks: Vec<(usize, RowCopy)>,
+    /// When set, a diagram shows as one card line with this text instead of
+    /// its rows.
+    diagram_card: Option<DiagramCard>,
+    /// Diagrams rendered so far.
+    diagrams: usize,
 }
 
 impl<'c> Builder<'c> {
@@ -173,7 +184,15 @@ impl<'c> Builder<'c> {
             pending_links: Vec::new(),
             anchors: Vec::new(),
             copy_marks: Vec::new(),
+            diagram_card: None,
+            diagrams: 0,
         }
+    }
+
+    /// Fold every diagram to a single card line reading `card(rows)`, or show
+    /// them whole again with `None`.
+    pub fn fold_diagrams(&mut self, card: Option<DiagramCard>) {
+        self.diagram_card = card;
     }
 
     // --- accessors for front-ends that compute their own styles -------------
@@ -598,7 +617,17 @@ impl<'c> Builder<'c> {
         // mermaid crate); unsupported diagram kinds fall through to code.
         if lang.eq_ignore_ascii_case("mermaid") {
             if let Some(diagram) = termide_mermaid::render_to_lines(&code) {
+                self.diagrams += 1;
                 let bar = Style::default().fg(self.colors.disabled);
+                if let Some(card) = self.diagram_card {
+                    let spans = vec![
+                        Span::styled("┊ ", bar),
+                        Span::styled(format!("▸ {}", card(diagram.len())), bar),
+                    ];
+                    self.mark_copy(2, Join::Break);
+                    self.lines.push(Line::from(spans));
+                    return;
+                }
                 for line in diagram {
                     let spans = vec![
                         Span::styled("┊ ", bar),
@@ -984,6 +1013,7 @@ impl<'c> Builder<'c> {
             copy,
             links,
             anchors,
+            diagrams: self.diagrams,
         }
     }
 }

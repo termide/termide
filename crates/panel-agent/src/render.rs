@@ -885,12 +885,26 @@ impl AgentPanel {
         // the last block while the agent works, animating on the ~10 fps redraw.
         let footer = self.live_footer_lines(text_width);
         self.transcript.set_live_footer(footer);
-        let total = self.transcript.lines(text_width, &colors, is_light).len();
-        let max_top = total.saturating_sub(transcript_height as usize);
+        let mut total = self.transcript.lines(text_width, &colors, is_light).len();
+        let mut max_top = total.saturating_sub(transcript_height as usize);
         if self.follow {
             self.top = max_top;
         } else {
             self.top = self.top.min(max_top);
+        }
+        // An answer's diagrams fold to a card once the answer is wholly
+        // above the view. Every row that goes was above the view, so moving
+        // the view up by as many keeps what is on screen where it was.
+        if self.transcript.fold_diagrams_above(self.top) {
+            let folded = self.transcript.lines(text_width, &colors, is_light).len();
+            let gone = total - folded;
+            total = folded;
+            max_top = total.saturating_sub(transcript_height as usize);
+            self.top = if self.follow {
+                max_top
+            } else {
+                self.top.saturating_sub(gone).min(max_top)
+            };
         }
         // Keep the chat selection valid, on screen, and note the flat-line
         // range to tint — computed now, before `lines` borrows the transcript.

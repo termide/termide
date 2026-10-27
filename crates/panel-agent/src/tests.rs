@@ -12231,3 +12231,88 @@ fn held_answers_survive_a_reopen_and_go_with_the_next_request() {
         "the log no longer holds them"
     );
 }
+
+/// An answer with a two-node flowchart in it.
+const DIAGRAM_REPLY: &str =
+    "Here:\n\n```mermaid\nflowchart TD\n  A[Start] --> B[Finish]\n```\n\ndone";
+
+/// A reply tall enough to push what came before it out of a short view.
+fn tall_reply() -> AssistantMessage {
+    let long = (1..=40)
+        .map(|n| format!("line {n}"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    reply(&long)
+}
+
+/// The transcript as last laid out, one string per line.
+fn transcript_text(panel: &AgentPanel) -> Vec<String> {
+    panel
+        .transcript()
+        .rendered()
+        .iter()
+        .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+        .collect()
+}
+
+fn shows_diagram(panel: &AgentPanel) -> bool {
+    transcript_text(panel).iter().any(|l| l.contains("Start"))
+}
+
+#[test]
+fn a_diagram_folds_once_its_answer_scrolls_out_of_view() {
+    let mut panel = panel(vec![reply(DIAGRAM_REPLY), tall_reply()]);
+    send(&mut panel, "draw");
+    let _ = render_text(&mut panel, 60, 40);
+    assert!(shows_diagram(&panel), "a fresh answer shows its diagram");
+
+    send(&mut panel, "more");
+    let _ = render_text(&mut panel, 60, 10);
+    assert!(!shows_diagram(&panel), "scrolled away, the diagram folds");
+    assert!(
+        transcript_text(&panel)
+            .iter()
+            .any(|l| l.contains("▸ mermaid")),
+        "a card stands in for it: {:?}",
+        transcript_text(&panel)
+    );
+}
+
+#[test]
+fn the_view_stays_put_when_a_diagram_above_it_folds() {
+    let mut panel = panel(vec![reply(DIAGRAM_REPLY), tall_reply()]);
+    send(&mut panel, "draw");
+    send(&mut panel, "more");
+    // Laid out tall, nothing is above the view and the diagram shows.
+    let _ = render_text(&mut panel, 60, 200);
+    assert!(shows_diagram(&panel));
+    let anchor = transcript_text(&panel)
+        .iter()
+        .position(|l| l.trim() == "line 20")
+        .expect("the tall reply is laid out");
+
+    panel.follow = false;
+    panel.top = anchor;
+    let rows = render_text(&mut panel, 60, 10);
+    assert!(!shows_diagram(&panel), "the diagram above the view folds");
+    assert!(rows[0].trim_start().starts_with("line 20 "), "{rows:?}");
+}
+
+#[test]
+fn a_diagram_unfolded_by_hand_stays_unfolded() {
+    let mut panel = panel(vec![reply(DIAGRAM_REPLY), tall_reply()]);
+    send(&mut panel, "draw");
+    send(&mut panel, "more");
+    let _ = render_text(&mut panel, 60, 10);
+    assert!(!shows_diagram(&panel));
+
+    let answer = panel
+        .transcript()
+        .items()
+        .iter()
+        .position(|item| matches!(item, Item::Assistant { text, .. } if text.contains("mermaid")))
+        .unwrap();
+    assert!(panel.transcript.toggle_expanded(answer));
+    let _ = render_text(&mut panel, 60, 10);
+    assert!(shows_diagram(&panel), "out of view, it is not folded again");
+}
