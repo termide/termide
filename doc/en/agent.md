@@ -226,7 +226,9 @@ later, or is reloaded, reaches them in the next session.
 All three keep their own conversation loop: they compact their context themselves
 (when the agent reports it, as Claude Code does, its compaction shows and is
 logged as the built-in one, its summary in place of the history before it, so
-`recall` finds what it took out), a run cannot pause between steps, and there is no prefill or generation
+`recall` finds what it took out; an older adapter that reports it as a
+"Compact conversation" step shows it as a compaction too, with no summary, so
+the log keeps the history whole), a run cannot pause between steps, and there is no prefill or generation
 timing (token totals show when the agent reports them, as Claude Code does).
 The **Permissions** chip works for all three, `auto` with termide's
 [reviewer](#auto-mode), by default on the agent's own subscription. The settings modal says the same under a
