@@ -3106,9 +3106,10 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .remove(&call.id);
-        // termide ran it: the details its tool gave, which the MCP reply
-        // leaves out, so its block draws as for the built-in agent.
-        let host_details = host.and_then(|(name, arguments)| {
+        // termide ran it: the details and pictures its tool gave, which the
+        // agent's report leaves out, so its block draws as for the built-in
+        // agent.
+        let host_finished = host.and_then(|(name, arguments)| {
             call.name = name;
             let server = self
                 .mcp_server
@@ -3132,8 +3133,15 @@ impl Shared {
                         extra_content: None,
                     });
             }
-            server.take_details(&call.name, &arguments)
+            server.take_finished(&call.name, &arguments)
         });
+        let (host_details, mut images) = match host_finished {
+            Some(finished) => (finished.details, finished.images),
+            None => (None, Vec::new()),
+        };
+        if images.is_empty() {
+            images = content_images(&update["content"]);
+        }
         // Codex reports an MCP call's result as the MCP result, not as content.
         let mut text = content_text(&update["content"]);
         if text.is_empty() {
@@ -3150,7 +3158,7 @@ impl Shared {
                 },
             )
         } else {
-            ToolResultMessage::text(&call, text)
+            ToolResultMessage::text(&call, text).with_images(images)
         };
         if let Some(details) = host_details {
             result = result.with_details(details);
@@ -3464,6 +3472,24 @@ fn content_text(content: &Value) -> String {
         }
     }
     out
+}
+
+/// The pictures among a tool call's ACP content, as `(media type, base64
+/// data)`.
+fn content_images(content: &Value) -> Vec<(String, String)> {
+    content
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|block| block["type"] == "content" && block["content"]["type"] == "image")
+        .filter_map(|block| {
+            let image = &block["content"];
+            Some((
+                image["mimeType"].as_str()?.to_string(),
+                image["data"].as_str()?.to_string(),
+            ))
+        })
+        .collect()
 }
 
 /// The text of a list of ACP content blocks, its text blocks one after
@@ -3885,8 +3911,14 @@ mod tests {
             _on_update: &mut dyn FnMut(termide_agent_core::ToolUpdate),
             _cancel: &CancelToken,
         ) -> ToolResultMessage {
-            ToolResultMessage::text(call, "echoed")
-                .with_details(json!({ "said": "echoed", "call": call.id }))
+            let result = ToolResultMessage::text(call, "echoed")
+                .with_details(json!({ "said": "echoed", "call": call.id }));
+            // As `read` returns an image file.
+            if call.arguments["text"] == "picture" {
+                result.with_images(vec![("image/png".into(), "AAAA".into())])
+            } else {
+                result
+            }
         }
     }
 
@@ -3970,6 +4002,79 @@ mod tests {
             ended.details,
             Some(json!({ "said": "echoed", "call": "t1" }))
         );
+    }
+
+    /// Claude Code reports the picture termide's tool returned as a line of
+    /// text naming the file it saved it to: the block shows the picture all
+    /// the same, from what the server kept.
+    #[test]
+    fn a_call_of_termides_tool_ends_with_the_pictures_its_report_left_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            Some(echo_host()),
+            ModeHandle::new(Mode::default()),
+        );
+        let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+        let server = &new["params"]["mcpServers"][0];
+        let url = server["url"].as_str().unwrap();
+        let auth = server["headers"][0]["value"].as_str().unwrap();
+        let shared = &runtime.shared;
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "other",
+            "status": "pending", "title": "mcp__termide__echo",
+            "rawInput": { "text": "picture" },
+        }));
+        let reply = post_mcp(
+            url,
+            auth,
+            &json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/call",
+                     "params": { "name": "echo", "arguments": { "text": "picture" } } }),
+        );
+        assert_eq!(reply["result"]["content"][1]["type"], "image");
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "content": [{ "type": "content", "content": { "type": "text",
+                          "text": "echoed\n[Image: source: /tmp/blob.png]" } }],
+        }));
+        let ended = runtime.drain().into_iter().find_map(|e| match e {
+            AgentEvent::ToolExecutionEnd { result } => Some(result),
+            _ => None,
+        });
+        let ended = ended.expect("the call ends");
+        assert_eq!(ended.images().collect::<Vec<_>>(), [("image/png", "AAAA")]);
+        assert_eq!(ended.details.unwrap()["said"], "echoed");
+    }
+
+    /// A picture the agent's own tool returns, sent as ACP image content.
+    #[test]
+    fn an_agents_own_call_ends_with_the_pictures_it_reports() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "kind": "read",
+            "status": "pending", "title": "Read a.png", "rawInput": { "file_path": "a.png" },
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "t1", "status": "completed",
+            "content": [
+                { "type": "content", "content": { "type": "image",
+                  "mimeType": "image/png", "data": "BBBB" } },
+            ],
+        }));
+        let ended = runtime.drain().into_iter().find_map(|e| match e {
+            AgentEvent::ToolExecutionEnd { result } => Some(result),
+            _ => None,
+        });
+        let ended = ended.expect("the call ends");
+        assert_eq!(ended.images().collect::<Vec<_>>(), [("image/png", "BBBB")]);
     }
 
     #[test]
