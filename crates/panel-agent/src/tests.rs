@@ -1697,6 +1697,15 @@ fn a_compaction_and_a_refused_summary_call_are_logged_with_how_the_call_went() {
         tokens_after: 3_000,
         call: summary_call(),
     });
+    // An external agent compacted without saying how: an empty summary
+    // must not replace the history the log rebuilds the context from.
+    panel.apply(AgentEvent::Compacted {
+        summary: String::new(),
+        kept: 0,
+        tokens_before: 92_000,
+        tokens_after: 0,
+        call: summary_call(),
+    });
     // The model went on with the work instead of summarising it.
     let refused = CompactionCall {
         stop_reason: StopReason::ToolUse,

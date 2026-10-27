@@ -555,7 +555,9 @@ impl AgentPanel {
                     termide_i18n::t().agent_notice_compacted_fmt(tokens_before, kept),
                     NoticeKind::Info,
                 );
-                if let Some(session) = &mut self.session {
+                // An external agent may compact without saying how: the log
+                // then keeps the history whole rather than an empty summary.
+                if let Some(session) = self.session.as_mut().filter(|_| !summary.is_empty()) {
                     if let Err(error) = session.append_compaction_with(
                         &summary,
                         tokens_before,
