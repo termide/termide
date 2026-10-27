@@ -1206,6 +1206,14 @@ could hold — one of a `select`'s options, a number, `true` or `false` — and
 the rest what the form opens with. The session ends when the panel is closed,
 `stop` is called or another launch starts.
 
+`start` and `evaluate`, which can call the program's own functions, are
+decided as any tool call is, by the rules and the mode; their subject for a
+rule names what runs (`start debug-server`, `start app/main.py`,
+`evaluate len(items)`), so "Allow always" trusts that command. Everything
+else — stepping, pausing, stopping, breakpoints, frames, `state` — only moves
+on or looks at a program whose launch was already decided, and asks no one,
+outside plan mode; a `deny` rule still refuses it.
+
 ## Permissions
 
 Permissions are a control, not isolation: termide has no sandbox. The agent's
