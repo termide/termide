@@ -620,6 +620,7 @@ pub fn menu_shortcut(kb: &termide_config::GlobalKeybindings, key: &str) -> Optio
         "journal" => &kb.new_journal,
         "diagnostics" => &kb.open_diagnostics,
         "outline" => &kb.open_outline,
+        "agent" => &kb.open_agent,
         // Bookmarks
         BOOKMARK_ADD_CURRENT => &kb.open_bookmark_add,
         // Panel action menu. Only the actions that have a global binding;
@@ -1281,6 +1282,11 @@ mod menu_shortcut_tests {
             menu_shortcut(&kb, "git_status").as_deref(),
             Some("Alt+G"),
             "the Tools entry `git_status` is bound as `open_git_status`"
+        );
+        assert_eq!(
+            menu_shortcut(&kb, "agent").as_deref(),
+            Some("Alt+A"),
+            "the Tools entry `agent` is bound as `open_agent`"
         );
         assert_eq!(
             menu_shortcut(&kb, "help").as_deref(),
