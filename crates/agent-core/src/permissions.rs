@@ -1723,6 +1723,7 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
     let mut stack: Vec<Option<std::path::PathBuf>> = Vec::new();
     let parsed = split_shell(command);
     let bindings = loop_bindings(command, &parsed);
+    let moving = moving_loops(&parsed);
     parsed
         .parts
         .iter()
@@ -1732,6 +1733,15 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
             let mut words = text.split_whitespace();
             let head = words.next().unwrap_or("");
             let rest = &text.trim_start()[head.len()..];
+            // A loop that changes directory runs each turn but the first
+            // somewhere else, and leaves after any number of turns: from
+            // its first part on the directory, and every one `pushd` kept,
+            // is unknown until an absolute `cd` after the loop.
+            let in_moving_loop = enclosing.iter().any(|&l| moving[l]);
+            if in_moving_loop {
+                dir = None;
+                stack.iter_mut().for_each(|kept| *kept = None);
+            }
             let runs_in = dir.clone();
             let (resolved, known) = match resolve_program(head, dir.as_deref(), cwd) {
                 Some(program) => (format!("{program}{rest}"), true),
@@ -1748,7 +1758,7 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
                 _ => {}
             }
             // A subshell's `cd` may or may not last; do not guess.
-            if text.starts_with('(') || text.ends_with(')') {
+            if text.starts_with('(') || text.ends_with(')') || in_moving_loop {
                 dir = None;
             }
             ShellPart {
@@ -1764,6 +1774,21 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
             }
         })
         .collect()
+}
+
+/// Whether each loop of `parsed` runs a `cd`, `pushd` or `popd`, in its
+/// header, its body or a loop nested in it.
+fn moving_loops(parsed: &ParsedShell) -> Vec<bool> {
+    let mut moving = vec![false; parsed.loops.len()];
+    for (text, enclosing) in parsed.parts.iter().zip(&parsed.enclosing) {
+        let head = text.split_whitespace().next().unwrap_or("");
+        if matches!(head, "cd" | "pushd" | "popd") {
+            for &l in enclosing {
+                moving[l] = true;
+            }
+        }
+    }
+    moving
 }
 
 /// The binding of each loop of `parsed` that a part in it can rely on: its
@@ -1901,6 +1926,9 @@ fn words_read_outside(
     // unless an option gives that.
     let patterned = matches!(head, "grep" | "egrep" | "fgrep" | "rg" | "sed");
     let args: Vec<&str> = words[1..].iter().map(String::as_str).collect();
+    if follows_symlinks(head, &args) {
+        return true;
+    }
     let mut pattern_pending = patterned
         && !has_short_flag(&args, 'e')
         && !has_short_flag(&args, 'f')
@@ -1997,6 +2025,33 @@ fn words_read_outside(
         _ => false,
     };
     reads_dir && dir.is_none_or(|dir| !real_path(dir).starts_with(project))
+}
+
+/// Whether the look-only command `head` with `args` follows the symlinks it
+/// meets while walking a tree: an in-project link can lead it anywhere, so
+/// such a walk counts as a read beyond the project. A symlink named as an
+/// operand is not meant here — [`path_outside`] already judges where it
+/// leads.
+fn follows_symlinks(head: &str, args: &[&str]) -> bool {
+    match head {
+        "rg" => has_short_flag(args, 'L') || has_long_option(args, "follow"),
+        "grep" | "egrep" | "fgrep" => {
+            has_short_flag(args, 'R') || has_long_option(args, "dereference-recursive")
+        }
+        "ls" | "du" => has_short_flag(args, 'L') || has_long_option(args, "dereference"),
+        "tree" => has_short_flag(args, 'l'),
+        // `-H` and `-L` lead the arguments, alone or together (`-HL`);
+        // `-follow` is an expression.
+        "find" => args.iter().any(|a| {
+            *a == "-follow"
+                || a.strip_prefix('-').is_some_and(|flags| {
+                    !flags.is_empty()
+                        && flags.chars().all(|c| matches!(c, 'H' | 'L' | 'P'))
+                        && flags.contains(['H', 'L'])
+                })
+        }),
+        _ => false,
+    }
 }
 
 /// Whether the shell word `word`, a path run from `dir`, leads outside
@@ -4085,6 +4140,110 @@ mod tests {
             );
         }
         assert_eq!(hooks.decide(&bash("cat notes"), &ctx), Decision::Allow);
+    }
+
+    /// A loop that changes directory reads its second turn somewhere else,
+    /// so its body and what follows it run in an unknown directory.
+    #[test]
+    fn a_loop_that_changes_directory_leaves_it_unknown() {
+        let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+        for command in [
+            "for x in a b; do cat src/lib.rs; cd ..; done",
+            "for x in a b; do cd ..; done; cat src/lib.rs",
+            "while true; do ls; cd ..; done",
+            "until false; do pushd ..; done; ls",
+            "select x in a b; do cat f; cd sub; done",
+            "for x in a; do for y in b; do cat f; done; cd ..; done",
+            "pushd src; for x in a b; do popd; done; popd; cat f",
+            "while cd ..; do cat f; done",
+            "for x in a b; do cd ..; done; cd src && cat f",
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{command}"
+            );
+        }
+        for command in [
+            // No directory change in the loop, or an absolute one after it.
+            "for x in a b; do cat src/lib.rs; done; cat f",
+            "for x in a b; do cd ..; done; cd /proj && cat f",
+            "cd src; for f in a b; do cat $f; done",
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{command}"
+            );
+        }
+        let dirs: Vec<_> = shell_parts(
+            "cd src; for x in a; do ls; cd ..; done; cat f",
+            Path::new("/proj"),
+        )
+        .into_iter()
+        .map(|p| p.dir)
+        .collect();
+        assert_eq!(dirs, vec![Some(PathBuf::from("/proj")), None, None, None]);
+    }
+
+    /// The tree walks that follow symlinks can be led out of the project by
+    /// one inside it, so they ask wherever an outside read asks.
+    #[test]
+    fn a_tree_walk_following_symlinks_asks() {
+        let (edit, _) = hooks(rules("mode = \"edit\""), vec![]);
+        let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+        let (all, _) = hooks(rules("mode = \"all\""), vec![]);
+        for command in [
+            "rg -L foo",
+            "rg --follow foo src",
+            "rg -iL foo",
+            "grep -R foo .",
+            "grep -rnR foo src",
+            "grep --dereference-recursive foo",
+            "find -L . -name x",
+            "find -H src",
+            "find -HL .",
+            "find . -follow -name x",
+            "ls -L src",
+            "ls -laL",
+            "ls --dereference",
+            "du -L",
+            "du -shL src",
+            "du --dereference .",
+            "tree -l",
+            "tree -al src",
+        ] {
+            assert_eq!(
+                edit.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{command}"
+            );
+            assert_eq!(
+                plan.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{command}"
+            );
+            assert_eq!(
+                all.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{command}"
+            );
+        }
+        for command in [
+            "rg foo",
+            "grep -rn foo src",
+            "find . -name x",
+            "find -P .",
+            "ls -la src",
+            "du -sh",
+            "tree -L 2",
+        ] {
+            assert_eq!(
+                edit.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{command}"
+            );
+        }
     }
 
     /// A backquote closes the substitution it opened, so the separators

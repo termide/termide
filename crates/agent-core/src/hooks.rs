@@ -66,6 +66,13 @@ impl HookConfig {
         .to_string()
     }
 
+    /// The [`crate::approvals::fingerprint`] of [`Self::launch_spec`]: what
+    /// a notice of the hook carries to the approval it asks for.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        crate::approvals::fingerprint(&self.launch_spec())
+    }
+
     /// What the hook runs, for a person to read.
     #[must_use]
     pub fn launch_line(&self) -> String {

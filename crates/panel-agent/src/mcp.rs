@@ -6,13 +6,15 @@
 use termide_agent_core::{McpReload, McpSignIn, McpStatus};
 use termide_core::{ChecklistButton, ChecklistGroup, ChecklistSwitch};
 
-use crate::{AgentPanel, NoticeKind};
+use crate::{AgentPanel, NoticeKind, Trusted};
 
 /// The heading buttons' ids: what the button does, then the server.
 const RELOAD_BUTTON: &str = "mcp-reload:";
 const LOGIN_BUTTON: &str = "mcp-login:";
 const LOGOUT_BUTTON: &str = "mcp-logout:";
-/// The key of a held server's checkbox: ticked, the list approves it.
+/// The key of a held server's checkbox, followed by the fingerprint of the
+/// launch beside it, a `:` and the server: ticked, the list approves that
+/// launch.
 const TRUST_SWITCH: &str = "mcp-trust:";
 
 /// A server's state in words, and how loud to say it.
@@ -64,39 +66,40 @@ impl AgentPanel {
         let t = termide_i18n::t();
         let name = args.trim();
         if !name.is_empty() {
-            self.trust(name);
+            // Only the launch last shown here is approved; one never shown
+            // is shown first.
+            let shown = self.shown_launches.get(name).cloned().unwrap_or_default();
+            self.trust(name, &shown);
             return;
         }
-        let servers: Vec<(String, String)> = self
+        let servers: Vec<_> = self
             .catalog
             .mcp_status()
             .into_iter()
             .filter(|server| server.status == McpStatus::NeedsApproval)
-            .map(|server| (server.name, server.launch))
             .collect();
         let hooks = self.catalog.held_hooks();
         if servers.is_empty() && hooks.is_empty() {
             return self.notice(t.agent_notice_trust_none(), NoticeKind::Info);
         }
-        for (name, launch) in servers {
-            self.notice(
-                t.agent_notice_mcp_needs_approval_fmt(&name, &launch),
-                NoticeKind::Warn,
-            );
+        for server in servers {
+            let text = t.agent_notice_mcp_needs_approval_fmt(&server.name, &server.launch);
+            self.shown_launches.insert(server.name, server.fingerprint);
+            self.notice(text, NoticeKind::Warn);
         }
-        for (name, launch) in hooks {
-            self.notice(
-                t.agent_notice_hook_needs_approval_fmt(&name, &launch),
-                NoticeKind::Warn,
-            );
+        for hook in hooks {
+            self.notice_held_hook(hook.name, &hook.launch, hook.fingerprint);
         }
     }
 
-    /// Approve `name`; a server connects at once. `true` when approved.
-    fn trust(&mut self, name: &str) -> bool {
+    /// Approve `name` as the launch whose fingerprint is `shown`; a server
+    /// connects at once. `true` when approved. A launch changed since it was
+    /// shown is not approved: the one there now is shown instead.
+    fn trust(&mut self, name: &str, shown: &str) -> bool {
         let t = termide_i18n::t();
-        match self.catalog.trust(name) {
-            Ok(report) => {
+        match self.catalog.trust(name, shown) {
+            Ok(Trusted::Approved(report)) => {
+                self.shown_launches.remove(name);
                 self.notice(t.agent_notice_trusted_fmt(name), NoticeKind::Info);
                 if report.is_some_and(|r| r.started.iter().any(|s| s == name)) {
                     self.mcp_reconnecting.insert(name.to_string());
@@ -105,6 +108,22 @@ impl AgentPanel {
                 }
                 true
             }
+            Ok(Trusted::Changed {
+                hook: true,
+                launch,
+                fingerprint,
+            }) => {
+                self.notice_held_hook(name.to_string(), &launch, fingerprint);
+                false
+            }
+            Ok(Trusted::Changed {
+                hook: false,
+                launch,
+                fingerprint,
+            }) => {
+                self.notice_held_server(name, &launch, fingerprint);
+                false
+            }
             Err(error) => {
                 self.notice(error, NoticeKind::Warn);
                 false
@@ -112,14 +131,26 @@ impl AgentPanel {
         }
     }
 
+    /// Show that the server `name` waits for approval of `launch`, and keep
+    /// its `fingerprint` for `/trust`.
+    fn notice_held_server(&mut self, name: &str, launch: &str, fingerprint: String) {
+        let text = termide_i18n::t().agent_notice_mcp_needs_approval_fmt(name, launch);
+        self.shown_launches.insert(name.to_string(), fingerprint);
+        self.notice(text, NoticeKind::Warn);
+    }
+
+    /// Show that the hook `name` waits for approval of `launch`, and keep
+    /// its `fingerprint` for `/trust`.
+    fn notice_held_hook(&mut self, name: String, launch: &str, fingerprint: String) {
+        let text = termide_i18n::t().agent_notice_hook_needs_approval_fmt(&name, launch);
+        self.shown_launches.insert(name, fingerprint);
+        self.notice(text, NoticeKind::Warn);
+    }
+
     /// The project's hooks held back, said once when the panel opens.
     pub(crate) fn notice_held_hooks(&mut self) {
-        let t = termide_i18n::t();
-        for (name, launch) in self.catalog.held_hooks() {
-            self.notice(
-                t.agent_notice_hook_needs_approval_fmt(&name, &launch),
-                NoticeKind::Warn,
-            );
+        for hook in self.catalog.held_hooks() {
+            self.notice_held_hook(hook.name, &hook.launch, hook.fingerprint);
         }
     }
 
@@ -233,7 +264,7 @@ impl AgentPanel {
                         note: server.launch,
                         buttons: Vec::new(),
                         switch: Some(ChecklistSwitch {
-                            key: format!("{TRUST_SWITCH}{}", server.name),
+                            key: format!("{TRUST_SWITCH}{}:{}", server.fingerprint, server.name),
                             checked: false,
                         }),
                     };
@@ -273,10 +304,12 @@ impl AgentPanel {
     /// A heading button of the toolset list was pressed, or a held server's
     /// checkbox ticked; the list stays open. Ticking a server approves it
     /// and says "on": its tools come on when they arrive, though the
-    /// session had switched them off before.
+    /// session had switched them off before. The tick approves the launch
+    /// shown beside it: one changed since is shown instead.
     pub(crate) fn press_toolset_button(&mut self, id: &str) {
-        if let Some(server) = id.strip_prefix(TRUST_SWITCH) {
-            if self.trust(server) {
+        if let Some(switch) = id.strip_prefix(TRUST_SWITCH) {
+            let (shown, server) = switch.split_once(':').unwrap_or(("", switch));
+            if self.trust(server, shown) {
                 self.mcp_enable.insert(server.to_string());
             }
             return;

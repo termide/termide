@@ -381,6 +381,31 @@ pub struct AgentProfile {
     pub skills: Vec<String>,
 }
 
+/// A hook the project brings that is held back until approved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeldHook {
+    pub name: String,
+    /// What it runs, for a person to read.
+    pub launch: String,
+    /// The fingerprint of that launch, which approving it must carry.
+    pub fingerprint: String,
+}
+
+/// What [`AgentCatalog::trust`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Trusted {
+    /// Approved: a server with the report of its connecting, a hook with
+    /// none.
+    Approved(Option<McpReload>),
+    /// Not approved: what is configured now is not the launch that was
+    /// shown. This is the launch to show instead, a hook's when `hook`.
+    Changed {
+        hook: bool,
+        launch: String,
+        fingerprint: String,
+    },
+}
+
 /// The app's view of the agent definitions (`agents/<name>/` across the
 /// agent directories); the panel only chooses among them.
 pub trait AgentCatalog: Send + Sync {
@@ -476,20 +501,23 @@ pub trait AgentCatalog: Send + Sync {
     fn mcp_logout(&self, server: &str) -> Result<bool, String> {
         Err(format!("no MCP server named {server}"))
     }
-    /// The hooks the project brings that are held back until approved, by
-    /// name, with what each runs.
-    fn held_hooks(&self) -> Vec<(String, String)> {
+    /// The hooks the project brings that are held back until approved, with
+    /// what each runs.
+    fn held_hooks(&self) -> Vec<HeldHook> {
         Vec::new()
     }
     /// Approve the MCP server or hook `name` the project brings, as it is
-    /// configured now. A server is connected at once, and its report comes
-    /// back; a hook runs from the next run on.
+    /// configured now, when that is the launch the user was shown: `shown`
+    /// is the fingerprint the notice or checkbox carried. A server is
+    /// connected at once, and its report comes back; a hook runs from the
+    /// next run on. A launch changed since is not approved but returned.
     ///
     /// # Errors
     ///
     /// When nothing of that name waits for approval, or the approval cannot
     /// be kept.
-    fn trust(&self, name: &str) -> Result<Option<McpReload>, String> {
+    fn trust(&self, name: &str, shown: &str) -> Result<Trusted, String> {
+        let _ = shown;
         Err(termide_i18n::t().agent_notice_trust_unknown_fmt(name))
     }
 }
@@ -779,6 +807,10 @@ pub struct AgentPanel {
     /// Servers approved by a tick in the toolset list: their tools come on
     /// when they arrive, whatever the session had switched off.
     mcp_enable: BTreeSet<String>,
+    /// The fingerprint of the launch last shown for each server or hook
+    /// that waits for approval: `/trust <name>` approves that one and no
+    /// other.
+    shown_launches: std::collections::HashMap<String, String>,
     /// Whether this panel is the one whose toolset checklist stands open.
     /// Only then does a tick ask the app to refresh it: with two agent panels
     /// open, the other one has nothing to say about this one's list. It is
@@ -1300,6 +1332,7 @@ impl AgentPanel {
             mcp_lines: std::collections::HashMap::new(),
             mcp_reconnecting: BTreeSet::new(),
             mcp_enable: BTreeSet::new(),
+            shown_launches: std::collections::HashMap::new(),
             toolset_list_open: false,
             mcp_settled_told: false,
             toolset_off,

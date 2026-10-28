@@ -34,7 +34,8 @@ use termide_config::{AiSettings, Connection, WebSettings};
 use termide_core::AgentSetupState;
 use termide_panel_agent::{
     AgentCatalog, AgentEntry, AgentPanel, AgentPanelSetup, AgentProfile, BackendFactory,
-    ConnectionCatalog, ConnectionChoice, ConnectionEntry, FoldMode, HooksFactory,
+    ConnectionCatalog, ConnectionChoice, ConnectionEntry, FoldMode, HeldHook, HooksFactory,
+    Trusted,
 };
 
 use super::App;
@@ -524,29 +525,49 @@ impl AgentCatalog for FsCatalog {
         Some(self.mcp.reload(mcp_servers(&self.dirs, &self.approvals)))
     }
 
-    fn held_hooks(&self) -> Vec<(String, String)> {
+    fn held_hooks(&self) -> Vec<HeldHook> {
         let (_, held) = self.approvals.split_hooks(self.dirs.hooks());
         held.into_iter()
-            .map(|(name, hook)| (name, hook.launch_line()))
+            .map(|(name, hook)| HeldHook {
+                launch: hook.launch_line(),
+                fingerprint: hook.fingerprint(),
+                name,
+            })
             .collect()
     }
 
     /// A server is approved as it is configured now and connected; a hook
-    /// as it is configured now, running from the next run on.
-    fn trust(&self, name: &str) -> Result<Option<termide_agent_core::McpReload>, String> {
+    /// as it is configured now, running from the next run on — each only
+    /// while the file read now still holds the launch that was shown.
+    fn trust(&self, name: &str, shown: &str) -> Result<Trusted, String> {
         if let Some(server) = self
             .dirs
             .mcp_servers()
             .get(name)
             .filter(|server| server.from_project)
         {
-            self.approvals.approve_mcp(name, server)?;
+            if !self.approvals.approve_mcp(name, server, shown)? {
+                return Ok(Trusted::Changed {
+                    hook: false,
+                    launch: server.launch_line(),
+                    fingerprint: server.fingerprint(),
+                });
+            }
             let servers = mcp_servers(&self.dirs, &self.approvals);
-            return self.mcp.reconnect(name, &servers).map(Some);
+            return self
+                .mcp
+                .reconnect(name, &servers)
+                .map(|report| Trusted::Approved(Some(report)));
         }
         if let Some(hook) = self.dirs.hooks().get(name).filter(|hook| hook.from_project) {
-            self.approvals.approve_hook(name, hook)?;
-            return Ok(None);
+            if !self.approvals.approve_hook(name, hook, shown)? {
+                return Ok(Trusted::Changed {
+                    hook: true,
+                    launch: hook.launch_line(),
+                    fingerprint: hook.fingerprint(),
+                });
+            }
+            return Ok(Trusted::Approved(None));
         }
         Err(termide_i18n::t().agent_notice_trust_unknown_fmt(name))
     }
@@ -3657,20 +3678,99 @@ mod tests {
         let status = catalog.mcp_status();
         assert_eq!(status[0].status, McpStatus::NeedsApproval);
         assert_eq!(status[0].launch, "/nonexistent/termide-ext -x");
+        let hooks = catalog.held_hooks();
+        assert_eq!(hooks.len(), 1);
         assert_eq!(
-            catalog.held_hooks(),
-            [("check".to_string(), "./check.sh".to_string())]
+            (hooks[0].name.as_str(), hooks[0].launch.as_str()),
+            ("check", "./check.sh")
         );
 
-        let report = catalog.trust("ext").unwrap().unwrap();
+        let Trusted::Approved(Some(report)) = catalog.trust("ext", &status[0].fingerprint).unwrap()
+        else {
+            panic!("the server shown is approved");
+        };
         assert_eq!(report.started, ["ext"]);
         assert_ne!(catalog.mcp_status()[0].status, McpStatus::NeedsApproval);
-        assert_eq!(catalog.trust("check").unwrap(), None);
+        assert_eq!(
+            catalog.trust("check", &hooks[0].fingerprint).unwrap(),
+            Trusted::Approved(None)
+        );
         assert!(catalog.held_hooks().is_empty());
         assert!(store.is_file());
-        assert!(catalog.trust("nope").is_err());
+        assert!(catalog.trust("nope", "").is_err());
         // Nothing was written into the project.
         assert!(!project.join(".termide/approved.toml").exists());
+    }
+
+    /// A `.mcp.json` or hook changed between the notice and the approval is
+    /// not approved: the approval is of what was shown, and the launch the
+    /// file holds now comes back to be shown instead.
+    #[test]
+    fn a_launch_changed_after_it_was_shown_is_not_approved() {
+        use termide_agent_core::McpStatus;
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let global = tmp.path().join("ai");
+        std::fs::create_dir_all(project.join(".termide/ai")).unwrap();
+        std::fs::create_dir_all(&global).unwrap();
+        let mcp = |args: &str| {
+            std::fs::write(
+                project.join(".mcp.json"),
+                format!(r#"{{"mcpServers":{{"ext":{{"command":"/nonexistent/termide-ext","args":[{args}]}}}}}}"#),
+            )
+            .unwrap();
+        };
+        let hook = |command: &str| {
+            std::fs::write(
+                project.join(".termide/ai/hooks.toml"),
+                format!("[check]\nevent = \"before_tool_call\"\ncommand = \"{command}\"\n"),
+            )
+            .unwrap();
+        };
+        mcp(r#""-x""#);
+        hook("./check.sh");
+        let store = tmp.path().join("data/trust/approved.toml");
+        let approvals = termide_agent_core::approvals::Approvals::new(Some(store));
+        let catalog = FsCatalog::with_global(&project, &project, Some(global), None, approvals);
+        let shown = catalog.mcp_status()[0].fingerprint.clone();
+        let shown_hook = catalog.held_hooks()[0].fingerprint.clone();
+
+        // Changed in between: refused, and the new launch comes back.
+        mcp(r#""-x","--evil""#);
+        hook("./evil.sh");
+        let Trusted::Changed {
+            hook: false,
+            launch,
+            fingerprint,
+        } = catalog.trust("ext", &shown).unwrap()
+        else {
+            panic!("a changed server is not approved");
+        };
+        assert_eq!(launch, "/nonexistent/termide-ext -x --evil");
+        assert_ne!(fingerprint, shown);
+        assert_eq!(catalog.mcp_status()[0].status, McpStatus::NeedsApproval);
+        let Trusted::Changed {
+            hook: true,
+            launch,
+            fingerprint: new_hook,
+        } = catalog.trust("check", &shown_hook).unwrap()
+        else {
+            panic!("a changed hook is not approved");
+        };
+        assert_eq!(launch, "./evil.sh");
+        assert_eq!(catalog.held_hooks().len(), 1);
+
+        // What came back, shown in turn, is what an approval then takes.
+        assert!(matches!(
+            catalog.trust("ext", &fingerprint).unwrap(),
+            Trusted::Approved(Some(_))
+        ));
+        assert_ne!(catalog.mcp_status()[0].status, McpStatus::NeedsApproval);
+        assert_eq!(
+            catalog.trust("check", &new_hook).unwrap(),
+            Trusted::Approved(None)
+        );
+        assert!(catalog.held_hooks().is_empty());
     }
 
     #[test]

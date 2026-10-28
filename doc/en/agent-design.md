@@ -581,7 +581,9 @@ skips the prompt in every mode, the way Claude Code's read-only Bash set and
 Codex's `is_safe_command` do; redirections disqualify. That holds only while
 it reads inside the project: a path argument, input redirection or working
 directory that resolves outside it (symlinks followed), an unseen variable
-(a `for` variable over in-project literals or globs is seen, `loop_bindings`),
+(a `for` variable over in-project literals or globs is seen, `loop_bindings`;
+a loop whose body changes directory leaves it unknown in the body and after,
+`moving_loops`), a tree walk that follows symlinks (`follows_symlinks`),
 and `env`/`printenv` without arguments ask wherever the `read` tool would
 (`reads_outside`). Reads inside the project never prompt. Suggested rule for "allow always": `git push *` style
 for shell (first two words for `git`, `cargo`, `npm`, ...), the exact path for
