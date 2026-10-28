@@ -66,43 +66,88 @@ pub fn perform_search(buffer: &TextBuffer, search: &mut SearchState) {
         return;
     }
 
-    // Literal search. Case-insensitivity is done by lowercasing both sides.
+    // Literal search, case-insensitive by folding both sides (see
+    // [`CaseFolded`]); match bytes are then mapped back to the line.
     let query = if search.case_sensitive {
         search.query.clone()
     } else {
-        search.query.to_lowercase()
+        CaseFolded::new(&search.query).text
     };
     for line_idx in 0..buffer.line_count() {
-        if let Some(line_text) = buffer.line_cow(line_idx) {
-            let search_text = if search.case_sensitive {
-                line_text
-            } else {
-                std::borrow::Cow::Owned(line_text.to_lowercase())
-            };
+        let Some(line_text) = buffer.line_cow(line_idx) else {
+            continue;
+        };
+        let folded = (!search.case_sensitive).then(|| CaseFolded::new(&line_text));
+        let haystack = folded.as_ref().map_or(&*line_text, |f| f.text.as_str());
 
-            let mut byte_col = 0;
-            while let Some(byte_pos) = search_text[byte_col..].find(&query) {
-                let match_byte_col = byte_col + byte_pos;
-                let match_grapheme_col = search_text[..match_byte_col].graphemes(true).count();
+        let mut byte_col = 0;
+        while let Some(byte_pos) = haystack[byte_col..].find(&query) {
+            let match_start = byte_col + byte_pos;
+            let match_end = match_start + query.len();
+            let range = match &folded {
+                Some(folded) => folded.original_range(match_start, match_end),
+                None => Some((match_start, match_end)),
+            };
+            if let Some((start, end)) = range {
+                // Columns and lengths are in graphemes of the line itself,
+                // the unit cursors and deletions use, so `नमस्ते` or `👍🏽`
+                // count as the clusters they are.
                 search.matches.push(Cursor {
                     line: line_idx,
-                    column: match_grapheme_col,
+                    column: line_text[..start].graphemes(true).count(),
                 });
-                // Lengths are in graphemes, the unit cursors and deletions
-                // use, so `नमस्ते` or `👍🏽` count as the clusters they are.
-                let match_end = match_byte_col + query.len();
-                search.match_lengths.push(
-                    search_text[match_byte_col..match_end]
-                        .graphemes(true)
-                        .count(),
-                );
-                if let Some(first_char) = search_text[match_byte_col..].chars().next() {
-                    byte_col = match_byte_col + first_char.len_utf8();
-                } else {
-                    break;
-                }
+                search
+                    .match_lengths
+                    .push(line_text[start..end].graphemes(true).count());
+            }
+            match haystack[match_start..].chars().next() {
+                Some(first_char) => byte_col = match_start + first_char.len_utf8(),
+                None => break,
             }
         }
+    }
+}
+
+/// A line folded for case-insensitive comparison, char by char, with where
+/// each original char's folding starts.
+///
+/// Folding can change a char's length: `İ` becomes `i̇` (two chars), `ẞ`
+/// becomes `ß` (one byte fewer). Positions found in the folded text are
+/// therefore mapped back through `starts` rather than used on the line.
+/// Folding is per char, unlike `str::to_lowercase`, so a final `ς` and `σ`
+/// fold alike wherever they stand.
+struct CaseFolded {
+    text: String,
+    /// `(folded byte, original byte)` at the start of every original char,
+    /// and of the end of both texts.
+    starts: Vec<(usize, usize)>,
+}
+
+impl CaseFolded {
+    fn new(original: &str) -> Self {
+        let mut text = String::with_capacity(original.len());
+        let mut starts = Vec::with_capacity(original.len() + 1);
+        for (byte, c) in original.char_indices() {
+            starts.push((text.len(), byte));
+            for lower in c.to_lowercase() {
+                text.push(if lower == 'ς' { 'σ' } else { lower });
+            }
+        }
+        starts.push((text.len(), original.len()));
+        Self { text, starts }
+    }
+
+    /// The original byte range of the folded range `start..end`, or `None`
+    /// when it begins or ends inside the folding of one char, like the `i`
+    /// of `İ`'s `i̇`: that is no match for the original text.
+    fn original_range(&self, start: usize, end: usize) -> Option<(usize, usize)> {
+        let original = |folded: usize| {
+            self.starts
+                .binary_search_by_key(&folded, |&(f, _)| f)
+                .ok()
+                .map(|i| self.starts[i].1)
+        };
+        Some((original(start)?, original(end)?))
     }
 }
 
@@ -310,6 +355,63 @@ mod tests {
             let r = replace_at_position(&mut b, &s.matches[0], s.match_len_at(0), "hi").unwrap();
             assert_eq!(b.line_cow(0).unwrap(), expected);
             assert_eq!(r.new_cursor.column, s.matches[0].column + 2);
+        }
+    }
+
+    /// Case-insensitive matches of `query` in `text`: (column, length).
+    fn found(text: &str, query: &str) -> Vec<(usize, usize)> {
+        let mut s = SearchState::new(query.to_string(), false);
+        perform_search(&buf(text), &mut s);
+        s.matches
+            .iter()
+            .map(|m| m.column)
+            .zip(s.match_lengths)
+            .collect()
+    }
+
+    /// `İ` folds to two chars, `i̇`: a plain `i` is not found inside it,
+    /// and what follows it is found where it stands.
+    #[test]
+    fn case_insensitive_search_maps_a_dotted_capital_i_back() {
+        assert_eq!(found("İi İ", "i"), [(1, 1)]);
+        assert_eq!(found("İi İ", "İ"), [(0, 1), (3, 1)]);
+        assert_eq!(found("İi İ", "i\u{307}"), [(0, 1), (3, 1)]);
+        assert_eq!(found("İİx İX", "x"), [(2, 1), (5, 1)]);
+    }
+
+    /// `ẞ` folds to `ß`, a byte shorter, which must not shift what follows.
+    #[test]
+    fn case_insensitive_search_maps_a_capital_sharp_s_back() {
+        let text = "STRAẞE straße Straße";
+        assert_eq!(found(text, "straße"), [(0, 6), (7, 6), (14, 6)]);
+        assert_eq!(found(text, "STRAẞE"), [(0, 6), (7, 6), (14, 6)]);
+        assert_eq!(found(text, "e"), [(5, 1), (12, 1), (19, 1)]);
+    }
+
+    /// Greek, Cyrillic and Latin on one line; a final `ς` and `σ` fold
+    /// alike wherever they stand.
+    #[test]
+    fn case_insensitive_search_across_scripts_and_final_sigma() {
+        let text = "ΟΔΟΣ Улица οδος ΣΟΦΙΑ";
+        assert_eq!(found(text, "οδοσ"), [(0, 4), (11, 4)]);
+        assert_eq!(found(text, "ΟΔΟΣ"), [(0, 4), (11, 4)]);
+        assert_eq!(found(text, "σ"), [(3, 1), (14, 1), (16, 1)]);
+        assert_eq!(found(text, "УЛИЦА"), [(5, 5)]);
+    }
+
+    #[test]
+    fn case_insensitive_replace_all_keeps_the_text_around_folded_chars() {
+        for (query, expected) in [
+            ("İSTANBUL", "X istanbul X ẞ"),
+            ("istanbul", "İstanbul X İSTANBUL ẞ"),
+            ("ß", "İstanbul istanbul İSTANBUL X"),
+            ("i", "İstanbul Xstanbul İSTANBUL ẞ"),
+        ] {
+            let mut b = buf("İstanbul istanbul İSTANBUL ẞ");
+            let mut s = SearchState::new_with_replace(query.to_string(), "X".to_string(), false);
+            perform_search(&b, &mut s);
+            replace_all_matches(&mut b, &s).unwrap();
+            assert_eq!(b.line_cow(0).unwrap(), expected, "{query}");
         }
     }
 }
