@@ -398,6 +398,40 @@ fn an_adapter_that_hangs_up_after_the_launch_ends_the_session() {
     assert_eq!(h.session.status, Status::Ended);
 }
 
+struct Broken;
+
+impl Write for Broken {
+    fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+        Err(io::ErrorKind::BrokenPipe.into())
+    }
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A request that could not be written is never answered; left pending, it
+/// kept a stopped session looking busy for good.
+#[test]
+fn a_request_that_cannot_be_written_is_not_left_pending() {
+    let mut h = Harness::stopped_at_breakpoint();
+    let before = h.session.pending.len();
+    h.session.writer = Some(Box::new(Broken));
+    h.session.select_frame(1);
+    assert_eq!(h.session.pending.len(), before);
+    assert!(!h.session.is_busy());
+}
+
+/// A hang-up leaves no request waiting.
+#[test]
+fn a_hang_up_drops_the_pending_requests() {
+    let mut h = Harness::stopped_at_breakpoint();
+    h.session.select_frame(1);
+    assert!(!h.session.pending.is_empty());
+    h.tx.send(Incoming::Closed).unwrap();
+    h.session.poll();
+    assert!(h.session.pending.is_empty());
+}
+
 #[test]
 fn a_failed_build_names_its_last_line() {
     let mut h = Harness::new(Vec::new());
