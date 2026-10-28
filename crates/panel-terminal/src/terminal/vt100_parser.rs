@@ -7,7 +7,7 @@
 
 use std::io::Write;
 use std::sync::{Arc, Mutex, RwLock};
-use vte::{Params, Perform};
+use vte::{Params, Parser, Perform};
 
 use super::{
     csi_handlers::{handle_cursor_movement, handle_private_sequence, handle_sgr},
@@ -69,6 +69,69 @@ impl VtPerformer {
             let _ = writer.write_all(data);
             let _ = writer.flush();
         }
+    }
+}
+
+/// Longest OSC string the parser buffers. vte keeps an OSC payload in an
+/// unbounded `Vec` until its terminator, so an unterminated one (binary
+/// output, a truncated stream) would grow memory without limit. The OSCs
+/// the panel acts on (7, 9;9) are short; longer ones are dropped whole.
+pub const MAX_OSC_LEN: usize = 64 * 1024;
+
+/// Where the byte stream stands relative to an OSC string.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum OscState {
+    #[default]
+    Other,
+    /// Just after an ESC: a `]` here starts an OSC.
+    Escape,
+    /// Inside an OSC, with this many payload bytes so far.
+    Osc(usize),
+    /// Past an OSC that ran over `MAX_OSC_LEN`: bytes are swallowed up to
+    /// its terminator.
+    Discarding,
+}
+
+/// The vte parser with a cap on OSC length; feed it the PTY output.
+#[derive(Default)]
+pub struct VtParser {
+    parser: Parser,
+    osc: OscState,
+}
+
+impl VtParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn advance(&mut self, performer: &mut VtPerformer, byte: u8) {
+        // BEL, CAN, SUB and ESC end an OSC string in vte (ESC as the start
+        // of ST or of the next sequence).
+        let ends_osc = matches!(byte, 0x07 | 0x18 | 0x1A | 0x1B);
+        self.osc = match self.osc {
+            OscState::Discarding if ends_osc => {
+                if byte != 0x1B {
+                    // The terminator of a dropped OSC: no bell, no output.
+                    self.osc = OscState::Other;
+                    return;
+                }
+                OscState::Escape
+            }
+            OscState::Discarding => return,
+            OscState::Osc(_) | OscState::Other if byte == 0x1B => OscState::Escape,
+            OscState::Osc(_) if ends_osc => OscState::Other,
+            OscState::Osc(len) if len >= MAX_OSC_LEN => {
+                // Forget the buffered payload and swallow the rest.
+                self.parser = Parser::new();
+                self.osc = OscState::Discarding;
+                return;
+            }
+            OscState::Osc(len) => OscState::Osc(len + 1),
+            OscState::Escape if byte == b']' => OscState::Osc(0),
+            OscState::Escape if byte == 0x1B => OscState::Escape,
+            OscState::Escape | OscState::Other => OscState::Other,
+        };
+        self.parser.advance(performer, byte);
     }
 }
 
@@ -691,7 +754,6 @@ impl Perform for VtPerformer {
 mod tests {
     use super::*;
     use std::io::Result as IoResult;
-    use vte::Parser;
 
     struct SharedCapture(Arc<Mutex<Vec<u8>>>);
 
@@ -726,7 +788,7 @@ mod tests {
     }
 
     fn feed(performer: &mut VtPerformer, bytes: &[u8]) {
-        let mut parser = Parser::new();
+        let mut parser = VtParser::new();
         for byte in bytes {
             parser.advance(performer, *byte);
         }
@@ -787,6 +849,43 @@ mod tests {
             screen.read().unwrap().reported_cwd,
             Some(std::path::PathBuf::from("/tmp/x"))
         );
+    }
+
+    #[test]
+    fn an_osc_longer_than_the_cap_is_dropped_whole() {
+        let (mut performer, _capture, screen) = performer();
+        let mut parser = VtParser::new();
+        let mut input = b"\x1b]0;".to_vec();
+        input.resize(input.len() + 3 * MAX_OSC_LEN, b'x');
+        for byte in input {
+            parser.advance(&mut performer, byte);
+        }
+        // vte's buffer was dropped at the cap instead of growing on.
+        assert_eq!(parser.osc, OscState::Discarding);
+        for &byte in b"\x07after\x1b]7;file:///tmp/y\x1b\\!" {
+            parser.advance(&mut performer, byte);
+        }
+        performer.flush();
+        let s = screen.read().unwrap();
+        assert!(!s.bell, "the terminator of a dropped OSC rang the bell");
+        assert_eq!(s.reported_cwd, Some(std::path::PathBuf::from("/tmp/y")));
+        drop(s);
+        assert_eq!(row_text(&screen, 0), "after!");
+    }
+
+    #[test]
+    fn a_dropped_osc_ended_by_esc_lets_the_next_sequence_through() {
+        let (mut performer, _capture, screen) = performer();
+        let mut parser = VtParser::new();
+        let mut input = b"\x1b]2;".to_vec();
+        input.resize(input.len() + MAX_OSC_LEN + 10, b'x');
+        input.extend_from_slice(b"\x1b[2;3Hz");
+        for byte in input {
+            parser.advance(&mut performer, byte);
+        }
+        performer.flush();
+        assert_eq!(row_text(&screen, 0), "");
+        assert_eq!(row_text(&screen, 1), "  z");
     }
 
     #[test]

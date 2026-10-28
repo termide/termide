@@ -34,7 +34,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
 use terminal::{KeyboardProtocolMode, MouseTrackingMode, TerminalScreen};
-use vte::Parser;
 
 use termide_config::{Config, TerminalKeybindings};
 use termide_core::{
@@ -229,7 +228,7 @@ impl Terminal {
         let is_alive_clone = Arc::clone(is_alive);
         let has_new_data_clone = Arc::clone(has_new_data);
         thread::spawn(move || {
-            let mut parser = Parser::new();
+            let mut parser = terminal::VtParser::new();
             let mut buf = [0u8; 16384];
             let mut performer = terminal::VtPerformer {
                 writer,

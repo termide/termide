@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::sync::LazyLock;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-pub use vt100_parser::VtPerformer;
+pub use vt100_parser::{VtParser, VtPerformer};
 
 /// Static lookup table for 256-color palette.
 ///
