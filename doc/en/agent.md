@@ -1452,7 +1452,12 @@ there does: a path argument or an input redirection (`< file`) that leads out
 — absolute, under `~`, through `..` or a symlink, or a glob such as `.*` that
 can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
 `ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
-the project (`cd /etc && cat passwd` included). So do `env` and `printenv`
+the project (`cd /etc && cat passwd` included). A loop (`for`, `while`,
+`until`, `select`) that changes directory (`cd`, `pushd`, `popd`) runs its
+later turns somewhere else, so in its body and after it the directory counts
+as unknown and a relative path asks:
+`for x in a b; do cat src/lib.rs; cd ..; done` asks, until an absolute `cd`
+after the loop sets the directory again. So do `env` and `printenv`
 without arguments, which print every secret in the environment. A grep or
 `rg` pattern is not taken for a path (`rg /api/ src` does not ask), nor is a
 `$` that starts no expansion a variable (`rg "foo$" src` does not ask).
