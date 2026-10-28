@@ -677,33 +677,8 @@ impl TerminalScreen {
                 let Some(top_line) = self.lines.front().cloned() else {
                     return;
                 };
-                self.scrollback.push_back(top_line);
-
-                // Save wrapped flag to scrollback
                 let top_wrapped = self.lines_wrapped.front().copied().unwrap_or(false);
-                self.scrollback_wrapped.push_back(top_wrapped);
-
-                // Limit scrollback size - O(1) with VecDeque
-                if self.scrollback.len() > self.max_scrollback {
-                    self.scrollback.pop_front();
-                }
-                if self.scrollback_wrapped.len() > self.max_scrollback {
-                    self.scrollback_wrapped.pop_front();
-                }
-
-                // Preserve the user's scrollback view when they're scrolled
-                // away from the live tail. The renderer derives the visible
-                // window from `scrollback.len() + visible_rows - scroll_offset`;
-                // pushing a line into scrollback shifts that window forward by
-                // one (or, when capped at `max_scrollback`, the absolute index
-                // of every kept line drops by one), so the same scroll_offset
-                // would point at later content on the next render. Bumping
-                // scroll_offset by one keeps the on-screen content stable.
-                // At the tail (`scroll_offset == 0`) we leave it alone so the
-                // natural follow-tail behaviour stays intact.
-                if self.scroll_offset > 0 {
-                    self.scroll_offset = (self.scroll_offset + 1).min(self.scrollback.len());
-                }
+                self.push_scrollback(top_line, top_wrapped);
             }
 
             let buffer = self.active_buffer_mut();
@@ -726,6 +701,34 @@ impl TerminalScreen {
                 wrapped.remove(top);
                 wrapped.insert(bottom, false);
             }
+        }
+    }
+
+    /// Append a line that left the top of the main screen to the scrollback.
+    fn push_scrollback(&mut self, line: Vec<Cell>, wrapped: bool) {
+        self.scrollback.push_back(line);
+        self.scrollback_wrapped.push_back(wrapped);
+
+        // Limit scrollback size - O(1) with VecDeque
+        if self.scrollback.len() > self.max_scrollback {
+            self.scrollback.pop_front();
+        }
+        if self.scrollback_wrapped.len() > self.max_scrollback {
+            self.scrollback_wrapped.pop_front();
+        }
+
+        // Preserve the user's scrollback view when they're scrolled
+        // away from the live tail. The renderer derives the visible
+        // window from `scrollback.len() + visible_rows - scroll_offset`;
+        // pushing a line into scrollback shifts that window forward by
+        // one (or, when capped at `max_scrollback`, the absolute index
+        // of every kept line drops by one), so the same scroll_offset
+        // would point at later content on the next render. Bumping
+        // scroll_offset by one keeps the on-screen content stable.
+        // At the tail (`scroll_offset == 0`) we leave it alone so the
+        // natural follow-tail behaviour stays intact.
+        if self.scroll_offset > 0 {
+            self.scroll_offset = (self.scroll_offset + 1).min(self.scrollback.len());
         }
     }
 
@@ -876,6 +879,34 @@ impl TerminalScreen {
             return;
         }
         let empty_cell = Cell::blank(CellStyle::default());
+
+        // Shrinking drops the main screen's lines below its cursor first;
+        // if the cursor line would still fall off, the top lines move into
+        // the scrollback instead, so the prompt stays in view. In the
+        // alternate screen the main cursor is the one saved on entering it.
+        let main_cursor_row = if self.use_alt_screen {
+            self.saved_cursor.map(|(row, _)| row)
+        } else {
+            Some(self.cursor.0)
+        };
+        if let Some(cursor_row) = main_cursor_row {
+            let scroll = (cursor_row + 1).saturating_sub(rows);
+            for _ in 0..scroll.min(self.lines.len()) {
+                let line = self.lines.pop_front().unwrap_or_default();
+                let wrapped = self.lines_wrapped.pop_front().unwrap_or(false);
+                self.push_scrollback(line, wrapped);
+            }
+            if self.use_alt_screen {
+                if let Some(saved) = self.saved_cursor.as_mut() {
+                    saved.0 -= scroll;
+                }
+            } else {
+                self.cursor.0 -= scroll;
+                if let Some(saved) = self.saved_cursor.as_mut() {
+                    saved.0 = saved.0.saturating_sub(scroll);
+                }
+            }
+        }
 
         for (lines, wrapped) in [
             (&mut self.lines, &mut self.lines_wrapped),
@@ -1055,6 +1086,71 @@ mod tests {
         screen.scroll_up();
         assert_eq!(screen.scrollback.len(), 8);
         assert_eq!(screen.scroll_offset, 8);
+    }
+
+    fn row_text(screen: &TerminalScreen, row: usize) -> String {
+        let mut s = String::new();
+        for cell in &screen.lines[row] {
+            cell.push_text(&mut s);
+        }
+        s.trim_end().to_string()
+    }
+
+    /// Write `count` numbered lines and leave the cursor on the last one.
+    fn write_lines(screen: &mut TerminalScreen, count: usize) {
+        for i in 0..count {
+            if i > 0 {
+                screen.carriage_return();
+                screen.newline();
+            }
+            for ch in format!("line{i}").chars() {
+                screen.put_char(ch);
+            }
+        }
+    }
+
+    #[test]
+    fn shrinking_keeps_the_cursor_line_and_moves_the_top_to_scrollback() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        assert_eq!(screen.cursor, (7, 5));
+
+        // Two blank lines below the cursor go first, then five top lines
+        // move into the scrollback.
+        screen.resize(3, 20);
+        assert_eq!(screen.cursor, (2, 5));
+        assert_eq!(row_text(&screen, 2), "line7");
+        assert_eq!(row_text(&screen, 0), "line5");
+        let history: Vec<String> = screen
+            .scrollback
+            .iter()
+            .map(|l| l.iter().map(|c| c.ch).collect::<String>().trim_end().into())
+            .collect();
+        assert_eq!(history, ["line0", "line1", "line2", "line3", "line4"]);
+        assert_eq!(screen.scrollback_wrapped.len(), 5);
+    }
+
+    #[test]
+    fn shrinking_with_the_cursor_near_the_top_drops_blank_bottom_lines() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 2);
+        screen.resize(4, 20);
+        assert!(screen.scrollback.is_empty());
+        assert_eq!(screen.cursor, (1, 5));
+        assert_eq!(row_text(&screen, 0), "line0");
+    }
+
+    #[test]
+    fn shrinking_in_the_alt_screen_keeps_the_main_prompt() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        screen.save_cursor();
+        screen.switch_to_alt_screen();
+        screen.resize(4, 20);
+        assert_eq!(screen.saved_cursor, Some((3, 5)));
+        screen.switch_to_main_screen();
+        screen.restore_cursor();
+        assert_eq!(row_text(&screen, 3), "line7");
     }
 
     #[test]
