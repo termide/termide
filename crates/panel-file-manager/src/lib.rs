@@ -182,7 +182,12 @@ pub struct FileManager {
 
 #[derive(Debug, Clone)]
 pub(crate) struct FileEntry {
+    /// Name for display, matching and sorting. Lossy when the real name is
+    /// not valid UTF-8 — build paths from [`Self::path_name`], never this.
     pub name: String,
+    /// The real name when it is not valid UTF-8 (`name` then holds U+FFFD
+    /// in place of the bad bytes); `None` otherwise.
+    pub os_name: Option<std::ffi::OsString>,
     pub is_dir: bool,
     pub is_symlink: bool,
     pub is_executable: bool,
@@ -193,10 +198,18 @@ pub(crate) struct FileEntry {
 }
 
 impl FileEntry {
+    /// The name to join onto the parent directory to reach this entry.
+    pub fn path_name(&self) -> &std::ffi::OsStr {
+        self.os_name
+            .as_deref()
+            .unwrap_or_else(|| std::ffi::OsStr::new(&self.name))
+    }
+
     /// Create FileEntry from VfsEntry (for remote directories).
     pub fn from_vfs_entry(entry: VfsEntry) -> Self {
         Self {
             name: entry.name,
+            os_name: None,
             is_dir: matches!(entry.metadata.file_type, VfsFileType::Directory),
             is_symlink: matches!(entry.metadata.file_type, VfsFileType::Symlink),
             is_executable: entry
@@ -1716,6 +1729,46 @@ mod tests {
             fm.modal_request.take(),
             Some((PendingAction::VfsMessage, ActiveModal::InfoAction(_)))
         ));
+    }
+
+    /// A name that is not valid UTF-8 is shown lossily but its path keeps
+    /// the real bytes, so operations reach the file and not `a\u{FFFD}`.
+    #[cfg(unix)]
+    #[test]
+    fn non_utf8_names_keep_their_real_path() {
+        use std::os::unix::ffi::OsStrExt;
+        let raw = std::ffi::OsStr::from_bytes(b"a\xff").to_os_string();
+        let fm = FileManager::new_with_path(PathBuf::from("/base"));
+        let entry = FileEntry {
+            name: raw.to_string_lossy().into_owned(),
+            os_name: Some(raw.clone()),
+            is_dir: false,
+            is_symlink: false,
+            is_executable: false,
+            is_readonly: false,
+            git_status: GitStatus::Unmodified,
+            size: None,
+            modified: None,
+        };
+        let tree = fm.build_top_level_tree(vec![entry]);
+        assert_eq!(tree[0].file_entry.name, "a\u{FFFD}");
+        assert_eq!(tree[0].full_path, PathBuf::from("/base").join(&raw));
+    }
+
+    /// End to end on a filesystem that stores arbitrary bytes (APFS does
+    /// not, so macOS cannot create such a file).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn listing_a_non_utf8_name_selects_the_real_file() {
+        use std::os::unix::ffi::OsStrExt;
+        let temp_dir = TempDir::new().unwrap();
+        let raw = std::ffi::OsStr::from_bytes(b"a\xff");
+        std::fs::write(temp_dir.path().join(raw), "x").unwrap();
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("a\u{FFFD}").unwrap();
+        assert_eq!(fm.get_selected_paths(), [temp_dir.path().join(raw)]);
     }
 
     /// `+` / `-` select and unselect by mask, files and `dir/` patterns
