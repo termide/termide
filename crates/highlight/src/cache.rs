@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tree_sitter::InputEdit;
 use tree_sitter_highlight::{HighlightEvent, Highlighter};
 
-use crate::document::{DocumentHighlight, DocumentRevision, DocumentSource, LineSegments};
+use crate::document::{DocumentHighlight, DocumentRevision, DocumentSource};
 use crate::keyword::{keyword_line_segments, KeywordSyntax};
 use crate::languages::{injection_language_alias, HIGHLIGHT_NAMES};
 use crate::TreeSitterHighlighter;
@@ -22,11 +22,14 @@ const MAX_CACHE_SIZE: usize = 1000;
 /// Upper bound (in bytes) for whole-document syntax highlighting.
 ///
 /// Whole-document highlighting is the only way to resolve cross-line context
-/// (PHP's HTML/PHP mode switches, multi-line strings and comments). Most
-/// grammars follow edits incrementally, but opening a file still parses it
-/// whole, and languages with injections re-parse it on every edit. Past this
-/// size callers fall back to the per-line path.
-pub const WHOLE_DOCUMENT_BYTE_LIMIT: usize = 1024 * 1024;
+/// (PHP's HTML/PHP mode switches, multi-line strings and comments). Edits are
+/// followed incrementally, but opening a file still parses it whole, and the
+/// incremental re-parse grows with the file: at 2 MiB a release build opens
+/// Rust in ~110 ms and keeps a keystroke under ~4 ms (JS, TS, HTML and
+/// Markdown under that), while 4 MiB doubles the open and brings Rust
+/// keystrokes near 9 ms. A kept tree also costs 10-40 times the text in
+/// memory. Past this size callers fall back to the per-line path.
+pub const WHOLE_DOCUMENT_BYTE_LIMIT: usize = 2 * 1024 * 1024;
 
 /// Trait for line-based syntax highlighting.
 /// Allows custom highlighters (e.g., for log files) to integrate with Editor.
@@ -209,13 +212,11 @@ impl HighlightCache {
     /// The document path keeps that context, so each line is coloured
     /// according to the real parse state at that point.
     ///
-    /// Most grammars are followed incrementally: the syntax tree is kept, the
-    /// edits since the last sync are applied to it and the text re-parsed
-    /// reusing what they left intact; only lines that were edited or whose
-    /// syntax changed are highlighted again, and only once they are visible.
-    /// Grammars with injections fall back to a full parse and highlight of
-    /// the whole text whenever it changes (see
-    /// `TreeSitterHighlighter::incremental_highlights`).
+    /// The syntax tree is kept between syncs: the edits since the last one
+    /// are applied to it and the text re-parsed reusing what they left
+    /// intact. Embedded languages keep a tree per injected range the same
+    /// way. Only visible lines are highlighted, and only those that were
+    /// edited or whose syntax may have changed.
     ///
     /// No-op when no tree-sitter syntax is set; when the parse fails the
     /// per-line path serves the lines. Callers must gate on buffer size.
@@ -223,25 +224,26 @@ impl HighlightCache {
         let Some(language) = self.language.as_deref() else {
             return;
         };
-        let default_style = Style::default().fg(self.default_fg);
-        if let Some(highlights) = self.syntax_highlighter.incremental_highlights(language) {
-            self.document.sync_tree(doc, &highlights);
-            let styles = &self.highlight_styles;
-            let style = |highlight: usize| styles.get(highlight).copied().unwrap_or(default_style);
-            self.document.fill(
-                doc.rope(),
-                visible_lines,
-                &highlights,
-                &style,
-                default_style,
-            );
+        let highlighter = self.syntax_highlighter;
+        let Some(highlights) = highlighter.incremental_highlights(language) else {
             return;
-        }
-        let revision = doc.revision();
-        if self.document.revision() != Some(revision) {
-            let lines = self.highlight_whole_text(&doc.rope().to_string());
-            self.document.set_whole(revision, lines);
-        }
+        };
+        let default_style = Style::default().fg(self.default_fg);
+        self.document.sync_tree(doc, &highlights);
+        let styles = &self.highlight_styles;
+        let style = |highlight: usize| styles.get(highlight).copied().unwrap_or(default_style);
+        // Embedded languages resolve to their own queries under the alias
+        // the host's injection names.
+        let resolve =
+            |name: &str| highlighter.incremental_highlights(injection_language_alias(name));
+        self.document.fill(
+            doc.rope(),
+            visible_lines,
+            &highlights,
+            &resolve,
+            &style,
+            default_style,
+        );
     }
 
     /// Highlight `text` as a whole document, every line at once. For text
@@ -252,9 +254,11 @@ impl HighlightCache {
     }
 
     /// Highlight the whole of `text` through `tree_sitter_highlight`, which
-    /// also colours injected languages. `None` when no syntax is set or the
-    /// grammar/parse fails.
-    fn highlight_whole_text(&self, text: &str) -> Option<Vec<LineSegments>> {
+    /// also colours injected languages: the reference the incremental path
+    /// is tested against. `None` when no syntax is set or the grammar/parse
+    /// fails.
+    #[cfg(test)]
+    fn highlight_whole_text(&self, text: &str) -> Option<Vec<crate::document::LineSegments>> {
         let language = self.language.as_ref()?;
         let config = self.syntax_highlighter.get_config(language)?;
 
@@ -273,8 +277,8 @@ impl HighlightCache {
             })
             .ok()?;
 
-        let mut doc: Vec<LineSegments> = Vec::new();
-        let mut current_line: LineSegments = Vec::new();
+        let mut doc: Vec<crate::document::LineSegments> = Vec::new();
+        let mut current_line: crate::document::LineSegments = Vec::new();
         // Highlights nest; when an inner one ends the enclosing one resumes.
         let mut styles: Vec<Style> = Vec::new();
 
@@ -376,10 +380,13 @@ impl HighlightCache {
         };
 
         let mut segments = Vec::new();
-        let mut current_style = default_style;
+        // Highlights nest; when an inner one ends the enclosing one resumes,
+        // as on the whole-document path.
+        let mut styles: Vec<Style> = Vec::new();
         let mut current_text = String::new();
 
         for event in highlights {
+            let current_style = styles.last().copied().unwrap_or(default_style);
             match event {
                 Ok(HighlightEvent::Source { start, end }) => {
                     if let Ok(text) = std::str::from_utf8(&source[start..end]) {
@@ -392,9 +399,12 @@ impl HighlightCache {
                         segments
                             .push((Cow::Owned(std::mem::take(&mut current_text)), current_style));
                     }
-                    current_style = self
-                        .syntax_highlighter
-                        .style_for_highlight(highlight.0, self.is_light_theme);
+                    styles.push(
+                        self.highlight_styles
+                            .get(highlight.0)
+                            .copied()
+                            .unwrap_or(default_style),
+                    );
                 }
                 Ok(HighlightEvent::HighlightEnd) => {
                     if !current_text.is_empty() {
@@ -402,7 +412,7 @@ impl HighlightCache {
                         segments
                             .push((Cow::Owned(std::mem::take(&mut current_text)), current_style));
                     }
-                    current_style = default_style;
+                    styles.pop();
                 }
                 Err(_) => {
                     return vec![(Cow::Owned(line_text.to_string()), default_style)];
@@ -411,6 +421,7 @@ impl HighlightCache {
         }
 
         if !current_text.is_empty() {
+            let current_style = styles.last().copied().unwrap_or(default_style);
             segments.push((Cow::Owned(current_text), current_style));
         }
 
@@ -696,11 +707,36 @@ mod tests {
         assert_eq!(rebuilt, "$totally = different;");
     }
 
+    /// The style of every byte of `segments`.
+    fn byte_styles(segments: &[(Cow<'_, str>, Style)]) -> Vec<Style> {
+        segments
+            .iter()
+            .flat_map(|(text, style)| std::iter::repeat_n(*style, text.len()))
+            .collect()
+    }
+
     #[test]
-    fn a_theme_change_rehighlights_the_fallback_document() {
-        // PHP takes the whole-text fallback, which keeps no tree: clearing its
-        // lines must make the next sync redo the pass rather than leave them
-        // empty.
+    fn the_per_line_path_resumes_the_enclosing_highlight() {
+        // Regression: when an inner highlight ended (an escape in a string)
+        // the rest of the outer one dropped to the default colour.
+        let line = r#"let s = "a\nb"; // c"#;
+        let mut cache = HighlightCache::new(global_highlighter(), false, Color::White);
+        cache.set_syntax("rust");
+        let whole = cache.highlight_whole_text(line).expect("rust parses");
+        let per_line = cache.compute_line_segments(line);
+        assert_eq!(byte_styles(&per_line), byte_styles(&whole[0]));
+        let string = cache.highlight_styles[HIGHLIGHT_NAMES
+            .iter()
+            .position(|&name| name == "string")
+            .unwrap()];
+        let b = line.find("b\"").unwrap();
+        assert_eq!(byte_styles(&per_line)[b], string, "after the escape");
+    }
+
+    #[test]
+    fn a_theme_change_rehighlights_a_document_with_injections() {
+        // Clearing the lines keeps the trees, host and embedded: the next
+        // sync must highlight the lines again rather than leave them empty.
         let mut cache = HighlightCache::new(global_highlighter(), false, Color::White);
         cache.set_syntax("php");
         let doc = WholeText::new("<?php\n$a = 1;\n");

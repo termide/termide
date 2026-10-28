@@ -7,13 +7,14 @@
 //! lines are re-highlighted when they are on screen, by running the
 //! highlights query over just their byte range.
 //!
-//! The capture walk mirrors `tree_sitter_highlight`'s handling of a single
-//! layer, so a language highlights the same here as through
-//! `Highlighter::highlight`. That crate cannot take a tree that was parsed
-//! elsewhere — it parses the whole source itself on every call — which is
-//! why the walk lives here. It covers grammars without an injections query;
-//! the rest take the whole-document path in `cache.rs` (see
-//! [`crate::TreeSitterHighlighter::incremental_highlights`]).
+//! The capture walk mirrors `tree_sitter_highlight`'s, so a language
+//! highlights the same here as through `Highlighter::highlight`. That crate
+//! cannot take a tree that was parsed elsewhere — it parses the whole source
+//! itself on every call — which is why the walk lives here. A grammar
+//! without injections is walked here line by line; one with injections goes
+//! through [`crate::layers`], which keeps a tree per injected range and
+//! replays `tree_sitter_highlight`'s layer interleaving over the visible
+//! byte range.
 
 use ratatui::style::Style;
 use ropey::Rope;
@@ -23,6 +24,8 @@ use std::ops::Range;
 use tree_sitter::{
     InputEdit, Node, Parser, Query, QueryCursor, StreamingIterator, TextProvider, Tree,
 };
+
+use crate::layers::{edit_bytes, HostCombined, HostLayer, LayerCache, Resolver};
 
 /// Styled pieces of one line, its line break excluded.
 pub(crate) type LineSegments = Vec<(Cow<'static, str>, Style)>;
@@ -47,12 +50,30 @@ pub trait DocumentSource {
     fn edits_since(&self, since: DocumentRevision) -> Option<Vec<InputEdit>>;
 }
 
-/// The highlights query of one language and what each capture maps to.
+/// The highlights and injections of one language, as its
+/// `HighlightConfiguration` holds them.
+#[derive(Clone, Copy)]
 pub(crate) struct QueryHighlights<'a> {
+    /// The name the language is loaded under (its `language_name`).
+    pub name: &'a str,
     pub language: &'a tree_sitter::Language,
+    /// Injection patterns first, then highlight patterns.
     pub query: &'a Query,
     /// Highlight index (into `HIGHLIGHT_NAMES`) per capture index.
     pub capture_highlights: &'a [Option<usize>],
+    /// How many patterns at the start of `query` are injections.
+    pub injection_patterns: usize,
+    /// The combined injections, matched over a whole tree at once.
+    pub combined_injections: Option<&'a Query>,
+    pub content_capture: Option<u32>,
+    pub language_capture: Option<u32>,
+}
+
+impl QueryHighlights<'_> {
+    /// Whether other languages can be embedded in this one.
+    pub fn has_injections(&self) -> bool {
+        self.injection_patterns > 0 || self.combined_injections.is_some()
+    }
 }
 
 /// A kept syntax tree plus the highlighted lines derived from it.
@@ -60,6 +81,11 @@ pub(crate) struct DocumentHighlight {
     parser: Parser,
     cursor: QueryCursor,
     tree: Option<Tree>,
+    /// The trees of languages embedded in `tree`, kept across edits.
+    layers: LayerCache,
+    /// The combined injections of `tree`; `None` until worked out for its
+    /// current text.
+    combined: Option<HostCombined>,
     /// The revision `tree` and `lines` describe.
     revision: Option<DocumentRevision>,
     /// One entry per rope line; `None` when stale or not highlighted yet.
@@ -72,6 +98,8 @@ impl DocumentHighlight {
             parser: Parser::new(),
             cursor: QueryCursor::new(),
             tree: None,
+            layers: LayerCache::new(),
+            combined: None,
             revision: None,
             lines: Vec::new(),
         }
@@ -80,13 +108,15 @@ impl DocumentHighlight {
     /// Forget the tree and every line, e.g. when the language changes.
     pub fn reset(&mut self) {
         self.tree = None;
+        self.layers.clear();
+        self.combined = None;
         self.revision = None;
         self.lines.clear();
     }
 
     /// Mark every line stale but keep the tree (the theme changed, the text
-    /// did not). Lines set by [`Self::set_whole`] have no tree to come back
-    /// from, so the next sync redoes the whole pass.
+    /// did not). Without a tree (the parse failed) the next sync parses
+    /// again.
     pub fn clear_lines(&mut self) {
         self.lines.iter_mut().for_each(|line| *line = None);
         if self.tree.is_none() {
@@ -94,26 +124,25 @@ impl DocumentHighlight {
         }
     }
 
-    /// Store a whole-document pass made without a kept tree (the fallback
-    /// for languages with injections). `None` records a failed pass, so it
-    /// is not retried until the text changes.
-    pub fn set_whole(&mut self, revision: DocumentRevision, lines: Option<Vec<LineSegments>>) {
-        self.tree = None;
-        self.revision = Some(revision);
-        self.lines = lines.unwrap_or_default().into_iter().map(Some).collect();
-    }
-
     #[cfg(test)]
     pub fn tree(&self) -> Option<&Tree> {
         self.tree.as_ref()
     }
 
-    pub fn revision(&self) -> Option<DocumentRevision> {
-        self.revision
+    /// The injected trees in use: language, included ranges, tree.
+    #[cfg(test)]
+    pub fn layer_trees(&self) -> impl Iterator<Item = (&str, &[tree_sitter::Range], &Tree)> {
+        self.layers.trees()
     }
 
     /// Bring the tree up to `doc`'s revision and mark stale the lines whose
     /// highlighting may have changed.
+    ///
+    /// With embedded languages every line goes stale: an edit can change how
+    /// text far from it is highlighted through a tree that is only brought
+    /// up to date when that text is on screen (a `/*` typed in an HTML
+    /// `<script>`, a code fence's language renamed). Only the visible lines
+    /// are highlighted again, so this costs no more than an unchanged line.
     pub fn sync_tree(&mut self, doc: &dyn DocumentSource, highlights: &QueryHighlights) {
         let revision = doc.revision();
         if self.revision == Some(revision) {
@@ -124,21 +153,48 @@ impl DocumentHighlight {
         self.revision = Some(revision);
 
         if let (Some(mut old_tree), Some(edits)) = (self.tree.take(), edits) {
+            // What the edits wrote, in the coordinates of the new text.
+            let mut written: Vec<Range<usize>> = Vec::with_capacity(edits.len());
             for edit in &edits {
                 old_tree.edit(edit);
+                self.layers.edit(edit);
+                if let Some(combined) = &mut self.combined {
+                    combined.edit(edit);
+                }
+                written.iter_mut().for_each(|w| edit_bytes(w, edit));
+                written.push(edit.start_byte..edit.new_end_byte);
                 self.splice_lines(edit);
             }
             if let Some(tree) = parse(&mut self.parser, highlights.language, rope, Some(&old_tree))
             {
-                for range in old_tree.changed_ranges(&tree) {
-                    self.mark_stale(rope, range.start_byte..range.end_byte);
+                let changed = old_tree
+                    .changed_ranges(&tree)
+                    .map(|range| range.start_byte..range.end_byte);
+                if highlights.has_injections() {
+                    let mut regions = written;
+                    regions.extend(changed);
+                    let layers = &mut self.layers;
+                    if self.combined.as_ref().is_some_and(|combined| {
+                        layers.host_combined_changed(combined, &tree, highlights, &regions, rope)
+                    }) {
+                        self.combined = None;
+                    }
+                    self.lines.iter_mut().for_each(|line| *line = None);
+                } else {
+                    for range in changed {
+                        self.mark_stale(rope, range);
+                    }
                 }
                 self.tree = Some(tree);
                 if self.lines.len() == rope.len_lines() {
                     return;
                 }
+            } else {
+                self.combined = None;
             }
         } else {
+            self.layers.clear();
+            self.combined = None;
             self.tree = parse(&mut self.parser, highlights.language, rope, None);
         }
         // A fresh parse, or line bookkeeping that no longer lines up.
@@ -166,18 +222,21 @@ impl DocumentHighlight {
     }
 
     /// Highlight every stale line in `visible`. A no-op without a tree (the
-    /// parse failed), leaving those lines to the per-line path.
+    /// parse failed), leaving those lines to the per-line path. `resolve`
+    /// finds the queries of an embedded language by the name its host gives.
     pub fn fill(
         &mut self,
         rope: &Rope,
         visible: Range<usize>,
-        highlights: &QueryHighlights,
+        highlights: &QueryHighlights<'static>,
+        resolve: &Resolver,
         styles: &dyn Fn(usize) -> Style,
         default_style: Style,
     ) {
         let Some(tree) = &self.tree else {
             return;
         };
+        let injections = highlights.has_injections();
         let end = visible.end.min(self.lines.len());
         let mut line = visible.start;
         while line < end {
@@ -189,24 +248,42 @@ impl DocumentHighlight {
             while line < end && self.lines[line].is_none() {
                 line += 1;
             }
-            let highlighted = highlight_lines(
-                &mut self.cursor,
-                tree,
-                rope,
-                run_start..line,
-                highlights,
-                styles,
-                default_style,
-            );
+            let highlighted = if injections {
+                let combined = self.combined.get_or_insert_with(|| {
+                    self.layers
+                        .host_combined_injections(tree, highlights, rope, resolve)
+                });
+                let host = HostLayer {
+                    tree,
+                    highlights: *highlights,
+                    combined: combined.injections(),
+                };
+                let window = line_byte(rope, run_start)..line_byte(rope, line);
+                let runs =
+                    self.layers
+                        .highlight(&host, rope, window, resolve, styles, default_style);
+                split_into_lines(rope, run_start..line, &runs)
+            } else {
+                highlight_lines(
+                    &mut self.cursor,
+                    tree,
+                    rope,
+                    run_start..line,
+                    highlights,
+                    styles,
+                    default_style,
+                )
+            };
             for (slot, segments) in self.lines[run_start..line].iter_mut().zip(highlighted) {
                 *slot = Some(segments);
             }
         }
+        self.layers.evict();
     }
 }
 
 /// Parse `rope` chunk by chunk, reusing `old_tree` where its edits allow.
-fn parse(
+pub(crate) fn parse(
     parser: &mut Parser,
     language: &tree_sitter::Language,
     rope: &Rope,
@@ -228,7 +305,7 @@ fn parse(
 }
 
 /// Node text for query predicates, read from the rope without copying.
-struct RopeText<'a>(&'a Rope);
+pub(crate) struct RopeText<'a>(pub &'a Rope);
 
 impl<'a> TextProvider<&'a [u8]> for RopeText<'a> {
     type I = std::iter::Map<ropey::iter::Chunks<'a>, fn(&'a str) -> &'a [u8]>;
@@ -254,6 +331,15 @@ struct Capture {
     index: u32,
 }
 
+/// Where rope line `line` starts; the end of the text past the last line.
+fn line_byte(rope: &Rope, line: usize) -> usize {
+    if line >= rope.len_lines() {
+        rope.len_bytes()
+    } else {
+        rope.line_to_byte(line)
+    }
+}
+
 /// Highlight rope lines `lines`, returning one segment list per line.
 ///
 /// Only captures intersecting those lines are visited. Highlights nest: when
@@ -269,14 +355,7 @@ fn highlight_lines(
     styles: &dyn Fn(usize) -> Style,
     default_style: Style,
 ) -> Vec<LineSegments> {
-    let line_byte = |line: usize| {
-        if line >= rope.len_lines() {
-            rope.len_bytes()
-        } else {
-            rope.line_to_byte(line)
-        }
-    };
-    let window = line_byte(lines.start)..line_byte(lines.end);
+    let window = line_byte(rope, lines.start)..line_byte(rope, lines.end);
 
     cursor.set_byte_range(window.clone());
     let mut captures = Vec::new();
@@ -364,7 +443,7 @@ fn styled_runs(
 }
 
 /// Cut styled runs at rope line boundaries, dropping each line's `\n`.
-fn split_into_lines(
+pub(crate) fn split_into_lines(
     rope: &Rope,
     lines: Range<usize>,
     runs: &[(Range<usize>, Style)],
@@ -422,9 +501,14 @@ mod tests {
         ];
         let query = Query::new(&tree_sitter_rust::LANGUAGE.into(), "").unwrap();
         let highlights = QueryHighlights {
+            name: "rust",
             language: &tree_sitter_rust::LANGUAGE.into(),
             query: &query,
             capture_highlights: &[Some(0), Some(1)],
+            injection_patterns: 0,
+            combined_injections: None,
+            content_capture: None,
+            language_capture: None,
         };
         let styles = |h: usize| if h == 0 { outer } else { inner };
         let runs = styled_runs(&caps, 0..12, &highlights, &styles, Style::default());

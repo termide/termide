@@ -2,6 +2,7 @@
 //! does, whatever the edits and whatever was on screen along the way.
 
 use super::*;
+use crate::document::LineSegments;
 use crate::global_highlighter;
 use tree_sitter::Point;
 
@@ -140,7 +141,7 @@ fn check_against_fresh(
     let mut fresh_cache = cache_for(language);
     let expected = all_lines(&mut fresh_cache, &TestDoc::new(&text));
     let tree = |c: &HighlightCache| c.document.tree().map(|t| t.root_node().to_sexp());
-    if tree(cache) != tree(&fresh_cache) {
+    if tree(cache) != tree(&fresh_cache) || !layers_match_fresh_parses(cache, &doc.rope) {
         return false;
     }
     assert_lines_eq(
@@ -150,6 +151,19 @@ fn check_against_fresh(
         &format!("{language}, {context}, fresh parse"),
     );
     true
+}
+
+/// Whether every kept injected tree equals a fresh parse of its ranges.
+fn layers_match_fresh_parses(cache: &HighlightCache, rope: &Rope) -> bool {
+    cache.document.layer_trees().all(|(name, ranges, tree)| {
+        let language = &global_highlighter().get_config(name).unwrap().language;
+        let mut parser = tree_sitter::Parser::new();
+        parser.set_language(language).unwrap();
+        parser.set_included_ranges(ranges).unwrap();
+        let text = rope.to_string();
+        let fresh = parser.parse(&text, None).unwrap();
+        fresh.root_node().to_sexp() == tree.root_node().to_sexp()
+    })
 }
 
 fn assert_lines_eq(got: &[LineSegments], want: &[LineSegments], text: &str, context: &str) {
@@ -334,6 +348,82 @@ const YAML: &str = "key: value\nlist:\n  - a\n  - \"b ё\"\nblock: |\n  text\n  
 const BASH: &str = "#!/bin/sh\nname=\"world\"\nif [ -n \"$name\" ]; then\n  echo \"hi $name\" # c\nfi\ncat <<EOF\nheredoc\nEOF\n";
 const RUBY: &str = "class A\n  def f(x)\n    \"v=#{x}\" # c\n  end\nend\n=begin\nblock\n=end\n";
 
+// Languages with injections: each sample embeds what its grammar injects.
+const JAVASCRIPT: &str = r#"const Box = styled.div`
+  color: red;
+  ${(p) => p.x}
+`;
+const re = /ab+c/g; // regex
+/** @param {number} a */
+function f(a) {
+  return html`<p class="x">${a}</p>`;
+}
+"#;
+const JSX: &str =
+    "const App = () => (\n  <div className=\"a\">\n    {css`color: red;`}\n  </div>\n);\n";
+const HTML: &str = r#"<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { color: red; } /* c */
+</style>
+<script>
+  const x = `a ${1}`;
+  function f() { return /re/; }
+</script>
+</head>
+<body><p class="a">Hi &amp; bye</p><!-- c --></body>
+</html>
+"#;
+const MARKDOWN: &str = r#"---
+title: x
+---
+# Title
+
+Some *text* with `code`.
+
+```rust
+fn main() { let s = "ё"; }
+```
+
+<div class="a">html block</div>
+
+```js
+const x = 1;
+```
+- item
+"#;
+const PHP: &str = r#"<!DOCTYPE html>
+<html>
+<body>
+    <h1 class="t">Title</h1>
+    <?php
+        /** @var string */
+        $name = "Ivan";
+        echo "<p>Hi, $name</p>";
+        $t = <<<HTML
+    <b>x</b>
+    HTML;
+    ?>
+    <script>let y = 1;</script>
+</body>
+</html>
+"#;
+const LUA: &str = "local ffi = require(\"ffi\")\nffi.cdef[[\n  int printf(const char *fmt, ...);\n]]\nlocal s = \"x\" -- c\n";
+const NIX: &str = "{ pkgs }:\n{\n  buildPhase = ''\n    echo \"hi\"\n    make\n  '';\n  x = /* bash */ ''\n    ls -la\n  '';\n}\n";
+const HASKELL: &str = "{-# LANGUAGE QuasiQuotes #-}\nmodule M where\nx = [hamlet|<p class=\"a\">hi</p>|]\n-- c\ny = [js|let z = 1;|]\n";
+
+const INJECTION_SAMPLES: &[(&str, &str)] = &[
+    ("javascript", JAVASCRIPT),
+    ("jsx", JSX),
+    ("html", HTML),
+    ("markdown", MARKDOWN),
+    ("php", PHP),
+    ("lua", LUA),
+    ("nix", NIX),
+    ("haskell", HASKELL),
+];
+
 #[test]
 fn random_edit_sessions_match_a_fresh_parse() {
     const SEEDS: u64 = 3;
@@ -357,6 +447,21 @@ fn random_edit_sessions_match_a_fresh_parse() {
     }
 }
 
+#[test]
+fn random_edit_sessions_with_injections_match_a_fresh_parse() {
+    const SEEDS: u64 = 3;
+    for &(language, source) in INJECTION_SAMPLES {
+        let mut diverged = 0;
+        for seed in 1..=SEEDS {
+            diverged += random_session(language, source, seed);
+        }
+        eprintln!(
+            "{language}: {diverged} of {} checks with a diverging tree",
+            SEEDS * 9
+        );
+    }
+}
+
 /// The incremental path's own capture walk must colour a file exactly as
 /// `tree_sitter_highlight` does, which the fallback path still uses.
 #[test]
@@ -369,7 +474,10 @@ fn query_walk_agrees_with_tree_sitter_highlight() {
         ("yaml", YAML),
         ("bash", BASH),
         ("ruby", RUBY),
-    ] {
+    ]
+    .into_iter()
+    .chain(INJECTION_SAMPLES.iter().copied())
+    {
         let mut cache = cache_for(language);
         let reference = cache
             .highlight_whole_text(source)
@@ -428,4 +536,18 @@ fn a_language_change_reparses_with_the_new_grammar() {
     all_lines(&mut cache, &doc);
     cache.set_syntax("python");
     assert_eq!(all_lines(&mut cache, &doc), fresh("python", "x = 1  # c\n"));
+}
+
+#[test]
+fn every_injection_sample_highlights_an_embedded_language() {
+    // Guards the samples above: an injection the grammar never resolves
+    // would leave the layer code untested by the edit sessions.
+    for &(language, source) in INJECTION_SAMPLES {
+        let mut cache = cache_for(language);
+        all_lines(&mut cache, &TestDoc::new(source));
+        assert!(
+            cache.document.layer_trees().next().is_some(),
+            "{language}: no embedded layer"
+        );
+    }
 }
