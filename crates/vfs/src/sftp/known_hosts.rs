@@ -23,6 +23,7 @@ use russh::keys::{Algorithm, HashAlg, PublicKey};
 use sha1::Sha1;
 
 use crate::error::{VfsError, VfsResult};
+use crate::ssh_config::match_pattern;
 use crate::types::HostKey;
 
 /// What the known keys say about a server key.
@@ -343,39 +344,16 @@ fn host_matches(patterns: &HostPatterns, token: &str) -> bool {
             for pattern in patterns {
                 let pattern = pattern.to_ascii_lowercase();
                 if let Some(negated) = pattern.strip_prefix('!') {
-                    if glob(negated.as_bytes(), token.as_bytes()) {
+                    if match_pattern(negated.as_bytes(), token.as_bytes()) {
                         return false;
                     }
-                } else if glob(pattern.as_bytes(), token.as_bytes()) {
+                } else if match_pattern(pattern.as_bytes(), token.as_bytes()) {
                     matched = true;
                 }
             }
             matched
         }
     }
-}
-
-/// Glob match with `*` (any run) and `?` (any one byte), as OpenSSH's
-/// `match_pattern`.
-fn glob(pattern: &[u8], text: &[u8]) -> bool {
-    let (mut p, mut t) = (0, 0);
-    let mut star: Option<(usize, usize)> = None;
-    while t < text.len() {
-        if p < pattern.len() && (pattern[p] == b'?' || pattern[p] == text[t]) {
-            p += 1;
-            t += 1;
-        } else if p < pattern.len() && pattern[p] == b'*' {
-            star = Some((p, t));
-            p += 1;
-        } else if let Some((sp, st)) = star {
-            p = sp + 1;
-            t = st + 1;
-            star = Some((sp, st + 1));
-        } else {
-            return false;
-        }
-    }
-    pattern[p..].iter().all(|&c| c == b'*')
 }
 
 #[cfg(test)]
@@ -595,14 +573,5 @@ mod tests {
         assert!(ordered[..3]
             .iter()
             .all(|a| matches!(a, Algorithm::Rsa { .. })));
-    }
-
-    #[test]
-    fn glob_matches_like_openssh() {
-        assert!(glob(b"*", b"anything"));
-        assert!(glob(b"a*c", b"abbbc"));
-        assert!(glob(b"[h]:22*", b"[h]:2222"));
-        assert!(!glob(b"a*c", b"abd"));
-        assert!(!glob(b"a?", b"a"));
     }
 }

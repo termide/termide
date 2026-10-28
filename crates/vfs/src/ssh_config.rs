@@ -1,316 +1,616 @@
-//! SSH config parser for ~/.ssh/config
+//! OpenSSH client configuration for one host: the options an SFTP
+//! connection takes from `~/.ssh/config` and `/etc/ssh/ssh_config`.
 //!
-//! Parses OpenSSH config files to extract host-specific settings
-//! like IdentityFile, User, Port, etc.
+//! Follows `ssh_config(5)` for what it reads: the user file is read before
+//! the system one, the first value obtained for an option wins (only
+//! `IdentityFile` accumulates), `Host` lines take `*`/`?` wildcards and
+//! `!` negations, and `Include` reads files (globs allowed, relative paths
+//! taken from `~/.ssh` or `/etc/ssh`) in place, conditionally when inside
+//! a `Host` block.
+//!
+//! `Match` blocks are skipped as a whole: their criteria (`exec`,
+//! `localnetwork`, `canonical`, ...) cannot all be judged here, and
+//! applying a block whose condition is false would be worse than not
+//! applying one whose condition is true. Options not listed in
+//! [`SshHostConfig`] are ignored.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// Settings for a specific host from SSH config.
-#[derive(Debug, Clone, Default)]
+/// `ReadConfig` nesting limit, as OpenSSH's `READCONF_MAX_DEPTH`.
+const MAX_INCLUDE_DEPTH: usize = 16;
+
+/// Settings for one host, as obtained from the configuration files.
+/// `None` means the files do not set the option.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SshHostConfig {
-    /// Actual hostname to connect to (HostName directive).
+    /// `HostName`, with `%h` replaced by the host as given.
     pub hostname: Option<String>,
-    /// Username for authentication.
+    /// `User`.
     pub user: Option<String>,
-    /// Port number.
+    /// `Port`.
     pub port: Option<u16>,
-    /// Identity files (private keys) to use.
+    /// Every `IdentityFile` of every matching block, in order.
     pub identity_files: Vec<PathBuf>,
-    /// Whether to only use identities from agent that match IdentityFile.
-    pub identities_only: bool,
+    /// `IdentitiesOnly`.
+    pub identities_only: Option<bool>,
+    /// `UserKnownHostsFile`; empty for `none`.
+    pub user_known_hosts_files: Option<Vec<PathBuf>>,
+    /// `GlobalKnownHostsFile`; empty for `none`.
+    pub global_known_hosts_files: Option<Vec<PathBuf>>,
+    /// `HashKnownHosts`.
+    pub hash_known_hosts: Option<bool>,
+    /// `HostKeyAlias`.
+    pub host_key_alias: Option<String>,
+    /// `StrictHostKeyChecking`: `true` for `yes`, `false` for `no`, `ask`,
+    /// `accept-new` and `off`.
+    pub strict_host_key_checking: Option<bool>,
 }
 
-/// Parsed SSH config with host entries.
-#[derive(Debug, Default)]
-pub struct SshConfig {
-    /// Host-specific configurations in order of appearance.
-    /// Each entry is (patterns, config).
-    hosts: Vec<(Vec<String>, SshHostConfig)>,
+/// A configuration file and the directory its relative `Include` paths
+/// are taken from.
+#[derive(Debug, Clone)]
+pub struct ConfigFile {
+    pub path: PathBuf,
+    pub include_base: PathBuf,
 }
 
-impl SshConfig {
-    /// Parse SSH config from the default location (~/.ssh/config).
-    pub fn from_default_path() -> Option<Self> {
-        let home = dirs::home_dir()?;
-        let config_path = home.join(".ssh").join("config");
-        Self::from_file(&config_path)
-    }
-
-    /// Parse SSH config from a specific file.
-    pub fn from_file(path: &Path) -> Option<Self> {
-        let content = fs::read_to_string(path).ok()?;
-        Some(Self::parse(&content))
-    }
-
-    /// Parse SSH config from string content.
-    pub fn parse(content: &str) -> Self {
-        let mut config = SshConfig::default();
-        let mut current_patterns: Vec<String> = Vec::new();
-        let mut current_config = SshHostConfig::default();
-        let mut in_host_block = false;
-
-        for line in content.lines() {
-            let line = line.trim();
-
-            // Skip empty lines and comments
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            // Parse key-value pair
-            let (key, value) = match Self::parse_line(line) {
-                Some(kv) => kv,
-                None => continue,
-            };
-
-            if key.eq_ignore_ascii_case("Host") {
-                // Save previous host block
-                if in_host_block && !current_patterns.is_empty() {
-                    config.hosts.push((current_patterns, current_config));
-                }
-
-                // Start new host block
-                current_patterns = value.split_whitespace().map(String::from).collect();
-                current_config = SshHostConfig::default();
-                in_host_block = true;
-            } else if key.eq_ignore_ascii_case("Match") {
-                // Match blocks are more complex, skip for now
-                // Save current and start fresh without pattern
-                if in_host_block && !current_patterns.is_empty() {
-                    config.hosts.push((current_patterns, current_config));
-                }
-                current_patterns = Vec::new();
-                current_config = SshHostConfig::default();
-                in_host_block = false;
-            } else {
-                // Parse option
-                Self::apply_option(&mut current_config, &key, value);
-            }
+impl ConfigFile {
+    /// `~/.ssh/config`, then `/etc/ssh/ssh_config` on Unix.
+    pub fn openssh_defaults() -> Vec<Self> {
+        let mut files = Vec::new();
+        if let Some(home) = dirs::home_dir() {
+            let ssh = home.join(".ssh");
+            files.push(Self {
+                path: ssh.join("config"),
+                include_base: ssh,
+            });
         }
-
-        // Save last host block
-        if in_host_block && !current_patterns.is_empty() {
-            config.hosts.push((current_patterns, current_config));
+        if cfg!(unix) {
+            files.push(Self {
+                path: PathBuf::from("/etc/ssh/ssh_config"),
+                include_base: PathBuf::from("/etc/ssh"),
+            });
         }
+        files
+    }
+}
 
-        config
+impl SshHostConfig {
+    /// Settings for `host` from the user's and the system's files.
+    pub fn for_host(host: &str) -> Self {
+        Self::from_files(host, &ConfigFile::openssh_defaults())
     }
 
-    /// Parse a single line into key-value pair.
-    fn parse_line(line: &str) -> Option<(String, &str)> {
-        // SSH config supports both "Key Value" and "Key=Value" formats
-        let (key, value) = if let Some(eq_pos) = line.find('=') {
-            let (k, v) = line.split_at(eq_pos);
-            (k.trim(), v[1..].trim())
-        } else {
-            let mut parts = line.splitn(2, char::is_whitespace);
-            let key = parts.next()?.trim();
-            let value = parts.next().unwrap_or("").trim();
-            (key, value)
+    /// Settings for `host` from `files`, read in order. Missing or
+    /// unreadable files contribute nothing.
+    pub fn from_files(host: &str, files: &[ConfigFile]) -> Self {
+        let mut reader = Reader {
+            host: host.to_ascii_lowercase(),
+            out: Self::default(),
         };
-
-        if key.is_empty() {
-            return None;
+        for file in files {
+            let mut active = true;
+            reader.read_file(&file.path, &file.include_base, &mut active, 0);
         }
-
-        Some((key.to_string(), value))
+        let mut out = reader.out;
+        if let Some(name) = &out.hostname {
+            out.hostname = Some(expand_percent(name, host));
+        }
+        out
     }
 
-    /// Apply a config option to the host config.
-    fn apply_option(config: &mut SshHostConfig, key: &str, value: &str) {
-        match key.to_lowercase().as_str() {
+    /// The `HostName` to connect to: the configured one, else `host`.
+    pub fn address<'a>(&'a self, host: &'a str) -> &'a str {
+        self.hostname.as_deref().unwrap_or(host)
+    }
+}
+
+struct Reader {
+    /// The host as given, lower-cased, which `Host` patterns match.
+    host: String,
+    out: SshHostConfig,
+}
+
+impl Reader {
+    fn read_file(&mut self, path: &Path, base: &Path, active: &mut bool, depth: usize) {
+        match fs::read_to_string(path) {
+            Ok(text) => self.read_text(&text, base, active, depth),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => log::warn!("ssh_config: cannot read {}: {e}", path.display()),
+        }
+    }
+
+    /// Process `text`. `active` is whether options apply at this point;
+    /// it is shared with an including file, as in OpenSSH, so a `Host` line
+    /// in an included file governs the lines after it there, and the
+    /// including file's state is restored once the include is done.
+    fn read_text(&mut self, text: &str, base: &Path, active: &mut bool, depth: usize) {
+        for line in text.lines() {
+            let Some((keyword, args)) = split_line(line) else {
+                continue;
+            };
+            match keyword.as_str() {
+                "host" => *active = host_matches(&self.host, &args),
+                // Skipped as a whole; see the module docs.
+                "match" => *active = false,
+                "include" if *active => {
+                    if depth >= MAX_INCLUDE_DEPTH {
+                        log::warn!("ssh_config: Include nested too deeply, ignored");
+                        continue;
+                    }
+                    for pattern in &args {
+                        for path in include_paths(pattern, base) {
+                            self.read_file(&path, base, active, depth + 1);
+                            *active = true;
+                        }
+                    }
+                }
+                _ if *active => self.apply(&keyword, &args),
+                _ => {}
+            }
+        }
+    }
+
+    /// Record an option unless an earlier line already set it.
+    fn apply(&mut self, keyword: &str, args: &[String]) {
+        let Some(first) = args.first() else {
+            return;
+        };
+        let out = &mut self.out;
+        match keyword {
             "hostname" => {
-                config.hostname = Some(value.to_string());
+                out.hostname.get_or_insert_with(|| first.clone());
             }
             "user" => {
-                config.user = Some(value.to_string());
+                out.user.get_or_insert_with(|| first.clone());
             }
             "port" => {
-                if let Ok(port) = value.parse() {
-                    config.port = Some(port);
+                if out.port.is_none() {
+                    match first.parse::<u16>() {
+                        Ok(port) if port != 0 => out.port = Some(port),
+                        _ => log::warn!("ssh_config: bad Port {first:?}, ignored"),
+                    }
                 }
             }
             "identityfile" => {
-                let path = Self::expand_path(value);
-                config.identity_files.push(path);
+                let path = expand_path(first);
+                if !out.identity_files.contains(&path) {
+                    out.identity_files.push(path);
+                }
             }
-            "identitiesonly" => {
-                config.identities_only = value.eq_ignore_ascii_case("yes");
+            "identitiesonly" => set_flag(&mut out.identities_only, first),
+            "userknownhostsfile" => {
+                out.user_known_hosts_files
+                    .get_or_insert_with(|| path_list(args));
             }
-            _ => {
-                // Ignore other options for now
+            "globalknownhostsfile" => {
+                out.global_known_hosts_files
+                    .get_or_insert_with(|| path_list(args));
             }
+            "hashknownhosts" => set_flag(&mut out.hash_known_hosts, first),
+            "hostkeyalias" => {
+                out.host_key_alias.get_or_insert_with(|| first.clone());
+            }
+            "stricthostkeychecking" => {
+                out.strict_host_key_checking
+                    .get_or_insert_with(|| is_yes(first));
+            }
+            _ => {}
         }
     }
+}
 
-    /// Expand ~ in path.
-    fn expand_path(path: &str) -> PathBuf {
-        if let Some(rest) = path.strip_prefix("~/") {
-            if let Some(home) = dirs::home_dir() {
+fn is_yes(value: &str) -> bool {
+    value.eq_ignore_ascii_case("yes") || value.eq_ignore_ascii_case("true")
+}
+
+fn set_flag(slot: &mut Option<bool>, value: &str) {
+    slot.get_or_insert_with(|| is_yes(value));
+}
+
+/// The files of a `UserKnownHostsFile` / `GlobalKnownHostsFile` line;
+/// `none` gives no files.
+fn path_list(args: &[String]) -> Vec<PathBuf> {
+    if args.len() == 1 && args[0].eq_ignore_ascii_case("none") {
+        return Vec::new();
+    }
+    args.iter().map(|a| expand_path(a)).collect()
+}
+
+/// Split a line into its lower-cased keyword and arguments; `None` for a
+/// blank line or a comment. The keyword may be followed by `=`, and
+/// arguments may be quoted.
+fn split_line(line: &str) -> Option<(String, Vec<String>)> {
+    let line = line.trim_start();
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let end = line
+        .find(|c: char| c.is_whitespace() || c == '=')
+        .unwrap_or(line.len());
+    let keyword = line[..end].to_ascii_lowercase();
+    let rest = line[end..].trim_start();
+    let rest = rest.strip_prefix('=').unwrap_or(rest);
+    if keyword.is_empty() {
+        return None;
+    }
+    Some((keyword, split_args(rest)))
+}
+
+/// Whitespace-separated arguments; `"…"` or `'…'` keeps blanks together,
+/// and an unquoted `#` starting an argument ends the line.
+fn split_args(s: &str) -> Vec<String> {
+    let mut args = Vec::new();
+    let mut chars = s.chars().peekable();
+    loop {
+        while chars.next_if(|c| c.is_whitespace()).is_some() {}
+        let Some(&first) = chars.peek() else {
+            break;
+        };
+        if first == '#' {
+            break;
+        }
+        let mut arg = String::new();
+        let mut quote: Option<char> = None;
+        while let Some(&c) = chars.peek() {
+            match quote {
+                Some(q) if c == q => quote = None,
+                Some(_) => arg.push(c),
+                None if c == '"' || c == '\'' => quote = Some(c),
+                None if c.is_whitespace() => break,
+                None => arg.push(c),
+            }
+            chars.next();
+        }
+        args.push(arg);
+    }
+    args
+}
+
+/// Whether a `Host` line's patterns select `host`: a matching negated
+/// pattern rules the line out, otherwise one positive match is needed.
+fn host_matches(host: &str, patterns: &[String]) -> bool {
+    let mut matched = false;
+    for pattern in patterns {
+        let pattern = pattern.to_ascii_lowercase();
+        if let Some(negated) = pattern.strip_prefix('!') {
+            if match_pattern(negated.as_bytes(), host.as_bytes()) {
+                return false;
+            }
+        } else if match_pattern(pattern.as_bytes(), host.as_bytes()) {
+            matched = true;
+        }
+    }
+    matched
+}
+
+/// Glob match with `*` (any run) and `?` (any one byte), as OpenSSH's
+/// `match_pattern`.
+pub(crate) fn match_pattern(pattern: &[u8], text: &[u8]) -> bool {
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        if p < pattern.len() && (pattern[p] == b'?' || pattern[p] == text[t]) {
+            p += 1;
+            t += 1;
+        } else if p < pattern.len() && pattern[p] == b'*' {
+            star = Some((p, t));
+            p += 1;
+        } else if let Some((sp, st)) = star {
+            p = sp + 1;
+            t = st + 1;
+            star = Some((sp, st + 1));
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|&c| c == b'*')
+}
+
+/// The files an `Include` argument names, sorted as `glob(3)` returns
+/// them. Wildcards are allowed in any component; hidden entries match
+/// only a pattern that starts with `.`.
+fn include_paths(pattern: &str, base: &Path) -> Vec<PathBuf> {
+    let path = expand_path(pattern);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        base.join(path)
+    };
+    let mut found = vec![PathBuf::new()];
+    for component in path.components() {
+        let part = component.as_os_str();
+        let text = part.to_string_lossy();
+        if !text.contains(['*', '?']) {
+            for p in &mut found {
+                p.push(part);
+            }
+            continue;
+        }
+        let mut next = Vec::new();
+        for dir in &found {
+            let Ok(entries) = fs::read_dir(dir) else {
+                continue;
+            };
+            let mut names: Vec<String> = entries
+                .filter_map(|e| e.ok()?.file_name().into_string().ok())
+                .filter(|n| !n.starts_with('.') || text.starts_with('.'))
+                .filter(|n| match_pattern(text.as_bytes(), n.as_bytes()))
+                .collect();
+            names.sort();
+            next.extend(names.into_iter().map(|n| dir.join(n)));
+        }
+        found = next;
+    }
+    found.retain(|p| p.is_file());
+    found
+}
+
+/// Expand a leading `~` (or `%d`) to the home directory.
+fn expand_path(value: &str) -> PathBuf {
+    let home = dirs::home_dir();
+    if let Some(home) = &home {
+        if value == "~" {
+            return home.clone();
+        }
+        for prefix in ["~/", "%d/"] {
+            if let Some(rest) = value.strip_prefix(prefix) {
                 return home.join(rest);
             }
         }
-        PathBuf::from(path)
     }
+    PathBuf::from(value)
+}
 
-    /// Merge source config into target (only if target field is not set).
-    /// Note: IdentityFile is additive in OpenSSH - each match adds to the list.
-    fn merge_config(target: &mut SshHostConfig, source: &SshHostConfig) {
-        if target.hostname.is_none() {
-            target.hostname = source.hostname.clone();
+/// Replace `%h` with `host` and `%%` with `%` in a `HostName` value.
+fn expand_percent(value: &str, host: &str) -> String {
+    let mut out = String::new();
+    let mut chars = value.chars();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
         }
-        if target.user.is_none() {
-            target.user = source.user.clone();
-        }
-        if target.port.is_none() {
-            target.port = source.port;
-        }
-        // IdentityFile is additive - append new keys (avoiding duplicates)
-        for key in &source.identity_files {
-            if !target.identity_files.contains(key) {
-                target.identity_files.push(key.clone());
+        match chars.next() {
+            Some('h') => out.push_str(host),
+            Some('%') => out.push('%'),
+            Some(other) => {
+                out.push('%');
+                out.push(other);
             }
-        }
-        // identities_only: take source if true
-        if source.identities_only {
-            target.identities_only = true;
+            None => out.push('%'),
         }
     }
-
-    /// Get configuration for a specific host.
-    ///
-    /// Returns merged config from all matching Host entries.
-    /// SSH config is processed in order; first match wins for each option.
-    pub fn get_host_config(&self, host: &str) -> SshHostConfig {
-        let mut result = SshHostConfig::default();
-
-        // Apply matching host configs in order (first match wins for each option)
-        for (patterns, config) in &self.hosts {
-            if Self::matches_any_pattern(host, patterns) {
-                Self::merge_config(&mut result, config);
-            }
-        }
-
-        result
-    }
-
-    /// Check if host matches any of the patterns.
-    fn matches_any_pattern(host: &str, patterns: &[String]) -> bool {
-        patterns.iter().any(|p| Self::matches_pattern(host, p))
-    }
-
-    /// Check if host matches a single pattern.
-    ///
-    /// Supports * and ? wildcards.
-    fn matches_pattern(host: &str, pattern: &str) -> bool {
-        if pattern == "*" {
-            return true;
-        }
-
-        // Simple glob matching
-        let mut host_chars = host.chars().peekable();
-        let mut pattern_chars = pattern.chars().peekable();
-
-        while let Some(pc) = pattern_chars.next() {
-            match pc {
-                '*' => {
-                    // Match zero or more characters
-                    if pattern_chars.peek().is_none() {
-                        return true; // * at end matches everything
-                    }
-                    // Try matching rest of pattern at each position
-                    let rest_pattern: String = pattern_chars.collect();
-                    let mut rest_host: String = host_chars.collect();
-                    while !rest_host.is_empty() {
-                        if Self::matches_pattern(&rest_host, &rest_pattern) {
-                            return true;
-                        }
-                        rest_host = rest_host[1..].to_string();
-                    }
-                    return Self::matches_pattern("", &rest_pattern);
-                }
-                '?' => {
-                    // Match single character
-                    if host_chars.next().is_none() {
-                        return false;
-                    }
-                }
-                c => {
-                    // Match literal character (case-insensitive for hostnames)
-                    match host_chars.next() {
-                        Some(hc) if hc.eq_ignore_ascii_case(&c) => {}
-                        _ => return false,
-                    }
-                }
-            }
-        }
-
-        host_chars.peek().is_none()
-    }
+    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_simple_config() {
-        let config = SshConfig::parse(
-            r#"
-Host example.com
-    User admin
-    Port 2222
-    IdentityFile ~/.ssh/example_key
-
-Host *.internal
-    User developer
-    IdentitiesOnly yes
-"#,
-        );
-
-        let host_config = config.get_host_config("example.com");
-        assert_eq!(host_config.user, Some("admin".to_string()));
-        assert_eq!(host_config.port, Some(2222));
-        assert_eq!(host_config.identity_files.len(), 1);
-
-        let internal_config = config.get_host_config("server.internal");
-        assert_eq!(internal_config.user, Some("developer".to_string()));
-        assert!(internal_config.identities_only);
+    fn resolve(host: &str, text: &str) -> SshHostConfig {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config");
+        fs::write(&path, text).unwrap();
+        SshHostConfig::from_files(
+            host,
+            &[ConfigFile {
+                path,
+                include_base: dir.path().to_path_buf(),
+            }],
+        )
     }
 
     #[test]
-    fn test_pattern_matching() {
-        assert!(SshConfig::matches_pattern("example.com", "*"));
-        assert!(SshConfig::matches_pattern("example.com", "example.com"));
-        assert!(SshConfig::matches_pattern("example.com", "*.com"));
-        assert!(SshConfig::matches_pattern("server.internal", "*.internal"));
-        assert!(!SshConfig::matches_pattern("example.com", "*.org"));
-        assert!(SshConfig::matches_pattern("a", "?"));
-        assert!(!SshConfig::matches_pattern("ab", "?"));
-    }
-
-    #[test]
-    fn test_global_config() {
-        // In SSH config, order matters: first match wins for each option.
-        // Specific hosts should come BEFORE wildcards (typical convention).
-        let config = SshConfig::parse(
-            r#"
-Host special
-    Port 2222
+    fn first_value_wins_and_identity_files_accumulate() {
+        let text = "\
+Host build
+    HostName 10.0.0.5
+    IdentityFile /keys/build
 
 Host *
-    User defaultuser
-    Port 22
-"#,
+    User deploy
+    Port 2222
+    HostName ignored.example
+    IdentityFile /keys/default
+";
+        let cfg = resolve("build", text);
+        assert_eq!(cfg.hostname.as_deref(), Some("10.0.0.5"));
+        assert_eq!(cfg.user.as_deref(), Some("deploy"));
+        assert_eq!(cfg.port, Some(2222));
+        assert_eq!(
+            cfg.identity_files,
+            vec![PathBuf::from("/keys/build"), PathBuf::from("/keys/default")]
         );
+        let other = resolve("elsewhere", text);
+        assert_eq!(other.hostname.as_deref(), Some("ignored.example"));
+        assert_eq!(other.identity_files, vec![PathBuf::from("/keys/default")]);
+    }
 
-        let default_config = config.get_host_config("random.host");
-        assert_eq!(default_config.user, Some("defaultuser".to_string()));
-        assert_eq!(default_config.port, Some(22));
+    #[test]
+    fn options_before_any_host_line_apply_to_every_host() {
+        let cfg = resolve("x", "User early\nHost x\n  User late\n");
+        assert_eq!(cfg.user.as_deref(), Some("early"));
+    }
 
-        let special_config = config.get_host_config("special");
-        assert_eq!(special_config.user, Some("defaultuser".to_string()));
-        assert_eq!(special_config.port, Some(2222));
+    #[test]
+    fn host_patterns_wildcards_negation_and_case() {
+        let text = "\
+Host *.lan !bad.lan
+    User lan
+Host web? db
+    Port 2200
+";
+        assert_eq!(resolve("a.lan", text).user.as_deref(), Some("lan"));
+        assert_eq!(resolve("A.LAN", text).user.as_deref(), Some("lan"));
+        assert_eq!(resolve("bad.lan", text).user, None);
+        assert_eq!(resolve("web1", text).port, Some(2200));
+        assert_eq!(resolve("db", text).port, Some(2200));
+        assert_eq!(resolve("web12", text).port, None);
+        // A negation alone matches nothing.
+        assert_eq!(resolve("h", "Host !x\n  User u\n").user, None);
+    }
+
+    #[test]
+    fn match_blocks_are_skipped() {
+        let text = "\
+Match host build exec \"true\"
+    User from-match
+    StrictHostKeyChecking yes
+Host build
+    Port 2201
+";
+        let cfg = resolve("build", text);
+        assert_eq!(cfg.user, None);
+        assert_eq!(cfg.strict_host_key_checking, None);
+        assert_eq!(cfg.port, Some(2201));
+    }
+
+    #[test]
+    fn equals_sign_quotes_and_trailing_comments() {
+        let text = "\
+Host=build
+  User=\"deploy\"   # comment
+  IdentityFile \"/keys/with space\"
+  Port = 2202
+";
+        let cfg = resolve("build", text);
+        assert_eq!(cfg.user.as_deref(), Some("deploy"));
+        assert_eq!(cfg.port, Some(2202));
+        assert_eq!(cfg.identity_files, vec![PathBuf::from("/keys/with space")]);
+    }
+
+    #[test]
+    fn hostname_expands_percent_h() {
+        let cfg = resolve("box", "Host *\n  HostName %h.internal.example\n");
+        assert_eq!(cfg.hostname.as_deref(), Some("box.internal.example"));
+        assert_eq!(cfg.address("box"), "box.internal.example");
+        assert_eq!(SshHostConfig::default().address("box"), "box");
+    }
+
+    #[test]
+    fn known_hosts_options() {
+        let text = "\
+Host build
+  UserKnownHostsFile /kh/one /kh/two
+  GlobalKnownHostsFile none
+  HashKnownHosts yes
+  HostKeyAlias build-alias
+  StrictHostKeyChecking yes
+Host *
+  UserKnownHostsFile /kh/late
+  StrictHostKeyChecking no
+";
+        let cfg = resolve("build", text);
+        assert_eq!(
+            cfg.user_known_hosts_files,
+            Some(vec![PathBuf::from("/kh/one"), PathBuf::from("/kh/two")])
+        );
+        assert_eq!(cfg.global_known_hosts_files, Some(vec![]));
+        assert_eq!(cfg.hash_known_hosts, Some(true));
+        assert_eq!(cfg.host_key_alias.as_deref(), Some("build-alias"));
+        assert_eq!(cfg.strict_host_key_checking, Some(true));
+        let other = resolve("other", text);
+        assert_eq!(other.strict_host_key_checking, Some(false));
+        for value in ["accept-new", "ask", "off"] {
+            let cfg = resolve("h", &format!("StrictHostKeyChecking {value}\n"));
+            assert_eq!(cfg.strict_host_key_checking, Some(false), "{value}");
+        }
+    }
+
+    #[test]
+    fn include_reads_globbed_files_in_place_and_restores_the_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let conf_d = dir.path().join("conf.d");
+        fs::create_dir(&conf_d).unwrap();
+        fs::write(conf_d.join("10-build"), "Host build\n  Port 2203\n").unwrap();
+        fs::write(conf_d.join("20-all"), "User included\n").unwrap();
+        fs::write(conf_d.join(".hidden"), "User hidden\n").unwrap();
+        let main = dir.path().join("config");
+        fs::write(
+            &main,
+            "\
+Include conf.d/*
+Host build
+  Include extra
+  Port 1
+Host other
+  Include conf.d/20-all
+",
+        )
+        .unwrap();
+        fs::write(dir.path().join("extra"), "HashKnownHosts yes\n").unwrap();
+        let files = [ConfigFile {
+            path: main,
+            include_base: dir.path().to_path_buf(),
+        }];
+
+        // `10-build` sets the port before `Port 1` of the outer block.
+        let cfg = SshHostConfig::from_files("build", &files);
+        assert_eq!(cfg.port, Some(2203));
+        assert_eq!(cfg.user.as_deref(), Some("included"));
+        assert_eq!(cfg.hash_known_hosts, Some(true));
+
+        // `10-build` ends on a `Host build` that is inactive for "other";
+        // the include restores the top-level state, so `20-all` applies.
+        let cfg = SshHostConfig::from_files("other", &files);
+        assert_eq!(cfg.user.as_deref(), Some("included"));
+        assert_eq!(cfg.port, None);
+        assert_eq!(cfg.hash_known_hosts, None);
+    }
+
+    #[test]
+    fn include_in_an_inactive_block_is_not_read() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("inc"), "User from-include\n").unwrap();
+        let cfg = resolve_in(dir.path(), "x", "Host other\n  Include inc\n");
+        assert_eq!(cfg.user, None);
+        let cfg = resolve_in(dir.path(), "other", "Host other\n  Include inc\n");
+        assert_eq!(cfg.user.as_deref(), Some("from-include"));
+    }
+
+    #[test]
+    fn self_include_stops_at_the_depth_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = resolve_in(dir.path(), "x", "Include config\nUser u\n");
+        assert_eq!(cfg.user.as_deref(), Some("u"));
+    }
+
+    #[test]
+    fn user_file_comes_before_the_system_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let user = dir.path().join("user");
+        let system = dir.path().join("system");
+        fs::write(&user, "Host h\n  Port 2204\n").unwrap();
+        fs::write(&system, "Host *\n  Port 2205\n  User sys\n").unwrap();
+        let files = [&user, &system, &dir.path().join("missing")].map(|p| ConfigFile {
+            path: p.clone(),
+            include_base: dir.path().to_path_buf(),
+        });
+        let cfg = SshHostConfig::from_files("h", &files);
+        assert_eq!(cfg.port, Some(2204));
+        assert_eq!(cfg.user.as_deref(), Some("sys"));
+    }
+
+    fn resolve_in(dir: &Path, host: &str, text: &str) -> SshHostConfig {
+        let path = dir.join("config");
+        fs::write(&path, text).unwrap();
+        SshHostConfig::from_files(
+            host,
+            &[ConfigFile {
+                path,
+                include_base: dir.to_path_buf(),
+            }],
+        )
+    }
+
+    #[test]
+    fn match_pattern_like_openssh() {
+        assert!(match_pattern(b"*", b"anything"));
+        assert!(match_pattern(b"a*c", b"abbbc"));
+        assert!(match_pattern(b"[h]:22*", b"[h]:2222"));
+        assert!(!match_pattern(b"a*c", b"abd"));
+        assert!(!match_pattern(b"a?", b"a"));
     }
 }

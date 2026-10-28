@@ -144,11 +144,10 @@ async fn try_authenticate(
             //   1. SSH agent (unless IdentitiesOnly=yes)
             //   2. Keys from IdentityFile entries in ssh_config
             //   3. Default keys in ~/.ssh/id_*
-            let host_cfg = crate::ssh_config::SshConfig::from_default_path()
-                .map(|cfg| cfg.get_host_config(host))
-                .unwrap_or_default();
+            let host_cfg = crate::ssh_config::SshHostConfig::for_host(host);
+            let identities_only = host_cfg.identities_only.unwrap_or(false);
 
-            if !host_cfg.identities_only && try_auth_agent(session, username).await.is_ok() {
+            if !identities_only && try_auth_agent(session, username).await.is_ok() {
                 return Ok(());
             }
             cancelled_check()?;
@@ -169,7 +168,7 @@ async fn try_authenticate(
             }
 
             // Fallback to default keys unless IdentitiesOnly forbids it.
-            if !host_cfg.identities_only {
+            if !identities_only {
                 for key_path in default_key_files() {
                     if try_auth_keyfile(session, username, &key_path, None)
                         .await
