@@ -21,6 +21,7 @@ pub mod deletion_markers;
 pub mod highlight_renderer;
 pub mod inline_diff;
 pub mod line_rendering;
+mod syntax_document;
 pub mod wrap_rendering;
 
 /// Right-align a number into a fixed-width string without heap allocation.
@@ -170,7 +171,7 @@ pub fn render_editor_content<H: LineHighlighter>(
         search_state,
         selection,
         diagnostics,
-        visible_lines,
+        visible_lines.clone(),
         tab_size,
     );
     render_context.breakpoint_lines = buffer.line_marks().clone();
@@ -182,16 +183,15 @@ pub fn render_editor_content<H: LineHighlighter>(
     // instead of rebuilding the HashMap for every visible row.
     let diagnostics_by_line = crate::git::group_diagnostics_by_line(diagnostics, buffer, tab_size);
 
-    // Rebuild the whole-document highlight when it is stale (after an edit or a
-    // syntax change) and the buffer is small enough to re-parse per edit. This
-    // resolves cross-line context — PHP's HTML/PHP mode, multi-line strings and
-    // comments — that the per-line path cannot. Large buffers skip it and fall
-    // back to per-line highlighting to keep editing responsive.
+    // Bring the whole-document highlight up to date with the buffer's edits
+    // and highlight the lines about to be drawn. This resolves cross-line
+    // context — PHP's HTML/PHP mode, multi-line strings and comments — that
+    // the per-line path cannot; it is a no-op when nothing changed. Large
+    // buffers skip it and fall back to per-line highlighting.
     if syntax_highlighting_enabled
-        && highlight_cache.needs_document()
         && buffer.len_bytes() <= termide_highlight::WHOLE_DOCUMENT_BYTE_LIMIT
     {
-        highlight_cache.set_document(&buffer.text());
+        highlight_cache.sync_document(&syntax_document::BufferDocument(buffer), visible_lines);
     }
 
     // Select rendering mode

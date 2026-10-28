@@ -10,6 +10,7 @@ description = "Syntax highlighting for termide using tree-sitter"
 [dependencies]
 ratatui.workspace = true
 log.workspace = true
+ropey.workspace = true
 tree-sitter.workspace = true
 tree-sitter-highlight.workspace = true
 

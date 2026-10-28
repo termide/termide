@@ -41,8 +41,7 @@ fn mixed_php_template_highlights_html_and_php() {
     cache.set_syntax("php");
     assert!(cache.has_syntax(), "php syntax should be active");
 
-    // The gate from `render_editor_content`.
-    assert!(cache.needs_document());
+    // The size gate from `render_editor_content`.
     assert!(buffer.len_bytes() <= WHOLE_DOCUMENT_BYTE_LIMIT);
     cache.set_document(&buffer.text());
 
