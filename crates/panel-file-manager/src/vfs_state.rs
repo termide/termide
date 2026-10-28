@@ -9,8 +9,8 @@ use std::time::Instant;
 
 use termide_core::{CredentialAttempt, SecretText};
 use termide_vfs::{
-    ConnectOptions, DirCache, VfsEntry, VfsError, VfsManager, VfsMetadata, VfsOperation, VfsPath,
-    VfsProtocol, VfsResult,
+    ConnectOptions, DirCache, HostKey, VfsEntry, VfsError, VfsManager, VfsMetadata, VfsOperation,
+    VfsPath, VfsProtocol, VfsResult,
 };
 
 /// Result type for pending VFS operations.
@@ -55,6 +55,81 @@ struct RemoteLogin {
     accepted: Option<String>,
 }
 
+/// A connection stopped on an SSH server key no `known_hosts` file records.
+/// Nothing was sent to the server; the user's answer either trusts the key
+/// and connects again, or drops the attempt.
+#[derive(Debug, Default)]
+struct HostKeyQuestion {
+    /// The path to open once the key is trusted, and the key put to the user.
+    waiting: Option<(VfsPath, HostKey)>,
+    /// Raised when the connection stops; taken by the FileManager on the
+    /// next tick: the login URL and the key.
+    request: Option<(String, HostKey)>,
+}
+
+/// How the user answered the unknown-host-key question.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HostKeyAnswer {
+    /// Trust the key and record it in `~/.ssh/known_hosts`.
+    Remember,
+    /// Trust the key until termide exits.
+    Once,
+    /// Do not connect.
+    Cancel,
+}
+
+impl HostKeyAnswer {
+    /// Button ids of the unknown-host-key modal.
+    pub const REMEMBER: &'static str = "host_key_remember";
+    pub const ONCE: &'static str = "host_key_once";
+    pub const CANCEL: &'static str = "host_key_cancel";
+
+    /// The answer a modal button id stands for; anything else (Esc, close)
+    /// is a refusal.
+    pub fn from_action(id: &str) -> Self {
+        match id {
+            Self::REMEMBER => Self::Remember,
+            Self::ONCE => Self::Once,
+            _ => Self::Cancel,
+        }
+    }
+}
+
+/// The name `known_hosts` records a host under: `host` on port 22,
+/// `[host]:port` otherwise. Shown to the user, and what `ssh-keygen -R`
+/// takes.
+pub(crate) fn known_hosts_name(host: &str, port: u16) -> String {
+    if port == 22 {
+        host.to_string()
+    } else {
+        format!("[{host}]:{port}")
+    }
+}
+
+/// The localized refusal of a changed or revoked SSH server key, or
+/// `None` for any other error.
+pub(crate) fn host_key_refusal(error: &VfsError) -> Option<String> {
+    let t = termide_i18n::t();
+    match error {
+        VfsError::HostKeyChanged {
+            host,
+            port,
+            recorded_in: Some(location),
+        } => Some(t.vfs_host_key_changed(&known_hosts_name(host, *port), location)),
+        VfsError::HostKeyChanged {
+            host,
+            port,
+            recorded_in: None,
+        } => Some(t.vfs_host_key_changed_session(&known_hosts_name(host, *port))),
+        VfsError::HostKeyRevoked {
+            host,
+            port,
+            location,
+        } => Some(t.vfs_host_key_revoked(&known_hosts_name(host, *port), location)),
+        _ => None,
+    }
+}
+
 /// URL that identifies a remote login: the server root, password-free.
 fn login_url(path: &VfsPath) -> String {
     let mut root = path.clone();
@@ -79,6 +154,8 @@ pub struct VfsState {
     /// Remote login state: which password the connection in flight uses,
     /// and the path waiting for one. See `termide_core::credentials`.
     login: RemoteLogin,
+    /// A connection waiting for the user to trust the server's key.
+    host_key: HostKeyQuestion,
     /// When connection started (for elapsed time display).
     connection_started: Option<Instant>,
     /// A remote symlink that resolved to a file and should be opened in
@@ -113,6 +190,7 @@ impl VfsState {
             pending_operation: None,
             connection_status: None,
             login: RemoteLogin::default(),
+            host_key: HostKeyQuestion::default(),
             connection_started: None,
             resolved_file_open: None,
             completed_create: None,
@@ -129,6 +207,7 @@ impl VfsState {
             pending_operation: None,
             connection_status: None,
             login: RemoteLogin::default(),
+            host_key: HostKeyQuestion::default(),
             connection_started: None,
             resolved_file_open: None,
             completed_create: None,
@@ -214,6 +293,45 @@ impl VfsState {
     /// password was just refused.
     pub fn take_credential_request(&mut self) -> Option<(String, CredentialAttempt)> {
         self.login.request.take()
+    }
+
+    /// Take the question about an unknown SSH server key: the login URL
+    /// and the key to show.
+    pub fn take_host_key_request(&mut self) -> Option<(String, HostKey)> {
+        self.host_key.request.take()
+    }
+
+    /// Answer the unknown-key question for `url`, if this panel is waiting
+    /// on that key (`fingerprint` guards against answering a different key
+    /// raised for the same URL by a later attempt). Trusting the key
+    /// connects again. Returns `None` when this panel is not waiting, and
+    /// the outcome of recording the key otherwise.
+    pub fn answer_host_key(
+        &mut self,
+        url: &str,
+        fingerprint: &str,
+        answer: HostKeyAnswer,
+    ) -> Option<VfsResult<()>> {
+        let (path, key) = self
+            .host_key
+            .waiting
+            .take_if(|(p, k)| login_url(p) == url && k.fingerprint == fingerprint)?;
+        let remember = match answer {
+            HostKeyAnswer::Remember => true,
+            HostKeyAnswer::Once => false,
+            HostKeyAnswer::Cancel => return Some(Ok(())),
+        };
+        if let Err(e) = self.manager.trust_host_key(&key, remember) {
+            log::error!("VfsState: cannot trust host key: {e}");
+            return Some(Err(e));
+        }
+        self.connection_status = Some(connecting_status(&path));
+        self.connection_started = Some(Instant::now());
+        self.previous_path = Some(self.current_path.clone());
+        let operation = self.manager.connect_sftp(&path, ConnectOptions::default());
+        self.current_path = path;
+        self.pending_operation = Some(PendingVfsOperation::Connect(operation));
+        Some(Ok(()))
     }
 
     /// Take the URL of a login whose password was just accepted.
@@ -513,6 +631,27 @@ impl VfsState {
                             .unwrap_or(CredentialAttempt::Initial);
                         self.login.request = Some((login_url(&self.current_path), attempt));
                         self.login.waiting = Some(self.current_path.clone());
+                        self.connection_status = None;
+                        self.clear_connection_tracking();
+                        if let Some(prev) = self.previous_path.take() {
+                            self.current_path = prev;
+                        }
+                        None
+                    }
+                    Some(Err(VfsError::UnknownHostKey(key))) => {
+                        // Ask whether to trust the key instead of reporting
+                        // an error; nothing reached the server, and the
+                        // panel shows where it was meanwhile.
+                        log::info!(
+                            "VfsState: unknown host key {} for {}:{}",
+                            key.fingerprint,
+                            key.host,
+                            key.port
+                        );
+                        let url = login_url(&self.current_path);
+                        self.host_key.request = Some((url, (*key).clone()));
+                        self.host_key.waiting = Some((self.current_path.clone(), *key));
+                        self.login.attempt = None;
                         self.connection_status = None;
                         self.clear_connection_tracking();
                         if let Some(prev) = self.previous_path.take() {
@@ -1027,6 +1166,124 @@ mod tests {
         assert!(state.is_connecting());
         assert_eq!(state.current_path(), &path);
         assert_eq!(state.login.attempt, Some(CredentialAttempt::Stored));
+    }
+
+    fn host_key(host: &str, port: u16) -> HostKey {
+        HostKey {
+            host: host.to_string(),
+            port,
+            algorithm: "ssh-ed25519".to_string(),
+            fingerprint: "SHA256:abc".to_string(),
+            openssh:
+                "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIJdD7y3aLq454yWBdwLWbieU1ebz9/cu7/QEXn9OIeZJ"
+                    .to_string(),
+        }
+    }
+
+    /// An unknown server key is a question, not an error: `tick` reports
+    /// nothing, raises the request once, and puts the panel back where it was.
+    #[test]
+    fn an_unknown_host_key_asks_instead_of_failing() {
+        let mut state = VfsState::with_path(VfsPath::local("/tmp"), None);
+        let path = VfsPath::remote(VfsProtocol::Sftp, "h", "/srv").with_port(2222);
+        state.previous_path = Some(state.current_path.clone());
+        state.current_path = path.clone();
+        state.login.attempt = Some(CredentialAttempt::Typed);
+        let key = host_key("h", 2222);
+        state.pending_operation = Some(PendingVfsOperation::Connect(VfsOperation::error(
+            VfsError::UnknownHostKey(Box::new(key.clone())),
+        )));
+
+        assert!(state.tick().is_none(), "no error reaches the panel");
+        assert_eq!(state.current_path(), &VfsPath::local("/tmp"));
+        assert!(!state.is_connecting());
+        assert_eq!(state.login.attempt, None);
+        assert_eq!(state.take_host_key_request(), Some((login_url(&path), key)));
+        assert_eq!(state.take_host_key_request(), None, "taken only once");
+    }
+
+    #[test]
+    fn a_host_key_answer_is_taken_only_for_the_waiting_url_and_key() {
+        let mut state = VfsState::new();
+        let path = VfsPath::remote(VfsProtocol::Sftp, "h", "/srv").with_username("bob");
+        state.host_key.waiting = Some((path.clone(), host_key("h", 22)));
+        let url = login_url(&path);
+
+        let other = "sftp://alice@h/";
+        assert!(state
+            .answer_host_key(other, "SHA256:abc", HostKeyAnswer::Once)
+            .is_none());
+        assert!(state
+            .answer_host_key(&url, "SHA256:other", HostKeyAnswer::Once)
+            .is_none());
+        assert!(state.host_key.waiting.is_some());
+
+        let answer = state.answer_host_key(&url, "SHA256:abc", HostKeyAnswer::Cancel);
+        assert!(matches!(answer, Some(Ok(()))));
+        assert!(state.host_key.waiting.is_none());
+        assert!(!state.is_connecting(), "a refusal connects nothing");
+    }
+
+    /// "Accept once" trusts the key in this process only (no file is
+    /// written) and connects to the waiting path again.
+    #[test]
+    fn accepting_a_host_key_once_connects_again() {
+        let mut state = VfsState::new();
+        // A port nothing listens on: the connection fails fast and quietly.
+        let path = VfsPath::remote(VfsProtocol::Sftp, "127.0.0.1", "/srv").with_port(1);
+        state.host_key.waiting = Some((path.clone(), host_key("127.0.0.1", 1)));
+
+        let answer = state.answer_host_key(&login_url(&path), "SHA256:abc", HostKeyAnswer::Once);
+        assert!(matches!(answer, Some(Ok(()))));
+        assert!(state.is_connecting());
+        assert_eq!(state.current_path(), &path);
+    }
+
+    #[test]
+    fn host_key_answers_come_from_button_ids() {
+        assert_eq!(
+            HostKeyAnswer::from_action(HostKeyAnswer::REMEMBER),
+            HostKeyAnswer::Remember
+        );
+        assert_eq!(
+            HostKeyAnswer::from_action(HostKeyAnswer::ONCE),
+            HostKeyAnswer::Once
+        );
+        assert_eq!(
+            HostKeyAnswer::from_action(HostKeyAnswer::CANCEL),
+            HostKeyAnswer::Cancel
+        );
+        assert_eq!(HostKeyAnswer::from_action("ok"), HostKeyAnswer::Cancel);
+    }
+
+    #[test]
+    fn changed_and_revoked_keys_are_refused_with_the_known_hosts_name() {
+        let changed = VfsError::HostKeyChanged {
+            host: "h".to_string(),
+            port: 2222,
+            recorded_in: Some("/home/u/.ssh/known_hosts:7".to_string()),
+        };
+        let text = host_key_refusal(&changed).unwrap();
+        assert!(text.contains("[h]:2222"), "{text}");
+        assert!(text.contains("/home/u/.ssh/known_hosts:7"), "{text}");
+        assert!(text.contains("ssh-keygen -R '[h]:2222'"), "{text}");
+
+        let in_session = VfsError::HostKeyChanged {
+            host: "h".to_string(),
+            port: 22,
+            recorded_in: None,
+        };
+        assert!(host_key_refusal(&in_session).unwrap().contains("h"));
+
+        let revoked = VfsError::HostKeyRevoked {
+            host: "h".to_string(),
+            port: 22,
+            location: "/etc/ssh/ssh_known_hosts:3".to_string(),
+        };
+        assert!(host_key_refusal(&revoked)
+            .unwrap()
+            .contains("/etc/ssh/ssh_known_hosts:3"));
+        assert!(host_key_refusal(&VfsError::NotConnected).is_none());
     }
 
     // =========================================================================

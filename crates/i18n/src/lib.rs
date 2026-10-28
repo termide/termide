@@ -114,6 +114,20 @@ pub trait Translation: Send + Sync {
     fn vfs_reconnect(&self) -> &str;
     fn vfs_open_local(&self) -> &str;
     fn vfs_close_panel(&self) -> &str;
+    /// SSH server key verification: the unknown-key question and the
+    /// refusals of a changed or revoked key. `host` is `host` or
+    /// `[host]:port`, the form `known_hosts` records.
+    fn vfs_host_key_title(&self) -> &str;
+    fn vfs_host_key_unknown(&self, host: &str) -> String;
+    fn vfs_host_key_host(&self) -> &str;
+    fn vfs_host_key_type(&self) -> &str;
+    fn vfs_host_key_fingerprint(&self) -> &str;
+    fn vfs_host_key_remember(&self) -> &str;
+    fn vfs_host_key_once(&self) -> &str;
+    fn vfs_host_key_changed_title(&self) -> &str;
+    fn vfs_host_key_changed(&self, host: &str, location: &str) -> String;
+    fn vfs_host_key_changed_session(&self, host: &str) -> String;
+    fn vfs_host_key_revoked(&self, host: &str, location: &str) -> String;
     fn db_reconnect(&self) -> &str;
     fn db_close_panel(&self) -> &str;
     fn connection_timeout_title(&self) -> &str;

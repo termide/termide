@@ -80,6 +80,27 @@ FTP 和 FTPS 使用 URL 中的用户登录；登录被拒绝时以同样的方�
 （`sftp://my-build-host/path`），让 SSH 配置补全真实的主机名、用户
 和密钥文件——这与 `ssh` CLI 使用的是同一份配置。
 
+## 服务器密钥（SFTP）
+
+在向 SFTP 服务器发送任何内容（包括密码）之前，Termide 会像 OpenSSH
+一样，对照 `~/.ssh/known_hosts`、`~/.ssh/known_hosts2` 和
+`/etc/ssh/ssh_known_hosts` 检查服务器密钥。支持哈希条目（`|1|…`）、
+非默认端口的 `[host]:port` 条目、通配符和 `!` 否定。
+
+- **已记录的密钥**——连接直接继续，不做任何提示。
+- **未知主机**——连接暂停，对话框按 `ssh` 的格式显示主机、密钥类型和
+  SHA256 指纹。请与可信来源的指纹核对后选择：
+  - **接受并记住**——密钥以 OpenSSH 格式追加到 `~/.ssh/known_hosts`
+    （若不存在，以 0700 权限创建 `~/.ssh`，以 0600 创建该文件），然后
+    重新连接。之后无论在这里还是在 `ssh` 中都会直接连接。
+  - **仅接受本次**——在 Termide 退出前信任该密钥，不写入任何文件。
+  - **取消**（默认选中）——不进行连接。
+- **密钥已更改**——若记录的同类型密钥不同，或密钥被标记为
+  `@revoked`，连接会被拒绝，对话框会指出对应的 `known_hosts` 文件和
+  行号。无法绕过：如果更换是预期的，请删除旧密钥
+  （`ssh-keygen -R host` 或 `ssh-keygen -R '[host]:port'`）后重新
+  连接。
+
 ## 远程面板的体验
 
 所有远程操作都是异步的：
@@ -196,3 +217,6 @@ DVD-Video、Blu-ray）只会显示其旁边很小的 ISO 9660 部分，通常只
   开始。
 - 远程面板不会询问加密 SSH 密钥的密码短语；请将密钥加载到
   SSH agent 中。
+- 服务器密钥检查只读取默认的 `known_hosts` 位置：不应用
+  `~/.ssh/config` 中的 `UserKnownHostsFile`、`HashKnownHosts` 和
+  `HostKeyAlias`，也不接受主机证书（`@cert-authority`）。

@@ -14,9 +14,8 @@
 //! pause/resume for download/upload are stubbed to plain transfer in
 //! this phase — added in subsequent phases.
 //!
-//! NOTE: known_hosts verification is intentionally not enforced yet
-//! (accept-all server keys) — matches previous ssh2 behavior. Hardening
-//! this is a separate task.
+//! Server keys are verified against OpenSSH `known_hosts` files before
+//! authentication; see [`known_hosts`].
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -37,6 +36,7 @@ use crate::types::{
 
 mod actor;
 mod connect;
+mod known_hosts;
 mod transfer;
 
 use actor::{sftp_actor, Reply, SftpCommand, SftpHandle};
@@ -90,6 +90,19 @@ fn try_runtime() -> VfsResult<&'static Runtime> {
 /// `Err` means the runtime itself is unavailable — the future never ran.
 fn block_on<F: std::future::Future>(fut: F) -> VfsResult<F::Output> {
     Ok(try_runtime()?.block_on(fut))
+}
+
+/// Trust `key`, which a connection reported as
+/// [`VfsError::UnknownHostKey`]: until termide exits, and with `remember`
+/// also by appending it to `~/.ssh/known_hosts` (created 0600 in a 0700
+/// `~/.ssh` when missing). Connect again afterwards.
+pub fn trust_host_key(key: &crate::types::HostKey, remember: bool) -> VfsResult<()> {
+    known_hosts::trust(
+        &known_hosts::KnownHostsFiles::openssh_defaults(),
+        &known_hosts::SESSION_KEYS,
+        key,
+        remember,
+    )
 }
 
 // ============================================================================
