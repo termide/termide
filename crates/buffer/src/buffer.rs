@@ -111,17 +111,12 @@ impl TextBuffer {
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read file: {}", path.display()))?;
 
-        // Determine line ending type
-        let line_ending = if contents.contains("\r\n") {
-            LineEnding::CRLF
-        } else {
-            LineEnding::LF
-        };
+        let line_ending = dominant_line_ending(&contents);
 
-        // Normalize CRLF to LF for internal storage.
-        // The original line ending type is preserved in `line_ending`
-        // and restored when saving to disk.
-        let contents = if line_ending == LineEnding::CRLF {
+        // Normalize CRLF to LF for internal storage. The dominant line ending
+        // is kept in `line_ending` and used for every line on save, so a
+        // mixed file is written with the ending most of its lines had.
+        let contents = if contents.contains("\r\n") {
             contents.replace("\r\n", "\n")
         } else {
             contents
@@ -704,6 +699,19 @@ impl TextBuffer {
     }
 }
 
+/// The line ending most lines of `contents` end with: CRLF only when CRLF
+/// lines outnumber bare LF lines, LF otherwise (ties and files without line
+/// breaks included).
+fn dominant_line_ending(contents: &str) -> LineEnding {
+    let crlf = contents.matches("\r\n").count();
+    let lf = contents.matches('\n').count() - crlf;
+    if crlf > lf {
+        LineEnding::CRLF
+    } else {
+        LineEnding::LF
+    }
+}
+
 impl Default for TextBuffer {
     fn default() -> Self {
         Self::new()
@@ -1149,5 +1157,39 @@ mod lsp_change_tests {
         assert!(!buf.toggle_line_mark(9));
         assert!(!buf.toggle_line_mark(1));
         assert!(!buf.has_line_mark(1));
+    }
+
+    fn round_trip(disk: &str) -> (LineEnding, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, disk).unwrap();
+        let mut buf = TextBuffer::from_file(&path).unwrap();
+        buf.save().unwrap();
+        (buf.line_ending(), std::fs::read_to_string(&path).unwrap())
+    }
+
+    #[test]
+    fn a_mostly_lf_file_stays_lf() {
+        let (ending, saved) = round_trip("a\nb\r\nc\nd\n");
+        assert_eq!(ending, LineEnding::LF);
+        assert_eq!(saved, "a\nb\nc\nd\n");
+    }
+
+    #[test]
+    fn a_mostly_crlf_file_stays_crlf() {
+        let (ending, saved) = round_trip("a\r\nb\nc\r\n");
+        assert_eq!(ending, LineEnding::CRLF);
+        assert_eq!(saved, "a\r\nb\r\nc\r\n");
+    }
+
+    #[test]
+    fn pure_files_keep_their_line_endings() {
+        assert_eq!(round_trip("a\r\nb"), (LineEnding::CRLF, "a\r\nb".into()));
+        assert_eq!(round_trip("a\nb\n"), (LineEnding::LF, "a\nb\n".into()));
+    }
+
+    #[test]
+    fn a_tie_between_line_endings_is_saved_as_lf() {
+        assert_eq!(round_trip("a\r\nb\n").0, LineEnding::LF);
     }
 }
