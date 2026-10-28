@@ -111,14 +111,20 @@ impl RepoWatch {
     }
 
     /// Take a finished walk's result into the install queue.
-    fn land(&mut self, kind: WalkKind, walk: RepoWalk, watcher: &mut dyn notify::Watcher) {
+    fn land(
+        &mut self,
+        kind: WalkKind,
+        walk: RepoWalk,
+        os: &mut PathWatches,
+        watcher: &mut dyn notify::Watcher,
+    ) {
         match kind {
             WalkKind::Full => {
                 let fresh: HashSet<PathBuf> = walk.paths.into_iter().collect();
                 // Directories the rules now exclude lose their watch.
                 let stale: Vec<PathBuf> = self.watched.difference(&fresh).cloned().collect();
                 for path in stale {
-                    let _ = watcher.unwatch(&path);
+                    os.release(watcher, &path, repo_watch_mode());
                     self.watched.remove(&path);
                 }
                 self.queue = fresh
@@ -161,6 +167,105 @@ const INSTALL_CHUNK: usize = 256;
 /// per-directory syscall, so Linux keeps the walk.
 const RECURSIVE_ROOT_WATCH: bool = cfg!(target_os = "macos");
 
+/// The mode every repository watch is installed with.
+fn repo_watch_mode() -> RecursiveMode {
+    if RECURSIVE_ROOT_WATCH {
+        RecursiveMode::Recursive
+    } else {
+        RecursiveMode::NonRecursive
+    }
+}
+
+/// How many holders want an OS watch on one path, by mode.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+struct PathHolders {
+    recursive: usize,
+    flat: usize,
+}
+
+impl PathHolders {
+    fn count(&mut self, mode: RecursiveMode) -> &mut usize {
+        match mode {
+            RecursiveMode::Recursive => &mut self.recursive,
+            RecursiveMode::NonRecursive => &mut self.flat,
+        }
+    }
+
+    /// The mode the OS watch needs: recursive if any holder wants it.
+    fn mode(&self) -> Option<RecursiveMode> {
+        if self.recursive > 0 {
+            Some(RecursiveMode::Recursive)
+        } else if self.flat > 0 {
+            Some(RecursiveMode::NonRecursive)
+        } else {
+            None
+        }
+    }
+}
+
+/// The OS-level watches, shared by every holder of a path.
+///
+/// notify keeps one watch per path: a second `watch` replaces the first
+/// (FSEvents also takes the new recursive flag), and one `unwatch` removes
+/// it whoever installed it. Holders do overlap — a repository nested in
+/// another is walked by both on Linux, and a directory can be held as a
+/// repo and as a plain directory while a panel moves between the two — so
+/// each path counts its holders, and the OS watch goes only with the last.
+#[derive(Debug, Default)]
+struct PathWatches {
+    paths: HashMap<PathBuf, PathHolders>,
+}
+
+impl PathWatches {
+    /// Hold `path` in `mode`, installing or widening the OS watch when this
+    /// holder changes what it must be. A failed install holds nothing.
+    fn acquire(
+        &mut self,
+        watcher: &mut dyn notify::Watcher,
+        path: &Path,
+        mode: RecursiveMode,
+    ) -> notify::Result<()> {
+        let before = self.paths.get(path).copied().unwrap_or_default();
+        let mut after = before;
+        *after.count(mode) += 1;
+        if let Some(wanted) = after.mode().filter(|m| Some(*m) != before.mode()) {
+            if before.mode().is_some() {
+                let _ = watcher.unwatch(path);
+            }
+            if let Err(err) = watcher.watch(path, wanted) {
+                if let Some(previous) = before.mode() {
+                    let _ = watcher.watch(path, previous);
+                }
+                return Err(err);
+            }
+        }
+        self.paths.insert(path.to_path_buf(), after);
+        Ok(())
+    }
+
+    /// Let go of one hold of `path` in `mode`: the last holder removes the
+    /// OS watch, the last recursive one narrows it to its direct children.
+    fn release(&mut self, watcher: &mut dyn notify::Watcher, path: &Path, mode: RecursiveMode) {
+        let Some(holders) = self.paths.get_mut(path) else {
+            return;
+        };
+        let before = holders.mode();
+        let count = holders.count(mode);
+        *count = count.saturating_sub(1);
+        match holders.mode() {
+            None => {
+                self.paths.remove(path);
+                let _ = watcher.unwatch(path);
+            }
+            Some(narrower) if Some(narrower) != before => {
+                let _ = watcher.unwatch(path);
+                let _ = watcher.watch(path, narrower);
+            }
+            Some(_) => {}
+        }
+    }
+}
+
 /// Something to watch, as a holder asks for it.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum WatchTarget {
@@ -181,6 +286,8 @@ pub struct UnifiedWatcher {
     repos: HashMap<PathBuf, RepoWatch>,
     /// Non-git dirs: dir_path -> reference count (NonRecursive mode)
     watched_dirs: HashMap<PathBuf, usize>,
+    /// The OS watches the repos and dirs above hold, counted per path.
+    os_watches: PathWatches,
     /// Receiver for internal events from debouncer callback
     internal_rx: Receiver<InternalEvent>,
     /// Pending git events waiting for the `GIT_DEBOUNCE_MS` debounce
@@ -212,6 +319,7 @@ impl UnifiedWatcher {
             debouncer,
             repos: HashMap::new(),
             watched_dirs: HashMap::new(),
+            os_watches: PathWatches::default(),
             internal_rx,
             pending_git: HashMap::new(),
             pending_gitignore: HashMap::new(),
@@ -358,7 +466,7 @@ impl UnifiedWatcher {
         if let Some(repo) = self.repos.remove(repo_root) {
             let watcher = self.debouncer.watcher();
             for path in repo.watched {
-                let _ = watcher.unwatch(&path);
+                self.os_watches.release(watcher, &path, repo_watch_mode());
             }
             // Dropping the receivers abandons the walks: their send fails.
         }
@@ -412,7 +520,7 @@ impl UnifiedWatcher {
                 Err(std::sync::mpsc::TryRecvError::Disconnected) => false,
             });
             for (kind, walk) in landed {
-                repo.land(kind, walk, watcher);
+                repo.land(kind, walk, &mut self.os_watches, watcher);
                 any_progress = true;
             }
         }
@@ -420,11 +528,7 @@ impl UnifiedWatcher {
         // Stage 2: install up to INSTALL_CHUNK watches across all repos
         // this tick. Round-robin across repos keeps a single huge repo
         // from starving smaller siblings.
-        let mode = if RECURSIVE_ROOT_WATCH {
-            RecursiveMode::Recursive
-        } else {
-            RecursiveMode::NonRecursive
-        };
+        let mode = repo_watch_mode();
         let mut budget = INSTALL_CHUNK;
         while budget > 0 {
             let waiting = self.repos.values().filter(|r| !r.queue.is_empty()).count();
@@ -442,7 +546,7 @@ impl UnifiedWatcher {
                 }
                 let from = repo.queue.len() - take;
                 for path in repo.queue.drain(from..) {
-                    if watcher.watch(&path, mode).is_ok() {
+                    if self.os_watches.acquire(watcher, &path, mode).is_ok() {
                         repo.watched.insert(path);
                     }
                 }
@@ -467,6 +571,11 @@ impl UnifiedWatcher {
     /// [`Self::poll_pending`] in chunks like the initial walk. Respects
     /// `.gitignore` (via [`collect_repo_watch_paths`]) and is additive: it
     /// extends the repo's watch set without touching its reference count.
+    ///
+    /// Every watched repo containing the path extends its own set, not just
+    /// the innermost: an outer repo's walk descends into a nested one, so
+    /// its set holds the nested repo's directories too and must keep them
+    /// when the nested repo is released.
     fn watch_new_repo_dirs(&mut self, changed: &[PathBuf]) {
         // A recursive root watch already covers directories created later.
         if RECURSIVE_ROOT_WATCH || self.repos.is_empty() {
@@ -475,23 +584,19 @@ impl UnifiedWatcher {
 
         let mut candidates: HashMap<PathBuf, Vec<PathBuf>> = HashMap::new();
         for path in changed {
-            // The innermost watched repo owns the path.
-            let Some((root, repo)) = self
-                .repos
-                .iter()
-                .filter(|(root, _)| path.starts_with(root))
-                .max_by_key(|(root, _)| root.as_os_str().len())
-            else {
-                continue;
-            };
-            // A full walk still running covers it; a watched path is known.
-            if repo.full_walk_pending() || repo.watched.contains(path) {
-                continue;
+            for (root, repo) in &self.repos {
+                // A full walk still running covers it; a watched path is known.
+                if !path.starts_with(root)
+                    || repo.full_walk_pending()
+                    || repo.watched.contains(path)
+                {
+                    continue;
+                }
+                candidates
+                    .entry(root.clone())
+                    .or_default()
+                    .push(path.clone());
             }
-            candidates
-                .entry(root.clone())
-                .or_default()
-                .push(path.clone());
         }
 
         for (root, mut paths) in candidates {
@@ -532,7 +637,8 @@ impl UnifiedWatcher {
         }
 
         let watcher = self.debouncer.watcher();
-        watcher.watch(&dir_path, RecursiveMode::NonRecursive)?;
+        self.os_watches
+            .acquire(watcher, &dir_path, RecursiveMode::NonRecursive)?;
 
         self.watched_dirs.insert(dir_path, 1);
         Ok(())
@@ -546,7 +652,8 @@ impl UnifiedWatcher {
             if *count == 0 {
                 self.watched_dirs.remove(dir_path);
                 let watcher = self.debouncer.watcher();
-                let _ = watcher.unwatch(dir_path);
+                self.os_watches
+                    .release(watcher, dir_path, RecursiveMode::NonRecursive);
             }
         }
     }
@@ -642,13 +749,16 @@ impl UnifiedWatcher {
             .is_some_and(|ignore| ignored_by(ignore, path))
     }
 
-    /// Find the watched root that contains this path.
+    /// Find the watched root that contains this path: the innermost repo,
+    /// so a change in a nested repo is reported as the nested repo's.
     fn find_watched_root(&self, path: &Path) -> PathBuf {
-        // First check watched repos
-        for repo_root in self.repos.keys() {
-            if path.starts_with(repo_root) {
-                return repo_root.clone();
-            }
+        if let Some(repo_root) = self
+            .repos
+            .keys()
+            .filter(|root| path.starts_with(root))
+            .max_by_key(|root| root.as_os_str().len())
+        {
+            return repo_root.clone();
         }
 
         // Then check watched directories
@@ -906,6 +1016,233 @@ mod tests {
         });
         assert!(w.repos[&root].watched.contains(&root));
         assert_eq!(w.repos[&root].refs, 2, "holders are untouched");
+    }
+
+    /// notify's contract as the backends implement it: one watch per path,
+    /// a repeated `watch` replaces it, one `unwatch` removes it.
+    #[derive(Default)]
+    struct FakeWatcher {
+        active: HashMap<PathBuf, RecursiveMode>,
+        /// Paths and modes `watch` fails for.
+        refuse: HashSet<(PathBuf, bool)>,
+    }
+
+    impl notify::Watcher for FakeWatcher {
+        fn new<F: notify::EventHandler>(_: F, _: notify::Config) -> notify::Result<Self> {
+            Ok(Self::default())
+        }
+        fn watch(&mut self, path: &Path, mode: RecursiveMode) -> notify::Result<()> {
+            if self
+                .refuse
+                .contains(&(path.to_path_buf(), mode == RecursiveMode::Recursive))
+            {
+                return Err(notify::Error::path_not_found());
+            }
+            self.active.insert(path.to_path_buf(), mode);
+            Ok(())
+        }
+        fn unwatch(&mut self, path: &Path) -> notify::Result<()> {
+            self.active
+                .remove(path)
+                .map(|_| ())
+                .ok_or_else(notify::Error::watch_not_found)
+        }
+        fn kind() -> notify::WatcherKind {
+            notify::WatcherKind::NullWatcher
+        }
+    }
+
+    /// Two holders of one directory: the first release keeps the OS watch.
+    #[test]
+    fn a_shared_path_is_unwatched_with_its_last_holder() {
+        let mut os = PathWatches::default();
+        let mut fake = FakeWatcher::default();
+        let dir = Path::new("/outer/inner/src");
+        os.acquire(&mut fake, dir, RecursiveMode::NonRecursive)
+            .unwrap();
+        os.acquire(&mut fake, dir, RecursiveMode::NonRecursive)
+            .unwrap();
+        os.release(&mut fake, dir, RecursiveMode::NonRecursive);
+        assert_eq!(fake.active.get(dir), Some(&RecursiveMode::NonRecursive));
+        os.release(&mut fake, dir, RecursiveMode::NonRecursive);
+        assert!(fake.active.is_empty());
+        assert!(os.paths.is_empty());
+        // A release past the last is a no-op.
+        os.release(&mut fake, dir, RecursiveMode::NonRecursive);
+    }
+
+    /// A path held flat and recursive at once is watched recursively, and
+    /// narrows back when the recursive holder goes — in either order.
+    #[test]
+    fn a_path_is_watched_in_the_widest_mode_held() {
+        let mut os = PathWatches::default();
+        let mut fake = FakeWatcher::default();
+        let dir = Path::new("/repo");
+        os.acquire(&mut fake, dir, RecursiveMode::NonRecursive)
+            .unwrap();
+        os.acquire(&mut fake, dir, RecursiveMode::Recursive)
+            .unwrap();
+        assert_eq!(fake.active.get(dir), Some(&RecursiveMode::Recursive));
+        os.release(&mut fake, dir, RecursiveMode::Recursive);
+        assert_eq!(fake.active.get(dir), Some(&RecursiveMode::NonRecursive));
+
+        os.acquire(&mut fake, dir, RecursiveMode::Recursive)
+            .unwrap();
+        os.release(&mut fake, dir, RecursiveMode::NonRecursive);
+        assert_eq!(
+            fake.active.get(dir),
+            Some(&RecursiveMode::Recursive),
+            "the flat holder leaving does not narrow a recursive watch"
+        );
+        os.release(&mut fake, dir, RecursiveMode::Recursive);
+        assert!(fake.active.is_empty());
+    }
+
+    /// A refused install holds nothing and leaves an existing watch intact.
+    #[test]
+    fn a_refused_watch_holds_nothing() {
+        let mut os = PathWatches::default();
+        let mut fake = FakeWatcher::default();
+        let dir = Path::new("/gone");
+        fake.refuse.insert((dir.to_path_buf(), false));
+        assert!(os
+            .acquire(&mut fake, dir, RecursiveMode::NonRecursive)
+            .is_err());
+        assert!(os.paths.is_empty());
+
+        let held = Path::new("/held");
+        os.acquire(&mut fake, held, RecursiveMode::NonRecursive)
+            .unwrap();
+        fake.refuse.insert((held.to_path_buf(), true));
+        assert!(os
+            .acquire(&mut fake, held, RecursiveMode::Recursive)
+            .is_err());
+        assert_eq!(fake.active.get(held), Some(&RecursiveMode::NonRecursive));
+        assert_eq!(
+            os.paths[held],
+            PathHolders {
+                recursive: 0,
+                flat: 1
+            }
+        );
+    }
+
+    /// `outer/` with a repository nested at `outer/inner/`.
+    fn nested_repos() -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let (tmp, outer) = temp_repo(None);
+        let inner = outer.join("inner");
+        std::fs::create_dir_all(inner.join(".git")).unwrap();
+        std::fs::write(inner.join(".git/HEAD"), b"ref: refs/heads/main\n").unwrap();
+        std::fs::create_dir(inner.join("src")).unwrap();
+        (tmp, outer, inner)
+    }
+
+    /// Every directory each still-watched repo installed keeps its OS hold.
+    fn assert_repo_watches_held(w: &UnifiedWatcher) {
+        for (root, repo) in &w.repos {
+            for path in &repo.watched {
+                assert!(
+                    w.os_watches.paths.contains_key(path),
+                    "{} lost the watch on {}",
+                    root.display(),
+                    path.display()
+                );
+            }
+        }
+    }
+
+    /// Wait for a filesystem event on `path`.
+    fn wait_for_change(w: &mut UnifiedWatcher, path: &Path) -> WatchEvent {
+        for _ in 0..100 {
+            w.poll_pending();
+            if let Some(event) = w.poll_events().into_iter().find(
+                |event| matches!(event, WatchEvent::DirectoryChanged { changed, .. } if changed == path),
+            ) {
+                return event;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        panic!("no event for {}", path.display());
+    }
+
+    /// Releasing either of two nested repos keeps every watch the other
+    /// installed, and the other still hears changes below the nested root.
+    #[test]
+    fn releasing_a_nested_repo_keeps_the_outer_repos_watches() {
+        for release_inner in [true, false] {
+            let (_tmp, outer, inner) = nested_repos();
+            let mut w = UnifiedWatcher::new().unwrap();
+            w.watch_repository(outer.clone()).unwrap();
+            w.watch_repository(inner.clone()).unwrap();
+            wait_until_watched(&mut w, &outer);
+            wait_until_watched(&mut w, &inner);
+            if !RECURSIVE_ROOT_WATCH {
+                assert!(
+                    w.repos[&outer].watched.contains(&inner.join("src")),
+                    "the outer walk descends into the nested repo"
+                );
+            }
+
+            let (gone, kept) = if release_inner {
+                (&inner, &outer)
+            } else {
+                (&outer, &inner)
+            };
+            w.unwatch_repository(gone);
+            assert_repo_watches_held(&w);
+            assert!(w.os_watches.paths.contains_key(kept));
+
+            let file = inner.join("src/lib.rs");
+            std::fs::write(&file, b"x").unwrap();
+            let WatchEvent::DirectoryChanged { root, .. } = wait_for_change(&mut w, &file) else {
+                unreachable!()
+            };
+            assert_eq!(&root, kept);
+
+            w.unwatch_repository(kept);
+            assert!(w.os_watches.paths.is_empty(), "{:?}", w.os_watches.paths);
+        }
+    }
+
+    /// A change inside a nested repo belongs to the nested repo, whatever
+    /// order the repos are found in.
+    #[test]
+    fn nested_repo_changes_are_attributed_to_the_innermost_repo() {
+        let (_tmp, outer, inner) = nested_repos();
+        let mut w = UnifiedWatcher::new().unwrap();
+        w.watch_repository(outer.clone()).unwrap();
+        w.watch_repository(inner.clone()).unwrap();
+        assert_eq!(w.find_watched_root(&inner.join("src/lib.rs")), inner);
+        assert_eq!(w.find_watched_root(&inner.join("x")), inner);
+        assert_eq!(w.find_watched_root(&outer.join("src/main.rs")), outer);
+        assert_eq!(
+            UnifiedWatcher::find_repo_root_from_git_path(&inner.join(".git/index")),
+            Some(inner.clone())
+        );
+        assert_eq!(
+            UnifiedWatcher::find_repo_root(&inner.join(".gitignore")),
+            Some(inner)
+        );
+    }
+
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn a_directory_created_in_a_nested_repo_is_held_by_both_repos() {
+        let (_tmp, outer, inner) = nested_repos();
+        let mut w = UnifiedWatcher::new().unwrap();
+        w.watch_repository(outer.clone()).unwrap();
+        w.watch_repository(inner.clone()).unwrap();
+        wait_until_watched(&mut w, &outer);
+        wait_until_watched(&mut w, &inner);
+
+        let created = inner.join("src/new");
+        std::fs::create_dir(&created).unwrap();
+        w.watch_new_repo_dirs(std::slice::from_ref(&created));
+        drive_until(&mut w, "both repos hold the new directory", |w| {
+            w.repos.values().all(|r| r.watched.contains(&created))
+        });
+        w.unwatch_repository(&inner);
+        assert!(w.os_watches.paths.contains_key(&created));
     }
 
     #[test]
