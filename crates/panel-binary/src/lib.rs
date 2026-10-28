@@ -20,7 +20,7 @@
 //! Opened with `F4`, the panel is editable: typing overwrites the byte under
 //! the cursor (two hex nibbles in the hex zone, a character in the ASCII zone)
 //! without changing the file length. `Ctrl+S` saves after a confirmation,
-//! backing the original up to `<file>.bak` first.
+//! backing the original up to `<file>.bak` (or a free `<file>.bak.N`) first.
 
 use std::any::Any;
 use std::fs::File;
@@ -218,15 +218,17 @@ impl BinaryPanel {
         vec![PanelEvent::NeedsRedraw]
     }
 
-    /// Write pending edits to disk after backing the original up to `<file>.bak`.
-    pub fn save(&mut self) -> std::io::Result<()> {
+    /// Write pending edits to disk after backing the original up.
+    ///
+    /// The backup goes to `<file>.bak`, or to the first free `<file>.bak.N`
+    /// when that exists, so an earlier backup is never overwritten. Returns
+    /// the backup path, `None` when there was nothing to save.
+    pub fn save(&mut self) -> std::io::Result<Option<PathBuf>> {
         use std::io::Write;
         if self.edits.is_empty() {
-            return Ok(());
+            return Ok(None);
         }
-        let mut bak = self.file_path.clone().into_os_string();
-        bak.push(".bak");
-        std::fs::copy(&self.file_path, PathBuf::from(bak))?;
+        let bak = backup_original(&self.file_path)?;
 
         let mut f = std::fs::OpenOptions::new()
             .write(true)
@@ -241,8 +243,39 @@ impl BinaryPanel {
         self.pending_nibble = None;
         // Refresh the read handle so reads reflect the saved bytes.
         self.file = File::open(&self.file_path).ok();
-        Ok(())
+        Ok(Some(bak))
     }
+}
+
+/// Copy `path` to the first of `<path>.bak`, `<path>.bak.1`, `<path>.bak.2`,
+/// … that does not exist yet, and return that name. The name is claimed with
+/// `create_new`, so an existing file is never overwritten.
+fn backup_original(path: &Path) -> std::io::Result<PathBuf> {
+    let mut source = File::open(path)?;
+    let permissions = source.metadata()?.permissions();
+    for n in 0u32.. {
+        let mut name = path.as_os_str().to_owned();
+        name.push(".bak");
+        if n > 0 {
+            name.push(format!(".{n}"));
+        }
+        let bak = PathBuf::from(name);
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&bak)
+        {
+            Ok(mut dest) => {
+                std::io::copy(&mut source, &mut dest)?;
+                dest.sync_all()?;
+                dest.set_permissions(permissions)?;
+                return Ok(bak);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!("ran out of backup names")
 }
 
 impl Panel for BinaryPanel {
@@ -512,7 +545,9 @@ impl Panel for BinaryPanel {
                 if self.is_modified() {
                     let name = self.title.clone();
                     return vec![PanelEvent::ShowConfirm {
-                        message: format!("Save {name}? A .bak backup will be created."),
+                        message: format!(
+                            "Save {name}? The original is backed up to {name}.bak (.bak.N if that exists)."
+                        ),
                         on_confirm: termide_core::ConfirmAction::SaveBinary,
                     }];
                 }
