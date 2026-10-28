@@ -40,7 +40,7 @@ mod known_hosts;
 mod transfer;
 
 use actor::{sftp_actor, Reply, SftpCommand, SftpHandle};
-use connect::{do_connect, fallback_username};
+use connect::{do_connect, fallback_username, Target};
 use transfer::{
     count_local_files_sync, worker_count_remote, worker_download_dir, worker_download_file,
     worker_upload_dir, worker_upload_file, DlState, UlState,
@@ -97,10 +97,10 @@ fn block_on<F: std::future::Future>(fut: F) -> VfsResult<F::Output> {
 /// also by appending it to the host's first `UserKnownHostsFile`
 /// (`~/.ssh/known_hosts` by default; created 0600 in a 0700 directory when
 /// missing), hashed under `HashKnownHosts yes`. Connect again afterwards.
+/// The key may be a jump host's: it is recorded in that host's files.
 pub fn trust_host_key(key: &crate::types::HostKey, remember: bool) -> VfsResult<()> {
-    let config = crate::ssh_config::SshHostConfig::for_host(&key.host);
     known_hosts::trust(
-        &known_hosts::KnownHostsFiles::from_config(&config),
+        Target::of_key(key).known_hosts_files(),
         &known_hosts::SESSION_KEYS,
         key,
         remember,

@@ -1166,6 +1166,7 @@ mod tests {
         HostKey {
             host: host.to_string(),
             port,
+            user: "u".to_string(),
             known_as: format!("[{host}]:{port}"),
             algorithm: "ssh-ed25519".to_string(),
             fingerprint: "SHA256:abc".to_string(),

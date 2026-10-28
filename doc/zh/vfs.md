@@ -98,10 +98,48 @@ Termide 按 `ssh` 的方式先读取 `~/.ssh/config`，再读取
 | `HostKeyAlias` | 查找和记录服务器密钥时使用的名称。 |
 | `HashKnownHosts` | 为 `yes` 时，记住的密钥以哈希后的主机名写入。 |
 | `StrictHostKeyChecking` | 为 `yes` 时，直接拒绝未知的服务器密钥而不询问。 |
+| `ProxyJump` | 连接时经过的跳板主机；见下文。 |
 
 URL 中写明的端口或用户优先于 `Port` 和 `User`，与 `ssh` 命令行一致。
-`Match` 块会被整体跳过，因为其条件无法全部判断；其他选项（`ProxyJump`、
-`ProxyCommand` 等）会被忽略。
+`Match` 块会被整体跳过，因为其条件无法全部判断。`ProxyCommand` 会被
+忽略：Termide 不运行 SSH 配置中的命令，因此这类主机会被直接连接；请
+改用 `ProxyJump`。其他选项同样会被忽略。
+
+`%` 占位符在 `ssh_config(5)` 允许的地方展开：
+
+| 占位符 | 含义 |
+|--------|------|
+| `%h` | 实际连接的主机（经 `HostName` 解析后）。 |
+| `%n` | URL 或 `ProxyJump` 中写下的主机。 |
+| `%p` | 连接的端口。 |
+| `%r` | 远程用户。 |
+| `%u` | 本地用户名。 |
+| `%d` | 你的主目录。 |
+| `%k` | `HostKeyAlias`，未设置时为写下的主机。 |
+| `%%` | 字面的 `%`。 |
+
+`HostName` 接受 `%h` 和 `%%`；`ProxyJump` 接受 `%h`、`%n`、`%p`、`%r`
+和 `%%`；`IdentityFile` 和 `UserKnownHostsFile` 接受上表全部占位符。
+其他占位符（`%C`、`%i`、`%j`、`%L`、`%l`）保持原样。
+
+### 跳板主机
+
+设置 `ProxyJump`（`[user@]host[:port]` 或 `ssh://[user@]host[:port]`，
+多个以逗号分隔并按顺序经过）后，Termide 依次登录每个跳板主机，请它
+打开到下一台主机的连接，并在该连接中运行下一个 SSH 会话，与 `ssh -J`
+相同。`ProxyJump none` 为某个主机关闭此功能。
+
+- 每个跳板主机按它自己的 `Host` 条目解析：`HostName`、`Port`、`User`、
+  密钥和 `known_hosts` 相关选项。`ProxyJump` 值中写明的用户或端口优先于
+  该条目。列表中的第一个跳板主机可以有自己的 `ProxyJump`；其余主机经由
+  它们之前的主机到达。到达同一服务器途中超过 8 个跳板主机会被拒绝，这也
+  能阻止循环。
+- 每个跳板主机的密钥在向它发送任何内容之前，都会像其他服务器密钥一样
+  检查（见下文）。询问或拒绝会写明该跳板主机，答复记录在该主机的
+  `known_hosts` 中。
+- 跳板主机只用 SSH agent 和密钥登录（不含密码的 `Auto`）。跳板主机拒绝
+  登录时会报告一个写明其名称的错误；Termide 询问的或从密码库取出的密码
+  只发送给 URL 中的服务器。
 
 ## 服务器密钥（SFTP）
 
@@ -248,6 +286,9 @@ DVD-Video、Blu-ray）只会显示其旁边很小的 ISO 9660 部分，通常只
   开始。
 - 远程面板不会询问加密 SSH 密钥的密码短语；请将密钥加载到
   SSH agent 中。
-- 不接受主机证书（`@cert-authority`）。
-- SSH 配置中的 `Match` 块会被跳过；`%` 占位符中只展开 `HostName` 里
-  的 `%h` 和路径开头的 `%d`。
+- 不接受主机证书（`@cert-authority`），也不提供用户证书
+  （`CertificateFile`）。
+- SSH 配置中的 `Match` 块会被跳过，`ProxyCommand` 不会运行，`%C`、
+  `%i`、`%j`、`%L` 和 `%l` 占位符不会展开。
+- 跳板主机不能用密码登录；请把它们的密钥加载到 SSH agent，或用
+  `IdentityFile` 指定。

@@ -13,6 +13,9 @@
 //! applying a block whose condition is false would be worse than not
 //! applying one whose condition is true. Options not listed in
 //! [`SshHostConfig`] are ignored.
+//!
+//! `%` tokens are expanded where `ssh_config(5)` allows them, once the
+//! port and user are known: see [`Tokens`].
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -26,15 +29,23 @@ const MAX_INCLUDE_DEPTH: usize = 16;
 pub struct SshHostConfig {
     /// `HostName`, with `%h` replaced by the host as given.
     pub hostname: Option<String>,
+    /// `ProxyJump`, unexpanded; `none` is kept as written. Not set when a
+    /// `ProxyCommand` came first, as in OpenSSH.
+    pub proxy_jump: Option<String>,
+    /// `ProxyCommand`, recorded only because whichever of it and
+    /// `ProxyJump` comes first wins; it is never run.
+    pub proxy_command: Option<String>,
     /// `User`.
     pub user: Option<String>,
     /// `Port`.
     pub port: Option<u16>,
-    /// Every `IdentityFile` of every matching block, in order.
+    /// Every `IdentityFile` of every matching block, in order, with `~`
+    /// expanded; `%` tokens are left for [`Self::expand_tokens`].
     pub identity_files: Vec<PathBuf>,
     /// `IdentitiesOnly`.
     pub identities_only: Option<bool>,
-    /// `UserKnownHostsFile`; empty for `none`.
+    /// `UserKnownHostsFile`; empty for `none`. Tokens as in
+    /// `identity_files`.
     pub user_known_hosts_files: Option<Vec<PathBuf>>,
     /// `GlobalKnownHostsFile`; empty for `none`.
     pub global_known_hosts_files: Option<Vec<PathBuf>>,
@@ -95,9 +106,35 @@ impl SshHostConfig {
         }
         let mut out = reader.out;
         if let Some(name) = &out.hostname {
-            out.hostname = Some(expand_percent(name, host));
+            out.hostname = Some(expand(name, "HostName", &[('h', host.to_string())]));
         }
         out
+    }
+
+    /// Expand the `%` tokens of `IdentityFile` and `UserKnownHostsFile`.
+    pub fn expand_tokens(&mut self, tokens: &Tokens) {
+        let table = tokens.file_tokens();
+        let expand_path = |path: &PathBuf, option: &str| match path.to_str() {
+            Some(text) if text.contains('%') => PathBuf::from(expand(text, option, &table)),
+            _ => path.clone(),
+        };
+        for path in &mut self.identity_files {
+            *path = expand_path(path, "IdentityFile");
+        }
+        if let Some(files) = &mut self.user_known_hosts_files {
+            for path in files {
+                *path = expand_path(path, "UserKnownHostsFile");
+            }
+        }
+    }
+
+    /// The jump hosts of `ProxyJump`, tokens expanded, in the order they
+    /// are visited; empty when unset or `none`.
+    pub fn jump_hosts(&self, tokens: &Tokens) -> Result<Vec<JumpHost>, String> {
+        match &self.proxy_jump {
+            Some(value) => parse_proxy_jump(&expand(value, "ProxyJump", &tokens.jump_tokens())),
+            None => Ok(Vec::new()),
+        }
     }
 
     /// The `HostName` to connect to: the configured one, else `host`.
@@ -162,6 +199,17 @@ impl Reader {
             "hostname" => {
                 out.hostname.get_or_insert_with(|| first.clone());
             }
+            // Whichever of the two comes first wins, `none` included.
+            "proxyjump" => {
+                if out.proxy_command.is_none() {
+                    out.proxy_jump.get_or_insert_with(|| first.clone());
+                }
+            }
+            "proxycommand" => {
+                if out.proxy_jump.is_none() {
+                    out.proxy_command.get_or_insert_with(|| args.join(" "));
+                }
+            }
             "user" => {
                 out.user.get_or_insert_with(|| first.clone());
             }
@@ -174,7 +222,7 @@ impl Reader {
                 }
             }
             "identityfile" => {
-                let path = expand_path(first);
+                let path = expand_tilde(first);
                 if !out.identity_files.contains(&path) {
                     out.identity_files.push(path);
                 }
@@ -215,7 +263,7 @@ fn path_list(args: &[String]) -> Vec<PathBuf> {
     if args.len() == 1 && args[0].eq_ignore_ascii_case("none") {
         return Vec::new();
     }
-    args.iter().map(|a| expand_path(a)).collect()
+    args.iter().map(|a| expand_tilde(a)).collect()
 }
 
 /// Split a line into its lower-cased keyword and arguments; `None` for a
@@ -347,24 +395,75 @@ fn include_paths(pattern: &str, base: &Path) -> Vec<PathBuf> {
     found
 }
 
-/// Expand a leading `~` (or `%d`) to the home directory.
-fn expand_path(value: &str) -> PathBuf {
-    let home = dirs::home_dir();
-    if let Some(home) = &home {
+/// Expand a leading `~` to the home directory, as OpenSSH does before
+/// expanding `%` tokens.
+fn expand_tilde(value: &str) -> PathBuf {
+    if let Some(home) = dirs::home_dir() {
         if value == "~" {
-            return home.clone();
+            return home;
         }
-        for prefix in ["~/", "%d/"] {
-            if let Some(rest) = value.strip_prefix(prefix) {
-                return home.join(rest);
-            }
+        if let Some(rest) = value.strip_prefix("~/") {
+            return home.join(rest);
         }
     }
     PathBuf::from(value)
 }
 
-/// Replace `%h` with `host` and `%%` with `%` in a `HostName` value.
-fn expand_percent(value: &str, host: &str) -> String {
+/// An `Include` path: `~` or a leading `%d` stand for the home directory.
+fn expand_path(value: &str) -> PathBuf {
+    match (value.strip_prefix("%d/"), dirs::home_dir()) {
+        (Some(rest), Some(home)) => home.join(rest),
+        _ => expand_tilde(value),
+    }
+}
+
+/// What the `%` tokens of `ssh_config(5)` stand for in one connection.
+/// Supported: `%%`, `%d`, `%h`, `%k`, `%n`, `%p`, `%r` and `%u`; any other
+/// token is left as written, with a warning.
+#[derive(Debug, Clone)]
+pub struct Tokens {
+    /// `%n`: the host as given.
+    pub original_host: String,
+    /// `%h`: the host connected to, after `HostName`.
+    pub hostname: String,
+    /// `%p`: the port connected to.
+    pub port: u16,
+    /// `%r`: the user logged in as.
+    pub remote_user: String,
+    /// `%u`: the local user name.
+    pub local_user: String,
+    /// `%d`: the local home directory, if known.
+    pub home: Option<String>,
+    /// `%k`: `HostKeyAlias`, else the host as given.
+    pub host_key_alias: String,
+}
+
+impl Tokens {
+    /// For `IdentityFile`, `UserKnownHostsFile` and the other file options.
+    fn file_tokens(&self) -> Vec<(char, String)> {
+        let mut table = self.jump_tokens();
+        table.push(('u', self.local_user.clone()));
+        table.push(('k', self.host_key_alias.clone()));
+        if let Some(home) = &self.home {
+            table.push(('d', home.clone()));
+        }
+        table
+    }
+
+    /// For `ProxyJump`: `%h`, `%n`, `%p` and `%r`.
+    fn jump_tokens(&self) -> Vec<(char, String)> {
+        vec![
+            ('h', self.hostname.clone()),
+            ('n', self.original_host.clone()),
+            ('p', self.port.to_string()),
+            ('r', self.remote_user.clone()),
+        ]
+    }
+}
+
+/// Replace `%%` and the `tokens` of `option` in `value`; any other token
+/// is kept as written.
+fn expand(value: &str, option: &str, tokens: &[(char, String)]) -> String {
     let mut out = String::new();
     let mut chars = value.chars();
     while let Some(c) = chars.next() {
@@ -373,16 +472,80 @@ fn expand_percent(value: &str, host: &str) -> String {
             continue;
         }
         match chars.next() {
-            Some('h') => out.push_str(host),
             Some('%') => out.push('%'),
-            Some(other) => {
-                out.push('%');
-                out.push(other);
-            }
+            Some(t) => match tokens.iter().find(|(k, _)| *k == t) {
+                Some((_, v)) => out.push_str(v),
+                None => {
+                    log::warn!("ssh_config: {option}: token %{t} not supported, left as is");
+                    out.push('%');
+                    out.push(t);
+                }
+            },
             None => out.push('%'),
         }
     }
     out
+}
+
+/// One host of a `ProxyJump` list: `[user@]host[:port]` or
+/// `ssh://[user@]host[:port]`; IPv6 addresses go in brackets.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JumpHost {
+    pub user: Option<String>,
+    pub host: String,
+    pub port: Option<u16>,
+}
+
+/// The hosts of a `ProxyJump` value, in the order they are visited;
+/// empty for `none`.
+pub fn parse_proxy_jump(value: &str) -> Result<Vec<JumpHost>, String> {
+    if value.eq_ignore_ascii_case("none") {
+        return Ok(Vec::new());
+    }
+    value.split(',').map(parse_jump_host).collect()
+}
+
+fn parse_jump_host(spec: &str) -> Result<JumpHost, String> {
+    let bad = || format!("invalid ProxyJump host {spec:?}");
+    let rest = spec.trim();
+    let rest = match rest.strip_prefix("ssh://") {
+        Some(uri) => uri.strip_suffix('/').unwrap_or(uri),
+        None => rest,
+    };
+    let (user, rest) = match rest.rsplit_once('@') {
+        Some((user, rest)) if !user.is_empty() => (Some(user.to_string()), rest),
+        Some(_) => return Err(bad()),
+        None => (None, rest),
+    };
+    let (host, port) = if let Some(bracketed) = rest.strip_prefix('[') {
+        let (host, after) = bracketed.split_once(']').ok_or_else(bad)?;
+        match after {
+            "" => (host, None),
+            _ => (host, Some(after.strip_prefix(':').ok_or_else(bad)?)),
+        }
+    } else {
+        match rest.split_once(':') {
+            Some((host, port)) if !port.contains(':') => (host, Some(port)),
+            // A bare IPv6 address.
+            Some(_) => (rest, None),
+            None => (rest, None),
+        }
+    };
+    if host.is_empty() || host.contains(['/', ' ']) {
+        return Err(bad());
+    }
+    let port = match port {
+        Some(p) => match p.parse::<u16>() {
+            Ok(port) if port != 0 => Some(port),
+            _ => return Err(bad()),
+        },
+        None => None,
+    };
+    Ok(JumpHost {
+        user,
+        host: host.to_string(),
+        port,
+    })
 }
 
 #[cfg(test)]
@@ -612,5 +775,103 @@ Host other
         assert!(match_pattern(b"[h]:22*", b"[h]:2222"));
         assert!(!match_pattern(b"a*c", b"abd"));
         assert!(!match_pattern(b"a?", b"a"));
+    }
+
+    fn tokens() -> Tokens {
+        Tokens {
+            original_host: "build".into(),
+            hostname: "10.0.0.5".into(),
+            port: 2222,
+            remote_user: "deploy".into(),
+            local_user: "me".into(),
+            home: Some("/home/me".into()),
+            host_key_alias: "build-alias".into(),
+        }
+    }
+
+    #[test]
+    fn file_options_expand_tokens() {
+        let mut cfg = resolve(
+            "build",
+            "\
+Host build
+  IdentityFile /keys/%n-%h-%p-%r-%u-%k
+  IdentityFile %d/.ssh/%r@%h
+  IdentityFile /keys/100%%-%x
+  UserKnownHostsFile %d/kh/%n /plain/kh
+  GlobalKnownHostsFile /global/%h
+",
+        );
+        cfg.expand_tokens(&tokens());
+        assert_eq!(
+            cfg.identity_files,
+            vec![
+                PathBuf::from("/keys/build-10.0.0.5-2222-deploy-me-build-alias"),
+                PathBuf::from("/home/me/.ssh/deploy@10.0.0.5"),
+                // Unsupported tokens are left as written.
+                PathBuf::from("/keys/100%-%x"),
+            ]
+        );
+        assert_eq!(
+            cfg.user_known_hosts_files,
+            Some(vec![
+                PathBuf::from("/home/me/kh/build"),
+                PathBuf::from("/plain/kh")
+            ])
+        );
+        // GlobalKnownHostsFile takes no tokens in ssh_config(5).
+        assert_eq!(
+            cfg.global_known_hosts_files,
+            Some(vec![PathBuf::from("/global/%h")])
+        );
+    }
+
+    #[test]
+    fn hostname_takes_only_percent_h() {
+        let cfg = resolve("box", "HostName %h-%p.%%\n");
+        assert_eq!(cfg.hostname.as_deref(), Some("box-%p.%"));
+    }
+
+    #[test]
+    fn proxy_jump_parses_and_expands() {
+        let cfg = resolve(
+            "build",
+            "Host build\n  ProxyJump alice@gw:2200,ssh://[::1]:2201,%r@%n-jump,[fe80::1]\n",
+        );
+        let hops = cfg.jump_hosts(&tokens()).unwrap();
+        let hop = |user: Option<&str>, host: &str, port| JumpHost {
+            user: user.map(String::from),
+            host: host.into(),
+            port,
+        };
+        assert_eq!(
+            hops,
+            vec![
+                hop(Some("alice"), "gw", Some(2200)),
+                hop(None, "::1", Some(2201)),
+                hop(Some("deploy"), "build-jump", None),
+                hop(None, "fe80::1", None),
+            ]
+        );
+        assert_eq!(parse_proxy_jump("NONE"), Ok(vec![]));
+        assert_eq!(
+            parse_proxy_jump("fe80::2").unwrap(),
+            vec![hop(None, "fe80::2", None)]
+        );
+        for bad in ["", "gw,", "@gw", "gw:0", "gw:x", "[::1", "[::1]x", "a b"] {
+            assert!(parse_proxy_jump(bad).is_err(), "{bad:?}");
+        }
+        assert_eq!(SshHostConfig::default().jump_hosts(&tokens()), Ok(vec![]));
+    }
+
+    #[test]
+    fn proxy_jump_and_proxy_command_first_one_wins() {
+        let cfg = resolve("h", "ProxyCommand nc %h %p\nProxyJump gw\n");
+        assert_eq!(cfg.proxy_jump, None);
+        assert_eq!(cfg.proxy_command.as_deref(), Some("nc %h %p"));
+        let cfg = resolve("h", "ProxyJump none\nProxyCommand nc %h %p\nProxyJump gw\n");
+        assert_eq!(cfg.proxy_jump.as_deref(), Some("none"));
+        assert_eq!(cfg.proxy_command, None);
+        assert_eq!(cfg.jump_hosts(&tokens()), Ok(vec![]));
     }
 }

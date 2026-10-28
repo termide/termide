@@ -107,11 +107,53 @@ options are used:
 | `HostKeyAlias` | The name the server key is looked up and recorded under. |
 | `HashKnownHosts` | `yes` writes remembered keys with the host name hashed. |
 | `StrictHostKeyChecking` | `yes` refuses an unknown server key instead of asking. |
+| `ProxyJump` | Jump hosts to connect through; see below. |
 
 A port or user written in the URL wins over `Port` and `User`, as on
 the `ssh` command line. `Match` blocks are skipped as a whole, since
-not all of their conditions can be judged; other options (`ProxyJump`,
-`ProxyCommand` and so on) are ignored.
+not all of their conditions can be judged. `ProxyCommand` is ignored:
+Termide does not run commands from the SSH configuration, so a host
+reached that way is connected to directly; use `ProxyJump` instead.
+Other options are ignored too.
+
+`%` tokens are expanded where `ssh_config(5)` allows them:
+
+| Token | Stands for |
+|-------|------------|
+| `%h` | The host connected to (after `HostName`). |
+| `%n` | The host as written in the URL or in `ProxyJump`. |
+| `%p` | The port connected to. |
+| `%r` | The remote user. |
+| `%u` | Your local user name. |
+| `%d` | Your home directory. |
+| `%k` | `HostKeyAlias`, else the host as written. |
+| `%%` | A literal `%`. |
+
+`HostName` takes `%h` and `%%`; `ProxyJump` takes `%h`, `%n`, `%p`, `%r`
+and `%%`; `IdentityFile` and `UserKnownHostsFile` take them all. Other
+tokens (`%C`, `%i`, `%j`, `%L`, `%l`) are left as written.
+
+### Jump hosts
+
+With `ProxyJump` (`[user@]host[:port]`, or `ssh://[user@]host[:port]`,
+several separated by commas and visited in order) Termide logs in to
+each jump host in turn, asks it to open a connection to the next one,
+and runs the next SSH session inside that connection, as `ssh -J` does.
+`ProxyJump none` turns it off for a host.
+
+- Each jump host is resolved with its own `Host` entry: `HostName`,
+  `Port`, `User`, keys and `known_hosts` options. A user or port in the
+  `ProxyJump` value wins over that entry. The first jump host of the
+  list may itself have a `ProxyJump`; the others are reached through
+  the ones before them. More than 8 jump hosts on the way to one server
+  are refused, which also stops a loop.
+- Each jump host's key is checked like any server key (see below)
+  before anything is sent to it. The question or refusal names the jump
+  host, and the answer is recorded in that host's `known_hosts`.
+- Jump hosts log in with the SSH agent and keys only (`Auto` without the
+  password). A refused login to a jump host is reported as an error
+  naming it; the password Termide asks for, or takes from the vault, is
+  sent only to the server in the URL.
 
 ## Server keys (SFTP)
 
@@ -313,7 +355,10 @@ the password before starting and asks again after a wrong one.
   uploads start over from the beginning if re-issued.
 - The passphrase of an encrypted SSH key is not asked for in remote
   panels; load the key into your SSH agent.
-- Host certificates (`@cert-authority`) are not accepted.
-- `Match` blocks in the SSH configuration are skipped, and of its `%`
-  tokens only `%h` in `HostName` and `%d` at the start of a path are
+- Host certificates (`@cert-authority`) are not accepted, and user
+  certificates (`CertificateFile`) are not offered.
+- `Match` blocks in the SSH configuration are skipped, `ProxyCommand` is
+  not run, and the `%C`, `%i`, `%j`, `%L` and `%l` tokens are not
   expanded.
+- Jump hosts cannot log in with a password; load their key into your
+  SSH agent or name it with `IdentityFile`.
