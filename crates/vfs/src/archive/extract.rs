@@ -1,9 +1,14 @@
 //! Copying archive entries out to the local filesystem.
 //!
-//! Invariant: symlinks from the archive are created only after every file
-//! has been written, so no extracted file is ever written through a link the
-//! archive planted. Link targets that lexically leave the extracted subtree
-//! are not created at all.
+//! Invariants:
+//! - Nothing is written through a symlink found on disk below the
+//!   destination's parent: every directory on the way is checked with
+//!   lstat, and files are opened with `O_NOFOLLOW`. A link already sitting
+//!   where a file goes is replaced; one where a directory goes fails the
+//!   extraction.
+//! - Symlinks from the archive are created only after every file has been
+//!   written, and only when the kernel's resolution of the target — links
+//!   in the archive included — stays inside the extracted subtree.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -14,7 +19,7 @@ use std::sync::mpsc::Sender;
 use std::sync::Arc;
 use std::time::Duration;
 
-use super::index::{symlink_target_key, EntrySource, Node, NodeKind};
+use super::index::{EntrySource, Node, NodeKind};
 use super::source::copy_error;
 use super::OpenArchive;
 use crate::error::{VfsError, VfsResult};
@@ -104,6 +109,11 @@ pub(crate) fn extract(
             path: key.to_path_buf(),
         })?;
 
+    // The destination's parent is the user's choice and trusted as is;
+    // everything from `dest` down is checked before it is written.
+    let base = dest.parent().unwrap_or(dest);
+    fs::create_dir_all(base)?;
+
     let mut jobs: BTreeMap<EntrySource, Job> = BTreeMap::new();
     let mut dirs = Vec::new();
     let mut links = Vec::new();
@@ -124,15 +134,15 @@ pub(crate) fn extract(
                         },
                         None => log::warn!("archive: dangling hard link {}", path.display()),
                     },
-                    NodeKind::Symlink(link) => match symlink_target_key(path, link) {
-                        Some(resolved) if resolved.starts_with(&top) => {
-                            links.push((target, link.clone()))
+                    NodeKind::Symlink(link) => {
+                        match archive.index.link_target_within(path, link, &top) {
+                            Some(_) => links.push((target, link.clone())),
+                            None => log::warn!(
+                                "archive: not creating {} -> {link}, it leaves the extracted tree",
+                                path.display()
+                            ),
                         }
-                        _ => log::warn!(
-                            "archive: not creating {} -> {link}, it leaves the extracted tree",
-                            path.display()
-                        ),
-                    },
+                    }
                 }
             }
         }
@@ -154,7 +164,7 @@ pub(crate) fn extract(
     progress.send();
 
     for dir in &dirs {
-        fs::create_dir_all(dir)?;
+        ensure_dir(base, dir)?;
     }
 
     let sources: Vec<EntrySource> = jobs.keys().copied().collect();
@@ -162,17 +172,15 @@ pub(crate) fn extract(
         let job = &jobs[&source];
         let (first, first_meta) = &job.dests[0];
         progress.start_file(first, job.size);
-        write_entry(reader, first, job.size, control, &mut progress)?;
-        apply_metadata(first, first_meta);
+        let out = write_entry(reader, base, first, job.size, control, &mut progress)?;
+        apply_metadata(&out, first_meta);
         progress.finish_file();
         for (copy, meta) in &job.dests[1..] {
             control.checkpoint()?;
             progress.start_file(copy, job.size);
-            if let Some(parent) = copy.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::copy(first, copy)?;
-            apply_metadata(copy, meta);
+            let mut out = create_file(base, copy)?;
+            std::io::copy(&mut File::open(first)?, &mut out)?;
+            apply_metadata(&out, meta);
             progress.advance(job.size);
             progress.finish_file();
         }
@@ -180,7 +188,10 @@ pub(crate) fn extract(
     })?;
 
     for (target, link) in links {
-        create_symlink(&link, &target);
+        match target.parent().map(|parent| ensure_dir(base, parent)) {
+            Some(Err(e)) => log::warn!("archive: not creating {}: {e}", target.display()),
+            _ => create_symlink(&link, &target),
+        }
     }
     Ok(dest.to_path_buf())
 }
@@ -224,16 +235,14 @@ fn add_job(jobs: &mut BTreeMap<EntrySource, Job>, source: EntrySource, node: &No
 /// instead of filling the disk. A partial file is removed on failure.
 fn write_entry(
     reader: &mut dyn Read,
+    base: &Path,
     dest: &Path,
     size: u64,
     control: &Control,
     progress: &mut Progress<'_>,
-) -> VfsResult<()> {
-    if let Some(parent) = dest.parent() {
-        fs::create_dir_all(parent)?;
-    }
+) -> VfsResult<File> {
+    let mut out = create_file(base, dest)?;
     let result = (|| {
-        let mut out = File::create(dest)?;
         let mut buf = vec![0u8; COPY_BUFFER];
         let mut written = 0u64;
         loop {
@@ -249,10 +258,74 @@ fn write_entry(
         }
         check_size(written, size)
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(dest);
+    match result {
+        Ok(()) => Ok(out),
+        Err(e) => {
+            drop(out);
+            let _ = fs::remove_file(dest);
+            Err(e)
+        }
     }
-    result
+}
+
+/// Make the directory `dir` (at or below `base`) exist without following a
+/// symlink: each component below `base` must be a real directory or absent.
+fn ensure_dir(base: &Path, dir: &Path) -> VfsResult<()> {
+    let rel = dir.strip_prefix(base).map_err(|_| {
+        VfsError::Archive(format!("{} is outside {}", dir.display(), base.display()))
+    })?;
+    let mut current = base.to_path_buf();
+    for component in rel.components() {
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(meta) if meta.file_type().is_symlink() => {
+                return Err(VfsError::Archive(format!(
+                    "refusing to extract through the symbolic link {}",
+                    current.display()
+                )));
+            }
+            Ok(_) => {
+                return Err(VfsError::Archive(format!(
+                    "{} exists and is not a directory",
+                    current.display()
+                )));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                match fs::create_dir(&current) {
+                    Ok(()) => {}
+                    // Lost a race to a concurrent creator: check it again.
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        if !fs::symlink_metadata(&current)?.is_dir() {
+                            return Err(e.into());
+                        }
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(())
+}
+
+/// Create (or truncate) the file `path` below `base` without writing
+/// through a symlink: a link at `path` itself is replaced, as tar does.
+fn create_file(base: &Path, path: &Path) -> VfsResult<File> {
+    if let Some(parent) = path.parent() {
+        ensure_dir(base, parent)?;
+    }
+    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
+        fs::remove_file(path)?;
+    }
+    let mut options = File::options();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    Ok(options.open(path)?)
 }
 
 fn check_size_bound(read: u64, declared: u64) -> VfsResult<()> {
@@ -276,16 +349,15 @@ fn check_size(read: u64, declared: u64) -> VfsResult<()> {
 
 /// Best-effort: restore the modification time and the permission bits
 /// (setuid, setgid and sticky are dropped).
-fn apply_metadata(path: &Path, meta: &VfsMetadata) {
+/// Applied through the open handle, so it reaches the file just written.
+fn apply_metadata(file: &File, meta: &VfsMetadata) {
     if let Some(modified) = meta.modified {
-        if let Ok(file) = File::options().write(true).open(path) {
-            let _ = file.set_modified(modified);
-        }
+        let _ = file.set_modified(modified);
     }
     #[cfg(unix)]
     if let Some(mode) = meta.permissions {
         use std::os::unix::fs::PermissionsExt;
-        let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode & 0o777));
+        let _ = file.set_permissions(fs::Permissions::from_mode(mode & 0o777));
     }
 }
 

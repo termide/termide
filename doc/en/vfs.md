@@ -191,9 +191,13 @@ renaming inside an archive are refused with a notice.
 
 Extraction never writes outside the destination: entries named with
 `..` or an absolute path are not shown, a symbolic link is created only
-when its target stays inside the extracted tree (and only after all
-files are written), and an entry that unpacks to more than its declared
-size fails instead of filling the disk.
+when its target stays inside the extracted tree — resolved the way the
+system resolves it, through the archive's other links — and only after
+all files are written. Nothing is written through a symbolic link that
+is already in the destination: a link where a file goes is replaced by
+the file, and a link where a directory goes stops the extraction with an
+error. An entry that unpacks to more than its declared size fails
+instead of filling the disk.
 
 The URL of a location inside an archive is
 `archive://<archive file>!<path inside>`, e.g.

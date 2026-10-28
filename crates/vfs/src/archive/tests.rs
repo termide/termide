@@ -447,6 +447,62 @@ fn a_link_out_of_an_extracted_subtree_is_not_created() {
     assert!(fs::symlink_metadata(dest.join("up")).is_err());
 }
 
+#[cfg(unix)]
+#[test]
+fn a_link_chain_that_climbs_out_is_not_created() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("t.tar");
+    let mut builder = tar::Builder::new(Vec::new());
+    append_link(&mut builder, tar::EntryType::Symlink, "s/up", "..");
+    append_link(&mut builder, tar::EntryType::Symlink, "esc", "s/up/../..");
+    fs::write(&archive, builder.into_inner().unwrap()).unwrap();
+
+    let dest = dir.path().join("sandbox/out");
+    opened(&archive)
+        .download(&at(&archive, "/"), &dest)
+        .recv()
+        .unwrap();
+    assert_eq!(fs::read_link(dest.join("s/up")).unwrap(), Path::new(".."));
+    assert!(fs::symlink_metadata(dest.join("esc")).is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn extraction_never_writes_through_a_link_already_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let outside = dir.path().join("outside");
+    fs::create_dir(&outside).unwrap();
+    fs::write(outside.join("victim"), b"keep").unwrap();
+    let archive = dir.path().join("t.tar");
+    let mut builder = tar::Builder::new(Vec::new());
+    append_file(&mut builder, "f.txt", b"new");
+    append_file(&mut builder, "sub/g.txt", b"new");
+    fs::write(&archive, builder.into_inner().unwrap()).unwrap();
+    let provider = opened(&archive);
+
+    // A link where a file goes is replaced, its target left alone.
+    let dest = dir.path().join("a");
+    fs::create_dir(&dest).unwrap();
+    std::os::unix::fs::symlink(outside.join("victim"), dest.join("f.txt")).unwrap();
+    provider
+        .download(&at(&archive, "/f.txt"), &dest.join("f.txt"))
+        .recv()
+        .unwrap();
+    assert!(!fs::symlink_metadata(dest.join("f.txt"))
+        .unwrap()
+        .file_type()
+        .is_symlink());
+    assert_eq!(fs::read(dest.join("f.txt")).unwrap(), b"new");
+    assert_eq!(fs::read(outside.join("victim")).unwrap(), b"keep");
+
+    // A link where a directory goes fails the extraction.
+    let dest = dir.path().join("b");
+    fs::create_dir(&dest).unwrap();
+    std::os::unix::fs::symlink(&outside, dest.join("sub")).unwrap();
+    assert!(provider.download(&at(&archive, "/"), &dest).recv().is_err());
+    assert!(!outside.join("g.txt").exists());
+}
+
 #[test]
 fn a_later_tar_entry_with_the_same_name_wins() {
     let dir = tempfile::tempdir().unwrap();
