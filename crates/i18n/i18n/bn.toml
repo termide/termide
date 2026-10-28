@@ -1138,6 +1138,7 @@ vfs_host_key_unknown = "{host}-এর সত্যতা নিশ্চিত �
 vfs_host_key_changed = "{host}-এর কী {location}-এ লেখা কী-এর সঙ্গে মেলে না। হয়তো কেউ সংযোগে আড়ি পাতছে, অথবা সার্ভারের কী বদলানো হয়েছে। পরিবর্তনটি প্রত্যাশিত হলে পুরোনো কী মুছুন (ssh-keygen -R '{host}') এবং আবার সংযোগ করুন।"
 vfs_host_key_changed_session = "{host}-এর কী এই সেশনে আগে গ্রহণ করা কী থেকে আলাদা। হয়তো কেউ সংযোগে আড়ি পাতছে। আবার জিজ্ঞাসা পেতে termide পুনরায় চালু করুন।"
 vfs_host_key_revoked = "{host}-এর কী {location}-এ বাতিল হিসেবে চিহ্নিত। সংযোগ প্রত্যাখ্যান করা হয়েছে।"
+vfs_host_key_strict = "known_hosts-এ {host}-এর কোনো কী নথিভুক্ত নেই, এবং SSH কনফিগারেশনের StrictHostKeyChecking yes নতুন কী গ্রহণ করতে দেয় না। সার্ভার {fingerprint} কী দেখিয়েছে। আগে ssh দিয়ে এটি নথিভুক্ত করুন, অথবা এই হোস্টের জন্য StrictHostKeyChecking ask করুন।"
 vault_password_prompt = "{target} এর পাসওয়ার্ড:"
 vault_stored_refused = "{target} এর সংরক্ষিত পাসওয়ার্ড প্রত্যাখ্যাত হয়েছে। বর্তমান পাসওয়ার্ড লিখুন:"
 vault_password_refused = "{target} এর পাসওয়ার্ড প্রত্যাখ্যাত হয়েছে। আবার চেষ্টা করুন:"

@@ -95,37 +95,31 @@ impl HostKeyAnswer {
     }
 }
 
-/// The name `known_hosts` records a host under: `host` on port 22,
-/// `[host]:port` otherwise. Shown to the user, and what `ssh-keygen -R`
-/// takes.
-pub(crate) fn known_hosts_name(host: &str, port: u16) -> String {
-    if port == 22 {
-        host.to_string()
-    } else {
-        format!("[{host}]:{port}")
-    }
-}
-
-/// The localized refusal of a changed or revoked SSH server key, or
-/// `None` for any other error.
-pub(crate) fn host_key_refusal(error: &VfsError) -> Option<String> {
+/// The title and localized text of a server key refused outright —
+/// changed, revoked, or unknown under `StrictHostKeyChecking yes` — or
+/// `None` for any other error. Hosts are named as `known_hosts` records
+/// them, which is what `ssh-keygen -R` takes.
+pub(crate) fn host_key_refusal(error: &VfsError) -> Option<(String, String)> {
     let t = termide_i18n::t();
+    let changed = |text: String| Some((t.vfs_host_key_changed_title().to_string(), text));
     match error {
         VfsError::HostKeyChanged {
-            host,
-            port,
+            known_as,
             recorded_in: Some(location),
-        } => Some(t.vfs_host_key_changed(&known_hosts_name(host, *port), location)),
+            ..
+        } => changed(t.vfs_host_key_changed(known_as, location)),
         VfsError::HostKeyChanged {
-            host,
-            port,
+            known_as,
             recorded_in: None,
-        } => Some(t.vfs_host_key_changed_session(&known_hosts_name(host, *port))),
+            ..
+        } => changed(t.vfs_host_key_changed_session(known_as)),
         VfsError::HostKeyRevoked {
-            host,
-            port,
-            location,
-        } => Some(t.vfs_host_key_revoked(&known_hosts_name(host, *port), location)),
+            known_as, location, ..
+        } => changed(t.vfs_host_key_revoked(known_as, location)),
+        VfsError::HostKeyNotRecorded(key) => Some((
+            t.vfs_host_key_title().to_string(),
+            t.vfs_host_key_strict(&key.known_as, &key.fingerprint),
+        )),
         _ => None,
     }
 }
@@ -1172,6 +1166,7 @@ mod tests {
         HostKey {
             host: host.to_string(),
             port,
+            known_as: format!("[{host}]:{port}"),
             algorithm: "ssh-ed25519".to_string(),
             fingerprint: "SHA256:abc".to_string(),
             openssh:
@@ -1257,32 +1252,45 @@ mod tests {
     }
 
     #[test]
-    fn changed_and_revoked_keys_are_refused_with_the_known_hosts_name() {
+    fn refused_keys_are_named_as_known_hosts_records_them() {
         let changed = VfsError::HostKeyChanged {
-            host: "h".to_string(),
+            host: "build".to_string(),
             port: 2222,
+            known_as: "[10.0.0.5]:2222".to_string(),
             recorded_in: Some("/home/u/.ssh/known_hosts:7".to_string()),
         };
-        let text = host_key_refusal(&changed).unwrap();
-        assert!(text.contains("[h]:2222"), "{text}");
+        let (_, text) = host_key_refusal(&changed).unwrap();
         assert!(text.contains("/home/u/.ssh/known_hosts:7"), "{text}");
-        assert!(text.contains("ssh-keygen -R '[h]:2222'"), "{text}");
+        assert!(text.contains("ssh-keygen -R '[10.0.0.5]:2222'"), "{text}");
 
         let in_session = VfsError::HostKeyChanged {
             host: "h".to_string(),
             port: 22,
+            known_as: "h-alias".to_string(),
             recorded_in: None,
         };
-        assert!(host_key_refusal(&in_session).unwrap().contains("h"));
+        assert!(host_key_refusal(&in_session).unwrap().1.contains("h-alias"));
 
         let revoked = VfsError::HostKeyRevoked {
             host: "h".to_string(),
             port: 22,
+            known_as: "h".to_string(),
             location: "/etc/ssh/ssh_known_hosts:3".to_string(),
         };
         assert!(host_key_refusal(&revoked)
             .unwrap()
+            .1
             .contains("/etc/ssh/ssh_known_hosts:3"));
+
+        let strict = VfsError::HostKeyNotRecorded(Box::new(host_key("h", 2222)));
+        let (title, text) = host_key_refusal(&strict).unwrap();
+        assert_eq!(title, termide_i18n::t().vfs_host_key_title());
+        assert!(
+            text.contains("[h]:2222") && text.contains("SHA256:abc"),
+            "{text}"
+        );
+        assert!(text.contains("StrictHostKeyChecking"), "{text}");
+
         assert!(host_key_refusal(&VfsError::NotConnected).is_none());
     }
 

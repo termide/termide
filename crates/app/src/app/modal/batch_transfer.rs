@@ -412,7 +412,8 @@ impl App {
     /// 1. If URL ends with '/' or multiple sources — treat as directory, append filename
     /// 2. Otherwise, stat the path on server:
     ///    - If it's a directory — append filename (copy INTO directory)
-    ///    - If it exists as a file — conflict (return dest path + exists=true)
+    ///    - If it exists as a file or a dangling symlink — conflict (return
+    ///      dest path + exists=true)
     ///    - If doesn't exist — use as-is (rename)
     fn resolve_remote_dest(
         &self,
@@ -448,8 +449,13 @@ impl App {
                 (remote_dest.clone(), true)
             }
             Err(_e) => {
-                // Dest doesn't exist — use as-is (rename)
-                (remote_dest.clone(), false)
+                // stat follows links, so a dangling symlink lands here too;
+                // `exists` does not follow it, and the link is a conflict.
+                let exists = vfs_manager.exists(remote_dest).recv().unwrap_or_else(|e| {
+                    log::error!("resolve_remote_dest: VFS channel error: {}", e);
+                    false
+                });
+                (remote_dest.clone(), exists)
             }
         }
     }

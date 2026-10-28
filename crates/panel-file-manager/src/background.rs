@@ -72,11 +72,11 @@ impl FileManager {
                     // user reconnects/refreshes explicitly.
                     self.current_path = self.vfs.path_buf();
                     if !self.is_stale {
-                        if let Some(refusal) = crate::vfs_state::host_key_refusal(&e) {
-                            // A changed or revoked server key: no reconnect
-                            // button, the user fixes known_hosts by hand.
-                            let t = termide_i18n::t();
-                            self.show_info_modal(t.vfs_host_key_changed_title(), &refusal);
+                        if let Some((title, refusal)) = crate::vfs_state::host_key_refusal(&e) {
+                            // A changed, revoked or (under strict checking)
+                            // unknown server key: no reconnect button, the
+                            // user fixes known_hosts by hand.
+                            self.show_info_modal(&title, &refusal);
                         } else if e.is_archive_error() {
                             let t = termide_i18n::t();
                             self.show_info_modal(t.modal_error_title(), &format!("{}", e));

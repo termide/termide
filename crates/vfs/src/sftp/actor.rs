@@ -207,7 +207,7 @@ pub(super) async fn sftp_actor(
                 let _ = reply.send(actor_lstat(sftp!(), &path).await);
             }
             SftpCommand::Exists { path, reply } => {
-                let _ = reply.send(Ok(sftp!().metadata(path_to_string(&path)).await.is_ok()));
+                let _ = reply.send(Ok(actor_exists(sftp!(), &path).await));
             }
             SftpCommand::Mkdir { path, reply } => {
                 let _ = reply.send(map_sftp_unit(
@@ -428,6 +428,13 @@ async fn actor_lstat(sftp: &SftpSession, path: &Path) -> VfsResult<VfsMetadata> 
     Ok(attrs_to_metadata(&attrs))
 }
 
+/// Whether anything is at `path`. lstat, not stat: a symlink whose target
+/// is missing still occupies the name, and an overwrite check that
+/// followed it would write through the link to wherever it points.
+async fn actor_exists(sftp: &SftpSession, path: &Path) -> bool {
+    sftp.symlink_metadata(path_to_string(path)).await.is_ok()
+}
+
 /// Create directory and all parents, ignoring "already exists" errors.
 async fn actor_mkdir_recursive(sftp: &SftpSession, path: &Path) -> VfsResult<()> {
     let mut current = PathBuf::new();
@@ -568,6 +575,50 @@ mod tests {
         assert!(delete_descends(SftpFileType::Dir));
         assert!(!delete_descends(SftpFileType::Symlink));
         assert!(!delete_descends(SftpFileType::File));
+    }
+
+    /// A server holding one dangling symlink, `/link`: stat follows it to
+    /// nothing, lstat reports the link itself.
+    struct DanglingLinkServer;
+
+    impl russh_sftp::server::Handler for DanglingLinkServer {
+        type Error = russh_sftp::protocol::StatusCode;
+
+        fn unimplemented(&self) -> Self::Error {
+            russh_sftp::protocol::StatusCode::OpUnsupported
+        }
+
+        async fn stat(
+            &mut self,
+            _id: u32,
+            _path: String,
+        ) -> Result<russh_sftp::protocol::Attrs, Self::Error> {
+            Err(russh_sftp::protocol::StatusCode::NoSuchFile)
+        }
+
+        async fn lstat(
+            &mut self,
+            id: u32,
+            path: String,
+        ) -> Result<russh_sftp::protocol::Attrs, Self::Error> {
+            if path != "/link" {
+                return Err(russh_sftp::protocol::StatusCode::NoSuchFile);
+            }
+            let attrs = FileAttributes {
+                permissions: Some(0o120777),
+                ..Default::default()
+            };
+            Ok(russh_sftp::protocol::Attrs { id, attrs })
+        }
+    }
+
+    #[tokio::test]
+    async fn a_dangling_symlink_exists() {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        russh_sftp::server::run(server, DanglingLinkServer).await;
+        let sftp = SftpSession::new(client).await.unwrap();
+        assert!(actor_exists(&sftp, Path::new("/link")).await);
+        assert!(!actor_exists(&sftp, Path::new("/missing")).await);
     }
 
     #[test]

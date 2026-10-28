@@ -94,11 +94,13 @@ fn block_on<F: std::future::Future>(fut: F) -> VfsResult<F::Output> {
 
 /// Trust `key`, which a connection reported as
 /// [`VfsError::UnknownHostKey`]: until termide exits, and with `remember`
-/// also by appending it to `~/.ssh/known_hosts` (created 0600 in a 0700
-/// `~/.ssh` when missing). Connect again afterwards.
+/// also by appending it to the host's first `UserKnownHostsFile`
+/// (`~/.ssh/known_hosts` by default; created 0600 in a 0700 directory when
+/// missing), hashed under `HashKnownHosts yes`. Connect again afterwards.
 pub fn trust_host_key(key: &crate::types::HostKey, remember: bool) -> VfsResult<()> {
+    let config = crate::ssh_config::SshHostConfig::for_host(&key.host);
     known_hosts::trust(
-        &known_hosts::KnownHostsFiles::openssh_defaults(),
+        &known_hosts::KnownHostsFiles::from_config(&config),
         &known_hosts::SESSION_KEYS,
         key,
         remember,
@@ -144,14 +146,18 @@ impl SftpInner {
 /// SFTP filesystem provider.
 pub struct SftpProvider {
     host: String,
-    port: u16,
+    /// The port as given; `None` leaves it to `Port` in the SSH
+    /// configuration, else 22.
+    port: Option<u16>,
     username: Option<String>,
     inner: Arc<Mutex<SftpInner>>,
 }
 
 impl SftpProvider {
-    /// Create a new SFTP provider.
-    pub fn new(host: &str, port: u16, username: Option<&str>) -> Self {
+    /// Create a new SFTP provider. `host` may be an alias from the SSH
+    /// configuration; a `port` or `username` given here wins over its
+    /// `Port` and `User`.
+    pub fn new(host: &str, port: Option<u16>, username: Option<&str>) -> Self {
         Self {
             host: host.to_string(),
             port,
@@ -296,13 +302,13 @@ impl VfsProvider for SftpProvider {
 
         let host = self.host.clone();
         let port = self.port;
-        let username = self.effective_username();
+        let given_username = self.username.clone();
         let inner_arc = Arc::clone(&self.inner);
         // Stash creds before the move into the worker thread so we can
         // hand them to the reconnect path later. Cloning ConnectOptions
         // is cheap (small enum + maybe a String).
         let options_for_cache = options.clone();
-        let username_for_cache = username.clone();
+        let username_for_cache = self.effective_username();
 
         let (tx, rx) = std_mpsc::channel();
 
@@ -321,7 +327,7 @@ impl VfsProvider for SftpProvider {
             let result = rt.block_on(do_connect(
                 host.clone(),
                 port,
-                username.clone(),
+                given_username,
                 options,
                 cancelled,
             ));
@@ -775,7 +781,7 @@ impl VfsProvider for SftpProvider {
         let home = self.inner.lock().ok()?.home_dir.clone()?;
         Some(
             VfsPath::remote(VfsProtocol::Sftp, &self.host, Path::new(&home))
-                .with_port(self.port)
+                .with_port(self.port.unwrap_or(22))
                 .with_username(self.effective_username()),
         )
     }
@@ -791,17 +797,17 @@ mod tests {
 
     #[test]
     fn test_sftp_provider_creation() {
-        let provider = SftpProvider::new("example.com", 22, Some("alice"));
+        let provider = SftpProvider::new("example.com", Some(22), Some("alice"));
         assert_eq!(provider.name(), "sftp");
         assert_eq!(provider.connection_state(), ConnectionState::Disconnected);
     }
 
     #[test]
     fn test_effective_username() {
-        let p1 = SftpProvider::new("h", 22, Some("alice"));
+        let p1 = SftpProvider::new("h", Some(22), Some("alice"));
         assert_eq!(p1.effective_username(), "alice");
 
-        let p2 = SftpProvider::new("h", 22, None);
+        let p2 = SftpProvider::new("h", None, None);
         assert!(!p2.effective_username().is_empty());
     }
 
@@ -816,7 +822,7 @@ mod tests {
 
     #[test]
     fn test_supported_auth_methods() {
-        let provider = SftpProvider::new("h", 22, None);
+        let provider = SftpProvider::new("h", None, None);
         let methods = provider.supported_auth_methods();
         assert!(!methods.is_empty());
     }

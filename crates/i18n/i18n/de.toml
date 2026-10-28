@@ -1141,6 +1141,7 @@ vfs_host_key_unknown = "Die Echtheit von {host} kann nicht bestätigt werden. Ak
 vfs_host_key_changed = "Der Schlüssel von {host} stimmt nicht mit dem in {location} gespeicherten überein. Möglicherweise wird die Verbindung abgefangen, oder der Serverschlüssel wurde ersetzt. Falls die Änderung erwartet ist, entfernen Sie den alten Schlüssel (ssh-keygen -R '{host}') und verbinden Sie sich erneut."
 vfs_host_key_changed_session = "Der Schlüssel von {host} weicht von dem zuvor in dieser Sitzung akzeptierten ab. Möglicherweise wird die Verbindung abgefangen. Starten Sie termide neu, um erneut gefragt zu werden."
 vfs_host_key_revoked = "Der Schlüssel von {host} ist in {location} als widerrufen markiert. Die Verbindung wurde abgelehnt."
+vfs_host_key_strict = "Für {host} ist kein Schlüssel in known_hosts eingetragen, und StrictHostKeyChecking yes in der SSH-Konfiguration verbietet, einen neuen anzunehmen. Der Server bot den Schlüssel {fingerprint} an. Tragen Sie ihn zuerst mit ssh ein oder setzen Sie StrictHostKeyChecking für diesen Host auf ask."
 vault_password_prompt = "Passwort für {target}:"
 vault_stored_refused = "Das gespeicherte Passwort für {target} wurde abgelehnt. Aktuelles eingeben:"
 vault_password_refused = "Das Passwort für {target} wurde abgelehnt. Erneut versuchen:"

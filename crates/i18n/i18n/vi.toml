@@ -1138,6 +1138,7 @@ vfs_host_key_unknown = "Không thể xác minh tính xác thực của {host}. C
 vfs_host_key_changed = "Khóa của {host} không khớp với khóa được ghi trong {location}. Có thể ai đó đang chặn kết nối, hoặc khóa máy chủ đã được thay. Nếu thay đổi là dự kiến, hãy xóa khóa cũ (ssh-keygen -R '{host}') rồi kết nối lại."
 vfs_host_key_changed_session = "Khóa của {host} khác với khóa đã chấp nhận trước đó trong phiên này. Có thể ai đó đang chặn kết nối. Khởi động lại termide để được hỏi lại."
 vfs_host_key_revoked = "Khóa của {host} bị đánh dấu là đã thu hồi trong {location}. Kết nối đã bị từ chối."
+vfs_host_key_strict = "Không có khóa nào của {host} trong known_hosts, và StrictHostKeyChecking yes trong cấu hình SSH cấm chấp nhận khóa mới. Máy chủ đưa ra khóa {fingerprint}. Hãy ghi khóa này bằng ssh trước, hoặc đặt StrictHostKeyChecking thành ask cho máy chủ này."
 vault_password_prompt = "Mật khẩu cho {target}:"
 vault_stored_refused = "Mật khẩu đã lưu cho {target} bị từ chối. Nhập mật khẩu hiện tại:"
 vault_password_refused = "Mật khẩu cho {target} bị từ chối. Thử lại:"

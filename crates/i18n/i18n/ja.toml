@@ -1138,6 +1138,7 @@ vfs_host_key_unknown = "{host} の真正性を確認できません。サーバ�
 vfs_host_key_changed = "{host} のキーが {location} に記録されたものと一致しません。接続が傍受されているか、サーバーのキーが置き換えられた可能性があります。変更が想定どおりなら、古いキーを削除して (ssh-keygen -R '{host}') 再接続してください。"
 vfs_host_key_changed_session = "{host} のキーが、このセッションで先に受け入れたものと異なります。接続が傍受されている可能性があります。もう一度確認するには termide を再起動してください。"
 vfs_host_key_revoked = "{host} のキーは {location} で失効済みとしてマークされています。接続は拒否されました。"
+vfs_host_key_strict = "known_hosts に {host} の鍵が記録されておらず、SSH 設定の StrictHostKeyChecking yes により新しい鍵は受け入れられません。サーバーが提示した鍵は {fingerprint} です。先に ssh で鍵を記録するか、このホストの StrictHostKeyChecking を ask にしてください。"
 vault_password_prompt = "{target} のパスワード:"
 vault_stored_refused = "保存済みの {target} のパスワードが拒否されました。現在のものを入力してください:"
 vault_password_refused = "{target} のパスワードが拒否されました。もう一度入力してください:"

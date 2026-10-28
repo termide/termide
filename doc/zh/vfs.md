@@ -39,8 +39,9 @@ ftps://secure.example.com/uploads
 说明：
 - `path` 支持非 ASCII 字符；解析器在与服务器通信前会将其
   percent-decode 回 UTF-8。
-- 省略用户名时 SFTP provider 会回退到 SSH 配置（见认证一节）。
-- 省略端口时使用协议默认值（22 / 21 / 990）。
+- 省略用户名或端口时，SFTP 会从 SSH 配置中取得它们（见
+  [SSH 配置](#ssh-配置sftp)）。
+- 否则，省略端口时使用协议默认值（22 / 21 / 990）。
 - URL 中的密码不会被使用。服务器要求密码时，Termide 会询问它，
   并可将其保存到[密码库](passwords.md)；对 SFTP 而言，基于密钥的
   认证仍是更好的选择。
@@ -64,10 +65,10 @@ ftps://secure.example.com/uploads
 
 SFTP 支持四种认证方式：
 
-- **`Auto`**（默认）— 先尝试 SSH agent，然后是 `~/.ssh/config` 中针对
-  该主机列出的密钥（包括 `IdentityFile`、`User`、`Port` 和 `Hostname`
-  别名），再尝试默认密钥（`id_ed25519`、`id_rsa`、`id_ecdsa`、
-  `id_dsa`），最后是密码。
+- **`Auto`**（默认）— 先尝试 SSH agent，然后是 SSH 配置中该主机的
+  `IdentityFile` 密钥，再尝试默认密钥（`id_ed25519`、`id_rsa`、
+  `id_ecdsa`、`id_dsa`），最后是密码。`IdentitiesOnly yes` 会跳过
+  agent 和默认密钥。
 - **SSH agent** — 当 `SSH_AUTH_SOCK` 指向正在运行的 agent 时使用。
 - **SSH key** — 明确指定私钥文件，可选带密码短语。
 - **Password** — 上述方式都被拒绝时，Termide 从[密码库](passwords.md)
@@ -76,30 +77,60 @@ SFTP 支持四种认证方式：
 FTP 和 FTPS 使用 URL 中的用户登录；登录被拒绝时以同样的方式询问
 密码。URL 中没有用户时为匿名登录。
 
-由于 `Auto` 会读取 `~/.ssh/config`，可以在书签里只写简短 URL
-（`sftp://my-build-host/path`），让 SSH 配置补全真实的主机名、用户
-和密钥文件——这与 `ssh` CLI 使用的是同一份配置。
+## SSH 配置（SFTP）
+
+`sftp://` URL 中的主机可以是 `Host` 别名：书签里只写简短 URL
+（`sftp://my-build-host/path`），由 SSH 配置补全真实的主机名、端口、
+用户和密钥，与 `ssh` CLI 相同。
+
+Termide 按 `ssh` 的方式先读取 `~/.ssh/config`，再读取
+`/etc/ssh/ssh_config`：每个选项以最先找到的值为准，`Host` 模式支持
+`*`、`?` 和 `!` 否定，并会处理 `Include`（路径可含通配符，相对路径
+基于 `~/.ssh` 或 `/etc/ssh`）。使用以下选项：
+
+| 选项 | 作用 |
+|------|------|
+| `HostName` | 实际连接的服务器；`%h` 代表 URL 中的主机。 |
+| `Port` | URL 中没有端口时使用。 |
+| `User` | URL 中没有用户时使用；两者都没有时使用本地用户名。 |
+| `IdentityFile`、`IdentitiesOnly` | `Auto` 尝试的密钥。 |
+| `UserKnownHostsFile`、`GlobalKnownHostsFile` | 查找服务器密钥的文件。 |
+| `HostKeyAlias` | 查找和记录服务器密钥时使用的名称。 |
+| `HashKnownHosts` | 为 `yes` 时，记住的密钥以哈希后的主机名写入。 |
+| `StrictHostKeyChecking` | 为 `yes` 时，直接拒绝未知的服务器密钥而不询问。 |
+
+URL 中写明的端口或用户优先于 `Port` 和 `User`，与 `ssh` 命令行一致。
+`Match` 块会被整体跳过，因为其条件无法全部判断；其他选项（`ProxyJump`、
+`ProxyCommand` 等）会被忽略。
 
 ## 服务器密钥（SFTP）
 
 在向 SFTP 服务器发送任何内容（包括密码）之前，Termide 会像 OpenSSH
-一样，对照 `~/.ssh/known_hosts`、`~/.ssh/known_hosts2` 和
-`/etc/ssh/ssh_known_hosts` 检查服务器密钥。支持哈希条目（`|1|…`）、
-非默认端口的 `[host]:port` 条目、通配符和 `!` 否定。
+一样，对照 `UserKnownHostsFile` 和 `GlobalKnownHostsFile` 指定的文件
+检查服务器密钥，默认为 `~/.ssh/known_hosts`、`~/.ssh/known_hosts2`、
+`/etc/ssh/ssh_known_hosts` 和 `/etc/ssh/ssh_known_hosts2`。若设置了
+`HostKeyAlias`，按该名称查找服务器，否则按 `HostName` 查找，非 22
+端口写作 `[名称]:端口`。支持哈希条目（`|1|…`）、通配符和 `!` 否定。
 
 - **已记录的密钥**——连接直接继续，不做任何提示。
 - **未知主机**——连接暂停，对话框按 `ssh` 的格式显示主机、密钥类型和
   SHA256 指纹。请与可信来源的指纹核对后选择：
-  - **接受并记住**——密钥以 OpenSSH 格式追加到 `~/.ssh/known_hosts`
-    （若不存在，以 0700 权限创建 `~/.ssh`，以 0600 创建该文件），然后
-    重新连接。之后无论在这里还是在 `ssh` 中都会直接连接。
+  - **接受并记住**——密钥以 OpenSSH 格式追加到第一个
+    `UserKnownHostsFile`（默认 `~/.ssh/known_hosts`；若不存在，以 0700
+    权限创建其目录，以 0600 创建该文件），在 `HashKnownHosts yes` 时
+    主机名经过哈希，然后重新连接。之后无论在这里还是在 `ssh` 中都会
+    直接连接。`UserKnownHostsFile none` 时无处记录，只能使用
+    **仅接受本次**。
   - **仅接受本次**——在 Termide 退出前信任该密钥，不写入任何文件。
   - **取消**（默认选中）——不进行连接。按 `Esc` 效果相同。
+
+  设置 `StrictHostKeyChecking yes` 时不会询问：连接被拒绝，消息中
+  显示指纹。其他取值（`ask`、`accept-new`、`no`、`off`）都按上面的方式
+  询问；Termide 从不在未询问的情况下接受未知密钥。
 - **密钥已更改**——若记录的同类型密钥不同，或密钥被标记为
   `@revoked`，连接会被拒绝，对话框会指出对应的 `known_hosts` 文件和
-  行号。无法绕过：如果更换是预期的，请删除旧密钥
-  （`ssh-keygen -R host` 或 `ssh-keygen -R '[host]:port'`）后重新
-  连接。
+  行号。无法绕过：如果更换是预期的，请用对话框给出的 `ssh-keygen -R`
+  命令删除旧密钥后重新连接。
 
 ## 远程面板的体验
 
@@ -217,6 +248,6 @@ DVD-Video、Blu-ray）只会显示其旁边很小的 ISO 9660 部分，通常只
   开始。
 - 远程面板不会询问加密 SSH 密钥的密码短语；请将密钥加载到
   SSH agent 中。
-- 服务器密钥检查只读取默认的 `known_hosts` 位置：不应用
-  `~/.ssh/config` 中的 `UserKnownHostsFile`、`HashKnownHosts` 和
-  `HostKeyAlias`，也不接受主机证书（`@cert-authority`）。
+- 不接受主机证书（`@cert-authority`）。
+- SSH 配置中的 `Match` 块会被跳过；`%` 占位符中只展开 `HostName` 里
+  的 `%h` 和路径开头的 `%d`。

@@ -2013,6 +2013,13 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn vfs_host_key_strict(&self, host: &str, fingerprint: &str) -> String {
+        self.format(
+            "vfs_host_key_strict",
+            &[("host", host), ("fingerprint", fingerprint)],
+        )
+    }
+
     fn fm_archive_password_prompt(&self, name: &str) -> String {
         self.format("fm_archive_password_prompt", &[("name", name)])
     }

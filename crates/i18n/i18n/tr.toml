@@ -1138,6 +1138,7 @@ vfs_host_key_unknown = "{host} sunucusunun kimliği doğrulanamıyor. Anahtarı 
 vfs_host_key_changed = "{host} anahtarı {location} içinde kayıtlı olanla eşleşmiyor. Bağlantı ele geçiriliyor olabilir ya da sunucunun anahtarı değiştirilmiş olabilir. Değişiklik bekleniyorsa eski anahtarı silin (ssh-keygen -R '{host}') ve yeniden bağlanın."
 vfs_host_key_changed_session = "{host} anahtarı bu oturumda daha önce kabul edilenden farklı. Bağlantı ele geçiriliyor olabilir. Yeniden sorulması için termide'yi yeniden başlatın."
 vfs_host_key_revoked = "{host} anahtarı {location} içinde iptal edilmiş olarak işaretli. Bağlantı reddedildi."
+vfs_host_key_strict = "known_hosts içinde {host} için kayıtlı anahtar yok ve SSH yapılandırmasındaki StrictHostKeyChecking yes yeni bir anahtarı kabul etmeyi yasaklıyor. Sunucu {fingerprint} anahtarını sundu. Önce anahtarı ssh ile kaydedin veya bu sunucu için StrictHostKeyChecking değerini ask yapın."
 vault_password_prompt = "{target} için parola:"
 vault_stored_refused = "{target} için kayıtlı parola reddedildi. Geçerli olanı girin:"
 vault_password_refused = "{target} için parola reddedildi. Tekrar deneyin:"

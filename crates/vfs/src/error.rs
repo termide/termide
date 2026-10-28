@@ -77,10 +77,19 @@ pub enum VfsError {
     #[error("Unknown host key for {}:{} ({} {})", .0.host, .0.port, .0.algorithm, .0.fingerprint)]
     UnknownHostKey(Box<crate::types::HostKey>),
 
+    /// The SSH server offered a key that no `known_hosts` file records for
+    /// the host, and `StrictHostKeyChecking yes` in the SSH configuration
+    /// forbids asking. Nothing was sent to the server.
+    #[error(
+        "No host key for {} is known and StrictHostKeyChecking is yes ({} {})",
+        .0.known_as, .0.algorithm, .0.fingerprint
+    )]
+    HostKeyNotRecorded(Box<crate::types::HostKey>),
+
     /// The SSH server offered a different key than the one recorded for the
-    /// host: someone may be intercepting the connection. `recorded_in` is
-    /// the `file:line` of the recorded key, `None` when it was accepted
-    /// earlier in this run.
+    /// host: someone may be intercepting the connection. `known_as` is the
+    /// name the host is recorded under; `recorded_in` is the `file:line` of
+    /// the recorded key, `None` when it was accepted earlier in this run.
     #[error(
         "Host key for {host}:{port} does not match the one recorded in {}",
         recorded_in.as_deref().unwrap_or("this session")
@@ -88,6 +97,7 @@ pub enum VfsError {
     HostKeyChanged {
         host: String,
         port: u16,
+        known_as: String,
         recorded_in: Option<String>,
     },
 
@@ -96,6 +106,7 @@ pub enum VfsError {
     HostKeyRevoked {
         host: String,
         port: u16,
+        known_as: String,
         location: String,
     },
 

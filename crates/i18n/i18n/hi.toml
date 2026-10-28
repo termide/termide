@@ -1140,6 +1140,7 @@ vfs_host_key_unknown = "{host} की प्रामाणिकता स्�
 vfs_host_key_changed = "{host} की कुंजी {location} में दर्ज कुंजी से मेल नहीं खाती। हो सकता है कोई कनेक्शन को बीच में रोक रहा हो, या सर्वर की कुंजी बदल दी गई हो। यदि यह बदलाव अपेक्षित है, तो पुरानी कुंजी हटाएँ (ssh-keygen -R '{host}') और फिर से कनेक्ट करें।"
 vfs_host_key_changed_session = "{host} की कुंजी इस सत्र में पहले स्वीकार की गई कुंजी से अलग है। हो सकता है कोई कनेक्शन को बीच में रोक रहा हो। फिर से पूछे जाने के लिए termide को पुनः आरंभ करें।"
 vfs_host_key_revoked = "{host} की कुंजी {location} में निरस्त के रूप में चिह्नित है। कनेक्शन अस्वीकार कर दिया गया।"
+vfs_host_key_strict = "known_hosts में {host} की कोई कुंजी दर्ज नहीं है, और SSH कॉन्फ़िगरेशन में StrictHostKeyChecking yes नई कुंजी स्वीकार करने से रोकता है। सर्वर ने कुंजी {fingerprint} प्रस्तुत की। पहले ssh से इसे दर्ज करें, या इस होस्ट के लिए StrictHostKeyChecking को ask पर सेट करें।"
 vault_password_prompt = "{target} के लिए पासवर्ड:"
 vault_stored_refused = "{target} का सहेजा गया पासवर्ड अस्वीकार हुआ। मौजूदा पासवर्ड दर्ज करें:"
 vault_password_refused = "{target} का पासवर्ड अस्वीकार हुआ। फिर से कोशिश करें:"

@@ -1174,6 +1174,7 @@ vfs_host_key_unknown = "Подлинность {host} не удаётся уст
 vfs_host_key_changed = "Ключ {host} не совпадает с записанным в {location}. Возможно, соединение перехватывают, или ключ сервера заменили. Если замена ожидаема, удалите старый ключ (ssh-keygen -R '{host}') и подключитесь снова."
 vfs_host_key_changed_session = "Ключ {host} отличается от принятого ранее в этом сеансе. Возможно, соединение перехватывают. Перезапустите termide, чтобы вопрос был задан снова."
 vfs_host_key_revoked = "Ключ {host} помечен как отозванный в {location}. Подключение отклонено."
+vfs_host_key_strict = "Ключ {host} не записан в known_hosts, а StrictHostKeyChecking yes в настройках SSH запрещает принимать новый. Сервер предъявил ключ {fingerprint}. Сначала запишите его с помощью ssh или задайте для этого хоста StrictHostKeyChecking ask."
 vault_password_prompt = "Пароль для {target}:"
 vault_stored_refused = "Сохранённый пароль для {target} не подошёл. Введите действующий:"
 vault_password_refused = "Пароль для {target} не подошёл. Попробуйте ещё раз:"

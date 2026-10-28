@@ -6116,6 +6116,7 @@ dependencies = [
  "bzip2",
  "dirs",
  "flate2",
+ "getrandom 0.4.2",
  "hmac 0.13.0",
  "libc",
  "log",

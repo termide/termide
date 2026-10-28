@@ -13,12 +13,64 @@ use russh::keys::{load_secret_key, PrivateKey, PrivateKeyWithHashAlg};
 use russh_sftp::client::SftpSession;
 
 use crate::error::{VfsError, VfsResult};
+use crate::ssh_config::SshHostConfig;
 use crate::types::{AuthMethod, ConnectOptions};
 
 #[cfg(test)]
 use super::known_hosts::SessionKeys;
 use super::known_hosts::{self, KnownHostsFiles, Verdict, SESSION_KEYS};
 use super::DEFAULT_TIMEOUT_SECS;
+
+/// Where an SFTP connection goes and how its server key is checked: the
+/// host, port and user as given, completed from the SSH configuration.
+#[derive(Debug, Clone)]
+pub(super) struct Target {
+    /// The host as given, which `Host` patterns matched.
+    host: String,
+    /// What to connect to: `HostName`, else `host`.
+    address: String,
+    /// The given port, else `Port`, else 22.
+    port: u16,
+    /// The given user, else `User`, else the local user name.
+    username: String,
+    /// The name the server key is recorded under in `known_hosts`.
+    known_as: String,
+    files: KnownHostsFiles,
+    /// `StrictHostKeyChecking yes`: refuse an unknown key without asking.
+    strict: bool,
+    config: SshHostConfig,
+}
+
+impl Target {
+    /// Complete what the user gave with `config`: a port or user given
+    /// explicitly wins over `Port` and `User`, as on the `ssh` command
+    /// line.
+    pub(super) fn resolve(
+        host: &str,
+        port: Option<u16>,
+        username: Option<&str>,
+        config: SshHostConfig,
+    ) -> Self {
+        let address = config.address(host).to_string();
+        let port = port.or(config.port).unwrap_or(22);
+        let username = username
+            .filter(|u| !u.is_empty())
+            .map(str::to_string)
+            .or_else(|| config.user.clone())
+            .unwrap_or_else(fallback_username);
+        let known_as = known_hosts::known_name(config.host_key_alias.as_deref(), &address, port);
+        Self {
+            host: host.to_string(),
+            address,
+            port,
+            username,
+            known_as,
+            files: KnownHostsFiles::from_config(&config),
+            strict: config.strict_host_key_checking.unwrap_or(false),
+            config,
+        }
+    }
+}
 
 /// Verifies the server key against `known_hosts` before authentication.
 ///
@@ -29,7 +81,9 @@ use super::DEFAULT_TIMEOUT_SECS;
 struct VerifyingHandler {
     host: String,
     port: u16,
+    known_as: String,
     files: KnownHostsFiles,
+    strict: bool,
     rejection: Arc<Mutex<Option<VfsError>>>,
 }
 
@@ -50,11 +104,12 @@ impl client::Handler for VerifyingHandler {
                 russh::keys::PublicKey::from(cert.public_key().clone())
             }
         };
-        let verdict = known_hosts::check(&self.files, &SESSION_KEYS, &self.host, self.port, &key);
+        let verdict = known_hosts::check(&self.files, &SESSION_KEYS, &self.known_as, &key);
         if verdict == Verdict::Trusted {
             return Ok(true);
         }
-        let error = known_hosts::verdict_error(verdict, &self.host, self.port, &key);
+        let described = known_hosts::describe(&self.host, self.port, &self.known_as, &key);
+        let error = known_hosts::verdict_error(verdict, described, self.strict);
         log::warn!("sftp: server key not accepted: {error}");
         if let Ok(mut slot) = self.rejection.lock() {
             *slot = Some(error);
@@ -108,11 +163,11 @@ fn expand_tilde(p: &Path) -> PathBuf {
 /// Try every reasonable auth method until one succeeds. Stops at the
 /// first success; returns AuthenticationFailed if none work.
 ///
-/// `host` is used to look up Host-specific entries in `~/.ssh/config`
-/// (IdentityFile / IdentitiesOnly) when `auth == Auto`.
+/// `host_cfg` supplies `IdentityFile` / `IdentitiesOnly` when
+/// `auth == Auto`.
 async fn try_authenticate(
     session: &mut client::Handle<VerifyingHandler>,
-    host: &str,
+    host_cfg: &SshHostConfig,
     username: &str,
     auth: &AuthMethod,
     cancelled: &Arc<AtomicBool>,
@@ -144,11 +199,9 @@ async fn try_authenticate(
             //   1. SSH agent (unless IdentitiesOnly=yes)
             //   2. Keys from IdentityFile entries in ssh_config
             //   3. Default keys in ~/.ssh/id_*
-            let host_cfg = crate::ssh_config::SshConfig::from_default_path()
-                .map(|cfg| cfg.get_host_config(host))
-                .unwrap_or_default();
+            let identities_only = host_cfg.identities_only.unwrap_or(false);
 
-            if !host_cfg.identities_only && try_auth_agent(session, username).await.is_ok() {
+            if !identities_only && try_auth_agent(session, username).await.is_ok() {
                 return Ok(());
             }
             cancelled_check()?;
@@ -169,7 +222,7 @@ async fn try_authenticate(
             }
 
             // Fallback to default keys unless IdentitiesOnly forbids it.
-            if !host_cfg.identities_only {
+            if !identities_only {
                 for key_path in default_key_files() {
                     if try_auth_keyfile(session, username, &key_path, None)
                         .await
@@ -283,30 +336,30 @@ async fn try_auth_agent(
     ))
 }
 
-/// Top-level async connect routine. Runs on the global runtime.
+/// Top-level async connect routine. Runs on the global runtime. `port`
+/// and `username` are what the user gave, if anything; the SSH
+/// configuration for `host` completes them.
 pub(super) async fn do_connect(
     host: String,
-    port: u16,
-    username: String,
+    port: Option<u16>,
+    username: Option<String>,
     options: ConnectOptions,
     cancelled: Arc<AtomicBool>,
 ) -> VfsResult<(SftpSession, Option<String>)> {
-    let files = KnownHostsFiles::openssh_defaults();
-    let session =
-        open_verified_session(files, &host, port, &username, &options, &cancelled).await?;
-    open_sftp(session, &username).await
+    let config = SshHostConfig::for_host(&host);
+    let target = Target::resolve(&host, port, username.as_deref(), config);
+    let session = open_verified_session(&target, &options, &cancelled).await?;
+    open_sftp(session, &target.username).await
 }
 
-/// Connect, verify the server key against `files`, and authenticate.
+/// Connect, verify the server key against the target's `known_hosts`, and
+/// authenticate.
 async fn open_verified_session(
-    files: KnownHostsFiles,
-    host: &str,
-    port: u16,
-    username: &str,
+    target: &Target,
     options: &ConnectOptions,
     cancelled: &Arc<AtomicBool>,
 ) -> VfsResult<client::Handle<VerifyingHandler>> {
-    let host = host.to_string();
+    let (address, port) = (target.address.as_str(), target.port);
     if cancelled.load(Ordering::SeqCst) {
         return Err(VfsError::ConnectionFailed("Connection cancelled".into()));
     }
@@ -314,7 +367,7 @@ async fn open_verified_session(
     // Ask for a key type already recorded for the host first, as OpenSSH
     // does, so a host known by one key type is not reported unknown
     // because the server offered another.
-    let known = known_hosts::known_algorithms(&files, &SESSION_KEYS, &host, port);
+    let known = known_hosts::known_algorithms(&target.files, &SESSION_KEYS, &target.known_as);
     let defaults = russh::Preferred::default();
     let preferred = russh::Preferred {
         key: Cow::Owned(known_hosts::prefer_known(&defaults.key, &known)),
@@ -328,17 +381,21 @@ async fn open_verified_session(
 
     let rejection = Arc::new(Mutex::new(None));
     let handler = VerifyingHandler {
-        host: host.clone(),
+        host: target.host.clone(),
         port,
-        files,
+        known_as: target.known_as.clone(),
+        files: target.files.clone(),
+        strict: target.strict,
         rejection: Arc::clone(&rejection),
     };
-    let addr = (host.as_str(), port);
+    let addr = (address, port);
 
     let connect_fut = client::connect(config, addr, handler);
     let mut session = tokio::time::timeout(Duration::from_secs(timeout_secs), connect_fut)
         .await
-        .map_err(|_| VfsError::ConnectionFailed(format!("Connection to {host}:{port} timed out")))?
+        .map_err(|_| {
+            VfsError::ConnectionFailed(format!("Connection to {address}:{port} timed out"))
+        })?
         .map_err(|e| {
             // A refused server key ends the handshake with a generic
             // russh error; report why it was refused instead.
@@ -353,7 +410,14 @@ async fn open_verified_session(
         return Err(VfsError::ConnectionFailed("Connection cancelled".into()));
     }
 
-    try_authenticate(&mut session, &host, username, &options.auth, cancelled).await?;
+    try_authenticate(
+        &mut session,
+        &target.config,
+        &target.username,
+        &options.auth,
+        cancelled,
+    )
+    .await?;
 
     if cancelled.load(Ordering::SeqCst) {
         return Err(VfsError::ConnectionFailed("Connection cancelled".into()));
@@ -401,7 +465,7 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::sftp::known_hosts::{describe, trust};
+    use crate::sftp::known_hosts::{describe, host_token, trust};
 
     const HOST_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
@@ -471,16 +535,40 @@ e1wHbrDT7niNbemBwH0LAAAAAAECAwQF
         let files = KnownHostsFiles {
             read: vec![path.clone()],
             user: Some(path),
+            hash: false,
         };
         (dir, files)
     }
 
-    async fn connect(files: &KnownHostsFiles, port: u16) -> VfsResult<()> {
+    /// `host` resolved through `config`, checked against `files` only.
+    fn target_for(host: &str, config: SshHostConfig, files: &KnownHostsFiles) -> Target {
+        let mut target = Target::resolve(host, None, Some("u"), config);
+        target.files = files.clone();
+        target
+    }
+
+    fn local(port: u16) -> SshHostConfig {
+        SshHostConfig {
+            port: Some(port),
+            ..Default::default()
+        }
+    }
+
+    async fn connect_to(target: &Target) -> VfsResult<()> {
         let options = ConnectOptions::with_password("secret").with_timeout(10);
         let cancelled = Arc::new(AtomicBool::new(false));
-        open_verified_session(files.clone(), "127.0.0.1", port, "u", &options, &cancelled)
+        open_verified_session(target, &options, &cancelled)
             .await
             .map(|_| ())
+    }
+
+    async fn connect(files: &KnownHostsFiles, port: u16) -> VfsResult<()> {
+        connect_to(&target_for("127.0.0.1", local(port), files)).await
+    }
+
+    fn described(port: u16) -> crate::types::HostKey {
+        let name = host_token("127.0.0.1", port);
+        describe("127.0.0.1", port, &name, host_key().public_key())
     }
 
     #[tokio::test]
@@ -493,8 +581,7 @@ e1wHbrDT7niNbemBwH0LAAAAAAECAwQF
             panic!("expected an unknown host key, got {err:?}");
         };
         assert_eq!(auths.load(Ordering::SeqCst), 0, "nothing sent before trust");
-        let expected = describe("127.0.0.1", port, host_key().public_key());
-        assert_eq!(*key, expected);
+        assert_eq!(*key, described(port));
 
         // Remembered in this test's known_hosts; the session store is
         // process-wide, so a fresh one proves the file alone suffices.
@@ -517,9 +604,11 @@ e1wHbrDT7niNbemBwH0LAAAAAAECAwQF
             VfsError::HostKeyChanged {
                 host,
                 port: p,
+                known_as,
                 recorded_in: Some(location),
             } => {
                 assert_eq!((host.as_str(), p), ("127.0.0.1", port));
+                assert_eq!(known_as, format!("[127.0.0.1]:{port}"));
                 assert!(location.ends_with("known_hosts:1"), "{location}");
             }
             other => panic!("expected a changed host key, got {other:?}"),
@@ -531,7 +620,7 @@ e1wHbrDT7niNbemBwH0LAAAAAAECAwQF
     async fn accept_once_trusts_the_key_for_the_rest_of_the_run() {
         let (port, auths) = serve().await;
         let (_dir, files) = files_with("");
-        let key = describe("127.0.0.1", port, host_key().public_key());
+        let key = described(port);
         // The process-wide store, as `trust_host_key(.., false)` uses;
         // the ephemeral port keeps it apart from other tests.
         trust(&files, &SESSION_KEYS, &key, false).unwrap();
@@ -540,5 +629,106 @@ e1wHbrDT7niNbemBwH0LAAAAAAECAwQF
         let err = connect(&files, port).await.unwrap_err();
         assert!(matches!(err, VfsError::AuthenticationFailed(_)), "{err:?}");
         assert!(auths.load(Ordering::SeqCst) > 0);
+    }
+
+    #[tokio::test]
+    async fn strict_checking_refuses_an_unknown_key_without_asking() {
+        let (port, auths) = serve().await;
+        let (_dir, files) = files_with("");
+        let config = SshHostConfig {
+            strict_host_key_checking: Some(true),
+            ..local(port)
+        };
+        let err = connect_to(&target_for("127.0.0.1", config, &files))
+            .await
+            .unwrap_err();
+        let VfsError::HostKeyNotRecorded(key) = err else {
+            panic!("expected a strict refusal, got {err:?}");
+        };
+        assert_eq!(*key, described(port));
+        assert_eq!(auths.load(Ordering::SeqCst), 0);
+
+        // A recorded key still connects under strict checking.
+        let (_dir, files) = files_with(&format!("[127.0.0.1]:{port} {}\n", key.openssh));
+        let config = SshHostConfig {
+            strict_host_key_checking: Some(true),
+            ..local(port)
+        };
+        let err = connect_to(&target_for("127.0.0.1", config, &files))
+            .await
+            .unwrap_err();
+        assert!(matches!(err, VfsError::AuthenticationFailed(_)), "{err:?}");
+    }
+
+    #[tokio::test]
+    async fn hostname_port_and_alias_come_from_the_config() {
+        let (port, auths) = serve().await;
+        let openssh = described(port).openssh;
+        // Recorded under the alias only: the address and port reach the
+        // server, the key is looked up as `build-alias`.
+        let (_dir, files) = files_with(&format!("build-alias {openssh}\n"));
+        let config = SshHostConfig {
+            hostname: Some("127.0.0.1".into()),
+            host_key_alias: Some("Build-Alias".into()),
+            ..local(port)
+        };
+        let target = target_for("build", config, &files);
+        assert_eq!(target.known_as, "build-alias");
+        let err = connect_to(&target).await.unwrap_err();
+        assert!(matches!(err, VfsError::AuthenticationFailed(_)), "{err:?}");
+        assert!(auths.load(Ordering::SeqCst) > 0);
+
+        // Without the alias the key is looked up under the HostName and
+        // reported with the host as given.
+        let config = SshHostConfig {
+            hostname: Some("127.0.0.1".into()),
+            ..local(port)
+        };
+        let err = connect_to(&target_for("build", config, &files))
+            .await
+            .unwrap_err();
+        let VfsError::UnknownHostKey(key) = err else {
+            panic!("expected an unknown key, got {err:?}");
+        };
+        assert_eq!(key.host, "build");
+        assert_eq!(key.known_as, format!("[127.0.0.1]:{port}"));
+    }
+
+    #[tokio::test]
+    async fn a_remembered_key_is_written_hashed_and_found_again() {
+        let (port, _auths) = serve().await;
+        let (_dir, mut files) = files_with("");
+        files.hash = true;
+        trust(&files, &SessionKeys::new(), &described(port), true).unwrap();
+        let text = std::fs::read_to_string(&files.read[0]).unwrap();
+        assert!(text.starts_with("|1|"), "{text}");
+        assert!(!text.contains("127.0.0.1"), "{text}");
+        let err = connect(&files, port).await.unwrap_err();
+        assert!(matches!(err, VfsError::AuthenticationFailed(_)), "{err:?}");
+    }
+
+    #[test]
+    fn given_port_and_user_win_over_the_config() {
+        let config = SshHostConfig {
+            hostname: Some("10.0.0.5".into()),
+            port: Some(2222),
+            user: Some("deploy".into()),
+            ..Default::default()
+        };
+        let t = Target::resolve("build", Some(22), Some("me"), config.clone());
+        assert_eq!((t.address.as_str(), t.port), ("10.0.0.5", 22));
+        assert_eq!(t.username, "me");
+        assert_eq!(t.known_as, "10.0.0.5");
+
+        let t = Target::resolve("build", None, Some(""), config);
+        assert_eq!(t.port, 2222);
+        assert_eq!(t.username, "deploy");
+        assert_eq!(t.known_as, "[10.0.0.5]:2222");
+
+        let t = Target::resolve("Plain", None, None, SshHostConfig::default());
+        assert_eq!((t.address.as_str(), t.port), ("Plain", 22));
+        assert_eq!(t.username, fallback_username());
+        assert_eq!(t.known_as, "plain");
+        assert!(!t.strict);
     }
 }
