@@ -8,7 +8,7 @@ use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 use termide_clipboard::{picture_from_path, picture_kind, Picture};
 
-use crate::args::{optional_u64, required_str, resolve_path};
+use crate::args::{ensure_not_special, optional_u64, required_str, resolve_path};
 use crate::truncate::{READ_MAX_BYTES, READ_MAX_LINES};
 
 pub struct ReadTool;
@@ -99,6 +99,7 @@ fn read_text(call: &ToolCall, path: PathBuf) -> Result<(String, Value), String> 
         .unwrap_or(READ_MAX_LINES)
         .min(READ_MAX_LINES);
 
+    ensure_not_special(&path)?;
     let bytes = std::fs::read(&path).map_err(|error| {
         if path.is_dir() {
             format!(
@@ -280,5 +281,26 @@ mod tests {
             run(dir.path(), json!({ "path": "e" })).plain_text(),
             "[empty file]"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_or_terminal_is_refused_without_blocking() {
+        use crate::args::test_support::{make_fifo, within_seconds};
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("pipe"));
+        let cwd = dir.path().to_path_buf();
+        let result = within_seconds(move || run(&cwd, json!({ "path": "pipe" })));
+        assert!(result.is_error);
+        assert!(
+            result.plain_text().contains("named pipe"),
+            "{}",
+            result.plain_text()
+        );
+
+        let terminal =
+            within_seconds(move || run(std::path::Path::new("/"), json!({ "path": "/dev/null" })));
+        assert!(terminal.is_error);
+        assert!(terminal.plain_text().contains("character device"));
     }
 }

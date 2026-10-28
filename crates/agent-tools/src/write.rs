@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
-use crate::args::{required_str, resolve_path};
+use crate::args::{ensure_not_special, required_str, resolve_path};
 
 pub struct WriteTool;
 
@@ -56,6 +56,7 @@ fn write(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> 
     if path.is_dir() {
         return Err(format!("{} is a directory", path.display()));
     }
+    ensure_not_special(&path)?;
     let existed = path.exists();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -113,5 +114,21 @@ mod tests {
         assert!(run(dir.path(), json!({ "path": ".", "content": "" })).is_error);
         let missing = run(dir.path(), json!({ "path": "x" }));
         assert!(missing.plain_text().contains("`content`"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_is_refused_without_blocking() {
+        use crate::args::test_support::{make_fifo, within_seconds};
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("pipe"));
+        let cwd = dir.path().to_path_buf();
+        let result = within_seconds(move || run(&cwd, json!({ "path": "pipe", "content": "x" })));
+        assert!(result.is_error);
+        assert!(
+            result.plain_text().contains("named pipe"),
+            "{}",
+            result.plain_text()
+        );
     }
 }

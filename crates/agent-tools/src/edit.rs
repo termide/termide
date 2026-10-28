@@ -13,7 +13,7 @@ use similar::{DiffOp, TextDiff};
 use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
-use crate::args::{optional_bool, required_str, resolve_path};
+use crate::args::{ensure_not_special, optional_bool, required_str, resolve_path};
 
 /// Diffs longer than this stay in `details` only.
 const INLINE_DIFF_LIMIT: usize = 4 * 1024;
@@ -78,6 +78,7 @@ fn edit(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
         return Err("`old_string` and `new_string` are identical".into());
     }
 
+    ensure_not_special(&path)?;
     let original = std::fs::read_to_string(&path).map_err(|error| {
         format!(
             "cannot read {}: {error}. `edit` needs an existing text file; use `write` for new files",
@@ -457,6 +458,27 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(path).unwrap(),
             "\u{feff}one\r\n2\r\nthree\r\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pipe_is_refused_without_blocking() {
+        use crate::args::test_support::{make_fifo, within_seconds};
+        let dir = tempfile::tempdir().unwrap();
+        make_fifo(&dir.path().join("pipe"));
+        let cwd = dir.path().to_path_buf();
+        let result = within_seconds(move || {
+            run(
+                &cwd,
+                json!({ "path": "pipe", "old_string": "a", "new_string": "b" }),
+            )
+        });
+        assert!(result.is_error);
+        assert!(
+            result.plain_text().contains("named pipe"),
+            "{}",
+            result.plain_text()
         );
     }
 }
