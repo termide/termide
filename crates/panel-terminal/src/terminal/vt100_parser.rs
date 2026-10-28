@@ -183,6 +183,38 @@ fn count_param(params: &Params) -> usize {
         .max(1) as usize
 }
 
+/// Shift `lines[row..=bottom]` by `n` (clamped to the span): down for
+/// IL (`insert`), blanks at `row` and the lines pushed past `bottom` lost;
+/// up for DL, blanks at `bottom`. Lines below `bottom` never move.
+fn shift_lines<T>(
+    lines: &mut std::collections::VecDeque<T>,
+    row: usize,
+    bottom: usize,
+    n: usize,
+    insert: bool,
+    blank: impl Fn() -> T,
+) {
+    let Some(last) = lines.len().checked_sub(1) else {
+        return;
+    };
+    let bottom = bottom.min(last);
+    if row > bottom {
+        return;
+    }
+    let span = &mut lines.make_contiguous()[row..=bottom];
+    let n = n.min(span.len());
+    let blanks = if insert {
+        span.rotate_right(n);
+        0..n
+    } else {
+        span.rotate_left(n);
+        span.len() - n..span.len()
+    };
+    for line in &mut span[blanks] {
+        *line = blank();
+    }
+}
+
 impl Perform for VtPerformer {
     fn print(&mut self, ch: char) {
         // Filter control characters that shouldn't be displayed
@@ -468,102 +500,31 @@ impl Perform for VtPerformer {
                     // Force cache invalidation after character insertion
                     screen.force_cache_invalidation = true;
                 }
-                'L' => {
-                    // IL - Insert Lines (insert blank lines within scroll region)
+                'L' | 'M' => {
+                    // IL / DL - Insert / Delete Lines. Per ECMA-48 and xterm
+                    // they act only with the cursor inside the scroll region,
+                    // move the lines from the cursor down to the bottom
+                    // margin (no further) and put the cursor in column 0.
                     let n = count_param(params);
                     let row = screen.cursor.0;
-                    let cols = screen.cols;
-                    let bottom = screen.scroll_bottom;
-                    let empty_cell = Cell::blank(screen.current_style);
-
-                    // Only operate if cursor is within scroll region
-                    if row <= bottom {
-                        let effective_n = n.min(bottom - row + 1);
-                        let buffer = screen.active_buffer_mut();
-
-                        // Delete n lines from scroll_bottom
-                        for _ in 0..effective_n {
-                            if bottom < buffer.len() {
-                                buffer.remove(bottom);
-                            }
-                        }
-                        // Insert n blank lines at cursor position
-                        for _ in 0..effective_n {
-                            if row == 0 {
-                                buffer.push_front(vec![empty_cell; cols]);
-                            } else {
-                                buffer.insert(row, vec![empty_cell; cols]);
-                            }
-                        }
-
-                        // Mirror on wrapped flags
-                        let wrapped = screen.active_wrapped_mut();
-                        for _ in 0..effective_n {
-                            if bottom < wrapped.len() {
-                                wrapped.remove(bottom);
-                            }
-                        }
-                        for _ in 0..effective_n {
-                            if row == 0 {
-                                wrapped.push_front(false);
-                            } else {
-                                wrapped.insert(row, false);
-                            }
-                        }
+                    let (top, bottom) = (screen.scroll_top, screen.scroll_bottom);
+                    if row < top || row > bottom {
+                        return;
                     }
-                    // Ensure buffer size invariant after IL operation
-                    screen.ensure_buffer_size();
-                    // Force cache invalidation after line insertion
-                    screen.force_cache_invalidation = true;
-                }
-                'M' => {
-                    // DL - Delete Lines (delete lines within scroll region)
-                    let n = count_param(params);
-                    let row = screen.cursor.0;
+                    let blank = Cell::blank(screen.current_style);
                     let cols = screen.cols;
-                    let bottom = screen.scroll_bottom;
-                    let empty_cell = Cell::blank(screen.current_style);
-
-                    // Only operate if cursor is within scroll region
-                    if row <= bottom {
-                        let effective_n = n.min(bottom - row + 1);
-                        let buffer = screen.active_buffer_mut();
-
-                        // Delete n lines at cursor position
-                        for _ in 0..effective_n {
-                            if row < buffer.len() {
-                                if row == 0 {
-                                    buffer.pop_front();
-                                } else {
-                                    buffer.remove(row);
-                                }
-                            }
-                        }
-                        // Insert n blank lines at scroll_bottom
-                        for _ in 0..effective_n {
-                            let insert_pos = bottom.min(buffer.len());
-                            buffer.insert(insert_pos, vec![empty_cell; cols]);
-                        }
-
-                        // Mirror on wrapped flags
-                        let wrapped = screen.active_wrapped_mut();
-                        for _ in 0..effective_n {
-                            if row < wrapped.len() {
-                                if row == 0 {
-                                    wrapped.pop_front();
-                                } else {
-                                    wrapped.remove(row);
-                                }
-                            }
-                        }
-                        for _ in 0..effective_n {
-                            let insert_pos = bottom.min(wrapped.len());
-                            wrapped.insert(insert_pos, false);
-                        }
-                    }
-                    // Ensure buffer size invariant after DL operation
+                    let insert = c == 'L';
+                    shift_lines(screen.active_buffer_mut(), row, bottom, n, insert, || {
+                        vec![blank; cols]
+                    });
+                    shift_lines(screen.active_wrapped_mut(), row, bottom, n, insert, || {
+                        false
+                    });
+                    screen.cursor.1 = 0;
+                    screen.wrap_pending = false;
+                    // Ensure buffer size invariant after the operation
                     screen.ensure_buffer_size();
-                    // Force cache invalidation after line deletion
+                    // Force cache invalidation after line insertion/deletion
                     screen.force_cache_invalidation = true;
                 }
                 'S' => {
@@ -973,7 +934,8 @@ mod tests {
             assert_eq!(screen.read().unwrap().cursor, (4, 9));
             feed(&mut performer, b"\x1b[3@\x1b[3P\x1b[3X\x1b[2L\x1b[2Mx");
             performer.flush();
-            assert_eq!(row_text(&screen, 4), "         x");
+            // IL/DL leave the cursor in column 0.
+            assert_eq!(row_text(&screen, 4), "x");
         }
 
         // A saved position outside the grid is clamped on restore as well.
@@ -1005,6 +967,62 @@ mod tests {
         feed(&mut performer, b"\x1b[T");
         assert_eq!(row_text(&screen, 0), "");
         assert_eq!(row_text(&screen, 1), "2");
+    }
+
+    /// IL and DL (`CSI L` / `CSI M`) do nothing with the cursor outside
+    /// the scroll region; inside it they move only the lines from the
+    /// cursor down to the bottom margin, and put the cursor in column 0
+    /// (ECMA-48, xterm).
+    #[test]
+    fn insert_and_delete_lines_keep_to_the_scroll_region() {
+        let (mut performer, _capture, screen) = performer();
+        let rows = |screen: &Arc<RwLock<TerminalScreen>>| -> Vec<String> {
+            (0..8).map(|row| row_text(screen, row)).collect()
+        };
+        let fill = |performer: &mut VtPerformer| {
+            feed(
+                performer,
+                b"\x1b[r\x1b[H\x1b[2J0\r\n1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n7",
+            );
+            // Region rows 2..=5 (0-based); DECSTBM homes the cursor.
+            feed(performer, b"\x1b[3;6r");
+        };
+        let untouched = ["0", "1", "2", "3", "4", "5", "6", "7"];
+
+        // Above and below the region: nothing moves, the cursor stays put.
+        for (at, op) in [(b"\x1b[1;5H", b"\x1b[L"), (b"\x1b[8;5H", b"\x1b[M")] {
+            fill(&mut performer);
+            feed(&mut performer, at);
+            feed(&mut performer, op);
+            assert_eq!(rows(&screen), untouched, "{op:?}");
+            let cursor = screen.read().unwrap().cursor;
+            assert_eq!(cursor.1, 4, "{op:?} moved the cursor");
+        }
+        fill(&mut performer);
+        feed(&mut performer, b"\x1b[1;5H\x1b[M\x1b[8;5H\x1b[L");
+        assert_eq!(rows(&screen), untouched);
+
+        // IL inside: blanks at the cursor, lines pushed past the bottom
+        // margin are lost, the line below the region stays.
+        fill(&mut performer);
+        feed(&mut performer, b"\x1b[4;6H\x1b[2L");
+        assert_eq!(rows(&screen), ["0", "1", "2", "", "", "3", "6", "7"]);
+        assert_eq!(screen.read().unwrap().cursor, (3, 0));
+
+        // DL inside: the region closes up over the cursor, blanks come in
+        // at the bottom margin, the line below the region does not.
+        fill(&mut performer);
+        feed(&mut performer, b"\x1b[3;4H\x1b[3M");
+        assert_eq!(rows(&screen), ["0", "1", "5", "", "", "", "6", "7"]);
+        assert_eq!(screen.read().unwrap().cursor, (2, 0));
+
+        // A count beyond the region clears it to the bottom margin.
+        fill(&mut performer);
+        feed(&mut performer, b"\x1b[4;1H\x1b[99L");
+        assert_eq!(rows(&screen), ["0", "1", "2", "", "", "", "6", "7"]);
+        fill(&mut performer);
+        feed(&mut performer, b"\x1b[4;1H\x1b[99M");
+        assert_eq!(rows(&screen), ["0", "1", "2", "", "", "", "6", "7"]);
     }
 
     #[test]
