@@ -119,6 +119,7 @@ pub fn attach(id: Option<String>, takeover: bool) -> Result<i32> {
     match outcome {
         Outcome::Detached => {
             println!("Detached from instance '{}'.", instance.id);
+            println!("Attach again with: termide --attach {}", instance.id);
             Ok(0)
         }
         Outcome::TakenOver => {

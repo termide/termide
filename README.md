@@ -402,8 +402,9 @@ Options:
   -r, --restore        Reopen the last run's projects, in the project it was in
   --config <PATH>      Use this file in place of the global config.toml
   --diagnostics        Run pre-flight diagnostics and exit (no UI)
-  --detached           Start a detached instance that survives the terminal
-                       closing, and print its id (Unix only)
+  -d, --detached       Start a detached instance that survives the terminal
+                       closing, and attach to it (Unix only)
+  --no-attach          With --detached: only start the instance, print its id
   --attach [<ID>]      Attach to a detached instance, most recent if omitted
   -f, --force          With --attach: take the instance over from a client
                        already attached to it, detaching that client

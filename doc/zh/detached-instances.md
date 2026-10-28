@@ -12,8 +12,8 @@
 ## 快速开始
 
 ```bash
-termide --detached            # 启动实例，打印其 ID
-termide --list-instances       # 查看正在运行的实例
+termide --detached            # 启动实例并接入它
+termide --list-instances      # 查看正在运行的实例
 termide --attach              # 接入最近的实例
 termide --attach my-project   # 接入指定的实例
 ```
@@ -57,7 +57,6 @@ always_detachable = true
 ssh server
 cd ~/src/my-project
 termide --detached
-termide --attach
 # … 工作、启动构建、在终端面板中运行代理 …
 # 按 Alt+D，或者直接关闭 SSH 连接
 ```
@@ -96,7 +95,8 @@ termide --attach my-project
 
 | 命令 | 作用 |
 |---------|--------------|
-| `termide --detached` | 启动可分离实例并打印其 ID |
+| `termide --detached`（`-d`） | 启动可分离实例并接入它 |
+| `termide --detached --no-attach` | 只启动实例并打印其 ID——用于脚本以及没有终端的启动，此时单独的 `--detached` 会被拒绝 |
 | `termide --detached file.rs` | 同上，并照常打开文件 |
 | `termide --detached --restore`（`-r`） | 同上，并在上次运行所在的项目中重新打开上次运行的项目 |
 | `termide --attach` | 接入最近的实例 |

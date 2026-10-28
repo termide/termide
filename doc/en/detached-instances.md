@@ -15,8 +15,8 @@ reporting.
 ## Quick start
 
 ```bash
-termide --detached            # start a instance, print its id
-termide --list-instances       # see what is running
+termide --detached            # start an instance and attach to it
+termide --list-instances      # see what is running
 termide --attach              # attach to the most recent instance
 termide --attach my-project   # attach to a specific one
 ```
@@ -65,7 +65,6 @@ Worth knowing before you enable it:
 ssh server
 cd ~/src/my-project
 termide --detached
-termide --attach
 # … work, start a build, run an agent in a terminal panel …
 # press Alt+D, or just close the SSH connection
 ```
@@ -109,7 +108,8 @@ the way it does in a local instance.
 
 | Command | What it does |
 |---------|--------------|
-| `termide --detached` | Start a detached instance and print its id |
+| `termide --detached` (`-d`) | Start a detached instance and attach to it |
+| `termide --detached --no-attach` | Only start it and print its id — for scripts, and for launches with no terminal, where a plain `--detached` is refused |
 | `termide --detached file.rs` | Same, opening files as usual |
 | `termide --detached --restore` (`-r`) | Same, reopening the projects of the last run in the project that run was in |
 | `termide --attach` | Attach to the most recent instance |

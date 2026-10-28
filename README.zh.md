@@ -398,8 +398,9 @@ termide [OPTIONS] [FILE]...
   -r, --restore        在上次运行所在的项目中重新打开上次运行的项目
   --config <PATH>      使用自定义配置文件路径
   --diagnostics        运行启动前诊断并退出（无 UI）
-  --detached           启动一个在终端关闭后仍继续运行的可分离实例，并打印其 ID
+  -d, --detached       启动一个在终端关闭后仍继续运行的可分离实例，并接入它
                        （仅限 Unix）
+  --no-attach          与 --detached 连用：只启动实例并打印其 ID
   --attach [<ID>]      接入某个可分离实例，省略时接入最近的一个
   -f, --force          与 --attach 连用：从已接入的客户端接管该实例，
                        并使该客户端分离

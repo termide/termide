@@ -18,7 +18,8 @@ complete -c termide -l no-lsp -d 'Disable LSP support'
 complete -c termide -s r -l restore -d 'Reopen the projects of the last run'
 complete -c termide -l config -d 'Path to config file' -r -F
 complete -c termide -l diagnostics -d 'Run pre-flight diagnostics and exit'
-complete -c termide -l detached -d 'Start a detached instance and print its id'
+complete -c termide -s d -l detached -d 'Start a detached instance and attach to it'
+complete -c termide -l no-attach -d 'With --detached, only start the instance and print its id'
 # `-r` so that fish completes the word after `--attach`; the id is optional to
 # termide itself, so files stay on offer as well.
 complete -c termide -l attach -d 'Attach to a detached instance, the most recent without an id' -r -a '(__termide_instances)'

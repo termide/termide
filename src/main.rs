@@ -39,12 +39,18 @@ struct Cli {
     #[arg(long)]
     diagnostics: bool,
 
-    /// Start a detached instance and print its id. The instance keeps
-    /// running — with every shell, LSP server and job inside it — after the
-    /// terminal that started it is closed.
+    /// Start a detached instance and attach to it. The instance keeps
+    /// running — with every shell, LSP server and job inside it — after
+    /// `Alt+D` or the terminal that started it is closed.
     #[cfg(unix)]
-    #[arg(long)]
+    #[arg(short, long)]
     detached: bool,
+
+    /// With `--detached`: only start the instance and print its id, for
+    /// scripts and launches without a terminal.
+    #[cfg(unix)]
+    #[arg(long, requires = "detached")]
+    no_attach: bool,
 
     /// Attach to a detached instance. Without an id, the most recent one.
     #[cfg(unix)]
@@ -274,6 +280,13 @@ fn hosted_args(cli: &Cli) -> Vec<std::ffi::OsString> {
     args
 }
 
+/// Whether stdin and stdout are a terminal an attach client can drive.
+#[cfg(unix)]
+fn attach_terminal_present() -> bool {
+    use std::io::IsTerminal;
+    std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
+}
+
 /// Handle `--list-instances`, `--kill`, `--attach` and `--detached`.
 ///
 /// Returns `Some(exit_code)` when one of them ran and the process should stop,
@@ -312,11 +325,29 @@ fn handle_detached_instance_cli(cli: &Cli) -> Result<Option<i32>> {
     }
 
     if cli.detached {
+        // Refused before the spawn: an instance started for a client that
+        // cannot attach would be left running unseen.
+        if !cli.no_attach && !attach_terminal_present() {
+            eprintln!(
+                "termide: --detached attaches, and this is not a terminal; \
+                 add --no-attach to only start the instance"
+            );
+            return Ok(Some(1));
+        }
         let project_root = std::env::current_dir()?;
         let id = termide_detach::spawn_detached(&project_root, &hosted_args(cli))?;
-        println!("Detached instance '{id}' started.");
-        println!("Attach with: termide --attach {id}");
-        return Ok(Some(0));
+        if cli.no_attach {
+            println!("Detached instance '{id}' started.");
+            println!("Attach with: termide --attach {id}");
+            return Ok(Some(0));
+        }
+        return match termide_detach::client::attach(Some(id), false) {
+            Ok(code) => Ok(Some(code)),
+            Err(e) => {
+                eprintln!("termide: {e:#}");
+                Ok(Some(1))
+            }
+        };
     }
 
     Ok(None)
@@ -723,6 +754,16 @@ mod cli_tests {
             assert!(cli.detached && cli.restore);
             assert_eq!(super::hosted_args(&cli), vec!["--restore"]);
         }
+    }
+
+    /// `--no-attach` qualifies `--detached` and never reaches the instance.
+    #[cfg(unix)]
+    #[test]
+    fn no_attach_needs_detached_and_stays_with_the_launcher() {
+        assert!(Cli::try_parse_from(["termide", "--no-attach"]).is_err());
+        let cli = Cli::try_parse_from(["termide", "-d", "--no-attach"]).unwrap();
+        assert!(cli.detached && cli.no_attach);
+        assert!(super::hosted_args(&cli).is_empty());
     }
 
     /// A detached instance runs with the settings flags it was started
