@@ -41,7 +41,7 @@ pub struct LaunchSpec {
     pub cwd: PathBuf,
     /// A shell command run first; the adapter starts only if it succeeds.
     pub build: Option<String>,
-    /// Environment of the build and the adapter.
+    /// Environment of the build, the adapter and the program.
     pub env: Vec<(String, String)>,
     /// What the session is called in the panel.
     pub label: String,
@@ -858,6 +858,7 @@ impl Session {
                     &self.spec.cwd,
                     self.spec.console,
                     self.spec.tty.as_deref(),
+                    &self.spec.env,
                 );
                 self.request("launch", arguments, Pending::Launch);
             }

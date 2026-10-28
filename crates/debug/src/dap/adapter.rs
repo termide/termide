@@ -161,6 +161,11 @@ impl Adapter {
     /// The arguments of `launch` for `program` run with `args` in `cwd`.
     /// With `console` [`Console::Terminal`] the program's input and output
     /// go to a terminal: one the adapter asks for, or the device `tty`.
+    ///
+    /// `env` is also the adapter's own environment, which lldb-dap, GDB and
+    /// Delve hand down to the program. debugpy does so only for a program
+    /// in its internal console: one it has started in a terminal gets
+    /// termide's environment and the `env` of `launch`, so it is given there.
     pub fn launch_arguments(
         self,
         program: &str,
@@ -168,6 +173,7 @@ impl Adapter {
         cwd: &Path,
         console: Console,
         tty: Option<&Path>,
+        env: &[(String, String)],
     ) -> Value {
         let cwd = cwd.to_string_lossy();
         let terminal = console == Console::Terminal && self.supports_terminal();
@@ -193,14 +199,24 @@ impl Adapter {
                 }
                 arguments
             }
-            Self::Debugpy => json!({
-                "program": program,
-                "args": args,
-                "cwd": cwd,
-                "console": if terminal { "integratedTerminal" } else { "internalConsole" },
-                "justMyCode": true,
-                "redirectOutput": !terminal,
-            }),
+            Self::Debugpy => {
+                let mut arguments = json!({
+                    "program": program,
+                    "args": args,
+                    "cwd": cwd,
+                    "console": if terminal { "integratedTerminal" } else { "internalConsole" },
+                    "justMyCode": true,
+                    "redirectOutput": !terminal,
+                });
+                if !env.is_empty() {
+                    arguments["env"] = env
+                        .iter()
+                        .map(|(k, v)| (k.clone(), Value::String(v.clone())))
+                        .collect::<serde_json::Map<_, _>>()
+                        .into();
+                }
+                arguments
+            }
             // `program` is the package to build, `.` or `./cmd/app`.
             Self::Delve => {
                 let mut arguments = json!({
@@ -381,18 +397,24 @@ mod tests {
             Path::new("/p"),
             Console::Panel,
             None,
+            &[],
         );
         assert_eq!(args["program"], "t.py");
         assert_eq!(args["args"], json!(["x"]));
         assert_eq!(args["console"], "internalConsole");
+        assert!(args.get("env").is_none());
         let args = Adapter::Debugpy.launch_arguments(
             "t.py",
             &[],
             Path::new("/p"),
             Console::Terminal,
             None,
+            &[("TERMIDE_PARAM_PORT".into(), "8091".into())],
         );
         assert_eq!(args["console"], "integratedTerminal");
+        // The program debugpy starts in a terminal does not get the
+        // adapter's environment, only termide's and this.
+        assert_eq!(args["env"], json!({ "TERMIDE_PARAM_PORT": "8091" }));
     }
 
     #[test]
@@ -403,6 +425,7 @@ mod tests {
             Path::new("/p"),
             Console::Terminal,
             Some(Path::new("/dev/ttys004")),
+            &[],
         );
         assert_eq!(
             args["preRunCommands"],
@@ -418,6 +441,7 @@ mod tests {
             Path::new("/p"),
             Console::Terminal,
             Some(Path::new("/dev/ttys004")),
+            &[],
         );
         assert!(
             args.get("preRunCommands").is_none(),
