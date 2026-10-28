@@ -598,6 +598,10 @@ pub enum PanelEvent {
     /// Remove every breakpoint of the project.
     ClearBreakpoints,
 
+    /// Restart the language server that handles `file`, with a fresh
+    /// budget of automatic restarts.
+    RestartLanguageServer { file: PathBuf },
+
     /// Preview media file (raster image) using native graphics or xdg-open
     PreviewMedia(PathBuf),
 

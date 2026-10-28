@@ -504,7 +504,10 @@ When opening a file with LSP support, the panel title shows a loading spinner:
 - `⠋ main.rs (starting)` — Server is starting
 - `⠋ main.rs (indexing)` — Server is indexing the project
 - `main.rs` — Server is ready
-- `main.rs (crashed)` — The server exited or sent a message it could not frame; its requests fail until termide is restarted
+- `⠋ main.rs (restarting)` — The server exited or sent a message it could not frame, and a new one is being started; every open file of that server is sent to it again, and the old server's diagnostics are cleared
+- `main.rs (crashed)` — The server crashed again after 3 restarts within 3 minutes and is not restarted on its own any more; its requests fail
+
+A crashed server is restarted on its own after a short pause (half a second, then 1 and 2 seconds), at most 3 times within 3 minutes. **Restart language server** in the command palette or the editor's `[≡]` menu restarts the server of the current file at once, whatever its state, and gives it 3 automatic restarts again.
 
 ### Supported Languages
 

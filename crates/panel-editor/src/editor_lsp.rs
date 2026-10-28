@@ -33,6 +33,23 @@ impl Editor {
         }
     }
 
+    /// Open the document again if its server was restarted since it was
+    /// opened: the new process knows nothing of it. The diagnostics of the
+    /// old one were cleared when it went down. `true` if `didOpen` was sent.
+    pub fn resync_lsp(&mut self, lsp_manager: &LspManager) -> bool {
+        let Some(path) = self.buffer.file_path().map(|p| p.to_path_buf()) else {
+            return false;
+        };
+        if !self.lsp.needs_reopen(&path, lsp_manager) {
+            return false;
+        }
+        let content = self.buffer.to_string();
+        self.lsp.reopen(&path, &content, lsp_manager);
+        // The text sent carries every change recorded so far.
+        let _ = self.buffer.take_lsp_changes();
+        true
+    }
+
     /// Notify LSP about buffer content change.
     ///
     /// Should be called after any text modification (insert, delete, etc.)
@@ -154,6 +171,7 @@ impl Editor {
             Some(ServerStatus::Starting) => Some("starting".to_string()),
             Some(ServerStatus::Indexing) => Some("indexing".to_string()),
             Some(ServerStatus::Crashed) => Some("crashed".to_string()),
+            Some(ServerStatus::Restarting) => Some("restarting".to_string()),
             _ => None,
         };
         let status_text_changed = self.lsp.server_status_text != new_status_text;
@@ -165,8 +183,12 @@ impl Editor {
             return true;
         }
 
-        // Check if server went back to indexing (e.g., after file changes)
-        if !self.lsp.server_loading && lsp_manager.server_is_indexing(&lang, &file_path) {
+        // Check if server went back to indexing (e.g., after file changes),
+        // or is being restarted
+        if !self.lsp.server_loading
+            && (status == Some(ServerStatus::Restarting)
+                || lsp_manager.server_is_indexing(&lang, &file_path))
+        {
             self.lsp.server_loading = true;
             return true;
         }
@@ -190,6 +212,34 @@ mod tests {
 
     use super::*;
     use crate::EditorConfig;
+
+    /// The `[≡]` menu offers a restart of the file's language server only
+    /// when the file uses one, and asks the app for it by file.
+    #[test]
+    fn the_panel_menu_restarts_the_language_server_of_the_file() {
+        use termide_core::{Panel, PanelEvent};
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let mut editor =
+            Editor::open_file_with_config(file.clone(), EditorConfig::default()).unwrap();
+        let offered = |e: &Editor| {
+            Panel::context_menu_items(e)
+                .iter()
+                .any(|(_, action)| action == crate::RESTART_LANGUAGE_SERVER_ACTION)
+        };
+        assert!(!offered(&editor), "no server for the file");
+
+        editor.lsp.enabled = true;
+        assert!(offered(&editor));
+        let events =
+            Panel::handle_status_action(&mut editor, crate::RESTART_LANGUAGE_SERVER_ACTION);
+        assert!(matches!(
+            events.as_slice(),
+            [PanelEvent::RestartLanguageServer { file: f }] if *f == file
+        ));
+    }
 
     /// A server that dies shows as crashed in the title and stops the
     /// spinner, instead of spinning on "starting" for good.
@@ -220,5 +270,78 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert!(!editor.is_lsp_loading());
+    }
+
+    /// A crashed server is restarted, and the editor opens its document in
+    /// the new process again: the current text, at the current version.
+    #[test]
+    fn a_restarted_server_is_sent_the_open_document_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let reply = r#"{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}"#;
+        // The first run dies once the document is open; the second answers
+        // `initialize` and records what it is sent.
+        let script = format!(
+            "if [ ! -e crashed ]; then : > crashed; head -c 1 > /dev/null; exit 0; fi; \
+             printf 'Content-Length: {}\\r\\n\\r\\n%s' '{reply}'; cat > received",
+            reply.len()
+        );
+        let mut config = LspConfig::default();
+        config.servers.insert(
+            "rust".into(),
+            LspServerConfig {
+                command: "sh".into(),
+                args: vec!["-c".into(), script],
+                root_markers: Vec::new(),
+            },
+        );
+        let mut manager = LspManager::new(config);
+        let mut editor = Editor::open_file_with_config(file, EditorConfig::default()).unwrap();
+        editor.init_lsp(&mut manager);
+        assert!(!editor.resync_lsp(&manager), "opened in the live server");
+
+        // Edits made while the server is down still reach the new one.
+        editor.insert_text("// edited\n").unwrap();
+        editor.flush_lsp_changes(&manager);
+        let version = editor.lsp.document_version;
+        assert!(version > 1);
+
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut saw_restarting = false;
+        while !editor.resync_lsp(&manager) {
+            assert!(Instant::now() < deadline, "never restarted");
+            manager.poll_restarts();
+            editor.update_lsp_loading_status(&manager);
+            saw_restarting |= editor.lsp.server_status_text.as_deref() == Some("restarting");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(saw_restarting, "the title never showed the restart");
+        assert!(!editor.resync_lsp(&manager), "sent once");
+
+        let text = editor.buffer.to_string();
+        let received = dir.path().join("received");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let opened = loop {
+            let received = std::fs::read_to_string(&received).unwrap_or_default();
+            if let Some(message) = received
+                .split("Content-Length:")
+                .find(|m| m.contains(r#""method":"textDocument/didOpen""#))
+            {
+                break message.to_string();
+            }
+            assert!(Instant::now() < deadline, "no didOpen in {received:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(text.starts_with("// edited\n"));
+        let escaped = text.replace('\n', "\\n");
+        assert!(
+            opened.contains(&format!(r#""text":"{escaped}""#)),
+            "{opened}"
+        );
+        assert!(
+            opened.contains(&format!(r#""version":{version}"#)),
+            "{opened}"
+        );
     }
 }

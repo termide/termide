@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "หมดเวลาการเชื่อ
 lsp_rename_no_identifier = "ไม่มีตัวระบุที่ตำแหน่งเคอร์เซอร์"
 lsp_rename_unsaved_file = "การเปลี่ยนชื่อต้องใช้ไฟล์ที่บันทึกแล้ว"
 lsp_rename_no_changes = "เปลี่ยนชื่อ: ไม่มีการเปลี่ยนแปลง"
+lsp_restart_server = "เริ่มเซิร์ฟเวอร์ภาษาใหม่"
+lsp_restart_no_server = "ไม่มีเซิร์ฟเวอร์ภาษาทำงานสำหรับไฟล์นี้"
 
 help_desc_collapse_dir = "ยุบไดเรกทอรี"
 help_desc_db_clear_filter = "ล้างตัวกรองทั้งหมด"

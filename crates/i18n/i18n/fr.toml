@@ -925,6 +925,8 @@ settings_vfs_connection_timeout = "Délai de connexion (s)"
 lsp_rename_no_identifier = "Aucun identifiant sous le curseur"
 lsp_rename_unsaved_file = "Le renommage nécessite un fichier enregistré"
 lsp_rename_no_changes = "Renommage : aucune modification produite"
+lsp_restart_server = "Redémarrer le serveur de langage"
+lsp_restart_no_server = "Aucun serveur de langage ne tourne pour ce fichier"
 
 help_desc_collapse_dir = "Réduire le répertoire"
 help_desc_db_clear_filter = "Effacer tous les filtres"

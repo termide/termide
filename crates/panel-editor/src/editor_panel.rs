@@ -22,7 +22,10 @@ use termide_state::PendingAction;
 use termide_theme::Theme;
 
 use crate::keyboard;
-use crate::{CLEAR_BREAKPOINTS_ACTION, CONFIGURE_DEBUG_ACTION, START_DEBUG_ACTION};
+use crate::{
+    CLEAR_BREAKPOINTS_ACTION, CONFIGURE_DEBUG_ACTION, RESTART_LANGUAGE_SERVER_ACTION,
+    START_DEBUG_ACTION,
+};
 
 use super::{build_editor_hotkey_table, Editor};
 
@@ -357,7 +360,7 @@ impl Panel for Editor {
 
     fn context_menu_items(&self) -> Vec<(String, String)> {
         let t = t();
-        vec![
+        let mut items = vec![
             (
                 t.menu_view_as_diagram().to_string(),
                 "view_as_diagram".into(),
@@ -374,7 +377,14 @@ impl Panel for Editor {
                 t.help_desc_clear_breakpoints().to_string(),
                 CLEAR_BREAKPOINTS_ACTION.into(),
             ),
-        ]
+        ];
+        if self.lsp.enabled && self.file_path().is_some() {
+            items.push((
+                t.lsp_restart_server().to_string(),
+                RESTART_LANGUAGE_SERVER_ACTION.into(),
+            ));
+        }
+        items
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
@@ -436,6 +446,12 @@ impl Panel for Editor {
                 vec![PanelEvent::ConfigureDebug { file }]
             }
             CLEAR_BREAKPOINTS_ACTION => vec![PanelEvent::ClearBreakpoints],
+            RESTART_LANGUAGE_SERVER_ACTION => match self.file_path() {
+                Some(file) => vec![PanelEvent::RestartLanguageServer {
+                    file: file.to_path_buf(),
+                }],
+                None => vec![],
+            },
             "view_as_diagram" => {
                 let source = self.buffer.text();
                 let language = self

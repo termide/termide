@@ -925,6 +925,8 @@ settings_vfs_connection_timeout = "연결 시간 초과 (초)"
 lsp_rename_no_identifier = "커서 위치에 식별자가 없습니다"
 lsp_rename_unsaved_file = "이름 바꾸기는 저장된 파일이 필요합니다"
 lsp_rename_no_changes = "이름 바꾸기: 변경사항이 없습니다"
+lsp_restart_server = "언어 서버 다시 시작"
+lsp_restart_no_server = "이 파일에 실행 중인 언어 서버가 없습니다"
 
 help_desc_collapse_dir = "디렉터리 접기"
 help_desc_db_clear_filter = "모든 필터 지우기"

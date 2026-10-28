@@ -56,6 +56,10 @@ pub struct LspState {
     /// Document version for sync (incremented on each change)
     pub document_version: i32,
 
+    /// Generation of the server the document was last opened in (see
+    /// [`LspManager::server_generation`]); a new one needs `didOpen` again.
+    pub server_generation: Option<u64>,
+
     /// Pending completion request receiver
     pub completion_rx: Option<mpsc::Receiver<Option<CompletionResponse>>>,
 
@@ -176,6 +180,7 @@ impl LspState {
         Self {
             language_id: None,
             document_version: 0,
+            server_generation: None,
             completion_rx: None,
             hover_rx: None,
             definition_rx: None,
@@ -316,7 +321,32 @@ impl LspState {
 
         if let Some(ref lang) = self.language_id {
             self.document_version = 1;
-            lsp_manager.did_open(lang, file_path, content);
+            lsp_manager.did_open(lang, file_path, self.document_version, content);
+            self.server_generation = lsp_manager.server_generation(lang, file_path);
+        }
+    }
+
+    /// Whether the server for this file is a newer process than the one
+    /// the document was opened in, and has to be sent it again.
+    pub fn needs_reopen(&self, file_path: &Path, lsp_manager: &LspManager) -> bool {
+        if !self.enabled {
+            return false;
+        }
+        let Some(ref lang) = self.language_id else {
+            return false;
+        };
+        lsp_manager
+            .server_generation(lang, file_path)
+            .is_some_and(|generation| self.server_generation != Some(generation))
+    }
+
+    /// Open the document in a restarted server: its current text, under the
+    /// version the editor is at, as nothing of it reached the new process.
+    pub fn reopen(&mut self, file_path: &Path, content: &str, lsp_manager: &LspManager) {
+        if let Some(ref lang) = self.language_id {
+            lsp_manager.did_open(lang, file_path, self.document_version, content);
+            self.server_generation = lsp_manager.server_generation(lang, file_path);
+            self.pending_change = false;
         }
     }
 

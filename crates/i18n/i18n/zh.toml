@@ -958,6 +958,8 @@ settings_vfs_connection_timeout = "连接超时 (秒)"
 lsp_rename_no_identifier = "光标位置无标识符"
 lsp_rename_unsaved_file = "重命名需要已保存的文件"
 lsp_rename_no_changes = "重命名:未产生更改"
+lsp_restart_server = "重启语言服务器"
+lsp_restart_no_server = "此文件没有运行语言服务器"
 
 # 数据库查看器
 db_connecting = "连接中…"

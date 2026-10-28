@@ -374,6 +374,8 @@ impl Translation for RuntimeTranslation {
         lsp_rename_no_identifier,
         lsp_rename_unsaved_file,
         lsp_rename_no_changes,
+        lsp_restart_server,
+        lsp_restart_no_server,
         help_desc_delete_generic,
         help_desc_open_bookmark_add,
         help_desc_command_palette,

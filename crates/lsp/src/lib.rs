@@ -20,11 +20,12 @@ mod workspace;
 
 pub use lsp_types::CompletionTriggerKind;
 pub use protocol::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
-pub use server::{LspServer, LspServerConfig, ServerStatus};
+pub use server::{CrashNotice, LspServer, LspServerConfig, ServerStatus};
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{mpsc, Mutex, OnceLock};
+use std::sync::{mpsc, Arc, Mutex, OnceLock};
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use lsp_types::{
@@ -47,10 +48,59 @@ pub struct LspConfig {
     pub servers: HashMap<String, LspServerConfig>,
 }
 
+/// A server's identity: its language and the workspace it runs in.
+type ServerKey = (String, PathBuf);
+
+/// How often a crashed server is restarted on its own: at most
+/// `max_restarts` within `window`, the n-th after `base_backoff * 2^n`.
+/// Past that it stays crashed until restarted by hand.
+#[derive(Debug, Clone, Copy)]
+struct RestartPolicy {
+    max_restarts: usize,
+    window: Duration,
+    base_backoff: Duration,
+}
+
+impl Default for RestartPolicy {
+    fn default() -> Self {
+        Self {
+            max_restarts: 3,
+            window: Duration::from_secs(180),
+            base_backoff: Duration::from_millis(500),
+        }
+    }
+}
+
+/// The server process behind one key, through its restarts.
+struct ServerSlot {
+    state: SlotState,
+    /// Id of the live server, or of the one being started. Every process
+    /// gets a new one, so it doubles as the generation editors sync against.
+    id: u64,
+    /// When the automatic restarts within the policy window were made.
+    restarts: Vec<Instant>,
+}
+
+enum SlotState {
+    Live(LspServer),
+    /// The old process is shut down and a new one started, off the UI
+    /// thread; the result arrives through `restarted_rx`.
+    Restarting,
+    /// The last restart could not start the server.
+    Failed,
+}
+
+/// A restart finished in the background.
+struct Restarted {
+    key: ServerKey,
+    id: u64,
+    result: Result<LspServer>,
+}
+
 /// Manages multiple LSP servers (one per language/workspace)
 pub struct LspManager {
-    /// Active servers keyed by (language_id, workspace_root)
-    servers: HashMap<(String, PathBuf), LspServer>,
+    /// Servers keyed by (language_id, workspace_root)
+    servers: HashMap<ServerKey, ServerSlot>,
     /// Configuration
     config: LspConfig,
     /// Diagnostics receiver for all servers
@@ -68,6 +118,20 @@ pub struct LspManager {
     /// server takes the library files opened from it (see
     /// [`workspace::is_library_file`]).
     last_roots: Mutex<HashMap<String, PathBuf>>,
+    /// Ids of servers whose connection was lost without a shutdown.
+    crash_tx: mpsc::Sender<u64>,
+    crash_rx: mpsc::Receiver<u64>,
+    /// Crash notices of servers not yet handed over.
+    crashes: Vec<u64>,
+    /// Servers started by restart threads.
+    restarted_tx: mpsc::Sender<Restarted>,
+    restarted_rx: mpsc::Receiver<Restarted>,
+    /// Set by [`Self::shutdown`]; a restart thread that finds it set shuts
+    /// its server down instead of handing it over. Checked and sent under
+    /// this lock, so no server is left in the channel after the drain.
+    closed: Arc<Mutex<bool>>,
+    next_id: u64,
+    restart_policy: RestartPolicy,
 }
 
 impl std::fmt::Debug for LspManager {
@@ -84,6 +148,8 @@ impl LspManager {
     pub fn new(config: LspConfig) -> Self {
         let (diagnostics_tx, diagnostics_rx) = mpsc::channel();
         let (apply_edit_tx, apply_edit_rx) = mpsc::channel();
+        let (crash_tx, crash_rx) = mpsc::channel();
+        let (restarted_tx, restarted_rx) = mpsc::channel();
         Self {
             servers: HashMap::new(),
             config,
@@ -93,6 +159,14 @@ impl LspManager {
             apply_edit_tx,
             workspace_roots: Mutex::new(HashMap::new()),
             last_roots: Mutex::new(HashMap::new()),
+            crash_tx,
+            crash_rx,
+            crashes: Vec::new(),
+            restarted_tx,
+            restarted_rx,
+            closed: Arc::new(Mutex::new(false)),
+            next_id: 1,
+            restart_policy: RestartPolicy::default(),
         }
     }
 
@@ -249,25 +323,206 @@ impl LspManager {
 
         log::info!("Starting LSP server for {} in {:?}", lang, workspace_root);
 
+        let id = self.next_id();
         let server = LspServer::start(
             lang.to_string(),
             server_config,
             workspace_root,
             self.diagnostics_tx.clone(),
             self.apply_edit_tx.clone(),
+            CrashNotice::new(self.crash_tx.clone(), id),
         )?;
 
-        self.servers.insert(key, server);
+        self.servers.insert(
+            key,
+            ServerSlot {
+                state: SlotState::Live(server),
+                id,
+                restarts: Vec::new(),
+            },
+        );
         Ok(())
+    }
+
+    fn next_id(&mut self) -> u64 {
+        let id = self.next_id;
+        self.next_id += 1;
+        id
+    }
+
+    /// The key of the server that handles this file.
+    fn server_key(&self, lang: &str, file_path: &Path) -> Option<ServerKey> {
+        let server_config = self.config.servers.get(lang)?;
+        let workspace_root = self.resolve_root(lang, file_path, &server_config.root_markers);
+        Some((lang.to_string(), workspace_root))
+    }
+
+    fn get_slot(&self, lang: &str, file_path: &Path) -> Option<&ServerSlot> {
+        self.servers.get(&self.server_key(lang, file_path)?)
     }
 
     /// Get server for language and file (if running)
     fn get_server(&self, lang: &str, file_path: &Path) -> Option<&LspServer> {
-        let server_config = self.config.servers.get(lang)?;
-        let workspace_root = self.resolve_root(lang, file_path, &server_config.root_markers);
+        match &self.get_slot(lang, file_path)?.state {
+            SlotState::Live(server) => Some(server),
+            SlotState::Restarting | SlotState::Failed => None,
+        }
+    }
 
-        let key = (lang.to_string(), workspace_root);
-        self.servers.get(&key)
+    /// The generation of the server handling this file: it changes with
+    /// every new process, and an editor that opened its document under
+    /// another one sends `didOpen` again (see [`Self::poll_restarts`]).
+    /// `None` while no server process is live.
+    pub fn server_generation(&self, lang: &str, file_path: &Path) -> Option<u64> {
+        let slot = self.get_slot(lang, file_path)?;
+        matches!(slot.state, SlotState::Live(_)).then_some(slot.id)
+    }
+
+    /// Act on crashed servers and finished restarts. Non-blocking: a crash
+    /// schedules a restart within the budget, and the restart runs on a
+    /// thread of its own. `true` when a new server went live, after which
+    /// every open document must be opened again in it: editors compare
+    /// [`Self::server_generation`] with the one they opened under.
+    pub fn poll_restarts(&mut self) -> bool {
+        let mut went_live = false;
+        while let Ok(restarted) = self.restarted_rx.try_recv() {
+            let Some(slot) = self.servers.get_mut(&restarted.key) else {
+                continue;
+            };
+            if slot.id != restarted.id || !matches!(slot.state, SlotState::Restarting) {
+                continue;
+            }
+            match restarted.result {
+                Ok(server) => {
+                    log::info!("LSP server for {:?} restarted", restarted.key);
+                    slot.state = SlotState::Live(server);
+                    went_live = true;
+                }
+                Err(e) => {
+                    log::error!(
+                        "LSP server for {:?} failed to restart: {e:#}",
+                        restarted.key
+                    );
+                    slot.state = SlotState::Failed;
+                    self.restart_automatically(restarted.key);
+                }
+            }
+        }
+
+        // A new server can crash before it is handed over: its notice then
+        // waits for it to go live rather than being lost.
+        self.crashes.extend(self.crash_rx.try_iter());
+        for id in std::mem::take(&mut self.crashes) {
+            let Some((key, slot)) = self.servers.iter().find(|(_, slot)| slot.id == id) else {
+                continue;
+            };
+            match slot.state {
+                SlotState::Live(_) => self.restart_automatically(key.clone()),
+                SlotState::Restarting => self.crashes.push(id),
+                SlotState::Failed => {}
+            }
+        }
+        went_live
+    }
+
+    /// Restart a crashed server unless it spent its budget.
+    fn restart_automatically(&mut self, key: ServerKey) {
+        let policy = self.restart_policy;
+        let Some(slot) = self.servers.get_mut(&key) else {
+            return;
+        };
+        let now = Instant::now();
+        slot.restarts
+            .retain(|at| now.duration_since(*at) < policy.window);
+        let attempt = slot.restarts.len();
+        if attempt >= policy.max_restarts {
+            log::error!(
+                "LSP server for {key:?} crashed {attempt} times within {:?}; not restarting it again",
+                policy.window
+            );
+            return;
+        }
+        slot.restarts.push(now);
+        let backoff = policy.base_backoff * 2u32.saturating_pow(attempt as u32);
+        log::warn!(
+            "Restarting LSP server for {key:?} in {backoff:?} (restart {} of {})",
+            attempt + 1,
+            policy.max_restarts
+        );
+        self.spawn_restart(key, backoff);
+    }
+
+    /// Restart the server handling this file by hand, whatever its state,
+    /// with a fresh budget of automatic restarts. `false` when no server was
+    /// ever started for it.
+    pub fn restart_server(&mut self, lang: &str, file_path: &Path) -> bool {
+        let Some(key) = self.server_key(lang, file_path) else {
+            return false;
+        };
+        let Some(slot) = self.servers.get_mut(&key) else {
+            return false;
+        };
+        slot.restarts.clear();
+        if !matches!(slot.state, SlotState::Restarting) {
+            log::info!("Restarting LSP server for {key:?} on request");
+            self.spawn_restart(key, Duration::ZERO);
+        }
+        true
+    }
+
+    /// Replace the slot's process off the UI thread: shut the old one down,
+    /// clear the diagnostics it left, wait `backoff`, start a new one.
+    fn spawn_restart(&mut self, key: ServerKey, backoff: Duration) {
+        let Some(config) = self.config.servers.get(&key.0).cloned() else {
+            return;
+        };
+        let id = self.next_id();
+        let Some(slot) = self.servers.get_mut(&key) else {
+            return;
+        };
+        let old = match std::mem::replace(&mut slot.state, SlotState::Restarting) {
+            SlotState::Live(server) => Some(server),
+            SlotState::Restarting | SlotState::Failed => None,
+        };
+        slot.id = id;
+
+        let diagnostics_tx = self.diagnostics_tx.clone();
+        let apply_edit_tx = self.apply_edit_tx.clone();
+        let notice = CrashNotice::new(self.crash_tx.clone(), id);
+        let restarted_tx = self.restarted_tx.clone();
+        let closed = self.closed.clone();
+        std::thread::spawn(move || {
+            if let Some(old) = old {
+                for uri in old.shutdown() {
+                    let _ = diagnostics_tx.send(PublishDiagnosticsParams {
+                        uri,
+                        diagnostics: Vec::new(),
+                        version: None,
+                    });
+                }
+            }
+            std::thread::sleep(backoff);
+            let is_closed = || *closed.lock().unwrap_or_else(|e| e.into_inner());
+            if is_closed() {
+                return;
+            }
+            let (lang, root) = key.clone();
+            let result =
+                LspServer::start(lang, config, root, diagnostics_tx, apply_edit_tx, notice);
+            let closed = closed.lock().unwrap_or_else(|e| e.into_inner());
+            let result = if *closed {
+                result
+            } else {
+                match restarted_tx.send(Restarted { key, id, result }) {
+                    Ok(()) => return,
+                    Err(mpsc::SendError(restarted)) => restarted.result,
+                }
+            };
+            drop(closed);
+            if let Ok(server) = result {
+                server.shutdown();
+            }
+        });
     }
 
     /// Request completion at position
@@ -418,10 +673,10 @@ impl LspManager {
     }
 
     /// Send didOpen notification
-    pub fn did_open(&self, lang: &str, file_path: &Path, text: &str) {
+    pub fn did_open(&self, lang: &str, file_path: &Path, version: i32, text: &str) {
         if let Some(server) = self.get_server(lang, file_path) {
             if let Some(uri) = path_to_uri(file_path) {
-                server.did_open(uri, lang.to_string(), text.to_string());
+                server.did_open(uri, lang.to_string(), version, text.to_string());
             }
         }
     }
@@ -490,7 +745,11 @@ impl LspManager {
 
     /// Get server status for a language and file path
     pub fn server_status(&self, lang: &str, file_path: &Path) -> Option<ServerStatus> {
-        self.get_server(lang, file_path).map(|s| s.status())
+        Some(match &self.get_slot(lang, file_path)?.state {
+            SlotState::Live(server) => server.status(),
+            SlotState::Restarting => ServerStatus::Restarting,
+            SlotState::Failed => ServerStatus::Crashed,
+        })
     }
 
     /// Check if server is effectively ready (Running, or Indexing with no active progress)
@@ -509,10 +768,27 @@ impl LspManager {
 
     /// Shut down all servers side by side, so the bounded wait of each
     /// (see [`LspServer::shutdown`]) is paid once, not once per server.
+    /// Restarts still in flight shut their own server down.
     pub fn shutdown(&mut self) {
-        let handles: Vec<_> = self
+        // Under the lock restart threads hand servers over with, so every
+        // server handed over is in the channel by the time it is drained.
+        let restarted: Vec<_> = {
+            let mut closed = self.closed.lock().unwrap_or_else(|e| e.into_inner());
+            *closed = true;
+            self.restarted_rx.try_iter().collect()
+        };
+        let live = self
             .servers
             .drain()
+            .filter_map(|(key, slot)| match slot.state {
+                SlotState::Live(server) => Some((key, server)),
+                SlotState::Restarting | SlotState::Failed => None,
+            });
+        let restarted = restarted
+            .into_iter()
+            .filter_map(|r| r.result.ok().map(|server| (r.key, server)));
+        let handles: Vec<_> = live
+            .chain(restarted)
             .map(|(key, server)| {
                 std::thread::spawn(move || {
                     log::info!("Shutting down LSP server for {:?}", key);
@@ -593,5 +869,149 @@ mod tests {
     fn test_find_workspace_root() {
         // This test depends on the actual filesystem
         // In a real test, we'd use tempfile to create a test directory structure
+    }
+
+    /// Restarts against stand-in servers written in `sh`.
+    #[cfg(unix)]
+    mod restart {
+        use super::*;
+
+        /// A manager running `script` for language `test` in `dir`, with
+        /// the default budget but no time to wait between restarts.
+        fn manager(dir: &Path, script: &str) -> (LspManager, PathBuf) {
+            let mut config = LspConfig::default();
+            config.servers.insert(
+                "test".into(),
+                LspServerConfig {
+                    command: "sh".into(),
+                    args: vec!["-c".into(), script.into()],
+                    root_markers: Vec::new(),
+                },
+            );
+            let mut manager = LspManager::new(config);
+            manager.restart_policy.base_backoff = Duration::from_millis(10);
+            let file = dir.join("a.rs");
+            std::fs::write(&file, "").unwrap();
+            manager.ensure_server("test", &file).unwrap();
+            (manager, file)
+        }
+
+        /// Poll until `done`, failing after a few seconds.
+        fn poll_until(manager: &mut LspManager, mut done: impl FnMut(&mut LspManager) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !done(manager) {
+                assert!(Instant::now() < deadline, "timed out");
+                manager.poll_restarts();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        /// How many times the server process was started.
+        fn starts(dir: &Path) -> usize {
+            std::fs::read_to_string(dir.join("starts"))
+                .map(|s| s.lines().count())
+                .unwrap_or(0)
+        }
+
+        /// Waits for `expected` starts and a crash, then keeps polling for a
+        /// while and checks the server is not started again.
+        fn assert_stays_crashed(
+            manager: &mut LspManager,
+            dir: &Path,
+            file: &Path,
+            expected: usize,
+        ) {
+            poll_until(manager, |m| {
+                starts(dir) >= expected
+                    && m.server_status("test", file) == Some(ServerStatus::Crashed)
+            });
+            for _ in 0..30 {
+                manager.poll_restarts();
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(starts(dir), expected, "restarted past its budget");
+            assert_eq!(
+                manager.server_status("test", file),
+                Some(ServerStatus::Crashed)
+            );
+        }
+
+        /// A server that crashes is started again, under a new generation,
+        /// and the diagnostics it published are cleared before the new one
+        /// can publish any.
+        #[test]
+        fn a_crashed_server_is_restarted_and_its_diagnostics_cleared() {
+            let dir = tempfile::tempdir().unwrap();
+            let uri = path_to_uri(&dir.path().join("a.rs")).unwrap();
+            let publish = serde_json::json!({
+                "jsonrpc": "2.0",
+                "method": "textDocument/publishDiagnostics",
+                "params": {
+                    "uri": uri.as_str(),
+                    "diagnostics": [{
+                        "range": {
+                            "start": {"line": 0, "character": 0},
+                            "end": {"line": 0, "character": 1}
+                        },
+                        "message": "bad"
+                    }]
+                }
+            })
+            .to_string();
+            // The first run publishes and dies; the second stays up.
+            let script = format!(
+                "echo >> starts; if [ -e crashed ]; then exec sleep 60; fi; : > crashed; \
+                 printf 'Content-Length: {}\\r\\n\\r\\n%s' '{publish}'",
+                publish.len()
+            );
+            let (mut manager, file) = manager(dir.path(), &script);
+            let first = manager.server_generation("test", &file);
+            assert!(first.is_some());
+
+            poll_until(&mut manager, |m| {
+                m.server_generation("test", &file)
+                    .is_some_and(|g| Some(g) != first)
+            });
+            assert_eq!(starts(dir.path()), 2);
+            assert_ne!(
+                manager.server_status("test", &file),
+                Some(ServerStatus::Crashed)
+            );
+
+            let published: Vec<_> = std::iter::from_fn(|| manager.poll_diagnostics()).collect();
+            let counts: Vec<_> = published.iter().map(|p| p.diagnostics.len()).collect();
+            assert_eq!(counts, [1, 0], "published, then cleared");
+            assert!(published.iter().all(|p| p.uri == uri));
+        }
+
+        /// A server that keeps crashing is restarted as often as the budget
+        /// allows, then left crashed; restarting it by hand starts it again
+        /// with a fresh budget.
+        #[test]
+        fn a_crash_loop_stops_at_the_budget_and_a_manual_restart_resets_it() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut manager, file) = manager(dir.path(), "echo >> starts");
+            let budget = manager.restart_policy.max_restarts;
+
+            assert_stays_crashed(&mut manager, dir.path(), &file, 1 + budget);
+
+            assert!(manager.restart_server("test", &file));
+            assert_ne!(
+                manager.server_status("test", &file),
+                Some(ServerStatus::Crashed),
+                "restarting shows at once"
+            );
+            assert_stays_crashed(&mut manager, dir.path(), &file, 2 + 2 * budget);
+        }
+
+        /// Restarting a file no server was started for does nothing.
+        #[test]
+        fn restarting_without_a_server_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut manager, _) = manager(dir.path(), "exec sleep 60");
+            let other = tempfile::tempdir().unwrap();
+            assert!(!manager.restart_server("test", &other.path().join("b.rs")));
+            assert!(!manager.restart_server("python", &dir.path().join("a.py")));
+        }
     }
 }

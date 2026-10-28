@@ -9,6 +9,20 @@ use super::App;
 impl App {
     /// Poll LSP status for visible editors and completion for active editor
     pub(super) fn poll_lsp_completion(&mut self) {
+        // A restarted server knows none of the open documents: every editor
+        // whose server is new opens its document again. Done only when a
+        // server went live, not on every tick.
+        if let Some(lsp_manager) = self.state.lsp_manager.as_mut() {
+            if lsp_manager.poll_restarts() {
+                for panel in self.layout_manager.iter_all_panels_mut() {
+                    if let Some(editor) = panel.as_editor_mut() {
+                        editor.resync_lsp(lsp_manager);
+                    }
+                }
+                self.state.needs_redraw = true;
+            }
+        }
+
         // Update LSP loading status for editors showing content only;
         // collapsed editors catch up when they grow again
         let mut any_loading = false;
@@ -255,6 +269,24 @@ impl App {
 }
 
 impl App {
+    /// Restart the language server that handles `file`; its editors open
+    /// their documents in the new process once it is up.
+    pub(super) fn restart_language_server(&mut self, file: Option<std::path::PathBuf>) {
+        let restarted = file.as_deref().is_some_and(|file| {
+            let lang = termide_lsp::LspManager::detect_language(file);
+            match (lang, self.state.lsp_manager.as_mut()) {
+                (Some(lang), Some(lsp_manager)) => lsp_manager.restart_server(&lang, file),
+                _ => false,
+            }
+        });
+        if restarted {
+            self.state.needs_redraw = true;
+        } else {
+            let t = termide_i18n::t();
+            self.state.set_info(t.lsp_restart_no_server().to_string());
+        }
+    }
+
     /// Show `path`'s diagnostics — the language servers' and the plugins'
     /// together — in its editor and the diagnostics panel, and keep them for
     /// the editors and panels opened later.

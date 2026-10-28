@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "Verbindungs-Timeout (Sek.)"
 lsp_rename_no_identifier = "Kein Bezeichner unter dem Cursor"
 lsp_rename_unsaved_file = "Umbenennen erfordert eine gespeicherte Datei"
 lsp_rename_no_changes = "Umbenennen: keine Änderungen erzeugt"
+lsp_restart_server = "Sprachserver neu starten"
+lsp_restart_no_server = "Für diese Datei läuft kein Sprachserver"
 
 help_desc_collapse_dir = "Verzeichnis einklappen"
 help_desc_db_clear_filter = "Alle Filter zurücksetzen"

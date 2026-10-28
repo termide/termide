@@ -925,6 +925,8 @@ settings_vfs_connection_timeout = "Tiempo de espera de conexión (s)"
 lsp_rename_no_identifier = "No hay identificador bajo el cursor"
 lsp_rename_unsaved_file = "Renombrar requiere un archivo guardado"
 lsp_rename_no_changes = "Renombrar: no se produjeron cambios"
+lsp_restart_server = "Reiniciar el servidor de lenguaje"
+lsp_restart_no_server = "No hay ningún servidor de lenguaje para este archivo"
 
 help_desc_collapse_dir = "Contraer directorio"
 help_desc_db_clear_filter = "Borrar todos los filtros"
