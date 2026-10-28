@@ -1387,9 +1387,11 @@ fn split_shell(command: &str) -> ParsedShell {
     // or to the next one when this segment is not a command at all.
     let mut expands = false;
     let mut quote: Option<char> = None;
-    // An open `$(…)` or `` `…` ``: its operators belong to the substitution,
-    // so they are not separators of the line around it.
-    let mut depth = 0usize;
+    // The substitutions open here, innermost last: `(` for `$(…)`, `` ` ``
+    // for a backquoted one. Their operators belong to the substitution, so
+    // they are not separators of the line around it. A backquote closes the
+    // backquoted substitution it is in and opens one otherwise.
+    let mut open: Vec<char> = Vec::new();
     // Here-documents opened on the current line: delimiter, whether tabs
     // are stripped (`<<-`), whether the body expands (unquoted delimiter).
     let mut heredocs: Vec<(String, bool, bool)> = Vec::new();
@@ -1431,16 +1433,20 @@ fn split_shell(command: &str) -> ParsedShell {
             }
             '`' => {
                 expands = true;
-                depth += 1;
+                if open.last() == Some(&'`') {
+                    open.pop();
+                } else {
+                    open.push('`');
+                }
                 current.push(c);
             }
             '$' if chars.get(i + 1) == Some(&'(') => {
                 expands = true;
-                depth += 1;
+                open.push('(');
                 current.push(c);
             }
-            ')' if depth > 0 => {
-                depth -= 1;
+            ')' if open.last() == Some(&'(') => {
+                open.pop();
                 current.push(c);
             }
             '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) != Some(&'<') => {
@@ -1450,20 +1456,20 @@ fn split_shell(command: &str) -> ParsedShell {
                 i = end;
                 continue;
             }
-            '&' if chars.get(i + 1) == Some(&'&') && depth == 0 => {
+            '&' if chars.get(i + 1) == Some(&'&') && open.is_empty() => {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 i += 1;
             }
             // A lone `&` sends the command before it to the background and
             // starts the next one, a separator like `;`. It is part of a
             // redirection in `&>`, `&>>`, `>&2`, `2>&1` and `<&0`.
-            '&' if depth == 0
+            '&' if open.is_empty()
                 && chars.get(i + 1) != Some(&'>')
                 && !matches!(i.checked_sub(1).map(|p| chars[p]), Some('>' | '<')) =>
             {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
             }
-            '|' if depth == 0 => {
+            '|' if open.is_empty() => {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 // `||`, and `|&`, which pipes standard error too.
                 if matches!(chars.get(i + 1), Some('|' | '&')) {
@@ -1477,7 +1483,7 @@ fn split_shell(command: &str) -> ParsedShell {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 continue;
             }
-            ';' | '\n' if depth == 0 => {
+            ';' | '\n' if open.is_empty() => {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
             }
             _ => current.push(c),
@@ -3256,6 +3262,34 @@ mod tests {
         assert_eq!(quoted.parts, vec!["echo \"x; $(id)\"", "ls"]);
         assert!(quoted.has_substitution);
         assert_eq!(split_shell("   ").parts, vec![""]);
+    }
+
+    /// A backquote closes the substitution it opened, so the separators
+    /// after it split the line again and a removal behind it is seen.
+    #[test]
+    fn a_closing_backquote_ends_its_substitution() {
+        let parsed = split_shell("echo `true`; rm -rf ~");
+        assert_eq!(parsed.parts, vec!["echo `true`", "rm -rf ~"]);
+        assert_eq!(parsed.substituted, vec![true, false]);
+        assert_eq!(
+            split_shell("a `b; c` && d `e && f`").parts,
+            vec!["a `b; c`", "d `e && f`"]
+        );
+        assert_eq!(
+            split_shell("a $(b `c; d` e; f) ; g").parts,
+            vec!["a $(b `c; d` e; f)", "g"]
+        );
+        assert_eq!(
+            split_shell("a `b $(c; d)` ; e").parts,
+            vec!["a `b $(c; d)`", "e"]
+        );
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            let parts = shell_parts("echo `true`; rm -rf ~", Path::new("/proj"));
+            assert!(parts
+                .iter()
+                .any(|p| critical_removal(&p.text, Path::new("/proj"))));
+        }
     }
 
     /// A lone `&` backgrounds a command and starts the next, so each side
