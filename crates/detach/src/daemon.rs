@@ -529,16 +529,57 @@ fn client_loop(instance: &Arc<Instance>, reader: &mut UnixStream) -> Result<()> 
     Ok(())
 }
 
+/// The instance this process is hosted in, as the daemon told it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct HostEnv {
+    socket: OsString,
+    id: String,
+}
+
+/// Read the hosting variables and take them out of the environment.
+///
+/// They describe this process alone: inherited by a shell in a terminal
+/// panel, they would make a termide started there believe it is hosted —
+/// its detach would let go of the outer client, it would read the outer
+/// instance's terminal handover.
+fn take_host_env() -> Option<HostEnv> {
+    let socket = std::env::var_os(SOCKET_ENV);
+    let id = std::env::var(ID_ENV).ok();
+    std::env::remove_var(SOCKET_ENV);
+    std::env::remove_var(ID_ENV);
+    Some(HostEnv {
+        socket: socket?,
+        id: id?,
+    })
+}
+
+/// The instance this process is hosted in, if any. The first call takes the
+/// variables out of the environment, so it must come before any thread is
+/// spawned — [`is_hosted`] early in `main`.
+fn host() -> Option<&'static HostEnv> {
+    static HOST: std::sync::OnceLock<Option<HostEnv>> = std::sync::OnceLock::new();
+    HOST.get_or_init(take_host_env).as_ref()
+}
+
+/// Whether this process runs inside a detached instance.
+///
+/// The first call also removes the hosting variables from the environment,
+/// so that no child process inherits them; make it before any thread is
+/// spawned, since changing the environment races with threads reading it.
+pub fn is_hosted() -> bool {
+    host().is_some()
+}
+
 /// Ask the daemon hosting this process to drop its client.
 ///
 /// Called by the in-app detach action. Returns `Ok(false)` when termide is not
 /// running inside a detached instance, so the caller can tell the user why
 /// nothing happened.
 pub fn request_detach_from_host() -> Result<bool> {
-    let Some(socket) = std::env::var_os(SOCKET_ENV) else {
+    let Some(socket) = host().map(|host| &host.socket) else {
         return Ok(false);
     };
-    let mut stream = UnixStream::connect(&socket)
+    let mut stream = UnixStream::connect(socket)
         .with_context(|| format!("Failed to reach the instance daemon at {socket:?}"))?;
     ClientFrame::RequestDetach.write_to(&mut stream)?;
     Ok(true)
@@ -546,12 +587,37 @@ pub fn request_detach_from_host() -> Result<bool> {
 
 /// The instance id this process is hosted in, if any.
 pub fn hosted_instance_id() -> Option<String> {
-    std::env::var(ID_ENV).ok()
+    host().map(|host| host.id.clone())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hosting variables are read once and leave the environment, so a
+    /// shell in a terminal panel — and a termide started there — does not
+    /// believe it is hosted in the outer instance.
+    #[test]
+    fn hosting_variables_do_not_reach_child_processes() {
+        std::env::set_var(SOCKET_ENV, "/run/termide/outer.sock");
+        std::env::set_var(ID_ENV, "outer");
+        assert_eq!(
+            take_host_env(),
+            Some(HostEnv {
+                socket: "/run/termide/outer.sock".into(),
+                id: "outer".into(),
+            })
+        );
+        let out = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!(
+                "echo \"${{{SOCKET_ENV}-unset}} ${{{ID_ENV}-unset}}\""
+            ))
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "unset unset");
+        assert_eq!(take_host_env(), None);
+    }
     use std::io::Read;
 
     /// Regression: an in-app detach must reach the client even though the

@@ -26,7 +26,7 @@ pub mod reattach;
 
 #[cfg(unix)]
 pub use daemon::{
-    hosted_instance_id, request_detach_from_host, spawn_detached, ID_ENV, SOCKET_ENV,
+    hosted_instance_id, is_hosted, request_detach_from_host, spawn_detached, ID_ENV, SOCKET_ENV,
 };
 #[cfg(unix)]
 pub use reattach::{

@@ -43,7 +43,7 @@ pub fn block_signal() -> Result<()> {
 /// Call this as early as possible: until it runs SIGUSR1 stays blocked, and an
 /// attach that happened meanwhile is sitting pending, waiting for this call.
 pub fn install_handler() -> Result<()> {
-    if std::env::var_os(daemon::SOCKET_ENV).is_none() {
+    if !daemon::is_hosted() {
         return Ok(());
     }
 
