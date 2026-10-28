@@ -134,14 +134,21 @@ pub(crate) fn known_name(alias: Option<&str>, address: &str, port: u16) -> Strin
     }
 }
 
-/// The user-facing description of `key`, offered on `port` by the host
-/// given as `host` and known as `known_as`.
-pub(crate) fn describe(host: &str, port: u16, known_as: &str, key: &PublicKey) -> HostKey {
+/// The user-facing description of `key`, offered on `port` to `user` by
+/// the host given as `host` and known as `known_as`.
+pub(crate) fn describe(
+    host: &str,
+    port: u16,
+    user: &str,
+    known_as: &str,
+    key: &PublicKey,
+) -> HostKey {
     let mut bare = key.clone();
     bare.set_comment("");
     HostKey {
         host: host.to_string(),
         port,
+        user: user.to_string(),
         known_as: known_as.to_string(),
         algorithm: key.algorithm().as_str().to_string(),
         fingerprint: key.fingerprint(HashAlg::Sha256).to_string(),
@@ -569,6 +576,7 @@ mod tests {
         let host_key = describe(
             "example.com",
             22,
+            "u",
             &host_token("example.com", 22),
             &key(ED_A),
         );
@@ -599,6 +607,7 @@ mod tests {
         let host_key = describe(
             "Example.com",
             2222,
+            "u",
             &host_token("Example.com", 2222),
             &key(ED_A),
         );
@@ -633,6 +642,7 @@ mod tests {
         let host_key = describe(
             "example.com",
             22,
+            "u",
             &host_token("example.com", 22),
             &key(ED_A),
         );
@@ -669,7 +679,7 @@ mod tests {
         };
         let files = KnownHostsFiles::from_config(&config);
         assert!(files.user.is_none() && files.read.is_empty() && !files.hash);
-        let host_key = describe("h", 22, "h", &key(ED_A));
+        let host_key = describe("h", 22, "u", "h", &key(ED_A));
         assert!(trust(&files, &SessionKeys::new(), &host_key, true).is_err());
 
         let defaults = KnownHostsFiles::from_config(&SshHostConfig::default());
@@ -692,6 +702,7 @@ mod tests {
         let d = describe(
             "h",
             22,
+            "u",
             &host_token("h", 22),
             &key(&format!("{ED_A} comment")),
         );

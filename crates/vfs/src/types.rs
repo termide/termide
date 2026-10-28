@@ -926,6 +926,9 @@ pub struct HostKey {
     pub host: String,
     /// Port connected to.
     pub port: u16,
+    /// User logging in, after `User`; with `host` and `port` it selects
+    /// the `known_hosts` files, whose names may use `%r`.
+    pub user: String,
     /// Name the key is (to be) recorded under in `known_hosts`, and what
     /// `ssh-keygen -R` takes: the `HostKeyAlias`, else the `HostName` as
     /// `name` on port 22 or `[name]:port`.

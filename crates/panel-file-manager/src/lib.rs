@@ -1186,6 +1186,7 @@ mod tests {
         let key = termide_vfs::HostKey {
             host: "example.com".to_string(),
             port: 2222,
+            user: "u".to_string(),
             known_as: "[example.com]:2222".to_string(),
             algorithm: "ssh-ed25519".to_string(),
             fingerprint: "SHA256:Zm9vYmFy".to_string(),

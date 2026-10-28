@@ -40,7 +40,7 @@ mod known_hosts;
 mod transfer;
 
 use actor::{sftp_actor, Reply, SftpCommand, SftpHandle};
-use connect::{do_connect, fallback_username};
+use connect::{do_connect, fallback_username, Target};
 use transfer::{
     count_local_files_sync, worker_count_remote, worker_download_dir, worker_download_file,
     worker_upload_dir, worker_upload_file, DlState, UlState,
@@ -97,10 +97,10 @@ fn block_on<F: std::future::Future>(fut: F) -> VfsResult<F::Output> {
 /// also by appending it to the host's first `UserKnownHostsFile`
 /// (`~/.ssh/known_hosts` by default; created 0600 in a 0700 directory when
 /// missing), hashed under `HashKnownHosts yes`. Connect again afterwards.
+/// The key may be a jump host's: it is recorded in that host's files.
 pub fn trust_host_key(key: &crate::types::HostKey, remember: bool) -> VfsResult<()> {
-    let config = crate::ssh_config::SshHostConfig::for_host(&key.host);
     known_hosts::trust(
-        &known_hosts::KnownHostsFiles::from_config(&config),
+        Target::of_key(key).known_hosts_files(),
         &known_hosts::SESSION_KEYS,
         key,
         remember,
@@ -777,13 +777,19 @@ impl VfsProvider for SftpProvider {
         true
     }
 
+    /// The remote home directory under the login as given: the port and
+    /// user resolved from `ssh_config` or the local user name would make
+    /// another connection key, and with it another connection.
     fn home_dir(&self) -> Option<VfsPath> {
         let home = self.inner.lock().ok()?.home_dir.clone()?;
-        Some(
-            VfsPath::remote(VfsProtocol::Sftp, &self.host, Path::new(&home))
-                .with_port(self.port.unwrap_or(22))
-                .with_username(self.effective_username()),
-        )
+        let mut path = VfsPath::remote(VfsProtocol::Sftp, &self.host, Path::new(&home));
+        if let Some(port) = self.port {
+            path = path.with_port(port);
+        }
+        if let Some(user) = self.username.as_deref().filter(|u| !u.is_empty()) {
+            path = path.with_username(user);
+        }
+        Some(path)
     }
 }
 
@@ -818,6 +824,26 @@ mod tests {
 
         let local_path = VfsPath::local("/tmp");
         assert!(SftpProvider::to_remote_path(&local_path).is_err());
+    }
+
+    /// The home directory stays on the connection it came from, whatever
+    /// user and port `ssh_config` resolved the login to.
+    #[test]
+    fn home_dir_keeps_the_login_as_given() {
+        for (port, user) in [(None, None), (Some(2222), Some("alice")), (None, Some(""))] {
+            let provider = SftpProvider::new("build", port, user);
+            provider.inner.lock().unwrap().home_dir = Some("/home/deploy".into());
+            let mut login = VfsPath::remote(VfsProtocol::Sftp, "build", Path::new("/"));
+            login.port = port;
+            login.username = user.map(String::from);
+            let home = provider.home_dir().unwrap();
+            assert_eq!(
+                home.connection_key(),
+                login.connection_key(),
+                "{port:?} {user:?}"
+            );
+            assert_eq!(home.path, Path::new("/home/deploy"));
+        }
     }
 
     #[test]
