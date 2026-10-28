@@ -12271,61 +12271,46 @@ fn shows_diagram(panel: &AgentPanel) -> bool {
 }
 
 #[test]
-fn a_diagram_folds_once_its_answer_scrolls_out_of_view() {
+fn a_diagram_scrolled_out_of_view_stays_whole() {
     let mut panel = panel(vec![reply(DIAGRAM_REPLY), tall_reply()]);
     send(&mut panel, "draw");
     let _ = render_text(&mut panel, 60, 40);
     assert!(shows_diagram(&panel), "a fresh answer shows its diagram");
 
     send(&mut panel, "more");
-    let _ = render_text(&mut panel, 60, 10);
-    assert!(!shows_diagram(&panel), "scrolled away, the diagram folds");
+    let _ = render_text(&mut panel, 60, 40);
+    assert!(shows_diagram(&panel), "scrolled away, it does not fold");
+}
+
+#[test]
+fn a_diagram_taller_than_half_the_panel_is_a_card_until_unfolded() {
+    let mut panel = panel(vec![reply(DIAGRAM_REPLY)]);
+    send(&mut panel, "draw");
+    let _ = render_text(&mut panel, 60, 40);
+    assert!(shows_diagram(&panel), "half a tall panel holds it");
+
+    let _ = render_text(&mut panel, 60, 8);
+    assert!(!shows_diagram(&panel), "half a short one does not");
     assert!(
         transcript_text(&panel)
             .iter()
             .any(|l| l.contains("▸ mermaid")),
-        "a card stands in for it: {:?}",
+        "{:?}",
         transcript_text(&panel)
     );
-}
-
-#[test]
-fn the_view_stays_put_when_a_diagram_above_it_folds() {
-    let mut panel = panel(vec![reply(DIAGRAM_REPLY), tall_reply()]);
-    send(&mut panel, "draw");
-    send(&mut panel, "more");
-    // Laid out tall, nothing is above the view and the diagram shows.
-    let _ = render_text(&mut panel, 60, 200);
-    assert!(shows_diagram(&panel));
-    let anchor = transcript_text(&panel)
-        .iter()
-        .position(|l| l.trim() == "line 20")
-        .expect("the tall reply is laid out");
-
-    panel.follow = false;
-    panel.top = anchor;
-    let rows = render_text(&mut panel, 60, 10);
-    assert!(!shows_diagram(&panel), "the diagram above the view folds");
-    assert!(rows[0].trim_start().starts_with("line 20 "), "{rows:?}");
-}
-
-#[test]
-fn a_diagram_unfolded_by_hand_stays_unfolded() {
-    let mut panel = panel(vec![reply(DIAGRAM_REPLY), tall_reply()]);
-    send(&mut panel, "draw");
-    send(&mut panel, "more");
-    let _ = render_text(&mut panel, 60, 10);
-    assert!(!shows_diagram(&panel));
 
     let answer = panel
         .transcript()
         .items()
         .iter()
-        .position(|item| matches!(item, Item::Assistant { text, .. } if text.contains("mermaid")))
+        .position(|item| matches!(item, Item::Assistant { .. }))
         .unwrap();
     assert!(panel.transcript.toggle_expanded(answer));
-    let _ = render_text(&mut panel, 60, 10);
-    assert!(shows_diagram(&panel), "out of view, it is not folded again");
+    let _ = render_text(&mut panel, 60, 8);
+    assert!(shows_diagram(&panel), "one click shows it whole");
+    assert!(panel.transcript.toggle_expanded(answer));
+    let _ = render_text(&mut panel, 60, 8);
+    assert!(!shows_diagram(&panel), "the next folds it");
 }
 
 /// A `w`×`h` red PNG as base64.
@@ -12427,12 +12412,11 @@ fn a_picture_cut_by_the_edge_shows_its_placeholder() {
 }
 
 #[test]
-fn a_picture_scrolled_away_folds_to_a_card_and_the_view_stays_put() {
+fn a_picture_scrolled_away_stays_until_its_block_is_folded_by_hand() {
     let mut panel = picture_panel();
     panel.transcript.push(picture_read(400, 200));
-    // 10 rows tall, in a 30-row panel and a 200-row one alike.
     panel.transcript.push(tall_answer());
-    let _ = render_buf(&mut panel, 60, 200);
+    let _ = render_buf(&mut panel, 60, 30);
     let anchor = transcript_text(&panel)
         .iter()
         .position(|l| l.trim() == "line 20")
@@ -12441,6 +12425,14 @@ fn a_picture_scrolled_away_folds_to_a_card_and_the_view_stays_put() {
     panel.top = anchor;
     let rows = render_text(&mut panel, 60, 30);
     assert!(rows[0].trim_start().starts_with("line 20 "), "{rows:?}");
+    // Out of sight it is not drawn, but it is not folded either.
+    assert_eq!(panel.transcript.pictures().len(), 1);
+    assert!(!transcript_text(&panel).iter().any(|l| l.contains("▸ PNG")));
+
+    // The block unfolded and folded again by hand folds the picture too.
+    assert!(panel.transcript.toggle_expanded(0));
+    assert!(panel.transcript.toggle_expanded(0));
+    let _ = render_buf(&mut panel, 60, 30);
     assert!(panel.transcript.pictures().is_empty());
     assert!(
         transcript_text(&panel)
@@ -12449,11 +12441,6 @@ fn a_picture_scrolled_away_folds_to_a_card_and_the_view_stays_put() {
         "{:?}",
         transcript_text(&panel)
     );
-
-    // Unfolded by hand, it shows with the block's detail and stays.
-    assert!(panel.transcript.toggle_expanded(0));
-    let _ = render_buf(&mut panel, 60, 30);
-    assert_eq!(panel.transcript.pictures().len(), 1);
 }
 
 #[test]
@@ -12546,4 +12533,81 @@ fn where_moving_is_cheap_a_moving_picture_is_drawn() {
     let y = (spot.line - 1) as u16;
     assert!(painted(&buf, y..y + spot.rows));
     assert!(!panel.pictures_settled());
+}
+
+/// A finished `write` of `path`, failed or not.
+fn wrote(path: &str, ok: bool) -> Item {
+    let call = ToolCall {
+        id: "w1".into(),
+        name: "write".into(),
+        arguments: serde_json::json!({ "path": path, "content": "<p>hi</p>" }),
+        extra_content: None,
+    };
+    let mut result = ToolResultMessage::text(&call, "Wrote 9 bytes");
+    result.is_error = !ok;
+    Item::Tool {
+        call,
+        result: Some(result),
+        live: None,
+        at: "12:00:00".into(),
+        duration_ms: Some(10),
+        waited_ms: None,
+        waiting: false,
+    }
+}
+
+#[test]
+fn a_written_page_is_a_card_that_opens_the_file() {
+    let mut panel = panel(vec![]);
+    panel.transcript.push(wrote("out/report.html", true));
+    let rows = render_text(&mut panel, 60, 12);
+    let y = rows
+        .iter()
+        .position(|r| r.contains("↗ HTML report.html"))
+        .unwrap_or_else(|| panic!("{rows:?}")) as u16;
+    let area = panel.transcript_area;
+    let click = |panel: &mut AgentPanel, modifiers| {
+        let mouse = |kind| MouseEvent {
+            kind,
+            column: area.x + 4,
+            row: area.y + y,
+            modifiers,
+        };
+        panel.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left)), area);
+        panel.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left)), area)
+    };
+    let report = panel.cwd.join("out/report.html");
+    let events = click(&mut panel, KeyModifiers::NONE);
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::OpenLink(LinkTarget::Path(p))] if *p == report),
+        "{events:?}"
+    );
+    let events = click(&mut panel, KeyModifiers::ALT);
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::OpenLinkExternal(LinkTarget::Path(p))] if *p == report),
+        "{events:?}"
+    );
+    // `o` on the block opens the file too, not the call's output.
+    panel.selected = 0;
+    let events = panel.open_selected_in_panel();
+    assert!(
+        matches!(events.as_slice(), [PanelEvent::OpenLink(LinkTarget::Path(p))] if *p == report),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn only_a_viewable_file_written_is_a_card() {
+    for (item, card) in [
+        (wrote("notes.md", true), true),
+        (wrote("flow.mmd", true), true),
+        (wrote("logo.svg", true), false),
+        (wrote("main.rs", true), false),
+        (wrote("page.html", false), false),
+    ] {
+        let mut panel = panel(vec![]);
+        panel.transcript.push(item);
+        let rows = render_text(&mut panel, 60, 12);
+        assert_eq!(rows.iter().any(|r| r.contains('↗')), card, "{rows:?}");
+    }
 }

@@ -69,10 +69,20 @@ pub struct Rendered {
     /// How many ```` ```mermaid ```` blocks rendered as diagrams (whole or
     /// folded to a card, see [`Builder::fold_diagrams`]).
     pub diagrams: usize,
+    /// How many of those diagrams were folded to a card.
+    pub folded_diagrams: usize,
 }
 
 /// The text of a folded diagram's card, given how many rows the diagram has.
 pub type DiagramCard = fn(usize) -> String;
+
+/// Which diagrams fold to a one-line card, and the card's text: those of
+/// more than `taller_than` rows, so `0` folds every one.
+#[derive(Clone, Copy)]
+pub struct DiagramFold {
+    pub card: DiagramCard,
+    pub taller_than: usize,
+}
 
 /// A pending table being collected between its start and end.
 struct Table {
@@ -154,11 +164,12 @@ pub struct Builder<'c> {
     /// How rows read when copied, by line index; a row not listed is a line
     /// of its own with no decoration.
     copy_marks: Vec<(usize, RowCopy)>,
-    /// When set, a diagram shows as one card line with this text instead of
-    /// its rows.
-    diagram_card: Option<DiagramCard>,
-    /// Diagrams rendered so far.
+    /// When set, a diagram it covers shows as one card line instead of its
+    /// rows.
+    diagram_fold: Option<DiagramFold>,
+    /// Diagrams rendered so far, and how many of them folded.
     diagrams: usize,
+    folded_diagrams: usize,
 }
 
 impl<'c> Builder<'c> {
@@ -184,15 +195,16 @@ impl<'c> Builder<'c> {
             pending_links: Vec::new(),
             anchors: Vec::new(),
             copy_marks: Vec::new(),
-            diagram_card: None,
+            diagram_fold: None,
             diagrams: 0,
+            folded_diagrams: 0,
         }
     }
 
-    /// Fold every diagram to a single card line reading `card(rows)`, or show
-    /// them whole again with `None`.
-    pub fn fold_diagrams(&mut self, card: Option<DiagramCard>) {
-        self.diagram_card = card;
+    /// Fold the diagrams `fold` covers to a single card line each, or show
+    /// them all whole with `None`.
+    pub fn fold_diagrams(&mut self, fold: Option<DiagramFold>) {
+        self.diagram_fold = fold;
     }
 
     // --- accessors for front-ends that compute their own styles -------------
@@ -619,7 +631,12 @@ impl<'c> Builder<'c> {
             if let Some(diagram) = termide_mermaid::render_to_lines(&code) {
                 self.diagrams += 1;
                 let bar = Style::default().fg(self.colors.disabled);
-                if let Some(card) = self.diagram_card {
+                if let Some(fold) = self
+                    .diagram_fold
+                    .filter(|fold| diagram.len() > fold.taller_than)
+                {
+                    self.folded_diagrams += 1;
+                    let card = fold.card;
                     let spans = vec![
                         Span::styled("┊ ", bar),
                         Span::styled(format!("▸ {}", card(diagram.len())), bar),
@@ -1014,6 +1031,7 @@ impl<'c> Builder<'c> {
             links,
             anchors,
             diagrams: self.diagrams,
+            folded_diagrams: self.folded_diagrams,
         }
     }
 }
