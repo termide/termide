@@ -1010,7 +1010,9 @@ something. How many delegated tasks think at once is the
 - **write** creates a file or replaces its whole content.
 - **bash** runs a shell command in the project directory, streaming its output.
   Long output keeps its beginning and end, and the complete log is written to
-  a file the agent can read.
+  a file the agent can read. Only the two ends stay in memory, so a command
+  that prints without end until its timeout cannot exhaust it; the log stops
+  at 256 MiB.
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
