@@ -1451,7 +1451,8 @@ can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
 `ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
 the project (`cd /etc && cat passwd` included). So do `env` and `printenv`
 without arguments, which print every secret in the environment. A grep or
-`rg` pattern is not taken for a path (`rg /api/ src` does not ask). The rule
+`rg` pattern is not taken for a path (`rg /api/ src` does not ask), nor is a
+`$` that starts no expansion a variable (`rg "foo$" src` does not ask). The rule
 "allow always" keeps for such a read names that one command, not `cat *`. Loading a skill never asks.
 
 ### Plan mode

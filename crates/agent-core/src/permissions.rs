@@ -2090,12 +2090,13 @@ pub fn is_read_only_command(part: &str) -> bool {
 }
 
 /// The words of a simple command with their quotes taken off, or `None`
-/// where a word would expand (`$`, a backquote, a glob in double quotes is
-/// fine) or a quote is left open.
+/// where a word would expand (a parameter, a substitution, a backquote; a
+/// glob in double quotes is fine) or a quote is left open. A `$` that starts
+/// no expansion, as in `rg "foo$"`, is the character itself.
 fn shell_words(part: &str) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut word: Option<String> = None;
-    let mut chars = part.chars();
+    let mut chars = part.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             c if c.is_whitespace() => words.extend(word.take()),
@@ -2113,19 +2114,32 @@ fn shell_words(part: &str) -> Option<Vec<String>> {
                 loop {
                     match chars.next()? {
                         '"' => break,
-                        '$' | '`' => return None,
+                        '$' if starts_expansion(chars.peek().copied(), true) => return None,
+                        '`' => return None,
                         '\\' => current.push(chars.next()?),
                         c => current.push(c),
                     }
                 }
             }
-            '$' | '`' => return None,
+            '$' if starts_expansion(chars.peek().copied(), false) => return None,
+            '`' => return None,
             '\\' => word.get_or_insert_with(String::new).push(chars.next()?),
             c => word.get_or_insert_with(String::new).push(c),
         }
     }
     words.extend(word);
     Some(words)
+}
+
+/// Whether a `$` followed by `next` expands: a name, a positional or special
+/// parameter, `${…}`, `$(…)` or `$[…]`. Outside double quotes `$'…'` and
+/// `$"…"` are quotes of their own whose escapes can spell any text.
+fn starts_expansion(next: Option<char>, in_double_quotes: bool) -> bool {
+    next.is_some_and(|c| {
+        c.is_ascii_alphanumeric()
+            || "_@*#?$!-{([".contains(c)
+            || (!in_double_quotes && (c == '\'' || c == '"'))
+    })
 }
 
 /// `sed` that only prints: no in-place edit, no script file, and every
@@ -3665,6 +3679,73 @@ mod tests {
         hooks.before_tool_call(&bash("cat /etc/hosts"), &ctx());
         let request = asked.lock().unwrap()[0].clone();
         assert_eq!(request.patterns(), vec!["cat /etc/hosts"]);
+    }
+
+    /// A `$` expands only before a name, a parameter, a brace, a parenthesis
+    /// or a bracket (and outside double quotes before a quote, `$'…'` being a
+    /// quote of its own); anywhere else it is a plain character, so a pattern
+    /// anchored with `$` is no variable whose value cannot be seen.
+    #[test]
+    fn a_dollar_that_expands_nothing_is_no_variable() {
+        let words = |part: &str| shell_words(part);
+        assert_eq!(
+            words("rg \"foo$\" src"),
+            Some(vec!["rg".into(), "foo$".into(), "src".into()])
+        );
+        assert_eq!(
+            words("grep a$ x"),
+            Some(vec!["grep".into(), "a$".into(), "x".into()])
+        );
+        assert_eq!(
+            words("echo $ \"$\""),
+            Some(vec!["echo".into(), "$".into(), "$".into()])
+        );
+        assert_eq!(
+            words("sed 's/x$//'"),
+            Some(vec!["sed".into(), "s/x$//".into()])
+        );
+        assert_eq!(
+            words("echo \"a$'\""),
+            Some(vec!["echo".into(), "a$'".into()])
+        );
+        for expanding in [
+            "cat $HOME/x",
+            "cat \"$HOME\"",
+            "cat ${HOME}/x",
+            "cat $1",
+            "cat \"$@\"",
+            "cat $_x",
+            "cat $$",
+            "cat $(ls)",
+            "cat \"$(ls)\"",
+            "cat $[1]",
+            "cat $'\\x2e\\x2e/x'",
+            "cat $\"x\"",
+        ] {
+            assert_eq!(words(expanding), None, "{expanding}");
+        }
+
+        let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+        for command in [
+            "rg \"foo$\" src",
+            "rg 'foo$' src",
+            "grep \"a$\" src/lib.rs",
+            "grep -rn 'end$' src",
+            "sed -n \"/x$/p\" src/lib.rs",
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{command}"
+            );
+        }
+        for command in ["cat $HOME/x", "cat \"${HOME}/x\"", "cat $'\\x2e\\x2e/x'"] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{command}"
+            );
+        }
     }
 
     /// A symlink in the project leading out of it carries a look-only read
