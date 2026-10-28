@@ -210,6 +210,12 @@ pub fn ansi_256_to_color(code: u16) -> Color {
         .unwrap_or(Color::Reset)
 }
 
+/// How long a synchronized update (`CSI ? 2026 h`) may hold back rendering.
+/// A program killed mid-frame, or a file containing the sequence sent to
+/// the terminal with `cat`, would otherwise freeze the panel for good;
+/// other terminals cap it the same way.
+pub const SYNC_OUTPUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Terminal screen state
 #[derive(Clone)]
 pub struct TerminalScreen {
@@ -274,6 +280,9 @@ pub struct TerminalScreen {
     /// Synchronized output mode (CSI ? 2026 h/l)
     /// When enabled, rendering is deferred until mode is disabled
     pub sync_output: bool,
+    /// When the current synchronized update began; it is honoured for at
+    /// most `SYNC_OUTPUT_TIMEOUT` from then.
+    pub sync_output_since: Option<std::time::Instant>,
     /// Flag set when sync_output transitions from true to false
     /// Signals that cached content must be invalidated
     pub sync_output_ended: bool,
@@ -327,11 +336,25 @@ impl TerminalScreen {
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
             sync_output: false,
+            sync_output_since: None,
             sync_output_ended: false,
             force_cache_invalidation: false,
             reported_cwd: None,
             bell: false,
         }
+    }
+
+    /// A synchronized update is in progress and still within its time
+    /// limit: rendering should keep showing the previous frame.
+    pub fn sync_output_held(&self) -> bool {
+        self.sync_output_held_at(std::time::Instant::now())
+    }
+
+    pub fn sync_output_held_at(&self, now: std::time::Instant) -> bool {
+        self.sync_output
+            && self
+                .sync_output_since
+                .is_none_or(|since| now.saturating_duration_since(since) < SYNC_OUTPUT_TIMEOUT)
     }
 
     /// Get mutable reference to active buffer

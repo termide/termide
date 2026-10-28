@@ -42,7 +42,7 @@ impl Terminal {
             (
                 screen.dirty,
                 screen.selection_start.is_some(),
-                screen.sync_output,
+                screen.sync_output_held(),
                 screen.sync_output_ended,
                 screen.use_alt_screen,
                 screen.force_cache_invalidation,

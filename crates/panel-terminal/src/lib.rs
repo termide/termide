@@ -129,6 +129,9 @@ pub struct Terminal {
     /// Last working directory reported to the app, so a `cd` inside the shell
     /// is announced once instead of on every tick.
     last_reported_cwd: Option<std::path::PathBuf>,
+    /// Start of the synchronized update whose timeout has already asked for
+    /// a redraw, so a stalled update is redrawn once, not on every tick.
+    sync_timeout_redrawn: Option<std::time::Instant>,
     /// Syntax the shell expects when the app types a command into it.
     shell_kind: shell_utils::ShellKind,
 }
@@ -303,6 +306,7 @@ impl Terminal {
             )),
             cached_cwd: std::sync::Mutex::new(None),
             last_reported_cwd: None,
+            sync_timeout_redrawn: None,
             shell_kind: shell_utils::ShellKind::default(),
         }
     }
@@ -736,6 +740,14 @@ impl Terminal {
         // inner shell/application running in our PTY
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         clipboard::paste_atomic(&mut *writer, text, true)
+    }
+
+    /// Start of the synchronized update in progress, once it has run past
+    /// `SYNC_OUTPUT_TIMEOUT` and no longer holds back rendering.
+    fn sync_output_expired(&self) -> Option<std::time::Instant> {
+        let screen = self.read_screen();
+        let since = screen.sync_output_since?;
+        (screen.sync_output && !screen.sync_output_held()).then_some(since)
     }
 
     /// Check if PTY has new data that needs rendering
@@ -1376,6 +1388,16 @@ impl Panel for Terminal {
             events.push(PanelEvent::WorkingDirectoryChanged);
         }
 
+        // A synchronized update that outlived its time limit stops holding
+        // back rendering; nothing else would redraw a panel whose program
+        // died mid-frame.
+        if let Some(since) = self.sync_output_expired() {
+            if self.sync_timeout_redrawn != Some(since) {
+                self.sync_timeout_redrawn = Some(since);
+                events.push(PanelEvent::NeedsRedraw);
+            }
+        }
+
         // Handle auto-scroll during selection drag
         if !self.selection_drag_active {
             return events;
@@ -1689,6 +1711,46 @@ mod device_tests {
         let mut line = String::new();
         std::io::BufRead::read_line(&mut std::io::BufReader::new(tty), &mut line).unwrap();
         assert_eq!(line.trim_end(), "typed");
+        term.kill_processes();
+    }
+
+    /// A synchronized update that never ends (the program died mid-frame)
+    /// holds the previous frame only until its time limit, then the panel
+    /// asks for one redraw and shows what the program wrote.
+    #[test]
+    fn a_stalled_synchronized_update_is_shown_after_its_timeout() {
+        let Ok((mut term, _device)) = Terminal::new_for_device(5, 20, "app") else {
+            return; // No PTY available.
+        };
+        let theme = termide_theme::Theme::default();
+        let asks_redraw = |term: &mut Terminal| {
+            term.tick()
+                .iter()
+                .any(|e| matches!(e, PanelEvent::NeedsRedraw))
+        };
+        let first_row = |term: &mut Terminal| -> String {
+            let (lines, _, _) = term.get_display_lines(false, &theme);
+            lines[0].spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        assert!(!first_row(&mut term).contains("frame"));
+
+        {
+            let mut screen = term.screen.write().unwrap();
+            screen.sync_output = true;
+            screen.sync_output_since = Some(std::time::Instant::now());
+            for ch in "frame".chars() {
+                screen.put_char(ch);
+            }
+            screen.dirty = true;
+        }
+        assert!(!first_row(&mut term).contains("frame"), "frame shown early");
+        assert!(!asks_redraw(&mut term));
+
+        term.screen.write().unwrap().sync_output_since =
+            std::time::Instant::now().checked_sub(terminal::SYNC_OUTPUT_TIMEOUT);
+        assert!(asks_redraw(&mut term));
+        assert!(!asks_redraw(&mut term), "redraw asked twice");
+        assert!(first_row(&mut term).contains("frame"));
         term.kill_processes();
     }
 }

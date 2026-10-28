@@ -98,6 +98,9 @@ pub fn handle_private_sequence(screen: &mut TerminalScreen, params: &Params, c: 
         }
         (2026, 'h') => {
             // Synchronized output protocol - begin update batch
+            if !screen.sync_output {
+                screen.sync_output_since = Some(std::time::Instant::now());
+            }
             screen.sync_output = true;
         }
         (2026, 'l') => {
@@ -106,6 +109,7 @@ pub fn handle_private_sequence(screen: &mut TerminalScreen, params: &Params, c: 
                 screen.sync_output_ended = true; // Signal cache invalidation needed
             }
             screen.sync_output = false;
+            screen.sync_output_since = None;
         }
         _ => {
             // Unknown private sequence - ignore
