@@ -1457,7 +1457,10 @@ the project (`cd /etc && cat passwd` included). A loop (`for`, `while`,
 later turns somewhere else, so in its body and after it the directory counts
 as unknown and a relative path asks:
 `for x in a b; do cat src/lib.rs; cd ..; done` asks, until an absolute `cd`
-after the loop sets the directory again. So do `env` and `printenv`
+after the loop sets the directory again. A walk that follows symlinks
+(`rg -L`/`--follow`, `grep -R`/`--dereference-recursive`, `find -L`, `-H` or
+`-follow`, `ls -L`, `du -L`, `tree -l`) asks too: a link inside the project
+can lead it anywhere. So do `env` and `printenv`
 without arguments, which print every secret in the environment. A grep or
 `rg` pattern is not taken for a path (`rg /api/ src` does not ask), nor is a
 `$` that starts no expansion a variable (`rg "foo$" src` does not ask).
