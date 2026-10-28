@@ -1331,7 +1331,9 @@ mode = "auto"       # ask | plan | edit | configured | auto (default) | all — 
 In a pattern, `*` stands for any text and a leading `**/` is optional, so
 `**/.env*` also matches `.env` in the project root. Shell commands are matched
 per part: `cargo build && rm -rf target` needs both halves allowed, and a deny
-on either half stops the whole command. The shell's own words are not parts:
+on either half stops the whole command. A background `&` separates parts as
+`;` does, so `cargo test & rm -rf src` is two commands, while the `&` of a
+redirection (`2>&1`, `&>file`) is not. The shell's own words are not parts:
 in `if [ -f x ]; then make; fi` the parts are `[ -f x ]` and `make`, and a
 `for … in` header or a closing `fi` or `done` is no part at all. Command substitution (`$(…)`, backticks)
 is never allowed automatically, and it asks about the part that carries it and

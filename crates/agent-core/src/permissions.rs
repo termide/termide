@@ -9,7 +9,8 @@
 //! model decides what would otherwise be a prompt. Reading inside the project, loading a skill and a short list
 //! of read-only shell commands never prompt.
 //!
-//! Shell commands are split on `&&`, `||`, `;`, `|` and newlines; every part
+//! Shell commands are split on `&&`, `||`, `;`, `|`, a background `&` and
+//! newlines; every part
 //! must be allowed for the whole to pass, while a `deny` or `ask` on any part
 //! applies to the whole. Command substitution (`$(...)`, backticks) is never
 //! auto-allowed by an `allow` rule.
@@ -1453,9 +1454,19 @@ fn split_shell(command: &str) -> ParsedShell {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 i += 1;
             }
+            // A lone `&` sends the command before it to the background and
+            // starts the next one, a separator like `;`. It is part of a
+            // redirection in `&>`, `&>>`, `>&2`, `2>&1` and `<&0`.
+            '&' if depth == 0
+                && chars.get(i + 1) != Some(&'>')
+                && !matches!(i.checked_sub(1).map(|p| chars[p]), Some('>' | '<')) =>
+            {
+                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+            }
             '|' if depth == 0 => {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
-                if chars.get(i + 1) == Some(&'|') {
+                // `||`, and `|&`, which pipes standard error too.
+                if matches!(chars.get(i + 1), Some('|' | '&')) {
                     i += 1;
                 }
             }
@@ -3245,6 +3256,41 @@ mod tests {
         assert_eq!(quoted.parts, vec!["echo \"x; $(id)\"", "ls"]);
         assert!(quoted.has_substitution);
         assert_eq!(split_shell("   ").parts, vec![""]);
+    }
+
+    /// A lone `&` backgrounds a command and starts the next, so each side
+    /// is judged on its own; the `&` of a redirection splits nothing.
+    #[test]
+    fn a_background_ampersand_separates_commands() {
+        let parts = |command: &str| split_shell(command).parts;
+        assert_eq!(
+            parts("ls & touch /tmp/pwned"),
+            vec!["ls", "touch /tmp/pwned"]
+        );
+        assert_eq!(parts("sleep 5 &"), vec!["sleep 5"]);
+        assert_eq!(parts("a&b"), vec!["a", "b"]);
+        assert_eq!(parts("cargo test 2>&1"), vec!["cargo test 2>&1"]);
+        assert_eq!(parts("ls >&2 && pwd"), vec!["ls >&2", "pwd"]);
+        assert_eq!(parts("ls &>/dev/null"), vec!["ls &>/dev/null"]);
+        assert_eq!(parts("ls &>> log"), vec!["ls &>> log"]);
+        assert_eq!(parts("cat <&3"), vec!["cat <&3"]);
+        assert_eq!(parts("make |& tee log"), vec!["make", "tee log"]);
+        assert_eq!(parts("echo 'a & b' \\& c"), vec!["echo 'a & b' \\& c"]);
+
+        // Each side earns its own verdict, in plan mode and under an allow
+        // rule for the first side.
+        let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+        assert_eq!(
+            plan.decide(&bash("ls & touch /tmp/pwned"), &ctx()),
+            Decision::Deny
+        );
+        let mut configured = rules("mode = \"configured\"");
+        configured.add("bash", "cargo test*", Decision::Allow);
+        let (configured, _) = hooks(configured, vec![]);
+        assert_eq!(
+            configured.decide(&bash("cargo test & rm -rf src"), &ctx()),
+            Decision::Ask
+        );
     }
 
     /// The shell's reserved words are not commands: the part is the command

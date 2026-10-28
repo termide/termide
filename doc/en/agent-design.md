@@ -573,7 +573,7 @@ mode = "auto" # ask | plan | edit | configured | auto | all
 Implementation (`crates/agent-core/src/permissions.rs`): `*` spans any text
 including slashes, a leading `**/` is optional. Subjects are the command for
 `bash` and the project-relative path for file tools. Shell commands are split
-on `&&`, `||`, `;`, `|` and newlines with quote awareness, as Claude Code
+on `&&`, `||`, `;`, `|`, a background `&` and newlines with quote awareness, as Claude Code
 does: every part needs its own allow, a deny or ask on any part wins, and
 command substitution is never auto-allowed. A built-in read-only command list
 (`ls`, `cat`, `rg`, `git status`, `find` without `-delete`/`-exec`, ...)
