@@ -100,13 +100,14 @@ impl App {
         // Working directory = directory containing the file
         let working_dir = file_path.parent().map(|p| p.to_path_buf());
 
-        // Command to execute
-        let command = file_path.to_string_lossy().into_owned();
-
         match self.create_terminal_panel(working_dir) {
             Ok(mut terminal) => {
-                // Send command to execute the file
-                let _ = terminal.send_command(&command);
+                // Quoted for the panel's shell: the name is the program's
+                // and nothing else, whatever characters it holds.
+                let command = terminal.run_file_command(&file_path);
+                if let Err(e) = terminal.send_command(&command) {
+                    log::warn!("Not running '{}': {}", file_path.display(), e);
+                }
                 self.add_panel(Box::new(terminal));
                 self.auto_save_layout();
             }

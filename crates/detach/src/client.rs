@@ -149,11 +149,13 @@ pub fn kill(id: &str) -> Result<()> {
     let instance =
         registry::read_info(id).with_context(|| format!("No detached instance named '{id}'"))?;
 
-    if registry::process_is_alive(instance.pid) {
+    // Only the daemon itself is signalled: a stale sidecar's pid may belong
+    // to an unrelated process by now.
+    if registry::is_running(&instance) {
         if let Ok(mut stream) = UnixStream::connect(crate::paths::socket_path(id)?) {
             let _ = ClientFrame::Kill.write_to(&mut stream);
         }
-        if !wait_for_exit(instance.pid, crate::daemon::KILL_GRACE + KILL_MARGIN) {
+        if !wait_for_exit(&instance, crate::daemon::KILL_GRACE + KILL_MARGIN) {
             use nix::sys::signal::{kill, Signal};
             let _ = kill(nix::unistd::Pid::from_raw(instance.pid), Signal::SIGKILL);
         }
@@ -169,10 +171,11 @@ pub fn kill(id: &str) -> Result<()> {
 /// Extra time `kill` gives the daemon beyond its own SIGKILL escalation.
 const KILL_MARGIN: Duration = Duration::from_secs(2);
 
-/// Wait for a process that is not our child to go, up to `timeout`.
-fn wait_for_exit(pid: i32, timeout: Duration) -> bool {
+/// Wait for an instance's daemon, not our child, to go, up to `timeout`;
+/// `false` while it is still the same process.
+fn wait_for_exit(instance: &registry::InstanceInfo, timeout: Duration) -> bool {
     let deadline = std::time::Instant::now() + timeout;
-    while registry::process_is_alive(pid) {
+    while registry::is_running(instance) {
         if std::time::Instant::now() >= deadline {
             return false;
         }

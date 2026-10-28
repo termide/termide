@@ -7,6 +7,7 @@ mod link_detection;
 #[cfg(target_os = "macos")]
 mod macos_proc;
 mod mouse;
+mod pty_input;
 mod render;
 mod search;
 mod selection;
@@ -29,7 +30,7 @@ use nix::unistd::Pid;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use ratatui::{buffer::Buffer, layout::Rect, prelude::Widget, style::Style, text::Line};
 use std::any::Any;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -51,7 +52,7 @@ struct TerminalSearchState {
     current_match: Option<usize>,
 }
 
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+type SharedChild = Arc<Mutex<Box<dyn Child + Send + Sync>>>;
 
 /// Full-featured terminal with PTY
 pub struct Terminal {
@@ -59,10 +60,10 @@ pub struct Terminal {
     scrollbars: termide_core::ScrollBars,
     /// PTY master (wrapped in Arc<Mutex<>> for shared access)
     pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    /// Writer for writing to PTY
-    writer: SharedWriter,
-    /// Shell process
-    child: Box<dyn Child + Send>,
+    /// Queue of bytes for the program; a writer thread drains it.
+    input: pty_input::PtyInput,
+    /// Shell process; the reader thread reaps it when it exits.
+    child: SharedChild,
     /// Shell process PID
     shell_pid: Option<u32>,
     /// Virtual terminal screen (RwLock allows concurrent reads during render)
@@ -173,6 +174,18 @@ fn device_name(_master: &(dyn MasterPty + Send)) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Wait briefly for a child whose terminal just closed to exit, and collect
+/// its status. One that keeps running without its terminal is left to
+/// [`Terminal::kill_processes`].
+fn reap_exited(child: &Mutex<Box<dyn Child + Send + Sync>>) {
+    for _ in 0..50 {
+        match child.lock().map(|mut c| c.try_wait()) {
+            Ok(Ok(None)) => thread::sleep(std::time::Duration::from_millis(20)),
+            _ => return,
+        }
+    }
+}
+
 fn build_terminal_hotkey_table(config: &Config) -> HotkeyTable {
     let mut t = HotkeyTable::new();
     let kb = &config.terminal.keybindings;
@@ -219,7 +232,8 @@ impl Terminal {
     /// Spawn a PTY reader thread that feeds output into the terminal screen.
     fn spawn_reader(
         mut reader: Box<dyn std::io::Read + Send>,
-        writer: SharedWriter,
+        replies: pty_input::ReplySink,
+        child: SharedChild,
         screen: &Arc<RwLock<TerminalScreen>>,
         is_alive: &Arc<Mutex<bool>>,
         has_new_data: &Arc<AtomicBool>,
@@ -230,7 +244,7 @@ impl Terminal {
         thread::spawn(move || {
             let mut parser = terminal::VtParser::new();
             let mut buf = [0u8; 16384];
-            let mut performer = terminal::VtPerformer::new(writer, Arc::clone(&screen_clone));
+            let mut performer = terminal::VtPerformer::new(replies, Arc::clone(&screen_clone));
 
             loop {
                 match reader.read(&mut buf) {
@@ -249,6 +263,10 @@ impl Terminal {
             if let Ok(mut alive) = is_alive_clone.lock() {
                 *alive = false;
             }
+            // The program closed the terminal, as it does when it exits:
+            // collect its status so it does not linger as a zombie for as
+            // long as the panel stays open.
+            reap_exited(&child);
         });
     }
 
@@ -256,8 +274,8 @@ impl Terminal {
     #[allow(clippy::too_many_arguments)]
     fn build(
         pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-        writer: SharedWriter,
-        child: Box<dyn portable_pty::Child + Send + Sync>,
+        input: pty_input::PtyInput,
+        child: SharedChild,
         shell_pid: Option<u32>,
         screen: Arc<RwLock<TerminalScreen>>,
         size: PtySize,
@@ -267,7 +285,7 @@ impl Terminal {
         Self {
             scrollbars: termide_core::ScrollBars::default(),
             pty,
-            writer,
+            input,
             child,
             shell_pid,
             screen,
@@ -379,21 +397,22 @@ impl Terminal {
             cmd.env(key, value);
         }
 
-        let child = pair.slave.spawn_command(cmd)?;
-        let shell_pid = child.process_id();
+        let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
+        let shell_pid = child.lock().ok().and_then(|c| c.process_id());
         let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
         )));
         let reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let input = pty_input::PtyInput::spawn(pair.master.take_writer()?);
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
 
         Self::spawn_reader(
             reader,
-            Arc::clone(&writer),
+            input.replies(),
+            Arc::clone(&child),
             &screen,
             &is_alive,
             &has_new_data,
@@ -409,7 +428,7 @@ impl Terminal {
 
         let mut term = Self::build(
             pty,
-            writer,
+            input,
             child,
             shell_pid,
             screen,
@@ -448,21 +467,22 @@ impl Terminal {
         cmd.cwd(&working_dir);
         Self::set_env(&mut cmd, &working_dir);
 
-        let child = pair.slave.spawn_command(cmd)?;
-        let shell_pid = child.process_id();
+        let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
+        let shell_pid = child.lock().ok().and_then(|c| c.process_id());
         let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
         )));
         let reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let input = pty_input::PtyInput::spawn(pair.master.take_writer()?);
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
 
         Self::spawn_reader(
             reader,
-            Arc::clone(&writer),
+            input.replies(),
+            Arc::clone(&child),
             &screen,
             &is_alive,
             &has_new_data,
@@ -470,7 +490,7 @@ impl Terminal {
 
         let mut term = Self::build(
             pty,
-            writer,
+            input,
             child,
             shell_pid,
             screen,
@@ -549,34 +569,26 @@ impl Terminal {
             cmd.env(key, value);
         }
         let device = device_name(pair.master.as_ref());
-        let child = pair.slave.spawn_command(cmd)?;
-        let pid = child.process_id();
+        let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
+        let pid = child.lock().ok().and_then(|c| c.process_id());
         let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
         )));
         let reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let input = pty_input::PtyInput::spawn(pair.master.take_writer()?);
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
         Self::spawn_reader(
             reader,
-            Arc::clone(&writer),
+            input.replies(),
+            Arc::clone(&child),
             &screen,
             &is_alive,
             &has_new_data,
         );
-        let mut term = Self::build(
-            pty,
-            writer,
-            child,
-            pid,
-            screen,
-            size,
-            is_alive,
-            has_new_data,
-        );
+        let mut term = Self::build(pty, input, child, pid, screen, size, is_alive, has_new_data);
         term.title = TitleSource::Command(title);
         term.initial_cwd = working_dir;
         Ok((term, device))
@@ -670,11 +682,9 @@ impl Terminal {
         })
     }
 
-    /// Send input to PTY
+    /// Queue input for the program; never waits for it to be read.
     fn send_input(&mut self, data: &[u8]) -> Result<()> {
-        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        writer.write_all(data)?;
-        writer.flush()?;
+        self.input.send(data.to_vec())?;
         Ok(())
     }
 
@@ -688,10 +698,28 @@ impl Terminal {
         self.send_command(&self.shell_kind.cd_command(path))
     }
 
-    /// Send a command to the terminal and execute it (adds Enter)
+    /// A line run in this terminal's shell that starts the program at `path`.
+    pub fn run_file_command(&self, path: &std::path::Path) -> String {
+        self.shell_kind.run_command(path)
+    }
+
+    /// Type `command` into the shell and press Enter.
+    ///
+    /// A line holding a control character is refused: typed, the line
+    /// editor would take it for a key (Ctrl+U erasing the line, CR running
+    /// what follows), so a file name could run a command of its own.
+    /// Quoting escapes such characters for the shells that can
+    /// ([`shell_utils::ShellKind::quote`]); for the others this refusal is
+    /// what keeps the name from being typed.
     pub fn send_command(&mut self, command: &str) -> Result<()> {
-        self.send_input(command.as_bytes())?;
-        self.send_input(b"\r")?;
+        if command.contains(|c: char| c.is_ascii_control()) {
+            log::warn!("Not typing a command with control characters: {command:?}");
+            anyhow::bail!("the command holds control characters and is not typed into the shell");
+        }
+        let mut line = Vec::with_capacity(command.len() + 1);
+        line.extend_from_slice(command.as_bytes());
+        line.push(b'\r');
+        self.input.send(line)?;
         Ok(())
     }
 
@@ -733,8 +761,8 @@ impl Terminal {
         // Always use bracketed paste - the outer terminal (where termide runs)
         // already stripped the brackets, so we need to re-add them for the
         // inner shell/application running in our PTY
-        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        clipboard::paste_atomic(&mut *writer, text, true)
+        self.input.send(clipboard::paste_bytes(text, true))?;
+        Ok(())
     }
 
     /// Start of the synchronized update in progress, once it has run past
@@ -1634,13 +1662,18 @@ impl Panel for Terminal {
     }
 
     fn kill_processes(&mut self) {
+        // A child already reaped is never signalled: its pid may belong to
+        // an unrelated process by now.
+        if self.has_exited() {
+            return;
+        }
         if let Some(pid) = self.shell_pid {
             #[cfg(unix)]
             {
                 let pid = Pid::from_raw(pid as i32);
                 let _ = signal::killpg(pid, Signal::SIGTERM);
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                if self.is_alive() {
+                if self.is_alive() || !self.has_exited() {
                     let _ = signal::killpg(pid, Signal::SIGKILL);
                 }
             }
@@ -1653,23 +1686,100 @@ impl Panel for Terminal {
                     .output();
             }
 
-            let _ = self.child.wait();
+            let _ = self.child.lock().map(|mut c| c.wait());
         }
+    }
+}
+
+impl Terminal {
+    /// Whether the child has exited and been reaped (reaping it if so).
+    fn has_exited(&self) -> bool {
+        self.child
+            .lock()
+            .map(|mut c| matches!(c.try_wait(), Ok(Some(_))))
+            .unwrap_or(false)
     }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // Properly terminate processes when dropping terminal
-        if self.is_alive() {
-            self.kill_processes();
-        }
+        // Ends a child still running and always collects its status, also
+        // for one that closed its terminal but has not exited.
+        self.kill_processes();
     }
 }
 
 #[cfg(all(test, unix))]
 mod device_tests {
     use super::*;
+    use std::io::Write;
+
+    /// A program that stops reading its input (here the holder, which reads
+    /// nothing) must not freeze the UI: typing and pasting far past the PTY
+    /// buffer return at once, and so does closing the panel.
+    #[test]
+    fn input_to_a_program_that_does_not_read_never_blocks() {
+        let Ok((mut term, _device)) = Terminal::new_for_device(10, 40, "app") else {
+            return; // No PTY available.
+        };
+        let start = std::time::Instant::now();
+        let text = "x".repeat(64 * 1024);
+        for _ in 0..16 {
+            term.paste_text(&text).unwrap();
+            term.send_input(b"typed").unwrap();
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "input waited for the program: {:?}",
+            start.elapsed()
+        );
+        let start = std::time::Instant::now();
+        drop(term);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "closing waited for the program: {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// A command line holding a control character is never typed, so a
+    /// name the quoting of the shell could not escape cannot press keys.
+    #[test]
+    fn a_command_with_control_characters_is_not_typed() {
+        let Ok((mut term, device)) = Terminal::new_for_device(10, 40, "app") else {
+            return; // No PTY available.
+        };
+        let tty = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&device)
+            .unwrap();
+        assert!(term.send_command("cd 'x\u{15}touch /tmp/pwned\r'").is_err());
+        term.send_command("echo ok").unwrap();
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(tty), &mut line).unwrap();
+        assert_eq!(line.trim_end(), "echo ok");
+        term.kill_processes();
+    }
+
+    /// A program that exits on its own is reaped while the panel is still
+    /// open, instead of lingering as a zombie until the panel is dropped.
+    #[test]
+    fn a_program_that_exits_is_reaped() {
+        let argv = ["/bin/sh".to_string(), "-c".into(), "exit 0".into()];
+        let Ok(term) = Terminal::new_with_program(10, 40, &argv, None, &[]) else {
+            return; // No PTY available.
+        };
+        let pid = Pid::from_raw(term.child_pid().unwrap() as i32);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // `kill(pid, 0)` still succeeds for a zombie; ESRCH means reaped.
+        while signal::kill(pid, None).is_ok() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
+        assert!(!term.is_alive());
+        drop(term);
+    }
 
     /// What another process writes to the device shows in the panel, and the
     /// panel's input goes to whoever reads the device — the holder reads none.

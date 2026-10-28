@@ -183,4 +183,7 @@ Sockets live in `$XDG_RUNTIME_DIR/termide/` on Linux and BSD, and in
 the machine can attach to your instances.
 
 Nothing there needs cleaning up by hand: a socket outlives its host only until
-the next `--list-instances` or `--detached`, which prunes it.
+the next `--list-instances` or `--detached`, which prunes it. That includes the
+ones left by a reboot (macOS keeps the directory): an instance is recognised by
+its host process's start time as well as its pid, so a pid since taken by
+another program counts as gone, and `--kill` never signals that program.

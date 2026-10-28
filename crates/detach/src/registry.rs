@@ -2,8 +2,12 @@
 //!
 //! There is no central index file: an instance is whatever has a live socket in
 //! the runtime directory. That keeps the registry self-healing — a daemon that
-//! dies without cleaning up leaves a socket whose pid no longer exists, and
+//! dies without cleaning up leaves a socket whose daemon no longer exists, and
 //! [`prune_dead`] removes it on the next listing.
+//!
+//! A pid alone does not identify the daemon: on macOS the runtime directory
+//! survives a reboot, and the recorded pid may since belong to an unrelated
+//! process. [`is_running`] checks the process start time recorded with it.
 
 use anyhow::{Context, Result};
 use std::path::PathBuf;
@@ -18,6 +22,11 @@ pub struct InstanceInfo {
     /// Pid of the daemon, not of the hosted termide: the daemon is what owns
     /// the socket, so its liveness is what decides whether the instance exists.
     pub pid: i32,
+    /// When the daemon process started, as the kernel tells it (an opaque
+    /// value, compared only for equality): with the pid, what identifies the
+    /// daemon. `None` in a sidecar written by an older termide, or where the
+    /// platform does not report it.
+    pub pid_start: Option<u64>,
     pub project: PathBuf,
     /// Seconds since the Unix epoch.
     pub started: u64,
@@ -47,17 +56,22 @@ impl InstanceInfo {
     }
 
     fn serialise(&self) -> String {
-        format!(
-            "pid={}\nproject={}\nstarted={}\nattached={}\n",
-            self.pid,
+        let mut text = format!("pid={}\n", self.pid);
+        if let Some(start) = self.pid_start {
+            text.push_str(&format!("pid_start={start}\n"));
+        }
+        text.push_str(&format!(
+            "project={}\nstarted={}\nattached={}\n",
             self.project.display(),
             self.started,
             u8::from(self.attached)
-        )
+        ));
+        text
     }
 
     fn parse(id: &str, text: &str) -> Option<Self> {
         let mut pid = None;
+        let mut pid_start = None;
         let mut project = None;
         let mut started = None;
         let mut attached = false;
@@ -68,6 +82,7 @@ impl InstanceInfo {
             };
             match key {
                 "pid" => pid = value.parse().ok(),
+                "pid_start" => pid_start = value.parse().ok(),
                 "project" => project = Some(PathBuf::from(value)),
                 "started" => started = value.parse().ok(),
                 "attached" => attached = value == "1",
@@ -78,6 +93,7 @@ impl InstanceInfo {
         Some(InstanceInfo {
             id: id.to_string(),
             pid: pid?,
+            pid_start,
             project: project?,
             started: started.unwrap_or(0),
             attached,
@@ -134,25 +150,76 @@ pub fn remove(id: &str) {
     }
 }
 
-/// Whether a process is still around.
+/// Whether a process of ours with this pid exists.
 ///
-/// `kill(pid, 0)` asks the kernel without touching the daemon, which is why
-/// liveness is probed this way rather than by connecting to the socket — a
-/// connect would arrive at the daemon as a client and have to be rejected.
+/// `kill(pid, 0)` asks the kernel without touching the process. EPERM means
+/// the pid belongs to another user, which a daemon started by this user,
+/// listed in this user's runtime directory, never does.
 #[cfg(unix)]
-pub(crate) fn process_is_alive(pid: i32) -> bool {
+fn pid_is_ours(pid: i32) -> bool {
     use nix::sys::signal::kill;
     use nix::unistd::Pid;
-    // Err(EPERM) means the process exists under another uid, which cannot
-    // happen for our own runtime directory but still counts as alive.
-    !matches!(
-        kill(Pid::from_raw(pid), None),
-        Err(nix::errno::Errno::ESRCH)
-    )
+    pid > 0 && kill(Pid::from_raw(pid), None).is_ok()
+}
+
+/// When process `pid` started, as an opaque value that differs between two
+/// processes that held the same pid.
+#[cfg(target_os = "linux")]
+pub(crate) fn process_start(pid: i32) -> Option<u64> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    // The command name in parentheses may hold spaces; the fields after it
+    // start with the state (field 3), so the start time (field 22) is the
+    // 20th of them.
+    let (_, rest) = stat.rsplit_once(')')?;
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+#[cfg(target_os = "macos")]
+pub(crate) fn process_start(pid: i32) -> Option<u64> {
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: `proc_pidinfo` writes at most `size` bytes into the zeroed
+    // struct it is given, and reports how many it wrote.
+    let info = unsafe {
+        let mut info: libc::proc_bsdinfo = std::mem::zeroed();
+        let written = libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast::<libc::c_void>(),
+            size,
+        );
+        (written == size).then_some(info)
+    }?;
+    Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+pub(crate) fn process_start(_pid: i32) -> Option<u64> {
+    None
+}
+
+/// Whether the daemon of `info` is still running.
+///
+/// The pid must be a live process of ours, and the same process: its start
+/// time must match the recorded one. A sidecar without a start time (older
+/// termide, or a platform that reports none) is taken as running only when
+/// its socket accepts a connection, which a socket left over from a reboot
+/// or a crash does not; a live daemon sees the probe as a client that says
+/// nothing, and drops it.
+#[cfg(unix)]
+pub fn is_running(info: &InstanceInfo) -> bool {
+    if !pid_is_ours(info.pid) {
+        return false;
+    }
+    match (info.pid_start, process_start(info.pid)) {
+        (Some(recorded), Some(current)) => recorded == current,
+        _ => paths::socket_path(&info.id)
+            .is_ok_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok()),
+    }
 }
 
 #[cfg(not(unix))]
-pub(crate) fn process_is_alive(_pid: i32) -> bool {
+pub fn is_running(_info: &InstanceInfo) -> bool {
     false
 }
 
@@ -160,7 +227,7 @@ pub(crate) fn process_is_alive(_pid: i32) -> bool {
 pub fn prune_dead() -> Result<Vec<String>> {
     let mut pruned = Vec::new();
     for info in scan()? {
-        if !process_is_alive(info.pid) {
+        if !is_running(&info) {
             remove(&info.id);
             pruned.push(info.id);
         }
@@ -221,6 +288,7 @@ mod tests {
         InstanceInfo {
             id: "termide".to_string(),
             pid: 4242,
+            pid_start: Some(1_700_000_000_123_456),
             project: PathBuf::from("/home/u/termide"),
             started: 1_700_000_000,
             attached: true,
@@ -251,9 +319,74 @@ mod tests {
 
     #[test]
     fn info_round_trips_through_the_sidecar_format() {
-        let info = sample();
+        let mut info = sample();
         let parsed = InstanceInfo::parse("termide", &info.serialise()).unwrap();
         assert_eq!(parsed, info);
+        info.pid_start = None;
+        let parsed = InstanceInfo::parse("termide", &info.serialise()).unwrap();
+        assert_eq!(parsed, info);
+    }
+
+    fn own_process(id: &str) -> InstanceInfo {
+        let pid = std::process::id() as i32;
+        InstanceInfo {
+            id: id.to_string(),
+            pid,
+            pid_start: process_start(pid),
+            ..sample()
+        }
+    }
+
+    // Regression: a sidecar that survived a reboot (macOS keeps the runtime
+    // directory) names a pid that now belongs to some other process. That
+    // process is not the daemon: never pruned, it could be killed by
+    // `--kill`.
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn a_reused_pid_is_not_the_daemon() {
+        let mut info = own_process("test-reused-pid");
+        assert!(info.pid_start.is_some());
+        assert!(is_running(&info), "the recorded process itself");
+        info.pid_start = info.pid_start.map(|start| start + 1);
+        assert!(!is_running(&info), "another process under the same pid");
+    }
+
+    // A pid of another user (here init/launchd, unless the tests run as
+    // root) cannot be a daemon from this user's runtime directory.
+    #[cfg(unix)]
+    #[test]
+    fn a_process_of_another_user_is_not_the_daemon() {
+        // SAFETY: `geteuid` only reads the process credentials.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let info = InstanceInfo {
+            pid: 1,
+            pid_start: None,
+            ..own_process("test-other-user")
+        };
+        assert!(!is_running(&info));
+    }
+
+    // A sidecar from an older termide records no start time: the daemon is
+    // the one listening on the socket, and a socket nobody listens on is a
+    // leftover.
+    #[cfg(unix)]
+    #[test]
+    fn without_a_start_time_the_socket_must_answer() {
+        let id = "test-legacy-sidecar";
+        let socket = paths::socket_path(id).unwrap();
+        let _ = std::fs::remove_file(&socket);
+        let info = InstanceInfo {
+            pid_start: None,
+            ..own_process(id)
+        };
+        assert!(!is_running(&info), "no socket at all");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        assert!(is_running(&info), "a daemon listening");
+        drop(listener);
+        assert!(!is_running(&info), "a socket left behind");
+        let _ = std::fs::remove_file(&socket);
     }
 
     #[test]

@@ -6,7 +6,6 @@
 //! - Pasting from clipboard to PTY
 
 use anyhow::Result;
-use std::io::Write;
 use std::sync::RwLock;
 
 use crate::terminal::TerminalScreen;
@@ -85,8 +84,9 @@ pub fn get_clipboard_text() -> Option<String> {
     termide_ui::clipboard::paste_text_or_paths()
 }
 
-/// Send paste data as a single atomic write with optional bracketed paste.
-pub fn paste_atomic<W: Write>(writer: &mut W, text: &str, bracketed: bool) -> Result<()> {
+/// Paste data as one chunk, so nothing interleaves with it, optionally
+/// wrapped in bracketed-paste markers.
+pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
     let mut buffer = Vec::with_capacity(text.len() + 14);
 
     if bracketed {
@@ -97,8 +97,5 @@ pub fn paste_atomic<W: Write>(writer: &mut W, text: &str, bracketed: bool) -> Re
         buffer.extend_from_slice(b"\x1b[201~");
     }
 
-    writer.write_all(&buffer)?;
-    writer.flush()?;
-
-    Ok(())
+    buffer
 }

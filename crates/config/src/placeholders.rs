@@ -26,9 +26,15 @@ pub enum PlaceholderValue {
 /// The quoting rules of the shell that reads a command line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Quoting {
-    /// sh, bash, zsh and the like.
+    /// sh, dash and the like: nothing in a quoted value expands, but a
+    /// control character in it stays a raw byte, which a line editor takes
+    /// for a key when the line is typed into an interactive shell.
     Posix,
-    /// fish, whose single quotes take `\\` and `\'` as escapes.
+    /// bash, zsh and ksh: POSIX quoting, with control characters written as
+    /// `$'\NNN'` escapes, so a value types into the shell as text.
+    Bash,
+    /// fish, whose single quotes take `\\` and `\'` as escapes; control
+    /// characters are written as `\xHH` escapes outside them.
     Fish,
     /// Windows PowerShell and PowerShell Core.
     PowerShell,
@@ -52,6 +58,55 @@ fn ps_single_quote(c: char) -> bool {
 
 fn ps_double_quote(c: char) -> bool {
     matches!(c, '"' | '\u{201C}' | '\u{201D}' | '\u{201E}')
+}
+
+/// Whether `value` holds a character a line editor takes for a key.
+fn has_control(value: &str) -> bool {
+    value.contains(|c: char| c.is_ascii_control())
+}
+
+/// `value` split into runs of control characters (`true`) and of others.
+fn control_runs(value: &str) -> impl Iterator<Item = (bool, &str)> {
+    let mut rest = value;
+    std::iter::from_fn(move || {
+        let first = rest.chars().next()?;
+        let control = first.is_ascii_control();
+        let len = rest
+            .find(|c: char| c.is_ascii_control() != control)
+            .unwrap_or(rest.len());
+        let (run, tail) = rest.split_at(len);
+        rest = tail;
+        Some((control, run))
+    })
+}
+
+/// `value` as one word of quoted parts: the plain runs as `plain` quotes
+/// them, each control character as `control` escapes it.
+fn with_escaped_controls(
+    value: &str,
+    plain: impl Fn(&str) -> String,
+    control: impl Fn(&str) -> String,
+) -> String {
+    if !has_control(value) {
+        return plain(value);
+    }
+    control_runs(value)
+        .map(|(is_control, run)| if is_control { control(run) } else { plain(run) })
+        .collect()
+}
+
+/// Control characters as one `$'…'` word, in fixed-width octal escapes
+/// (ksh reads `\xHH` greedily past two digits).
+fn ansi_c_controls(run: &str) -> String {
+    let escapes: String = run.chars().map(|c| format!("\\{:03o}", c as u32)).collect();
+    format!("$'{escapes}'")
+}
+
+/// Control characters as fish's unquoted `\xHH` escapes.
+fn fish_controls(run: &str) -> String {
+    run.chars()
+        .map(|c| format!("\\x{:02x}", c as u32))
+        .collect()
 }
 
 /// `value` inside fish's single quotes: `\` and `'` escaped by a `\`.
@@ -80,12 +135,22 @@ impl Quoting {
     fn quote_within(self, value: &str, within: Within) -> String {
         match (self, within) {
             (Self::Posix, Within::Bare) => format!("'{}'", value.replace('\'', r"'\''")),
+            (Self::Bash, Within::Bare) => {
+                with_escaped_controls(value, |run| Self::Posix.quote(run), ansi_c_controls)
+            }
             // Out of the quotes, the value in single ones, back in: adjacent
             // quoted parts make one word, and nothing expands in '…', not
             // even an interactive bash's `!`.
-            (Self::Posix, Within::Single) => format!("'{}'", Self::Posix.quote(value)),
-            (Self::Posix, Within::Double) => format!("\"{}\"", Self::Posix.quote(value)),
-            (Self::Fish, Within::Bare) => format!("'{}'", fish_in_single(value)),
+            (Self::Posix | Self::Bash, Within::Single) => format!("'{}'", self.quote(value)),
+            (Self::Posix | Self::Bash, Within::Double) => format!("\"{}\"", self.quote(value)),
+            (Self::Fish, Within::Bare) => with_escaped_controls(
+                value,
+                |run| format!("'{}'", fish_in_single(run)),
+                fish_controls,
+            ),
+            (Self::Fish, Within::Single) if has_control(value) => {
+                format!("'{}'", Self::Fish.quote(value))
+            }
             (Self::Fish, Within::Single) => fish_in_single(value),
             (Self::Fish, Within::Double) => format!("\"{}\"", Self::Fish.quote(value)),
             (Self::PowerShell, Within::Bare) => format!("'{}'", ps_in_single(value)),
@@ -120,7 +185,7 @@ impl Quoting {
                 }
                 chars.next();
                 let escape = match (self, within) {
-                    (Self::Posix, Within::Bare | Within::Double) => c == '\\',
+                    (Self::Posix | Self::Bash, Within::Bare | Within::Double) => c == '\\',
                     (Self::Fish, _) => c == '\\',
                     (Self::PowerShell, Within::Bare | Within::Double) => c == '`',
                     (Self::Cmd, Within::Bare) => c == '^',
@@ -133,10 +198,18 @@ impl Quoting {
                     continue;
                 }
                 within = match (self, within) {
-                    (Self::Posix | Self::Fish, Within::Bare) if c == '\'' => Within::Single,
-                    (Self::Posix | Self::Fish, Within::Bare) if c == '"' => Within::Double,
-                    (Self::Posix | Self::Fish, Within::Single) if c == '\'' => Within::Bare,
-                    (Self::Posix | Self::Fish, Within::Double) if c == '"' => Within::Bare,
+                    (Self::Posix | Self::Bash | Self::Fish, Within::Bare) if c == '\'' => {
+                        Within::Single
+                    }
+                    (Self::Posix | Self::Bash | Self::Fish, Within::Bare) if c == '"' => {
+                        Within::Double
+                    }
+                    (Self::Posix | Self::Bash | Self::Fish, Within::Single) if c == '\'' => {
+                        Within::Bare
+                    }
+                    (Self::Posix | Self::Bash | Self::Fish, Within::Double) if c == '"' => {
+                        Within::Bare
+                    }
                     (Self::PowerShell, Within::Bare) if ps_single_quote(c) => Within::Single,
                     (Self::PowerShell, Within::Bare) if ps_double_quote(c) => Within::Double,
                     // A doubled quote inside its kind is the quote itself.
@@ -396,6 +469,57 @@ mod tests {
         assert_eq!(
             expand_placeholder_words(&words, &v),
             ["p4", "add", "a b", "$(c)", "--x=a b $(c)"]
+        );
+    }
+
+    /// What `shell` makes of `line`: the arguments `printf` gets.
+    #[cfg(unix)]
+    fn shell_args(shell: &str, line: &str) -> Option<Vec<u8>> {
+        let out = std::process::Command::new(shell)
+            .arg("-c")
+            .arg(format!("printf '[%s]' {line}"))
+            .output()
+            .ok()?;
+        Some(out.stdout)
+    }
+
+    // A control character typed into a shell is a key to its line editor
+    // (Ctrl+U erases the line, CR runs it), so in bash, zsh and ksh it must
+    // reach the line as an escape, never as the raw byte.
+    #[cfg(unix)]
+    #[test]
+    fn bash_writes_control_characters_as_escapes() {
+        let evil = "x\u{15}touch /tmp/pwned\r'\t\x7f\n$(id)\u{1}9";
+        let v = values(&[("file", one(evil))]);
+        let bash = |t| expand_placeholders(t, &v, Quoting::Bash);
+        for line in [bash("{file}"), bash("\"at {file}\""), bash("'at {file}'")] {
+            assert!(!has_control(&line), "{line:?}");
+        }
+        assert_eq!(Quoting::Bash.quote("a\u{15}b'"), r"'a'$'\025''b'\'''");
+        assert_eq!(Quoting::Bash.quote("it's"), Quoting::Posix.quote("it's"));
+        assert_eq!(Quoting::Bash.quote(""), "''");
+        for shell in ["bash", "zsh", "ksh"] {
+            let Some(out) = shell_args(shell, &bash("{file}")) else {
+                continue; // Not installed.
+            };
+            assert_eq!(out, format!("[{evil}]").into_bytes(), "{shell}");
+            let out = shell_args(shell, &bash("\"at {file}\"")).unwrap();
+            assert_eq!(out, format!("[at {evil}]").into_bytes(), "{shell}");
+            let out = shell_args(shell, &bash("'at {file}'")).unwrap();
+            assert_eq!(out, format!("[at {evil}]").into_bytes(), "{shell}");
+        }
+    }
+
+    #[test]
+    fn fish_writes_control_characters_as_escapes() {
+        let fish = |v: &str| Quoting::Fish.quote(v);
+        assert_eq!(fish("a\u{15}\rb'"), r"'a'\x15\x0d'b\''");
+        assert_eq!(fish("\n"), r"\x0a");
+        assert_eq!(fish(""), "''");
+        let v = values(&[("file", one("a\u{15}b"))]);
+        assert_eq!(
+            expand_placeholders("cat 'at {file}'", &v, Quoting::Fish),
+            r"cat 'at ''a'\x15'b'''"
         );
     }
 

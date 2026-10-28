@@ -473,11 +473,15 @@ fn main() -> Result<()> {
     // Skipped with file arguments: `git commit` and friends wait for the editor
     // to exit, and a detach would tell them the edit finished when it had not.
     // Skipped inside a hosted instance for the obvious reason.
+    //
+    // Asking whether this process is hosted also takes the hosting variables
+    // out of the environment, which must happen before any thread exists.
     #[cfg(unix)]
-    if config.general.always_detachable
-        && cli.files.is_empty()
-        && std::env::var_os(termide_detach::SOCKET_ENV).is_none()
-    {
+    let hosted = termide_detach::is_hosted();
+    #[cfg(not(unix))]
+    let hosted = false;
+    #[cfg(unix)]
+    if config.general.always_detachable && cli.files.is_empty() && !hosted {
         let id = termide_detach::spawn_detached(&project_root, &hosted_args(&cli))?;
         let code = termide_detach::client::attach(Some(id), false)?;
         std::process::exit(code);
@@ -572,10 +576,6 @@ fn main() -> Result<()> {
     // call, and the frame diff must agree with it. A hosted instance has the
     // daemon at the other end of its PTY, which answers no query: there the
     // attach client probes its own terminal and hands the answer over.
-    #[cfg(unix)]
-    let hosted = std::env::var_os(termide_detach::SOCKET_ENV).is_some();
-    #[cfg(not(unix))]
-    let hosted = false;
     let vs16_probe = if hosted {
         None
     } else {
