@@ -1333,6 +1333,7 @@ settings_ai_connection_context_limit_min_fmt = "für Claude Code mindestens {val
 projects_delete_failed_fmt = "Gespeichertes Layout konnte nicht gelöscht werden: {error}"
 command_edit_title_fmt = "Befehl bearbeiten: {name}"
 command_run_failed_fmt = "Befehl konnte nicht ausgeführt werden: {error}"
+terminal_control_chars_refused_fmt = "{shell}: Der Pfad enthält Steuerzeichen, die diese Shell nicht sicher annehmen kann, daher wurde der Befehl nicht eingegeben"
 command_needs_context_fmt = "Dieser Befehl verwendet {placeholder}, das das fokussierte Panel nicht hat: Fokussieren Sie zuerst einen Editor oder Dateimanager"
 command_needs_editor_fmt = "Dieser Befehl verwendet {placeholder}, das nur ein Editor hat: Fokussieren Sie zuerst einen Editor"
 debug_current_file_fmt = "{file} unter {debugger}"

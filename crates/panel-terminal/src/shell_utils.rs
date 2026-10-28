@@ -337,7 +337,7 @@ pub fn get_shell_args(shell_path: &str) -> Vec<&'static str> {
 }
 
 /// Lowercased executable name without `.exe`.
-fn shell_name(shell_path: &str) -> String {
+pub(crate) fn shell_name(shell_path: &str) -> String {
     let shell_name = std::path::Path::new(shell_path)
         .file_name()
         .and_then(|n| n.to_str())

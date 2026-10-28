@@ -134,6 +134,11 @@ pub struct Terminal {
     sync_timeout_redrawn: Option<std::time::Instant>,
     /// Syntax the shell expects when the app types a command into it.
     shell_kind: shell_utils::ShellKind,
+    /// Name of the shell (`dash`, `nu`, `pwsh`…), for messages about it.
+    shell_name: String,
+    /// Events raised outside the event-returning handlers (a refused
+    /// [`Terminal::send_command`]), handed over on the next tick.
+    pending_events: Vec<PanelEvent>,
 }
 
 /// Where a terminal panel's title text comes from.
@@ -321,6 +326,8 @@ impl Terminal {
             last_reported_cwd: None,
             sync_timeout_redrawn: None,
             shell_kind: shell_utils::ShellKind::default(),
+            shell_name: "sh".to_string(),
+            pending_events: Vec::new(),
         }
     }
 
@@ -439,6 +446,7 @@ impl Terminal {
         term.title = TitleSource::Shell { user_host };
         term.initial_cwd = working_dir;
         term.shell_kind = shell_utils::ShellKind::from_shell_path(shell_path);
+        term.shell_name = shell_utils::shell_name(shell_path);
         Ok(term)
     }
 
@@ -710,10 +718,13 @@ impl Terminal {
     /// what follows), so a file name could run a command of its own.
     /// Quoting escapes such characters for the shells that can
     /// ([`shell_utils::ShellKind::quote`]); for the others this refusal is
-    /// what keeps the name from being typed.
+    /// what keeps the name from being typed, and the user is told so
+    /// through a [`PanelEvent::ShowError`] on the next tick.
     pub fn send_command(&mut self, command: &str) -> Result<()> {
         if command.contains(|c: char| c.is_ascii_control()) {
             log::warn!("Not typing a command with control characters: {command:?}");
+            let message = termide_i18n::t().terminal_control_chars_refused_fmt(&self.shell_name);
+            self.pending_events.push(PanelEvent::ShowError(message));
             anyhow::bail!("the command holds control characters and is not typed into the shell");
         }
         let mut line = Vec::with_capacity(command.len() + 1);
@@ -1400,7 +1411,7 @@ impl Panel for Terminal {
     }
 
     fn tick(&mut self) -> Vec<PanelEvent> {
-        let mut events = Vec::new();
+        let mut events = std::mem::take(&mut self.pending_events);
 
         // A `cd` inside the shell changes what this panel's directory means to
         // the rest of the app (watched roots, the git panels' repository list).
@@ -1755,6 +1766,21 @@ mod device_tests {
             .open(&device)
             .unwrap();
         assert!(term.send_command("cd 'x\u{15}touch /tmp/pwned\r'").is_err());
+        // The user is told, not left wondering why nothing happened.
+        let refused = termide_i18n::t().terminal_control_chars_refused_fmt("sh");
+        let events = term.tick();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| matches!(e, PanelEvent::ShowError(m) if *m == refused))
+                .count(),
+            1,
+            "{events:?}"
+        );
+        assert!(!term
+            .tick()
+            .iter()
+            .any(|e| matches!(e, PanelEvent::ShowError(_))));
         term.send_command("echo ok").unwrap();
         let mut line = String::new();
         std::io::BufRead::read_line(&mut std::io::BufReader::new(tty), &mut line).unwrap();

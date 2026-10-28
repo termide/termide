@@ -729,8 +729,10 @@ impl App {
 
                 // Try as Terminal
                 if let Some(terminal) = panel.as_terminal_mut() {
-                    let _ = terminal.send_cd(path);
-                    self.state.set_info(format!("cd {}", path.display()));
+                    // A refused `cd` reports itself on the terminal's next tick.
+                    if terminal.send_cd(path).is_ok() {
+                        self.state.set_info(format!("cd {}", path.display()));
+                    }
                     return Ok(());
                 }
 

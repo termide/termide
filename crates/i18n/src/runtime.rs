@@ -2278,6 +2278,10 @@ impl Translation for RuntimeTranslation {
         self.format("command_run_failed_fmt", &[("error", error)])
     }
 
+    fn terminal_control_chars_refused_fmt(&self, shell: &str) -> String {
+        self.format("terminal_control_chars_refused_fmt", &[("shell", shell)])
+    }
+
     fn command_needs_context_fmt(&self, placeholder: &str) -> String {
         self.format("command_needs_context_fmt", &[("placeholder", placeholder)])
     }

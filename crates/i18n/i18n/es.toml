@@ -1332,6 +1332,7 @@ settings_ai_connection_context_limit_min_fmt = "al menos {value} para Claude Cod
 projects_delete_failed_fmt = "No se pudo eliminar la disposición guardada: {error}"
 command_edit_title_fmt = "Editar comando: {name}"
 command_run_failed_fmt = "No se pudo ejecutar el comando: {error}"
+terminal_control_chars_refused_fmt = "{shell}: la ruta contiene caracteres de control que este shell no puede recibir de forma segura, así que el comando no se escribió"
 command_needs_context_fmt = "Este comando usa {placeholder}, que el panel enfocado no tiene: enfoque primero un editor o un gestor de archivos"
 command_needs_editor_fmt = "Este comando usa {placeholder}, que solo tiene un editor: enfoque primero un editor"
 debug_current_file_fmt = "{file} con {debugger}"

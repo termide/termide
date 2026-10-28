@@ -194,7 +194,7 @@ key = "Alt+E"
 每个值都会按读取该命令行的程序进行引用，因此包含空格、引号或 `;` 的路径始终是一个参数，绝不会被当作命令执行：
 
 - `background` 和 `report` 命令通过 `sh -c` 运行：使用 POSIX 引用。
-- `terminal` 命令按终端的 shell 引用：sh、bash、zsh 等使用 POSIX，fish 使用其自身的规则，PowerShell 使用 `'…'`，cmd 使用 `"…"`。cmd 没有字面引用，因此值中的 `%name%` 在那里仍会被展开。值中的控制字符（含制表符、换行或 Ctrl+U 的文件名）一旦输入就会像按键一样生效，因此 bash、zsh 和 ksh 以 `$'\NNN'` 转义的形式接收它，fish 以 `\xHH` 的形式接收；对于没有此类转义的 sh 及其他 shell、PowerShell 和 cmd，该命令根本不会被输入。
+- `terminal` 命令按终端的 shell 引用：sh、bash、zsh 等使用 POSIX，fish 使用其自身的规则，PowerShell 使用 `'…'`，cmd 使用 `"…"`。cmd 没有字面引用，因此值中的 `%name%` 在那里仍会被展开。值中的控制字符（含制表符、换行或 Ctrl+U 的文件名）一旦输入就会像按键一样生效，因此 bash、zsh 和 ksh 以 `$'\NNN'` 转义的形式接收它，fish 以 `\xHH` 的形式接收；对于没有此类转义的 sh 及其他 shell、PowerShell 和 cmd，该命令根本不会被输入，并会显示一条注明 shell 名称的错误消息。
 - 调试命令的命令行先拆分为词，再把值放入其中，每个值为一个词（`{files}` 为多个）；其 `build` 使用 POSIX 引用。
 
 占位符可以写在任何位置：作为独立的词（`p4 edit {file}`）、写在引号中（`"{file}"`），或位于更长的引号字符串中（`"at {file}"`、`'at {file}'`）。值会按其所在位置进行引用，因此在任何情况下都按字面理解：名为 `$(rm -rf ~).c` 的文件只是一个名称。引号中的 `{files}` 会成为一个词，与引号中的其他内容一样。为 shell 转义过的占位符（sh 中的 `\{file}`、PowerShell 中的 `` `{file} ``、cmd 中的 `^{file}`）保持原样。只有上面列出的名称和命令的参数会被替换：其他花括号保持原样，因此 `awk '{print $1}'`、`docker inspect -f '{{.Name}}'`、花括号展开和 `${VAR}` 都不受影响。

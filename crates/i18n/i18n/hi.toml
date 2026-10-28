@@ -1332,6 +1332,7 @@ settings_ai_connection_context_limit_min_fmt = "Claude Code के लिए क
 projects_delete_failed_fmt = "सहेजा गया लेआउट हटाया नहीं जा सका: {error}"
 command_edit_title_fmt = "कमांड संपादित करें: {name}"
 command_run_failed_fmt = "कमांड चलाई नहीं जा सकी: {error}"
+terminal_control_chars_refused_fmt = "{shell}: पथ में नियंत्रण वर्ण हैं जिन्हें इस शेल को सुरक्षित रूप से नहीं दिया जा सकता, इसलिए कमांड टाइप नहीं की गई"
 command_needs_context_fmt = "यह कमांड {placeholder} का उपयोग करती है, जो फ़ोकस वाले पैनल में नहीं है: पहले किसी एडिटर या फ़ाइल मैनेजर पर फ़ोकस करें"
 command_needs_editor_fmt = "यह कमांड {placeholder} का उपयोग करती है, जो केवल एडिटर में होता है: पहले किसी एडिटर पर फ़ोकस करें"
 debug_current_file_fmt = "{debugger} के अंतर्गत {file}"

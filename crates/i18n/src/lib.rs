@@ -905,6 +905,9 @@ pub trait Translation: Send + Sync {
     fn projects_delete_failed_fmt(&self, error: &str) -> String;
     fn command_edit_title_fmt(&self, name: &str) -> String;
     fn command_run_failed_fmt(&self, error: &str) -> String;
+    /// A terminal refused to type a line holding control characters: its
+    /// shell has no safe way to escape them.
+    fn terminal_control_chars_refused_fmt(&self, shell: &str) -> String;
     fn command_needs_context_fmt(&self, placeholder: &str) -> String;
     fn command_needs_editor_fmt(&self, placeholder: &str) -> String;
     fn debug_current_file_fmt(&self, file: &str, debugger: &str) -> String;
