@@ -83,10 +83,11 @@ impl ImagePanel {
 
     /// Check if graphics protocol is available in the current terminal.
     ///
-    /// This queries the parent terminal for graphics capabilities.
-    /// Returns true if Kitty, Sixel, or iTerm2 protocol is supported.
+    /// The parent terminal is asked once per process, through
+    /// [`inline::Graphics::detect`]: each query leaves a thread reading
+    /// stdin when the answer is late, which then takes termide's keys.
     pub fn graphics_available() -> bool {
-        Picker::from_query_stdio().is_ok()
+        inline::Graphics::detect().is_some()
     }
 
     /// Update the displayed image to a new path.
@@ -106,11 +107,12 @@ impl ImagePanel {
     fn load_image(&mut self, path: &Path) {
         // Initialize picker if not already done
         if self.picker.is_none() {
-            match Picker::from_query_stdio() {
-                Ok(picker) => self.picker = Some(picker),
-                Err(e) => {
+            match inline::Graphics::detect() {
+                Some(graphics) => self.picker = Some(graphics.into_picker()),
+                None => {
                     let t = termide_i18n::t();
-                    self.error = Some(t.image_error_fmt(&e.to_string()));
+                    self.error =
+                        Some(t.image_error_fmt("the terminal did not answer the graphics query"));
                     return;
                 }
             }

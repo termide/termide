@@ -31,6 +31,12 @@ impl Graphics {
     /// and reads its answer, so call it between frames, never while one is
     /// drawn. `None` when the terminal cannot be asked at all; a terminal
     /// with no graphics protocol gets half-block pictures.
+    ///
+    /// Once is a must, not a saving: `ratatui-image` reads the answer on a
+    /// thread of its own, and when the answer is late the call gives up but
+    /// the thread reads stdin on, taking keys and halves of escape sequences
+    /// from termide for the rest of its life. Every image path goes through
+    /// here rather than querying itself.
     #[must_use]
     pub fn detect() -> Option<Self> {
         static DETECTED: OnceLock<Option<Picker>> = OnceLock::new();
@@ -38,6 +44,12 @@ impl Graphics {
             .get_or_init(|| Picker::from_query_stdio().ok())
             .clone()
             .map(|picker| Self { picker })
+    }
+
+    /// The picker, for a widget that draws through `ratatui-image` itself.
+    #[must_use]
+    pub fn into_picker(self) -> Picker {
+        self.picker
     }
 
     /// Half-block pictures, without asking the terminal.
