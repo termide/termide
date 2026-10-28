@@ -12412,6 +12412,233 @@ fn a_diagram_taller_than_half_the_panel_is_a_card_until_unfolded() {
     assert!(!shows_diagram(&panel), "the next folds it");
 }
 
+/// An answer with a sequence diagram far wider than a 40-column panel.
+const WIDE_DIAGRAM_REPLY: &str = "Here:\n\n```mermaid\nsequenceDiagram\n\
+    Alice->>Bob: a rather long message that goes on and on and on\n\
+    Bob->>Alice: ok\n```\n\ndone";
+
+/// A 40×40 panel showing [`WIDE_DIAGRAM_REPLY`], its answer selected in
+/// the chat, and the wide diagram on screen.
+fn wide_diagram_panel() -> (AgentPanel, crate::pan::DiagramSpot) {
+    let mut panel = panel(vec![reply(WIDE_DIAGRAM_REPLY)]);
+    send(&mut panel, "draw");
+    let _ = render_text(&mut panel, 40, 40);
+    let spot = match panel.transcript.wide_diagrams() {
+        [spot] => *spot,
+        spots => panic!("one wide diagram expected: {spots:?}"),
+    };
+    panel.chat_focus = true;
+    panel.selected = spot.item;
+    (panel, spot)
+}
+
+/// The screen row flattened line `line` is drawn on.
+fn screen_row(panel: &AgentPanel, line: usize) -> u16 {
+    panel.transcript_area.y + (line - panel.top) as u16
+}
+
+fn wheel(kind: MouseEventKind, column: u16, row: u16, modifiers: KeyModifiers) -> MouseEvent {
+    MouseEvent {
+        kind,
+        column,
+        row,
+        modifiers,
+    }
+}
+
+#[test]
+fn a_wide_diagram_gets_a_scrollbar_row_and_one_that_fits_does_not() {
+    let (mut panel, spot) = wide_diagram_panel();
+    assert_eq!((spot.col, spot.view), (4, 35));
+    assert!(spot.cols > spot.view);
+    let rows = render_text(&mut panel, 40, 40);
+    let track = &rows[screen_row(&panel, spot.track()) as usize];
+    assert!(track.starts_with("  ┊ ━"), "{rows:#?}");
+    assert!(track.contains('─'), "the thumb is shorter than the track");
+    assert_eq!(panel.diagram_bars.len(), 1);
+
+    let mut narrow = panel_with_reply(DIAGRAM_REPLY);
+    let rows = render_text(&mut narrow, 60, 40);
+    assert!(shows_diagram(&narrow));
+    assert!(narrow.transcript.wide_diagrams().is_empty());
+    assert!(narrow.diagram_bars.is_empty());
+    assert!(!rows.iter().any(|row| row.contains('━')), "{rows:#?}");
+}
+
+fn panel_with_reply(text: &str) -> AgentPanel {
+    let mut panel = panel(vec![reply(text)]);
+    send(&mut panel, "draw");
+    panel
+}
+
+#[test]
+fn panning_shifts_the_diagram_but_not_its_bar_and_copies_what_shows() {
+    let (mut panel, spot) = wide_diagram_panel();
+    let before = panel.transcript.rendered().to_vec();
+    let y = screen_row(&panel, spot.line + 1) as usize;
+    let unpanned = render_text(&mut panel, 40, 40)[y].clone();
+
+    let shift = |code| chord(code, KeyModifiers::SHIFT);
+    assert!(!panel.handle_key(shift(KeyCode::Right)).is_empty());
+    assert_eq!(panel.transcript.pan_of(&spot), crate::pan::KEY_STEP);
+    let panned = render_text(&mut panel, 40, 40)[y].clone();
+    let cut = |row: &str, skip: usize| -> String {
+        let chars: Vec<char> = row.chars().collect();
+        chars[..4]
+            .iter()
+            .chain(&chars[4 + skip..39 + skip])
+            .collect()
+    };
+    assert_eq!(&panned[..panned.char_indices().nth(4).unwrap().0], "  ┊ ");
+    let full: String = before[spot.line + 1]
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    let full = format!("{full:<200}");
+    assert_eq!(
+        panned.chars().take(39).collect::<String>(),
+        cut(&full, crate::pan::KEY_STEP),
+        "{unpanned:?} → {panned:?}"
+    );
+    // The laid-out lines stay those of the whole diagram: block copy, links
+    // and line mapping read the same as before.
+    assert_eq!(panel.transcript.rendered(), &before[..]);
+    // Left pans back; at the edge it redraws nothing.
+    assert!(!panel.handle_key(shift(KeyCode::Left)).is_empty());
+    assert!(panel.handle_key(shift(KeyCode::Left)).is_empty());
+    assert_eq!(render_text(&mut panel, 40, 40)[y], unpanned);
+
+    // A mouse selection over a panned row copies the cells it covers.
+    panel.handle_key(shift(KeyCode::Right));
+    let _ = render_text(&mut panel, 40, 40);
+    let area = panel.transcript_area;
+    let y = y as u16;
+    panel.handle_mouse(
+        wheel(
+            MouseEventKind::Down(MouseButton::Left),
+            4,
+            y,
+            KeyModifiers::NONE,
+        ),
+        area,
+    );
+    panel.handle_mouse(
+        wheel(
+            MouseEventKind::Drag(MouseButton::Left),
+            38,
+            y,
+            KeyModifiers::NONE,
+        ),
+        area,
+    );
+    panel.handle_mouse(
+        wheel(
+            MouseEventKind::Up(MouseButton::Left),
+            38,
+            y,
+            KeyModifiers::NONE,
+        ),
+        area,
+    );
+    let selection = panel.text_selection.expect("a selection");
+    let copied = selection.text(&panel.shown_rows(), panel.transcript.rendered_copy(), 39);
+    let shown: String = cut(&full, crate::pan::KEY_STEP).chars().skip(4).collect();
+    assert_eq!(copied, shown.trim_end());
+}
+
+#[test]
+fn the_wheel_pans_a_wide_diagram_only_over_it() {
+    let (mut panel, spot) = wide_diagram_panel();
+    let area = panel.transcript_area;
+    let on = screen_row(&panel, spot.line);
+    let off = screen_row(&panel, spot.line) - 2;
+    let none = KeyModifiers::NONE;
+    let step = crate::pan::WHEEL_STEP;
+
+    panel.handle_mouse(wheel(MouseEventKind::ScrollRight, 10, on, none), area);
+    assert_eq!(panel.transcript.pan_of(&spot), step);
+    panel.handle_mouse(wheel(MouseEventKind::ScrollLeft, 10, on, none), area);
+    assert_eq!(panel.transcript.pan_of(&spot), 0);
+    // Off the diagram, a horizontal wheel does nothing.
+    assert!(panel
+        .handle_mouse(wheel(MouseEventKind::ScrollRight, 10, off, none), area)
+        .is_empty());
+    assert_eq!(panel.transcript.pan_of(&spot), 0);
+
+    // Shift+wheel, coalesced or not, pans it — on its scrollbar row too.
+    let track = screen_row(&panel, spot.track());
+    panel.handle_wheel(
+        wheel(MouseEventKind::ScrollDown, 10, track, KeyModifiers::SHIFT),
+        2,
+        area,
+    );
+    assert_eq!(panel.transcript.pan_of(&spot), 2 * step);
+    panel.handle_mouse(
+        wheel(MouseEventKind::ScrollUp, 10, on, KeyModifiers::SHIFT),
+        area,
+    );
+    assert_eq!(panel.transcript.pan_of(&spot), step);
+    // The plain wheel still scrolls the transcript, over the diagram too.
+    let top = panel.top;
+    panel.follow = false;
+    panel.handle_wheel(wheel(MouseEventKind::ScrollUp, 10, on, none), -1, area);
+    assert_eq!(panel.transcript.pan_of(&spot), step);
+    assert!(panel.top < top || top == 0);
+}
+
+#[test]
+fn a_wide_diagrams_scrollbar_pans_it_on_click_and_drag() {
+    let (mut panel, spot) = wide_diagram_panel();
+    let area = panel.transcript_area;
+    let y = screen_row(&panel, spot.track());
+    let none = KeyModifiers::NONE;
+    let right_end = spot.col + spot.view - 1;
+    // A click at the track's far end brings the diagram's end into view.
+    panel.handle_mouse(
+        wheel(MouseEventKind::Down(MouseButton::Left), right_end, y, none),
+        area,
+    );
+    panel.handle_mouse(
+        wheel(MouseEventKind::Up(MouseButton::Left), right_end, y, none),
+        area,
+    );
+    assert_eq!(panel.transcript.pan_of(&spot), spot.max_pan());
+    assert!(panel.text_selection.is_none(), "no text was selected");
+    let _ = render_text(&mut panel, 40, 40);
+    // The thumb dragged back to the start pans back.
+    let thumb = panel.diagram_bars[0].1;
+    let grab = spot.col + thumb.thumb_pos;
+    panel.handle_mouse(
+        wheel(MouseEventKind::Down(MouseButton::Left), grab, y, none),
+        area,
+    );
+    panel.handle_mouse(
+        wheel(MouseEventKind::Drag(MouseButton::Left), spot.col, y, none),
+        area,
+    );
+    panel.handle_mouse(
+        wheel(MouseEventKind::Up(MouseButton::Left), spot.col, y, none),
+        area,
+    );
+    assert_eq!(panel.transcript.pan_of(&spot), 0);
+}
+
+#[test]
+fn a_diagrams_pan_clamps_to_its_width() {
+    let (mut panel, spot) = wide_diagram_panel();
+    for _ in 0..100 {
+        panel.handle_key(chord(KeyCode::Right, KeyModifiers::SHIFT));
+    }
+    assert_eq!(panel.transcript.pan_of(&spot), spot.max_pan());
+    // Wider, the same diagram has less to pan: the offset clamps to it.
+    let _ = render_text(&mut panel, 50, 40);
+    let wider = panel.transcript.wide_diagrams()[0];
+    assert_eq!(wider.key(), spot.key());
+    assert!(wider.max_pan() < spot.max_pan());
+    assert_eq!(panel.transcript.pan_of(&wider), wider.max_pan());
+}
+
 /// A `w`×`h` red PNG as base64.
 fn png(w: u32, h: u32) -> String {
     use base64::Engine;

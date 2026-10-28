@@ -305,7 +305,7 @@ impl App {
             && mouse.row >= area.y
             && mouse.row < area.y + area.height;
         if inside {
-            let events = panel.handle_scroll(delta, area);
+            let events = panel.handle_wheel(mouse, delta, area);
             self.overlay_events(events)?;
             self.state.needs_redraw = true;
         }

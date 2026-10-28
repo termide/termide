@@ -280,7 +280,7 @@ impl App {
         if let Some((group_idx, panel_idx, rect)) = self.find_panel_at(mouse.column, mouse.row) {
             if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
                 if let Some(panel) = group.panels_mut().get_mut(panel_idx) {
-                    let events = panel.handle_scroll(delta, rect);
+                    let events = panel.handle_wheel(mouse, delta, rect);
                     self.process_panel_events(events)?;
                 }
             }

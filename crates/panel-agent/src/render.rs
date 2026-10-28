@@ -14,6 +14,7 @@ use termide_core::{RenderContext, SegmentKind, StatusSegment, ThemeColors};
 use termide_panel_image::inline::Graphics;
 use termide_ui::ScrollBar;
 
+use crate::pan::{pan_line, DiagramSpot};
 use crate::toolset::TOOLSET_ACTION;
 use crate::transcript::{PictureLayout, PICTURE_INDENT};
 use crate::{
@@ -1031,6 +1032,16 @@ impl AgentPanel {
                 selected_range = self.transcript.content_lines_of(self.selected);
             }
         }
+        // The wide diagrams on screen, with how far each is panned.
+        let rows_shown = self.top..self.top + transcript_height as usize;
+        let diagrams: Vec<(DiagramSpot, usize)> = self
+            .transcript
+            .wide_diagrams()
+            .iter()
+            .filter(|spot| spot.line <= rows_shown.end && spot.track() >= rows_shown.start)
+            .map(|spot| (*spot, self.transcript.pan_of(spot)))
+            .collect();
+        self.diagram_bars.clear();
         let lines = self.transcript.lines(text_width, &colors, is_light);
         // The block under the chat cursor is shown inverted (text and
         // background swapped), so the selection reads as one solid block.
@@ -1056,7 +1067,35 @@ impl AgentPanel {
                 let Some(line) = lines.get(self.top + row) else {
                     break;
                 };
-                buf.set_line(area.x, area.y + row as u16, line, text_width);
+                let at = self.top + row;
+                let y = area.y + row as u16;
+                match diagrams.iter().find(|(spot, _)| spot.covers(at)) {
+                    // A panned diagram's row: the mark and the bar stay put.
+                    Some((spot, pan)) if *pan > 0 && spot.is_row(at) => {
+                        let panned = pan_line(line, usize::from(spot.col), *pan);
+                        buf.set_line(area.x, y, &panned, text_width);
+                    }
+                    // Its track row: the bar, then its own scrollbar.
+                    Some((spot, pan)) if !spot.is_row(at) => {
+                        buf.set_line(area.x, y, line, text_width);
+                        if let Some(bar) = ScrollBar::render_horizontal_tracked(
+                            buf,
+                            area.x + spot.col,
+                            y,
+                            spot.view,
+                            *pan,
+                            usize::from(spot.view),
+                            usize::from(spot.cols),
+                            &colors,
+                            ctx.is_focused,
+                        ) {
+                            self.diagram_bars.push((*spot, bar));
+                        }
+                    }
+                    _ => {
+                        buf.set_line(area.x, y, line, text_width);
+                    }
+                }
                 if selected_range.is_some_and(|(f, l)| self.top + row >= f && self.top + row <= l) {
                     for dx in 0..text_width {
                         let cell = &mut buf[(area.x + dx, area.y + row as u16)];

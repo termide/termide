@@ -362,6 +362,16 @@ pub trait Panel: Any {
         vec![]
     }
 
+    /// Handle coalesced wheel scrolling together with the event it began
+    /// with: where the pointer is and the modifiers held (Shift+wheel).
+    ///
+    /// This is what the application calls; the default ignores the event
+    /// and forwards to [`Panel::handle_scroll`].
+    fn handle_wheel(&mut self, event: MouseEvent, delta: i32, panel_area: Rect) -> Vec<PanelEvent> {
+        let _ = event;
+        self.handle_scroll(delta, panel_area)
+    }
+
     /// Periodic tick for background tasks.
     ///
     /// Called periodically to allow panels to perform background work
