@@ -390,6 +390,17 @@ impl ShellKind {
         }
     }
 
+    /// A command line running the program at `path`, quoted for this shell.
+    /// PowerShell takes a quoted word for a string to print, so it needs
+    /// its call operator.
+    pub fn run_command(self, path: &std::path::Path) -> String {
+        let path = self.quote(&path.to_string_lossy());
+        match self {
+            Self::PowerShell => format!("& {path}"),
+            _ => path,
+        }
+    }
+
     /// The quoting rules of this shell, for a line typed into it.
     pub fn quoting(self) -> termide_config::Quoting {
         match self {
@@ -462,6 +473,20 @@ mod tests {
         for kind in [ShellKind::Posix, ShellKind::Cmd, ShellKind::PowerShell] {
             assert!(kind.cd_command(path).contains('\u{15}'), "{kind:?}");
         }
+    }
+
+    #[test]
+    fn run_command_quotes_the_program() {
+        let path = Path::new("/p/my app;rm -rf ~");
+        assert_eq!(ShellKind::Bash.run_command(path), r"'/p/my app;rm -rf ~'");
+        assert_eq!(
+            ShellKind::PowerShell.run_command(Path::new(r"C:\my app.exe")),
+            r"& 'C:\my app.exe'"
+        );
+        assert_eq!(
+            ShellKind::Cmd.run_command(Path::new(r"C:\my app.exe")),
+            r#""C:\my app.exe""#
+        );
     }
 
     #[test]

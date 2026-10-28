@@ -698,6 +698,11 @@ impl Terminal {
         self.send_command(&self.shell_kind.cd_command(path))
     }
 
+    /// A line run in this terminal's shell that starts the program at `path`.
+    pub fn run_file_command(&self, path: &std::path::Path) -> String {
+        self.shell_kind.run_command(path)
+    }
+
     /// Type `command` into the shell and press Enter.
     ///
     /// A line holding a control character is refused: typed, the line
