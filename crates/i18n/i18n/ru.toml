@@ -1366,6 +1366,7 @@ settings_ai_connection_context_limit_min_fmt = "для Claude Code не мень
 projects_delete_failed_fmt = "Не удалось удалить сохранённую раскладку: {error}"
 command_edit_title_fmt = "Изменить команду: {name}"
 command_run_failed_fmt = "Не удалось запустить команду: {error}"
+terminal_control_chars_refused_fmt = "{shell}: путь содержит управляющие символы, их нельзя безопасно передать этой оболочке, поэтому команда не введена"
 command_needs_context_fmt = "Команда использует {placeholder}, а у панели в фокусе его нет: сначала перейдите в редактор или файловый менеджер"
 command_needs_editor_fmt = "Команда использует {placeholder}, а он есть только у редактора: сначала перейдите в редактор"
 debug_current_file_fmt = "{file} под {debugger}"

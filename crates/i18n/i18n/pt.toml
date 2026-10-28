@@ -1332,6 +1332,7 @@ settings_ai_connection_context_limit_min_fmt = "no mínimo {value} para o Claude
 projects_delete_failed_fmt = "Falha ao excluir o layout salvo: {error}"
 command_edit_title_fmt = "Editar comando: {name}"
 command_run_failed_fmt = "Falha ao executar o comando: {error}"
+terminal_control_chars_refused_fmt = "{shell}: o caminho contém caracteres de controle que este shell não pode receber com segurança, então o comando não foi digitado"
 command_needs_context_fmt = "Este comando usa {placeholder}, que o painel em foco não tem: foque primeiro um editor ou um gerenciador de arquivos"
 command_needs_editor_fmt = "Este comando usa {placeholder}, que só um editor tem: foque primeiro um editor"
 debug_current_file_fmt = "{file} com {debugger}"

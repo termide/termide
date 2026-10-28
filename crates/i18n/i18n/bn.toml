@@ -1332,6 +1332,7 @@ settings_ai_connection_context_limit_min_fmt = "Claude Code-এর জন্য 
 projects_delete_failed_fmt = "সংরক্ষিত লেআউট মোছা যায়নি: {error}"
 command_edit_title_fmt = "কমান্ড সম্পাদনা: {name}"
 command_run_failed_fmt = "কমান্ড চালানো যায়নি: {error}"
+terminal_control_chars_refused_fmt = "{shell}: পাথে কন্ট্রোল অক্ষর আছে যা এই শেলে নিরাপদে পাঠানো যায় না, তাই কমান্ডটি টাইপ করা হয়নি"
 command_needs_context_fmt = "এই কমান্ড {placeholder} ব্যবহার করে, যা ফোকাস করা প্যানেলে নেই: আগে একটি এডিটর বা ফাইল ম্যানেজারে ফোকাস করুন"
 command_needs_editor_fmt = "এই কমান্ড {placeholder} ব্যবহার করে, যা শুধু এডিটরে থাকে: আগে একটি এডিটরে ফোকাস করুন"
 debug_current_file_fmt = "{debugger}-এর অধীনে {file}"

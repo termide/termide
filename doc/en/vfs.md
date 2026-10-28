@@ -109,7 +109,8 @@ entries for other ports, wildcards and `!` negations are understood.
     silently.
   - **Accept once** — the key is trusted until Termide exits and
     nothing is written.
-  - **Cancel** *(preselected)* — nothing is connected.
+  - **Cancel** *(preselected)* — nothing is connected. `Esc` does the
+    same.
 - **Changed key** — when the recorded key of that type differs, or the
   key is marked `@revoked`, the connection is refused and the dialog
   names the `known_hosts` file and line. There is no override: if the

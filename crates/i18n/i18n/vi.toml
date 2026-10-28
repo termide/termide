@@ -1332,6 +1332,7 @@ settings_ai_connection_context_limit_min_fmt = "tối thiểu {value} với Clau
 projects_delete_failed_fmt = "Không thể xóa bố cục đã lưu: {error}"
 command_edit_title_fmt = "Sửa lệnh: {name}"
 command_run_failed_fmt = "Không thể chạy lệnh: {error}"
+terminal_control_chars_refused_fmt = "{shell}: đường dẫn chứa ký tự điều khiển không thể truyền an toàn cho shell này, nên lệnh không được nhập"
 command_needs_context_fmt = "Lệnh này dùng {placeholder}, nhưng bảng đang chọn không có: hãy chuyển sang trình soạn thảo hoặc trình quản lý tệp trước"
 command_needs_editor_fmt = "Lệnh này dùng {placeholder}, chỉ trình soạn thảo mới có: hãy chuyển sang trình soạn thảo trước"
 debug_current_file_fmt = "{file} với {debugger}"

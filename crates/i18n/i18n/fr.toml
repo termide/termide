@@ -1332,6 +1332,7 @@ settings_ai_connection_context_limit_min_fmt = "au moins {value} pour Claude Cod
 projects_delete_failed_fmt = "Échec de la suppression de la disposition enregistrée : {error}"
 command_edit_title_fmt = "Modifier la commande : {name}"
 command_run_failed_fmt = "Échec de l'exécution de la commande : {error}"
+terminal_control_chars_refused_fmt = "{shell} : le chemin contient des caractères de contrôle que ce shell ne peut pas recevoir sans risque, la commande n'a donc pas été saisie"
 command_needs_context_fmt = "Cette commande utilise {placeholder}, que le panneau actif n'a pas : placez d'abord le focus sur un éditeur ou un gestionnaire de fichiers"
 command_needs_editor_fmt = "Cette commande utilise {placeholder}, que seul un éditeur possède : placez d'abord le focus sur un éditeur"
 debug_current_file_fmt = "{file} sous {debugger}"
