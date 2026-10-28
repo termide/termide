@@ -188,14 +188,83 @@ impl Editor {
     }
 
     /// Save file as (Save As)
+    ///
+    /// The target is always a local path, so afterwards the buffer is a plain
+    /// local file: a remote origin is forgotten, otherwise the next `save()`
+    /// would upload the old temp copy over the original remote file.
     pub fn save_file_as(&mut self, path: PathBuf) -> Result<()> {
         self.buffer.save_to(&path)?;
         log::info!("File saved as: {}", path.display());
         self.saved_paths.push(path.clone());
 
-        // Update title
+        self.file_state.remote_path = None;
+        self.file_state.temp_local_path = None;
+        self.file_state.remote_mtime = None;
+        self.file_state.uploading = false;
+        // Track the new file on disk, so later external changes are noticed.
+        self.file_state.update_mtime(&path);
         self.file_state.title = file_io::path_to_title(&path);
 
+        self.update_git_diff();
+
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, SystemTime};
+
+    use termide_vfs::{VfsPath, VfsProtocol};
+
+    use crate::state::FileState;
+    use crate::Editor;
+
+    #[test]
+    fn save_as_turns_a_remote_buffer_into_a_local_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let temp = dir.path().join("remote-copy.txt");
+        std::fs::write(&temp, "remote\n").unwrap();
+        let mut editor = Editor::open_file_with_config(temp.clone(), Default::default()).unwrap();
+        editor.set_file_state(FileState::from_remote(
+            VfsPath::remote(VfsProtocol::Sftp, "host", "/srv/file.txt"),
+            temp.clone(),
+            None,
+            7,
+        ));
+
+        let target = dir.path().join("local.txt");
+        editor.save_file_as(target.clone()).unwrap();
+
+        assert!(!editor.file_state.is_remote());
+        assert!(editor.file_state.temp_local_path().is_none());
+        // The next save writes the new local file and asks for no upload.
+        assert!(editor.save().unwrap().is_none());
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "remote\n");
+    }
+
+    #[test]
+    fn save_as_tracks_the_new_file_for_external_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut editor = Editor::new();
+        editor.file_state.external_change_detected = true;
+        let target = dir.path().join("new.txt");
+
+        editor.save_file_as(target.clone()).unwrap();
+
+        assert!(!editor.file_state.external_change_detected);
+        assert!(editor.file_state.mtime.is_some());
+
+        // Someone else rewrites the file later: the editor must notice.
+        std::fs::write(&target, "changed elsewhere").unwrap();
+        let later = SystemTime::now() + Duration::from_secs(60);
+        std::fs::File::options()
+            .write(true)
+            .open(&target)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+        editor.file_state.check_external_modification(&target);
+        assert!(editor.file_state.external_change_detected);
     }
 }
