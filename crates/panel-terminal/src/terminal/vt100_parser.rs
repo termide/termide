@@ -651,10 +651,19 @@ impl Perform for VtPerformer {
         }
     }
 
-    fn esc_dispatch(&mut self, _intermediates: &[u8], _ignore: bool, byte: u8) {
+    fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
         self.flush();
+        // `ESC # 8`, `ESC ( B` and the like are other functions entirely.
+        if !intermediates.is_empty() {
+            return;
+        }
         if let Ok(mut screen) = self.screen.write() {
             match byte {
+                // DECSC / DECRC - save and restore the cursor
+                b'7' => screen.save_cursor(),
+                b'8' => screen.restore_cursor(),
+                // RIS - full reset
+                b'c' => screen.reset(),
                 b'D' => {
                     // IND - Index: move down, scroll at bottom margin
                     if screen.cursor.0 >= screen.scroll_bottom {
@@ -856,6 +865,49 @@ mod tests {
         feed(&mut performer, b"\x1b[T");
         assert_eq!(row_text(&screen, 0), "");
         assert_eq!(row_text(&screen, 1), "2");
+    }
+
+    #[test]
+    fn esc_7_and_esc_8_save_and_restore_cursor_and_style() {
+        let (mut performer, _capture, screen) = performer();
+        feed(
+            &mut performer,
+            b"\x1b[3;5H\x1b[1m\x1b7\x1b[m\x1b[10;10Hx\x1b8y",
+        );
+        performer.flush();
+        let s = screen.read().unwrap();
+        assert_eq!(s.cursor, (2, 5));
+        assert!(s.active_buffer()[2][4].style.bold, "style was not restored");
+        assert_eq!(s.active_buffer()[2][4].ch, 'y');
+        drop(s);
+
+        // `ESC # 8` (DECALN) shares the final byte but is not DECRC.
+        feed(&mut performer, b"\x1b[1;1H\x1b#8");
+        assert_eq!(screen.read().unwrap().cursor, (0, 0));
+    }
+
+    #[test]
+    fn esc_c_resets_the_screen_but_keeps_scrollback() {
+        let (mut performer, _capture, screen) = performer();
+        for _ in 0..30 {
+            feed(&mut performer, b"line\r\n");
+        }
+        feed(
+            &mut performer,
+            b"\x1b[1;31m\x1b[5;10r\x1b[?25l\x1b[?1h\x1b[?2004htext",
+        );
+        performer.flush();
+        let scrollback = screen.read().unwrap().scrollback.len();
+        assert!(scrollback > 0);
+
+        feed(&mut performer, b"\x1bc");
+        let s = screen.read().unwrap();
+        assert_eq!(s.cursor, (0, 0));
+        assert!(s.active_buffer().iter().flatten().all(|c| c.ch == ' '));
+        assert_eq!((s.scroll_top, s.scroll_bottom), (0, 23));
+        assert!(s.cursor_visible && !s.application_cursor_keys && !s.bracketed_paste_mode);
+        assert!(!s.current_style.bold);
+        assert_eq!(s.scrollback.len(), scrollback);
     }
 
     #[test]

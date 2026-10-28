@@ -26,7 +26,7 @@ pub fn handle_private_sequence(screen: &mut TerminalScreen, params: &Params, c: 
     match (mode, c) {
         (1049, 'h') => {
             // Switch to alternate screen and save cursor
-            screen.saved_cursor = Some(screen.cursor);
+            screen.save_cursor();
             screen.switch_to_alt_screen();
         }
         (1049, 'l') => {

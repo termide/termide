@@ -223,6 +223,8 @@ pub struct TerminalScreen {
     pub cursor: (usize, usize),
     /// Saved cursor position
     pub saved_cursor: Option<(usize, usize)>,
+    /// Style saved together with the cursor (DECSC)
+    pub saved_style: CellStyle,
     /// Cursor visibility
     pub cursor_visible: bool,
     /// Screen dimensions
@@ -300,6 +302,7 @@ impl TerminalScreen {
             use_alt_screen: false,
             cursor: (0, 0),
             saved_cursor: None,
+            saved_style: CellStyle::default(),
             cursor_visible: true,
             rows,
             cols,
@@ -808,17 +811,34 @@ impl TerminalScreen {
         self.cursor.1 = next_tab.min(self.cols.saturating_sub(1));
     }
 
-    /// Save cursor position
+    /// Save the cursor position and the current style (DECSC, `CSI s`).
     pub fn save_cursor(&mut self) {
         self.saved_cursor = Some(self.cursor);
+        self.saved_style = self.current_style;
     }
 
-    /// Restore cursor position, clamped to the grid: the screen may have
-    /// shrunk since the position was saved.
+    /// Restore what `save_cursor` saved (DECRC, `CSI u`). The position is
+    /// clamped to the grid: the screen may have shrunk since it was saved.
     pub fn restore_cursor(&mut self) {
         if let Some((row, col)) = self.saved_cursor {
             self.move_cursor(row, col);
+            self.current_style = self.saved_style;
         }
+    }
+
+    /// Full reset (RIS, `ESC c`): a fresh screen of the same size. The
+    /// scrollback, the reported working directory and a pending bell are
+    /// the user's, not the program's, and survive.
+    pub fn reset(&mut self) {
+        let mut fresh = TerminalScreen::new(self.rows, self.cols);
+        fresh.scrollback = std::mem::take(&mut self.scrollback);
+        fresh.scrollback_wrapped = std::mem::take(&mut self.scrollback_wrapped);
+        fresh.max_scrollback = self.max_scrollback;
+        fresh.reported_cwd = self.reported_cwd.take();
+        fresh.bell = self.bell;
+        fresh.sync_output_ended = self.sync_output;
+        fresh.force_cache_invalidation = true;
+        *self = fresh;
     }
 
     /// Resize the grid in place, never below 1×1.
