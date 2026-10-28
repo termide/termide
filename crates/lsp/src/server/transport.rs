@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 use crate::protocol::{
-    decode_header, encode_message, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
+    encode_message, read_frame, JsonRpcMessage, JsonRpcNotification, JsonRpcRequest,
     JsonRpcResponse, RequestId,
 };
 
@@ -140,58 +140,22 @@ impl LspServer {
         writer_tx: mpsc::Sender<String>,
     ) {
         let mut reader = BufReader::new(stdout);
-        let mut header = String::new();
 
         loop {
             if *status.lock().unwrap_or_else(|e| e.into_inner()) == ServerStatus::ShuttingDown {
                 break;
             }
 
-            header.clear();
-
-            // Read headers until empty line
-            let mut content_length = 0;
-            loop {
-                header.clear();
-                match reader.read_line(&mut header) {
-                    Ok(0) => return, // EOF
-                    Ok(_) => {
-                        let trimmed = header.trim();
-                        if trimmed.is_empty() {
-                            break; // End of headers
-                        }
-                        if let Some(len) = decode_header(trimmed) {
-                            content_length = len;
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Error reading LSP header: {}", e);
-                        return;
-                    }
-                }
-            }
-
-            if content_length == 0 {
-                continue;
-            }
-
-            // Read content
-            let mut content = vec![0u8; content_length];
-            if let Err(e) = std::io::Read::read_exact(&mut reader, &mut content) {
-                log::error!("Error reading LSP content: {}", e);
-                return;
-            }
-
-            // Parse message
-            let content_str = match String::from_utf8(content) {
-                Ok(s) => s,
+            let content = match read_frame(&mut reader) {
+                Ok(Some(content)) => content,
+                Ok(None) => return,
                 Err(e) => {
-                    log::error!("Invalid UTF-8 in LSP message: {}", e);
-                    continue;
+                    log::error!("Dropping the LSP connection: {}", e);
+                    return;
                 }
             };
 
-            match serde_json::from_str::<JsonRpcMessage>(&content_str) {
+            match serde_json::from_slice::<JsonRpcMessage>(&content) {
                 Ok(JsonRpcMessage::Response(response)) => {
                     Self::handle_response(&pending, &capabilities, response);
                 }
