@@ -603,22 +603,9 @@ fn render_main_area_with_accordion(
     if !layout_manager.panel_groups.is_empty() {
         let groups_area = area;
 
-        // Calculate horizontal constraints for groups (distribute all space)
-        // Группы могут иметь фиксированную ширину (width = Some(n)) или auto-width (width = None)
-        let group_constraints: Vec<Constraint> = layout_manager
-            .panel_groups
-            .iter()
-            .map(|g| {
-                // Для auto-width групп использовать всю доступную ширину
-                let width = g.width.unwrap_or(groups_area.width);
-                Constraint::Length(width.max(20))
-            })
-            .collect();
-
-        let group_chunks = Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints(group_constraints)
-            .split(groups_area);
+        // The same geometry the mouse hit-tests against.
+        let group_chunks =
+            termide_layout::calculate_group_rects(&layout_manager.panel_groups, groups_area);
 
         // Get active group index before borrowing panel_groups
         let active_group_idx = layout_manager.active_group_index();
@@ -632,7 +619,7 @@ fn render_main_area_with_accordion(
         }
 
         // Render dividers between groups (ghost line during drag)
-        let divider_positions = layout_manager.get_divider_positions();
+        let divider_positions = termide_layout::divider_positions(&group_chunks);
         render_dividers(
             frame.buffer_mut(),
             &divider_positions,

@@ -1,5 +1,8 @@
 //! Group width distribution and divider geometry for [`LayoutManager`].
 
+use ratatui::layout::Rect;
+
+use crate::geometry::{calculate_group_rects, divider_positions};
 use crate::layout_manager::{LayoutManager, MIN_GROUP_WIDTH};
 
 impl LayoutManager {
@@ -151,52 +154,28 @@ impl LayoutManager {
         }
     }
 
-    /// Find divider at given position (for drag resize).
+    /// Find the divider at `(x, y)` (for drag resize), the groups laid out
+    /// in `main_area` as the renderer lays them out.
     ///
-    /// Returns divider index if position is within grab zone (±1 from divider).
-    /// Divider N is between groups N and N+1.
-    pub fn find_divider_at_position(&self, x: u16, y: u16, terminal_height: u16) -> Option<usize> {
-        // Skip menu row (y == 0) and status bar (y == terminal_height - 1)
-        if y == 0 || y >= terminal_height.saturating_sub(1) {
+    /// Returns divider index if position is within grab zone (the column
+    /// either side of the divider). Divider N is between groups N and N+1.
+    pub fn find_divider_at_position(&self, x: u16, y: u16, main_area: Rect) -> Option<usize> {
+        // Only the panel rows: not the menu above nor the status bar below.
+        if y < main_area.y || y >= main_area.bottom() {
             return None;
         }
-
-        // Need at least 2 groups for a divider
-        if self.panel_groups.len() < 2 {
-            return None;
-        }
-
-        let mut current_x: u16 = 0;
-        for (idx, group) in self.panel_groups.iter().enumerate() {
-            current_x += group.width.unwrap_or(0);
-
-            // Check if this is not the last group (divider exists after it)
-            if idx < self.panel_groups.len() - 1 {
-                // Grab zone: [current_x - 1, current_x]
-                if x >= current_x.saturating_sub(1) && x <= current_x {
-                    return Some(idx);
-                }
-            }
-        }
-        None
+        self.get_divider_positions(main_area)
+            .into_iter()
+            .find(|&(_, divider_x)| x >= divider_x.saturating_sub(1) && x <= divider_x)
+            .map(|(idx, _)| idx)
     }
 
-    /// Get X positions of all dividers.
+    /// X positions of all dividers, the groups laid out in `main_area` as
+    /// the renderer lays them out.
     ///
     /// Returns Vec of (divider_index, x_position).
-    pub fn get_divider_positions(&self) -> Vec<(usize, u16)> {
-        let mut positions = Vec::new();
-        let mut current_x: u16 = 0;
-
-        for (idx, group) in self.panel_groups.iter().enumerate() {
-            current_x += group.width.unwrap_or(0);
-
-            // Divider exists after each group except the last
-            if idx < self.panel_groups.len() - 1 {
-                positions.push((idx, current_x));
-            }
-        }
-        positions
+    pub fn get_divider_positions(&self, main_area: Rect) -> Vec<(usize, u16)> {
+        divider_positions(&calculate_group_rects(&self.panel_groups, main_area))
     }
 
     /// Resize two adjacent groups.

@@ -314,7 +314,7 @@ impl App {
 
     /// The area the layout fills, under the menu bar and over the status
     /// bar, where a view over the layout goes.
-    fn main_area(&self) -> ratatui::layout::Rect {
+    pub(in crate::app) fn main_area(&self) -> ratatui::layout::Rect {
         ratatui::layout::Rect {
             x: 0,
             y: 1,
