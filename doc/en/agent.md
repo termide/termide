@@ -1401,6 +1401,7 @@ for the current panel only.
 | edit inside the project | ? | ✗ | ✓ | rules / ? | ✓ | ✓ |
 | edit outside it | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 | look-only command | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| look-only command reading outside the project | ? | ? | ? | rules / ? | rules / R | ✓ |
 | other command | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 | MCP tool | ? | rules / ? ¹ | ? ² | rules / ? | rules / R | ✓ |
 
@@ -1440,7 +1441,17 @@ addresses with `p`, `l`, `=`, `q` or `d`, such as `sed -n '40,80p'`; a
 substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
 `sort -o` and `sort --compress-program`, `uniq` with an output file,
 `tree -o`/`-R`, `rg --pre`, `--pre-glob` and `--hostname-bin`, and
-`git diff --output` ask, abbreviated long options (`--out=`) included. Loading a skill never asks.
+`git diff --output` ask, abbreviated long options (`--out=`) included.
+
+A look-only command that reads outside the project asks where reading a file
+there does: a path argument or an input redirection (`< file`) that leads out
+— absolute, under `~`, through `..` or a symlink, or a glob such as `.*` that
+can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
+`ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
+the project (`cd /etc && cat passwd` included). So do `env` and `printenv`
+without arguments, which print every secret in the environment. A grep or
+`rg` pattern is not taken for a path (`rg /api/ src` does not ask). The rule
+"allow always" keeps for such a read names that one command, not `cat *`. Loading a skill never asks.
 
 ### Plan mode
 
