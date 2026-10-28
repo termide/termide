@@ -36,7 +36,8 @@ pub use termide_modal::ActiveModal;
 pub use crate::state_types::{
     kill_process_tree, BatchOperationState, CacheState, CommandOperationHandle,
     CommandOperationResult, GitOperationHandle, GitOperationResult, PendingBatchUpload,
-    PendingEditorDownload, PendingRemoteDelete, ResourceModalKind, ScrollBarDrag, StashState,
+    PendingCommandLaunch, PendingEditorDownload, PendingRemoteDelete, ResourceModalKind,
+    ScrollBarDrag, StashState,
 };
 
 /// A viewer URL fetch in flight: the id its viewer waits under and the channel
@@ -88,6 +89,8 @@ pub struct AppState {
     pub command_operation_handles: Vec<CommandOperationHandle>,
     /// Handles for background commands (.bg.) tracked in Operations panel: (op_id, receiver, pid)
     pub bg_command_handles: Vec<(termide_file_ops::OperationId, mpsc::Receiver<()>, u32)>,
+    /// Commands waiting for their directory's first direnv environment
+    pub pending_command_launches: Vec<PendingCommandLaunch>,
     /// Pending editor download via OperationManager (replaces download_operation for editor opens)
     pub pending_editor_download: Option<PendingEditorDownload>,
     /// Grouped state for an in-flight batch operation (upload/delete/tracking).
@@ -258,6 +261,7 @@ impl AppState {
             git_ssh_passphrase: None,
             command_operation_handles: Vec::new(),
             bg_command_handles: Vec::new(),
+            pending_command_launches: Vec::new(),
             pending_editor_download: None,
             batch: BatchOperationState {
                 id_counter: u64::MAX / 2,

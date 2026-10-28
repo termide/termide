@@ -1236,6 +1236,7 @@ impl App {
             // Check background command operation result (.report. commands)
             self.check_command_operation_result();
             self.check_bg_command_completion();
+            self.start_pending_command_launches();
 
             // Poll unified operation manager for events (new system)
             self.poll_operation_manager();
