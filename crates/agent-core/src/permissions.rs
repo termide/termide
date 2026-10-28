@@ -1128,7 +1128,10 @@ impl PermissionHooks {
                     && !bundle
                     && !destructive
                     && !delegating
-                    && (call.name != "bash" || parts[0].pattern.is_some());
+                    // A whole-command `ask` rule can ask about a command
+                    // whose every part is settled, which leaves no part, and
+                    // so no rule, to record.
+                    && (call.name != "bash" || parts.first().is_some_and(|p| p.pattern.is_some()));
                 // A destructive call is allowed once at a time; `all` is the
                 // mode that lets a run through without asking. Denying for the
                 // session stays on offer: it trusts nothing.
@@ -3533,6 +3536,38 @@ mod tests {
             }
         );
         assert_eq!(hooks.decide(&bash("rm -rf target"), &ctx()), Decision::Deny);
+    }
+
+    /// A whole-command `ask` rule over parts that are all look-only asks
+    /// with no part listed and no rule to keep, instead of panicking.
+    #[test]
+    fn a_whole_command_ask_over_look_only_parts_asks_without_parts() {
+        let (hooks, asked) = hooks(
+            rules(
+                r#"
+                mode = "configured"
+                [bash]
+                "*&&*" = "ask"
+                "#,
+            ),
+            vec![PermissionAnswer::AllowAlways],
+        );
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let sink = persisted.clone();
+        let mut hooks = hooks.with_persist(Box::new(move |tool, pattern, _, _| {
+            sink.lock()
+                .unwrap()
+                .push((tool.to_string(), pattern.to_string()));
+        }));
+        assert_eq!(
+            hooks.before_tool_call(&bash("ls && pwd"), &ctx()),
+            ToolDecision::Allow
+        );
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked.len(), 1);
+        assert!(asked[0].parts.is_empty());
+        assert!(!asked[0].can_persist);
+        assert!(persisted.lock().unwrap().is_empty());
     }
 
     #[test]
