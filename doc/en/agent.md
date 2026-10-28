@@ -1331,7 +1331,9 @@ mode = "auto"       # ask | plan | edit | configured | auto (default) | all — 
 In a pattern, `*` stands for any text and a leading `**/` is optional, so
 `**/.env*` also matches `.env` in the project root. Shell commands are matched
 per part: `cargo build && rm -rf target` needs both halves allowed, and a deny
-on either half stops the whole command. The shell's own words are not parts:
+on either half stops the whole command. A background `&` separates parts as
+`;` does, so `cargo test & rm -rf src` is two commands, while the `&` of a
+redirection (`2>&1`, `&>file`) is not. The shell's own words are not parts:
 in `if [ -f x ]; then make; fi` the parts are `[ -f x ]` and `make`, and a
 `for … in` header or a closing `fi` or `done` is no part at all. Command substitution (`$(…)`, backticks)
 is never allowed automatically, and it asks about the part that carries it and
@@ -1399,6 +1401,7 @@ for the current panel only.
 | edit inside the project | ? | ✗ | ✓ | rules / ? | ✓ | ✓ |
 | edit outside it | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 | look-only command | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| look-only command reading outside the project | ? | ? | ? | rules / ? | rules / R | ✓ |
 | other command | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 | MCP tool | ? | rules / ? ¹ | ? ² | rules / ? | rules / R | ✓ |
 
@@ -1406,6 +1409,17 @@ for the current panel only.
 matching rule and asks without one. Whatever the mode, a rule's `deny` refuses and its `ask` asks:
 the modes set the configured `allow` rules aside, never the refusals. Your
 answers for the session count in every mode but `all`.
+
+A file counts as inside or outside the project by where its symlinks lead,
+not by how its path is spelled: with a link `docs` pointing at your home
+directory, writing `docs/.zshrc` is an edit outside the project, and a rule
+for `.env` also covers a link to it.
+
+An edit or a write under a `.git` directory, or to a worktree's `.git` file,
+asks in every mode, `all` included, and whatever the `allow` rules say: git's
+config and hooks name programs that even a look-only `git status` runs. A
+`deny` rule still refuses it, plan mode refuses it, and the answer holds for
+that one call.
 
 ¹ In `plan` an MCP tool counts the configured `allow` rules too, and one its
 server marks read-only (`readOnlyHint`) runs without asking.
@@ -1425,8 +1439,19 @@ issues, pull/merge requests, CI runs, releases, repositories and labels
 can retry jobs, and so does a bare `tea comments`, which posts), `sed` only while it prints (no `-i` or `-f`, and a script of
 addresses with `p`, `l`, `=`, `q` or `d`, such as `sed -n '40,80p'`; a
 substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
-`sort -o`, `uniq` with an output file, `tree -o`/`-R`, `rg --pre` and
-`git diff --output` ask. Loading a skill never asks.
+`sort -o` and `sort --compress-program`, `uniq` with an output file,
+`tree -o`/`-R`, `rg --pre`, `--pre-glob` and `--hostname-bin`, and
+`git diff --output` ask, abbreviated long options (`--out=`) included.
+
+A look-only command that reads outside the project asks where reading a file
+there does: a path argument or an input redirection (`< file`) that leads out
+— absolute, under `~`, through `..` or a symlink, or a glob such as `.*` that
+can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
+`ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
+the project (`cd /etc && cat passwd` included). So do `env` and `printenv`
+without arguments, which print every secret in the environment. A grep or
+`rg` pattern is not taken for a path (`rg /api/ src` does not ask). The rule
+"allow always" keeps for such a read names that one command, not `cat *`. Loading a skill never asks.
 
 ### Plan mode
 

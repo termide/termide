@@ -7,9 +7,11 @@
 //! narrow ones), every mode keeps their `deny` and `ask`, and answers given
 //! "for this session" count everywhere but in `all`. In `auto` a reviewer
 //! model decides what would otherwise be a prompt. Reading inside the project, loading a skill and a short list
-//! of read-only shell commands never prompt.
+//! of read-only shell commands never prompt, so long as those commands read
+//! inside the project too.
 //!
-//! Shell commands are split on `&&`, `||`, `;`, `|` and newlines; every part
+//! Shell commands are split on `&&`, `||`, `;`, `|`, a background `&` and
+//! newlines; every part
 //! must be allowed for the whole to pass, while a `deny` or `ask` on any part
 //! applies to the whole. Command substitution (`$(...)`, backticks) is never
 //! auto-allowed by an `allow` rule.
@@ -852,6 +854,16 @@ impl PermissionHooks {
         if call.name == "bash" {
             return self.judge_command(&subject, ctx).decision;
         }
+        // What git keeps under `.git` — its config, its hooks — names programs
+        // that a look-only `git status` then runs, so no mode, `allow` rule or
+        // answer for the session lets an edit there through unasked.
+        if writes_git_dir(call, &subject) {
+            return match self.rule_for(call, &subject, ctx) {
+                Some(Decision::Deny) => Decision::Deny,
+                _ if mode == Mode::Plan => Decision::Deny,
+                _ => Decision::Ask,
+            };
+        }
 
         if let Some(decision) = self.rule_for(call, &subject, ctx) {
             return decision;
@@ -961,6 +973,7 @@ impl PermissionHooks {
                 .chain(self.rule("bash", &part.resolved))
                 .max();
             forced |= matched == Some(Decision::Ask);
+            let mut reads_out = false;
             let decision = match matched {
                 // A rule cannot vouch for a substitution, nor for a program
                 // whose directory is unknown; the parts beside them, which a
@@ -968,16 +981,31 @@ impl PermissionHooks {
                 Some(Decision::Allow) if part.substituted || !part.savable => Decision::Ask,
                 Some(decision) => decision,
                 None if mode == Mode::All => Decision::Allow,
-                None if !part.substituted && is_read_only_command(&part.text) => Decision::Allow,
+                // A look-only command reading beyond the project asks, as
+                // the `read` tool does there, in plan mode too.
+                None if !part.substituted && is_read_only_command(&part.text) => {
+                    if reads_outside(&part, &ctx.cwd) {
+                        reads_out = true;
+                        Decision::Ask
+                    } else {
+                        Decision::Allow
+                    }
+                }
                 // Plan mode refuses a command that could change something.
                 None if mode == Mode::Plan => Decision::Deny,
                 None => Decision::Ask,
             };
             if decision == Decision::Ask {
+                // A rule for a read beyond the project names that one
+                // command: `cat *` would let every file on the machine out.
                 asked.push(AskedPart {
-                    pattern: part
-                        .savable
-                        .then(|| suggested_pattern("bash", &part.resolved)),
+                    pattern: part.savable.then(|| {
+                        if reads_out {
+                            part.resolved.clone()
+                        } else {
+                            suggested_pattern("bash", &part.resolved)
+                        }
+                    }),
                     text: part.text,
                 });
             }
@@ -1103,7 +1131,8 @@ impl PermissionHooks {
                 } else {
                     (
                         Vec::new(),
-                        self.rule_for(call, &subject, ctx) == Some(Decision::Ask),
+                        self.rule_for(call, &subject, ctx) == Some(Decision::Ask)
+                            || writes_git_dir(call, &subject),
                     )
                 };
                 if let Some(judged) = self.review(call, ctx, forced, &parts) {
@@ -1116,7 +1145,9 @@ impl PermissionHooks {
                 // touches, and not one that runs some other program a rule for
                 // it would vouch for blindly.
                 let bundle = parts.len() > 1;
-                let destructive = parts.iter().any(|p| destructive_command(&p.text));
+                // An edit under `.git` asks every time, so no answer outlasts it.
+                let destructive = parts.iter().any(|p| destructive_command(&p.text))
+                    || writes_git_dir(call, &subject);
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
@@ -1127,7 +1158,10 @@ impl PermissionHooks {
                     && !bundle
                     && !destructive
                     && !delegating
-                    && (call.name != "bash" || parts[0].pattern.is_some());
+                    // A whole-command `ask` rule can ask about a command
+                    // whose every part is settled, which leaves no part, and
+                    // so no rule, to record.
+                    && (call.name != "bash" || parts.first().is_some_and(|p| p.pattern.is_some()));
                 // A destructive call is allowed once at a time; `all` is the
                 // mode that lets a run through without asking. Denying for the
                 // session stays on offer: it trusts nothing.
@@ -1247,7 +1281,7 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
         "bash" => call.arguments["command"].as_str().unwrap_or("").to_string(),
         "read" | "edit" | "write" => {
             let raw = call.arguments["path"].as_str().unwrap_or("");
-            relative_to_project(raw, &ctx.cwd)
+            real_relative_to_project(raw, &ctx.cwd)
         }
         "fetch" => call.arguments["url"]
             .as_str()
@@ -1299,6 +1333,54 @@ fn relative_to_project(raw: &str, cwd: &Path) -> String {
     }
 }
 
+/// [`relative_to_project`] for the file a file tool acts on, with symlinks
+/// resolved: the file the system opens, which a link in the project (`docs`
+/// pointing at the home directory) may put outside it, or a link to `.env`
+/// may hide from the rule that guards it. A path outside the project that
+/// stays outside keeps the spelling it was given (`/etc/hosts`, not the
+/// `/private/etc/hosts` macOS resolves it to).
+fn real_relative_to_project(raw: &str, cwd: &Path) -> String {
+    let real = real_path(&cwd.join(raw));
+    match real.strip_prefix(real_path(cwd)) {
+        Ok(relative) if !relative.as_os_str().is_empty() => relative.to_string_lossy().into_owned(),
+        Ok(_) => ".".to_string(),
+        Err(_) => {
+            let lexical = relative_to_project(raw, cwd);
+            if Path::new(&lexical).is_absolute() {
+                lexical
+            } else {
+                real.to_string_lossy().into_owned()
+            }
+        }
+    }
+}
+
+/// `path` as the file system resolves it, symlinks included, so far as it
+/// exists; the part that does not yet exist (a file to create) is appended
+/// as written. A `..` steps out of what the link before it points at, as
+/// the system's own lookup does.
+fn real_path(path: &Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                out.push(name);
+                // Each existing prefix is made real before the next step, so
+                // a `..` after a link leaves its target, not the link.
+                if let Ok(real) = dunce::canonicalize(&out) {
+                    out = real;
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
 /// Resolve `.` and `..` lexically; the file need not exist.
 fn normalize(path: &Path) -> std::path::PathBuf {
     let mut out = std::path::PathBuf::new();
@@ -1312,6 +1394,16 @@ fn normalize(path: &Path) -> std::path::PathBuf {
         }
     }
     out
+}
+
+/// Whether `call` edits or writes a file under a `.git` directory, or the
+/// `.git` file of a worktree, its `subject` being the real path. The match
+/// ignores case, which file systems such as macOS's ignore too.
+fn writes_git_dir(call: &ToolCall, subject: &str) -> bool {
+    matches!(call.name.as_str(), "edit" | "write")
+        && Path::new(subject)
+            .components()
+            .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
 }
 
 fn inside_project(call: &ToolCall, ctx: &ToolContext) -> bool {
@@ -1386,9 +1478,11 @@ fn split_shell(command: &str) -> ParsedShell {
     // or to the next one when this segment is not a command at all.
     let mut expands = false;
     let mut quote: Option<char> = None;
-    // An open `$(…)` or `` `…` ``: its operators belong to the substitution,
-    // so they are not separators of the line around it.
-    let mut depth = 0usize;
+    // The substitutions open here, innermost last: `(` for `$(…)`, `` ` ``
+    // for a backquoted one. Their operators belong to the substitution, so
+    // they are not separators of the line around it. A backquote closes the
+    // backquoted substitution it is in and opens one otherwise.
+    let mut open: Vec<char> = Vec::new();
     // Here-documents opened on the current line: delimiter, whether tabs
     // are stripped (`<<-`), whether the body expands (unquoted delimiter).
     let mut heredocs: Vec<(String, bool, bool)> = Vec::new();
@@ -1430,16 +1524,20 @@ fn split_shell(command: &str) -> ParsedShell {
             }
             '`' => {
                 expands = true;
-                depth += 1;
+                if open.last() == Some(&'`') {
+                    open.pop();
+                } else {
+                    open.push('`');
+                }
                 current.push(c);
             }
             '$' if chars.get(i + 1) == Some(&'(') => {
                 expands = true;
-                depth += 1;
+                open.push('(');
                 current.push(c);
             }
-            ')' if depth > 0 => {
-                depth -= 1;
+            ')' if open.last() == Some(&'(') => {
+                open.pop();
                 current.push(c);
             }
             '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) != Some(&'<') => {
@@ -1449,13 +1547,23 @@ fn split_shell(command: &str) -> ParsedShell {
                 i = end;
                 continue;
             }
-            '&' if chars.get(i + 1) == Some(&'&') && depth == 0 => {
+            '&' if chars.get(i + 1) == Some(&'&') && open.is_empty() => {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 i += 1;
             }
-            '|' if depth == 0 => {
+            // A lone `&` sends the command before it to the background and
+            // starts the next one, a separator like `;`. It is part of a
+            // redirection in `&>`, `&>>`, `>&2`, `2>&1` and `<&0`.
+            '&' if open.is_empty()
+                && chars.get(i + 1) != Some(&'>')
+                && !matches!(i.checked_sub(1).map(|p| chars[p]), Some('>' | '<')) =>
+            {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
-                if chars.get(i + 1) == Some(&'|') {
+            }
+            '|' if open.is_empty() => {
+                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+                // `||`, and `|&`, which pipes standard error too.
+                if matches!(chars.get(i + 1), Some('|' | '&')) {
                     i += 1;
                 }
             }
@@ -1466,7 +1574,7 @@ fn split_shell(command: &str) -> ParsedShell {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 continue;
             }
-            ';' | '\n' if depth == 0 => {
+            ';' | '\n' if open.is_empty() => {
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
             }
             _ => current.push(c),
@@ -1577,6 +1685,9 @@ pub struct ShellPart {
     /// about the parts beside it, so a `cd && ls && echo $(date)` line asks
     /// about the one unknown command instead of listing all three.
     pub substituted: bool,
+    /// The directory it runs in, as the `cd`s before it left it; `None` when
+    /// that cannot be told.
+    pub dir: Option<std::path::PathBuf>,
 }
 
 /// Split `command` into its parts, following `cd`, `pushd` and `popd` from
@@ -1596,6 +1707,7 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
             let mut words = text.split_whitespace();
             let head = words.next().unwrap_or("");
             let rest = &text.trim_start()[head.len()..];
+            let runs_in = dir.clone();
             let (resolved, known) = match resolve_program(head, dir.as_deref(), cwd) {
                 Some(program) => (format!("{program}{rest}"), true),
                 None if head.contains('/') => (text.clone(), false),
@@ -1619,9 +1731,170 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
                 substituted,
                 text: text.clone(),
                 resolved,
+                dir: runs_in,
             }
         })
         .collect()
+}
+
+/// The look-only commands that read the files their arguments name.
+const FILE_READERS: [&str; 20] = [
+    "ls", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "stat", "du", "cut", "sort",
+    "tree", "uniq", "rg", "file", "find", "sed", "git", "date",
+];
+
+/// Whether a look-only `part` reads beyond `project`, so that it asks where
+/// the `read` tool would: a path argument or an input redirection that leads
+/// outside it (absolute, `~`, a `..` or a symlink stepping out, a glob that
+/// could match `..`), a file reader run in a directory outside it or in one
+/// that cannot be told, a variable whose value cannot be seen, or the whole
+/// environment dumped (`env`, `printenv`), secrets and all.
+fn reads_outside(part: &ShellPart, project: &Path) -> bool {
+    let text = without_harmless_redirections(&part.text);
+    let head = text.split_whitespace().next().unwrap_or("");
+    let reader = FILE_READERS.contains(&head);
+    let Some(words) = shell_words(&text) else {
+        // A variable expands to a path no one can see beforehand.
+        return reader || text.contains('<');
+    };
+    if matches!(head, "env" | "printenv") && words.len() == 1 {
+        return true;
+    }
+    let project = real_path(project);
+    let dir = part.dir.as_deref();
+    let outside = |word: &str| path_outside(word, dir, &project);
+    // The first operand of these is a pattern or a script, not a file,
+    // unless an option gives that.
+    let patterned = matches!(head, "grep" | "egrep" | "fgrep" | "rg" | "sed");
+    let args: Vec<&str> = words[1..].iter().map(String::as_str).collect();
+    let mut pattern_pending = patterned
+        && !has_short_flag(&args, 'e')
+        && !has_short_flag(&args, 'f')
+        && !args.iter().any(|a| {
+            ["--regexp", "--expression", "--file"]
+                .iter()
+                .any(|o| a.split_once('=').map_or(*a, |(name, _)| name) == *o)
+        });
+    // Options whose separate value is a pattern, never a file.
+    let pattern_value: &[&str] = match head {
+        "grep" | "egrep" | "fgrep" => &["-e", "--regexp"],
+        "sed" => &["-e", "--expression"],
+        "rg" => &[
+            "-e",
+            "--regexp",
+            "-g",
+            "--glob",
+            "--iglob",
+            "-r",
+            "--replace",
+            "-t",
+            "--type",
+            "-T",
+            "--type-not",
+            "--type-add",
+        ],
+        _ => &[],
+    };
+    let mut operands_only = false;
+    let mut operands = 0;
+    let mut i = 0;
+    while i < args.len() {
+        let word = args[i];
+        i += 1;
+        // An input redirection, which any command reads: `< file`, `<file`,
+        // `0<file`; `<&3` and here-documents and -strings read no file.
+        if let Some(target) = word
+            .trim_start_matches(|c: char| c.is_ascii_digit())
+            .strip_prefix('<')
+        {
+            if target.starts_with(['<', '&']) {
+                continue;
+            }
+            let target = if target.is_empty() {
+                i += 1;
+                args.get(i - 1).copied().unwrap_or("")
+            } else {
+                target
+            };
+            if outside(target) {
+                return true;
+            }
+            continue;
+        }
+        if !reader {
+            continue;
+        }
+        if !operands_only && word == "--" {
+            operands_only = true;
+            continue;
+        }
+        if !operands_only && word.starts_with('-') && word.len() > 1 {
+            if pattern_value.contains(&word) {
+                i += 1;
+            } else if let Some((_, value)) = word.strip_prefix("--").and_then(|w| w.split_once('='))
+            {
+                if outside(value) {
+                    return true;
+                }
+            }
+            continue;
+        }
+        if pattern_pending {
+            pattern_pending = false;
+            continue;
+        }
+        if outside(word) {
+            return true;
+        }
+        operands += 1;
+    }
+    // Without a file to read the others read standard input; these read
+    // the directory they run in, and `git` that repository's config.
+    let reads_dir = match head {
+        "ls" | "du" | "tree" | "find" | "git" => true,
+        "rg" => operands == 0,
+        "grep" | "egrep" | "fgrep" => {
+            operands == 0
+                && (has_short_flag(&args, 'r')
+                    || has_short_flag(&args, 'R')
+                    || has_long_option(&args, "recursive")
+                    || has_long_option(&args, "dereference-recursive"))
+        }
+        _ => false,
+    };
+    reads_dir && dir.is_none_or(|dir| !real_path(dir).starts_with(&project))
+}
+
+/// Whether the shell word `word`, a path run from `dir`, leads outside
+/// `project` (a real path); `/dev/null` and `-` (standard input) do not.
+fn path_outside(word: &str, dir: Option<&Path>, project: &Path) -> bool {
+    if word.is_empty() || word == "-" || word == "/dev/null" {
+        return false;
+    }
+    // `.*` and `.?` match `..` in some shells, `{..,x}` spells it out.
+    let dotted_glob = word
+        .split('/')
+        .any(|c| c.starts_with('.') && c.contains(['*', '?', '[']));
+    if dotted_glob || (word.contains('{') && word.contains("..")) {
+        return true;
+    }
+    let path = if word == "~" || word.starts_with("~/") {
+        match home() {
+            Some(home) => home.join(word[1..].trim_start_matches('/')),
+            None => return true,
+        }
+    } else if word.starts_with('~') {
+        // Another user's home.
+        return true;
+    } else if Path::new(word).is_absolute() {
+        std::path::PathBuf::from(word)
+    } else {
+        match dir {
+            Some(dir) => dir.join(word),
+            None => return true,
+        }
+    };
+    !real_path(&path).starts_with(project)
 }
 
 /// The home directory, for `~`.
@@ -1779,15 +2052,23 @@ pub fn is_read_only_command(part: &str) -> bool {
         // `env <command>` runs that command.
         "env" => args.is_empty(),
         "date" => !args.iter().any(|a| *a == "-s" || a.starts_with("--set")),
-        "sort" => !has_short_flag(args, 'o') && !args.iter().any(|a| a.starts_with("--output")),
+        // `--compress-program` runs a program on the temporary files.
+        "sort" => {
+            !has_short_flag(args, 'o')
+                && !has_long_option(args, "output")
+                && !has_long_option(args, "compress-program")
+        }
         // `-o` writes the listing to a file, `-R` writes one per directory.
         "tree" => !has_short_flag(args, 'o') && !has_short_flag(args, 'R'),
         // A second operand is the file `uniq` writes to.
         "uniq" => args.iter().filter(|a| !a.starts_with('-')).count() <= 1,
-        // `--pre` runs a program on every file searched.
-        "rg" => !args
-            .iter()
-            .any(|a| *a == "--pre" || a.starts_with("--pre=")),
+        // `--pre` runs a program on every file searched (`--pre-glob` picks
+        // the files), `--hostname-bin` one to name the host for hyperlinks.
+        // ripgrep takes no abbreviated long options.
+        "rg" => !args.iter().any(|a| {
+            let name = a.split_once('=').map_or(*a, |(name, _)| name);
+            matches!(name, "--pre" | "--pre-glob" | "--hostname-bin")
+        }),
         // `-C` compiles a magic file next to the source.
         "file" => !args.iter().any(|a| *a == "-C" || *a == "--compile"),
         "find" => !["-delete", "-exec", "-ok", "-fprint", "-fls"]
@@ -2165,6 +2446,17 @@ fn destructive_command(part: &str) -> bool {
     }
 }
 
+/// Whether a long option `--name`, or an abbreviation of it, is among
+/// `args`, alone or with `=value`: GNU tools and git take any unambiguous
+/// prefix of a long option's name (`--out=x` for `--output=x`).
+fn has_long_option(args: &[&str], name: &str) -> bool {
+    args.iter().any(|a| {
+        a.strip_prefix("--")
+            .map(|a| a.split_once('=').map_or(a, |(key, _)| key))
+            .is_some_and(|key| !key.is_empty() && name.starts_with(key))
+    })
+}
+
 /// Whether a short-option word such as `-ro` carries `flag`.
 fn has_short_flag(args: &[&str], flag: char) -> bool {
     args.iter()
@@ -2330,7 +2622,7 @@ fn is_read_only_git(mut args: &[&str]) -> bool {
         "status" | "blame" | "rev-parse" | "ls-files" | "ls-tree" | "cat-file" | "describe"
         | "merge-base" | "for-each-ref" | "show-ref" | "name-rev" | "count-objects" => true,
         // `-O` opens the matches in a pager program of its choosing.
-        "grep" => !has_short_flag(rest, 'O') && !rest.iter().any(|a| a.starts_with("--open-files")),
+        "grep" => !has_short_flag(rest, 'O') && !has_long_option(rest, "open-files-in-pager"),
         "stash" => matches!(rest.first(), Some(&("list" | "show"))),
         "worktree" => matches!(rest.first(), Some(&"list")),
         // `expire` and `delete` rewrite the log; a ref name shows it, but is
@@ -2372,7 +2664,7 @@ fn is_read_only_git(mut args: &[&str]) -> bool {
             reads && !rest.iter().any(|a| WRITE.contains(a))
         }
         "diff" | "log" | "show" | "rev-list" | "shortlog" | "cherry" | "range-diff" => {
-            !rest.iter().any(|a| a.starts_with("--output"))
+            !has_long_option(rest, "output")
         }
         // Without `--list`, a bare name creates a tag; `-d`, `-a`, `-s`,
         // `-f` and the rest are left out.
@@ -2774,7 +3066,9 @@ mod tests {
             Decision::Allow
         );
         assert_eq!(decide("[ -d target ] && cargo test"), Decision::Allow);
-        assert_eq!(decide("for f in a b; do cat $f; done"), Decision::Allow);
+        assert_eq!(decide("for f in a b; do echo $f; done"), Decision::Allow);
+        // The loop header is no part, so what `$f` reads cannot be seen.
+        assert_eq!(decide("for f in a b; do cat $f; done"), Decision::Ask);
         assert_eq!(decide("if true; then rm -rf x; fi"), Decision::Ask);
         assert_eq!(
             decide("for f in $(ls); do cat $f; done"),
@@ -2921,6 +3215,8 @@ mod tests {
             "uniq -c words.txt",
             "rg TODO src",
             "rg --pretty TODO",
+            "rg --pretty --hyperlink-format=default TODO",
+            "git log --oneline --one",
             "file README.md",
             "find . -name '*.rs' -print",
             "git status",
@@ -2951,10 +3247,25 @@ mod tests {
             "uniq in.txt out.txt",
             "rg --pre ./run.sh TODO",
             "rg --pre=./run.sh TODO",
+            "rg --pre-glob '*.pdf' TODO",
+            "rg --hostname-bin=./name.sh --hyperlink-format=default TODO",
+            "rg --hostname-bin ./name.sh TODO",
+            "sort --compress-program=./run.sh big.txt",
+            "sort --compress-prog ./run.sh big.txt",
+            "sort --out=out.txt in.txt",
+            "git diff --out=patch.diff",
+            "git grep --open=vim foo",
             "file -C -m magic",
             "find . -fprint list.txt",
             "find . -fls list.txt",
             "find . -execdir rm {} +",
+            "find . -okdir rm {} ;",
+            "find . -fprintf list.txt %p",
+            "find . -fprint0 list.txt",
+            "find . -delete",
+            "git -c core.pager=./run.sh log",
+            "git --exec-path=./bin status",
+            "git --output=x diff",
             "git diff --output=patch.diff",
             "git log --output=log.txt",
             "git branch feature",
@@ -3247,6 +3558,192 @@ mod tests {
         assert_eq!(split_shell("   ").parts, vec![""]);
     }
 
+    /// A look-only command that reads beyond the project asks, in the modes
+    /// where the `read` tool does, plan mode included, while one reading
+    /// inside it does not; a rule kept for it names the one command.
+    #[test]
+    fn look_only_commands_reading_outside_the_project_ask() {
+        let home = std::env::var("HOME").unwrap_or_default();
+        let outside = [
+            "cat /etc/passwd",
+            "head -n 5 ~/.ssh/id_rsa",
+            "cat ~",
+            "cat ~root/.profile",
+            "grep -r token /Users/someone",
+            "grep token ../other/.env",
+            "grep -e x /etc/hosts",
+            "rg secret ..",
+            "rg --ignore-file=/etc/x y",
+            "cat src/../../x",
+            "cat .*/x",
+            "cat {..,x}/y",
+            "tr a b < /etc/passwd",
+            "wc -l </etc/passwd",
+            "cat -- /etc/passwd",
+            "cat $HOME/.netrc",
+            "cd .. && ls",
+            "cd /etc && cat passwd",
+            "cd $X && ls",
+            "cd /tmp && git status",
+            "find / -name id_rsa",
+            "ls /",
+            "env",
+            "printenv",
+            "date -f /etc/shadow",
+        ];
+        let inside = [
+            "cat src/main.rs",
+            "cat /proj/src/main.rs",
+            "head -n 5 README.md",
+            "grep -rn /api/ src",
+            "grep -e /api/ src",
+            "rg '/etc/passwd' src",
+            "rg -g '!/target' TODO",
+            "sed -n '/^fn/p' src/lib.rs",
+            "ls",
+            "ls -la src",
+            "git log --oneline -5",
+            "cat < README.md",
+            "grep x 2>/dev/null",
+            "cat /dev/null",
+            "cd src && cat lib.rs",
+            "echo $HOME",
+            "pwd",
+            "printenv PATH",
+            "cd /tmp && echo hi | tail -3",
+        ];
+        for mode in [
+            Mode::Ask,
+            Mode::Plan,
+            Mode::Edit,
+            Mode::Configured,
+            Mode::Auto,
+        ] {
+            let (hooks, _) = hooks(
+                PermissionRules {
+                    mode,
+                    ..PermissionRules::default()
+                },
+                vec![],
+            );
+            for command in outside {
+                if home.is_empty() && command.contains('~') {
+                    continue;
+                }
+                assert_eq!(
+                    hooks.decide(&bash(command), &ctx()),
+                    Decision::Ask,
+                    "{mode:?} {command}"
+                );
+                // Still look-only: plan mode lets it reach the question.
+                assert!(is_read_only_call(&bash(command)), "{command}");
+            }
+            for command in inside {
+                assert_eq!(
+                    hooks.decide(&bash(command), &ctx()),
+                    Decision::Allow,
+                    "{mode:?} {command}"
+                );
+            }
+        }
+        let (all, _) = hooks(rules("mode = \"all\""), vec![]);
+        assert_eq!(
+            all.decide(&bash("cat /etc/passwd"), &ctx()),
+            Decision::Allow
+        );
+
+        let (hooks, asked) = hooks(rules("mode = \"configured\""), vec![]);
+        let mut hooks = hooks.with_persist(Box::new(|_, _, _, _| {}));
+        hooks.before_tool_call(&bash("cat /etc/hosts"), &ctx());
+        let request = asked.lock().unwrap()[0].clone();
+        assert_eq!(request.patterns(), vec!["cat /etc/hosts"]);
+    }
+
+    /// A symlink in the project leading out of it carries a look-only read
+    /// out too.
+    #[cfg(unix)]
+    #[test]
+    fn a_look_only_read_through_a_symlink_out_of_the_project_asks() {
+        let outside = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret"), "x").unwrap();
+        std::fs::write(project.path().join("notes"), "x").unwrap();
+        std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).unwrap();
+        let ctx = ToolContext::new(project.path().to_path_buf());
+        let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+        for command in ["cat docs/secret", "cd docs && cat secret", "cd docs && ls"] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx),
+                Decision::Ask,
+                "{command}"
+            );
+        }
+        assert_eq!(hooks.decide(&bash("cat notes"), &ctx), Decision::Allow);
+    }
+
+    /// A backquote closes the substitution it opened, so the separators
+    /// after it split the line again and a removal behind it is seen.
+    #[test]
+    fn a_closing_backquote_ends_its_substitution() {
+        let parsed = split_shell("echo `true`; rm -rf ~");
+        assert_eq!(parsed.parts, vec!["echo `true`", "rm -rf ~"]);
+        assert_eq!(parsed.substituted, vec![true, false]);
+        assert_eq!(
+            split_shell("a `b; c` && d `e && f`").parts,
+            vec!["a `b; c`", "d `e && f`"]
+        );
+        assert_eq!(
+            split_shell("a $(b `c; d` e; f) ; g").parts,
+            vec!["a $(b `c; d` e; f)", "g"]
+        );
+        assert_eq!(
+            split_shell("a `b $(c; d)` ; e").parts,
+            vec!["a `b $(c; d)`", "e"]
+        );
+        let home = std::env::var("HOME").unwrap_or_default();
+        if !home.is_empty() {
+            let parts = shell_parts("echo `true`; rm -rf ~", Path::new("/proj"));
+            assert!(parts
+                .iter()
+                .any(|p| critical_removal(&p.text, Path::new("/proj"))));
+        }
+    }
+
+    /// A lone `&` backgrounds a command and starts the next, so each side
+    /// is judged on its own; the `&` of a redirection splits nothing.
+    #[test]
+    fn a_background_ampersand_separates_commands() {
+        let parts = |command: &str| split_shell(command).parts;
+        assert_eq!(
+            parts("ls & touch /tmp/pwned"),
+            vec!["ls", "touch /tmp/pwned"]
+        );
+        assert_eq!(parts("sleep 5 &"), vec!["sleep 5"]);
+        assert_eq!(parts("a&b"), vec!["a", "b"]);
+        assert_eq!(parts("cargo test 2>&1"), vec!["cargo test 2>&1"]);
+        assert_eq!(parts("ls >&2 && pwd"), vec!["ls >&2", "pwd"]);
+        assert_eq!(parts("ls &>/dev/null"), vec!["ls &>/dev/null"]);
+        assert_eq!(parts("ls &>> log"), vec!["ls &>> log"]);
+        assert_eq!(parts("cat <&3"), vec!["cat <&3"]);
+        assert_eq!(parts("make |& tee log"), vec!["make", "tee log"]);
+        assert_eq!(parts("echo 'a & b' \\& c"), vec!["echo 'a & b' \\& c"]);
+
+        // Each side earns its own verdict, in plan mode and under an allow
+        // rule for the first side.
+        let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+        assert_eq!(
+            plan.decide(&bash("ls & touch /tmp/pwned"), &ctx()),
+            Decision::Deny
+        );
+        let mut configured = rules("mode = \"configured\"");
+        configured.add("bash", "cargo test*", Decision::Allow);
+        let (configured, _) = hooks(configured, vec![]);
+        assert_eq!(
+            configured.decide(&bash("cargo test & rm -rf src"), &ctx()),
+            Decision::Ask
+        );
+    }
+
     /// The shell's reserved words are not commands: the part is the command
     /// after them, and closing words and loop headers run nothing.
     #[test]
@@ -3455,6 +3952,38 @@ mod tests {
         assert_eq!(hooks.decide(&bash("rm -rf target"), &ctx()), Decision::Deny);
     }
 
+    /// A whole-command `ask` rule over parts that are all look-only asks
+    /// with no part listed and no rule to keep, instead of panicking.
+    #[test]
+    fn a_whole_command_ask_over_look_only_parts_asks_without_parts() {
+        let (hooks, asked) = hooks(
+            rules(
+                r#"
+                mode = "configured"
+                [bash]
+                "*&&*" = "ask"
+                "#,
+            ),
+            vec![PermissionAnswer::AllowAlways],
+        );
+        let persisted = Arc::new(Mutex::new(Vec::new()));
+        let sink = persisted.clone();
+        let mut hooks = hooks.with_persist(Box::new(move |tool, pattern, _, _| {
+            sink.lock()
+                .unwrap()
+                .push((tool.to_string(), pattern.to_string()));
+        }));
+        assert_eq!(
+            hooks.before_tool_call(&bash("ls && pwd"), &ctx()),
+            ToolDecision::Allow
+        );
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked.len(), 1);
+        assert!(asked[0].parts.is_empty());
+        assert!(!asked[0].can_persist);
+        assert!(persisted.lock().unwrap().is_empty());
+    }
+
     #[test]
     fn prompt_answers_drive_grants_and_persistence() {
         let persisted = Arc::new(Mutex::new(Vec::new()));
@@ -3608,6 +4137,151 @@ mod tests {
         assert_eq!(subject_of(&search, &ctx()), "rust tui");
         assert!(is_read_only_call(&fetch));
         assert!(is_read_only_call(&search));
+    }
+
+    /// A symlink in the project does not carry a file tool past its edge: the
+    /// subject is the file the system opens, outside the project when the
+    /// link points out, and the edit asks.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_project_is_outside_it() {
+        let outside = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join(".env"), "SECRET=1").unwrap();
+        std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).unwrap();
+        std::os::unix::fs::symlink(project.path().join(".env"), project.path().join("env.txt"))
+            .unwrap();
+        let ctx = ToolContext::new(project.path().to_path_buf());
+        let real_outside = dunce::canonicalize(outside.path()).unwrap();
+        let path = |p: &str| json!({ "path": p, "content": "x" });
+
+        let write = call("write", path("docs/.zshrc"));
+        assert_eq!(
+            subject_of(&write, &ctx),
+            real_outside.join(".zshrc").to_string_lossy()
+        );
+        // `..` after the link leaves its target, as the system's lookup does.
+        let up = call("write", path("docs/../escape"));
+        assert_eq!(
+            subject_of(&up, &ctx),
+            real_outside
+                .parent()
+                .unwrap()
+                .join("escape")
+                .to_string_lossy()
+        );
+        // A file not yet there, inside, stays inside.
+        assert_eq!(
+            subject_of(&call("write", path("src/new.rs")), &ctx),
+            "src/new.rs"
+        );
+        assert_eq!(
+            subject_of(&call("write", path("new/../src/x.rs")), &ctx),
+            "src/x.rs"
+        );
+        // A link to a guarded file is judged as that file.
+        assert_eq!(subject_of(&call("read", path("env.txt")), &ctx), ".env");
+
+        let mut rules = rules("mode = \"edit\"");
+        rules.add("read", ".env", Decision::Deny);
+        let (hooks, _) = hooks(rules, vec![]);
+        assert_eq!(hooks.decide(&write, &ctx), Decision::Ask);
+        assert_eq!(hooks.decide(&up, &ctx), Decision::Ask);
+        assert_eq!(
+            hooks.decide(&call("write", path("src/new.rs")), &ctx),
+            Decision::Allow
+        );
+        assert_eq!(
+            hooks.decide(&call("read", path("env.txt")), &ctx),
+            Decision::Deny
+        );
+        for mode in [Mode::Auto, Mode::Plan] {
+            hooks.set_mode(mode);
+            assert_ne!(hooks.decide(&write, &ctx), Decision::Allow, "{mode:?}");
+            assert_ne!(
+                hooks.decide(&call("read", path("docs/secret")), &ctx),
+                Decision::Allow,
+                "{mode:?}"
+            );
+        }
+    }
+
+    /// An edit or a write under `.git` (its config can name a program that a
+    /// look-only `git status` runs) asks in every mode, whatever the rules
+    /// allow; a `deny` still refuses, plan mode still refuses, and no answer
+    /// outlasts the call.
+    #[test]
+    fn writing_under_git_asks_in_every_mode() {
+        let edit = |path: &str| call("edit", json!({ "path": path }));
+        for mode in [
+            Mode::Ask,
+            Mode::Edit,
+            Mode::Configured,
+            Mode::Auto,
+            Mode::All,
+        ] {
+            let mut rules = PermissionRules {
+                mode,
+                ..PermissionRules::default()
+            };
+            rules.add("edit", "**", Decision::Allow);
+            rules.add_session("edit", ".git/config", Decision::Allow);
+            let (hooks, _) = hooks(rules, vec![]);
+            for path in [
+                ".git/config",
+                ".git/hooks/pre-commit",
+                "/proj/.git/config",
+                ".GIT/config",
+                "sub/.git",
+                "/elsewhere/repo/.git/config",
+            ] {
+                assert_eq!(
+                    hooks.decide(&edit(path), &ctx()),
+                    Decision::Ask,
+                    "{mode:?} {path}"
+                );
+            }
+            assert_eq!(
+                hooks.decide(&call("write", json!({ "path": ".git/config" })), &ctx()),
+                Decision::Ask
+            );
+            // Reading git's files, and a file merely named like it, are not
+            // held back.
+            assert_ne!(
+                hooks.decide(&call("read", json!({ "path": ".git/config" })), &ctx()),
+                Decision::Deny
+            );
+            if matches!(mode, Mode::Edit | Mode::Auto | Mode::All) {
+                assert_eq!(hooks.decide(&edit(".gitignore"), &ctx()), Decision::Allow);
+                assert_eq!(
+                    hooks.decide(&edit("src/.github/x"), &ctx()),
+                    Decision::Allow
+                );
+            }
+        }
+        let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+        assert_eq!(plan.decide(&edit(".git/config"), &ctx()), Decision::Deny);
+        let mut denied = rules("mode = \"all\"");
+        denied.add("edit", ".git/**", Decision::Deny);
+        let (denied, _) = hooks(denied, vec![]);
+        assert_eq!(denied.decide(&edit(".git/config"), &ctx()), Decision::Deny);
+
+        // The reviewer is not asked, and no answer outlasts the call.
+        let (hooks, judged, asked) = auto_hooks(
+            "",
+            vec![allow("fine")],
+            vec![PermissionAnswer::AllowSession],
+        );
+        let mut hooks = hooks.with_persist(Box::new(|_, _, _, _| {}));
+        assert_eq!(
+            hooks.before_tool_call(&edit(".git/config"), &ctx()),
+            ToolDecision::Allow
+        );
+        assert!(judged.lock().unwrap().is_empty());
+        let request = asked.lock().unwrap()[0].clone();
+        assert!(!request.can_persist && !request.can_allow_session);
+        assert_eq!(hooks.decide(&edit(".git/config"), &ctx()), Decision::Ask);
     }
 
     #[test]
