@@ -21,7 +21,24 @@ use crate::protocol::{
     JsonRpcResponse, RequestId,
 };
 
-use super::{LspServer, PendingRequests, ServerStatus};
+use super::{CrashNotice, LspServer, PendingRequests, Published, ServerStatus};
+
+/// What both I/O threads need to give the connection up.
+pub(super) struct Connection {
+    pub(super) pending: PendingRequests,
+    pub(super) status: Arc<Mutex<ServerStatus>>,
+    pub(super) crash_notice: CrashNotice,
+}
+
+/// Where the reader puts what the server sends.
+pub(super) struct Inbound {
+    pub(super) capabilities: Arc<Mutex<Option<ServerCapabilities>>>,
+    pub(super) active_progress: Arc<Mutex<HashSet<String>>>,
+    pub(super) published: Published,
+    pub(super) diagnostics_tx: mpsc::Sender<PublishDiagnosticsParams>,
+    pub(super) apply_edit_tx: mpsc::Sender<WorkspaceEdit>,
+    pub(super) writer_tx: mpsc::Sender<String>,
+}
 
 const INITIALIZE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -61,26 +78,26 @@ impl LspServer {
         mut stdin: impl Write,
         writer_rx: mpsc::Receiver<String>,
         initialize_rx: mpsc::Receiver<Option<InitializeResult>>,
-        status: Arc<Mutex<ServerStatus>>,
-        pending: PendingRequests,
+        connection: Connection,
     ) {
+        let status = &connection.status;
         let mut initialize_rx = Some(initialize_rx);
         while let Ok(msg) = writer_rx.recv() {
             if !Self::write_message(&mut stdin, &msg) {
-                Self::connection_lost(&pending, &status, "writing to the server failed");
+                Self::connection_lost(&connection, "writing to the server failed");
                 break;
             }
             // A shutdown during the wait skips `initialized`, but the loop
             // goes on to write the `shutdown` and `exit` queued behind it.
             let initialize_rx = initialize_rx.take();
             if initialize_rx
-                .is_some_and(|rx| Self::await_initialize(&rx, &status, INITIALIZE_TIMEOUT))
+                .is_some_and(|rx| Self::await_initialize(&rx, status, INITIALIZE_TIMEOUT))
             {
                 let initialized =
                     JsonRpcNotification::new("initialized", Some(serde_json::json!({})));
                 if let Ok(initialized) = encode_message(&initialized) {
                     if !Self::write_message(&mut stdin, &initialized) {
-                        Self::connection_lost(&pending, &status, "writing to the server failed");
+                        Self::connection_lost(&connection, "writing to the server failed");
                         break;
                     }
                 }
@@ -135,16 +152,10 @@ impl LspServer {
 
     /// Reader thread main loop: dispatch messages until the server's output
     /// ends or stops making sense, then mark the connection lost.
-    #[allow(clippy::too_many_arguments)]
     pub(super) fn reader_loop(
         stdout: std::process::ChildStdout,
-        pending: PendingRequests,
-        status: Arc<Mutex<ServerStatus>>,
-        capabilities: Arc<Mutex<Option<ServerCapabilities>>>,
-        active_progress: Arc<Mutex<HashSet<String>>>,
-        diagnostics_tx: mpsc::Sender<PublishDiagnosticsParams>,
-        apply_edit_tx: mpsc::Sender<WorkspaceEdit>,
-        writer_tx: mpsc::Sender<String>,
+        connection: Connection,
+        inbound: Inbound,
     ) {
         let mut reader = BufReader::new(stdout);
 
@@ -159,19 +170,18 @@ impl LspServer {
 
             match serde_json::from_slice::<JsonRpcMessage>(&content) {
                 Ok(JsonRpcMessage::Response(response)) => {
-                    Self::handle_response(&pending, &capabilities, response);
+                    Self::handle_response(&connection.pending, &inbound.capabilities, response);
                 }
                 Ok(JsonRpcMessage::Notification(notification)) => {
-                    Self::handle_notification(
-                        &diagnostics_tx,
-                        &status,
-                        &active_progress,
-                        notification,
-                    );
+                    Self::handle_notification(&connection.status, &inbound, notification);
                 }
                 Ok(JsonRpcMessage::Request(request)) => {
                     // Server-initiated requests (e.g. workspace/applyEdit)
-                    Self::handle_server_request(&writer_tx, &apply_edit_tx, request);
+                    Self::handle_server_request(
+                        &inbound.writer_tx,
+                        &inbound.apply_edit_tx,
+                        request,
+                    );
                 }
                 Err(e) => {
                     log::error!("Failed to parse LSP message: {}", e);
@@ -179,33 +189,36 @@ impl LspServer {
             }
         };
 
-        active_progress
+        inbound
+            .active_progress
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clear();
-        Self::connection_lost(&pending, &status, &reason);
+        Self::connection_lost(&connection, &reason);
     }
 
     /// The server can no longer be talked to. Every request still waiting is
     /// released — its sender dropped, so the caller's receiver disconnects
     /// instead of waiting forever — and later requests fail at once. Unless
-    /// the server is being shut down on purpose, it is marked crashed.
-    pub(super) fn connection_lost(
-        pending: &PendingRequests,
-        status: &Arc<Mutex<ServerStatus>>,
-        reason: &str,
-    ) {
+    /// the server is being shut down on purpose, it is marked crashed and
+    /// the crash is reported, once, to whoever restarts it.
+    fn connection_lost(connection: &Connection, reason: &str) {
         {
-            let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+            let mut pending = connection.pending.lock().unwrap_or_else(|e| e.into_inner());
             pending.closed = true;
             pending.waiting.clear();
         }
-        let mut status = status.lock().unwrap_or_else(|e| e.into_inner());
+        let mut status = connection.status.lock().unwrap_or_else(|e| e.into_inner());
         match *status {
-            ServerStatus::ShuttingDown | ServerStatus::Stopped | ServerStatus::Crashed => {}
+            ServerStatus::ShuttingDown
+            | ServerStatus::Stopped
+            | ServerStatus::Crashed
+            | ServerStatus::Restarting => {}
             _ => {
                 log::error!("LSP server crashed: {reason}");
                 *status = ServerStatus::Crashed;
+                drop(status);
+                connection.crash_notice.send();
             }
         }
     }
@@ -258,22 +271,21 @@ impl LspServer {
 
     /// Handle a notification from the server
     fn handle_notification(
-        diagnostics_tx: &mpsc::Sender<PublishDiagnosticsParams>,
         status: &Arc<Mutex<ServerStatus>>,
-        active_progress: &Arc<Mutex<HashSet<String>>>,
+        inbound: &Inbound,
         notification: JsonRpcNotification,
     ) {
         match notification.method.as_str() {
             "textDocument/publishDiagnostics" => {
                 if let Some(params) = notification.params {
                     if let Ok(diagnostics) = serde_json::from_value(params) {
-                        let _ = diagnostics_tx.send(diagnostics);
+                        Self::forward_diagnostics(status, inbound, diagnostics);
                     }
                 }
             }
             "$/progress" => {
                 if let Some(params) = notification.params {
-                    Self::handle_progress(status, active_progress, params);
+                    Self::handle_progress(status, &inbound.active_progress, params);
                 }
             }
             "window/logMessage" | "window/showMessage" => {
@@ -281,6 +293,30 @@ impl LspServer {
             }
             _ => {}
         }
+    }
+
+    /// Pass diagnostics on to the app and remember which documents carry
+    /// some. Done under the status lock and never once the server is
+    /// stopped, so diagnostics cleared after a shutdown stay cleared.
+    fn forward_diagnostics(
+        status: &Arc<Mutex<ServerStatus>>,
+        inbound: &Inbound,
+        diagnostics: PublishDiagnosticsParams,
+    ) {
+        let status = status.lock().unwrap_or_else(|e| e.into_inner());
+        if *status == ServerStatus::Stopped {
+            return;
+        }
+        {
+            let mut published = inbound.published.lock().unwrap_or_else(|e| e.into_inner());
+            if diagnostics.diagnostics.is_empty() {
+                published.remove(&diagnostics.uri);
+            } else {
+                published.insert(diagnostics.uri.clone());
+            }
+        }
+        let _ = inbound.diagnostics_tx.send(diagnostics);
+        drop(status);
     }
 
     /// Handle $/progress notification

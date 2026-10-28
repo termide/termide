@@ -1005,6 +1005,8 @@ calendar_december = "December"
 lsp_rename_no_identifier = "No identifier at cursor"
 lsp_rename_unsaved_file = "Rename requires a saved file"
 lsp_rename_no_changes = "Rename: no changes produced"
+lsp_restart_server = "Restart language server"
+lsp_restart_no_server = "No language server runs for this file"
 
 # Database viewer
 db_connecting = "Connecting…"

@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "कनेक्शन टाइमआउट (
 lsp_rename_no_identifier = "कर्सर पर कोई पहचानकर्ता नहीं"
 lsp_rename_unsaved_file = "नाम बदलने के लिए सहेजी गई फ़ाइल आवश्यक है"
 lsp_rename_no_changes = "नाम बदलें: कोई परिवर्तन नहीं हुआ"
+lsp_restart_server = "लैंग्वेज सर्वर फिर से शुरू करें"
+lsp_restart_no_server = "इस फ़ाइल के लिए कोई लैंग्वेज सर्वर नहीं चल रहा"
 
 help_desc_collapse_dir = "निर्देशिका संकुचित करें"
 help_desc_db_clear_filter = "सभी फ़िल्टर साफ़ करें"

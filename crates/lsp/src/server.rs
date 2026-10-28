@@ -60,7 +60,32 @@ pub enum ServerStatus {
     /// output closed, or it sent a stream that cannot be framed. Requests
     /// fail at once from then on.
     Crashed,
+    /// A crashed or manually restarted server is being replaced by a new
+    /// process. Reported by [`crate::LspManager`], never by a server itself.
+    Restarting,
 }
+
+/// Where a server reports that it crashed: its id is sent once, when the
+/// connection is lost without a shutdown, so the owner can restart it.
+#[derive(Clone)]
+pub struct CrashNotice {
+    tx: mpsc::Sender<u64>,
+    id: u64,
+}
+
+impl CrashNotice {
+    pub fn new(tx: mpsc::Sender<u64>, id: u64) -> Self {
+        Self { tx, id }
+    }
+
+    fn send(&self) {
+        let _ = self.tx.send(self.id);
+    }
+}
+
+/// Documents the server published non-empty diagnostics for, so they can be
+/// cleared once it is gone.
+type Published = Arc<Mutex<HashSet<Uri>>>;
 
 /// Requests waiting for their reply, keyed by id.
 #[derive(Default)]
@@ -94,6 +119,8 @@ pub struct LspServer {
     capabilities: Arc<Mutex<Option<ServerCapabilities>>>,
     /// Active progress tokens (server is indexing while non-empty)
     active_progress: Arc<Mutex<HashSet<String>>>,
+    /// Documents with diagnostics from this server
+    published: Published,
 }
 
 impl LspServer {
@@ -104,6 +131,7 @@ impl LspServer {
         workspace_root: PathBuf,
         diagnostics_tx: mpsc::Sender<PublishDiagnosticsParams>,
         apply_edit_tx: mpsc::Sender<WorkspaceEdit>,
+        crash_notice: CrashNotice,
     ) -> Result<Self> {
         let mut process = Command::new(&config.command)
             .args(&config.args)
@@ -136,6 +164,7 @@ impl LspServer {
         let status = Arc::new(Mutex::new(ServerStatus::Starting));
         let capabilities = Arc::new(Mutex::new(None));
         let active_progress = Arc::new(Mutex::new(HashSet::new()));
+        let published: Published = Arc::new(Mutex::new(HashSet::new()));
 
         let (writer_tx, writer_rx) = mpsc::channel::<String>();
 
@@ -148,17 +177,21 @@ impl LspServer {
             let capabilities = capabilities.clone();
             let active_progress = active_progress.clone();
             let writer_tx = writer_tx.clone();
+            let connection = transport::Connection {
+                pending,
+                status,
+                crash_notice: crash_notice.clone(),
+            };
+            let inbound = transport::Inbound {
+                capabilities,
+                active_progress,
+                published: published.clone(),
+                diagnostics_tx,
+                apply_edit_tx,
+                writer_tx,
+            };
             thread::spawn(move || {
-                Self::reader_loop(
-                    stdout,
-                    pending,
-                    status,
-                    capabilities,
-                    active_progress,
-                    diagnostics_tx,
-                    apply_edit_tx,
-                    writer_tx,
-                );
+                Self::reader_loop(stdout, connection, inbound);
             });
         }
 
@@ -170,6 +203,7 @@ impl LspServer {
             status,
             capabilities,
             active_progress,
+            published,
         };
 
         // Send initialize request
@@ -177,10 +211,13 @@ impl LspServer {
 
         // Writer thread - sends messages to server
         {
-            let status = server.status.clone();
-            let pending = server.pending.clone();
+            let connection = transport::Connection {
+                pending: server.pending.clone(),
+                status: server.status.clone(),
+                crash_notice,
+            };
             thread::spawn(move || {
-                Self::writer_loop(stdin, writer_rx, initialize_rx, status, pending);
+                Self::writer_loop(stdin, writer_rx, initialize_rx, connection);
             });
         }
 
@@ -477,12 +514,12 @@ impl LspServer {
     }
 
     /// Send textDocument/didOpen notification
-    pub fn did_open(&self, uri: Uri, language_id: String, text: String) {
+    pub fn did_open(&self, uri: Uri, language_id: String, version: i32, text: String) {
         let params = lsp_types::DidOpenTextDocumentParams {
             text_document: TextDocumentItem {
                 uri,
                 language_id,
-                version: 1,
+                version,
                 text,
             },
         };
@@ -588,11 +625,14 @@ impl LspServer {
     /// Shut the server down: `shutdown`, then `exit`, then the process is
     /// reaped — killed if it has not exited by then. Takes at most about
     /// two seconds, however the server behaves.
-    pub fn shutdown(self) {
-        self.shutdown_within(SHUTDOWN_REPLY_TIMEOUT, EXIT_TIMEOUT);
+    ///
+    /// Returns the documents the server left diagnostics on; it forwards no
+    /// more once this returns, so clearing them now cannot be overtaken.
+    pub fn shutdown(self) -> Vec<Uri> {
+        self.shutdown_within(SHUTDOWN_REPLY_TIMEOUT, EXIT_TIMEOUT)
     }
 
-    fn shutdown_within(mut self, reply_timeout: Duration, exit_timeout: Duration) {
+    fn shutdown_within(mut self, reply_timeout: Duration, exit_timeout: Duration) -> Vec<Uri> {
         // Keeps a lost connection from being reported as a crash; the writer
         // still writes what is queued.
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = ServerStatus::ShuttingDown;
@@ -617,7 +657,12 @@ impl LspServer {
             }
         }
 
+        // Under the lock the reader forwards diagnostics with, so none of
+        // this server's reaches the app after this point.
         *self.status.lock().unwrap_or_else(|e| e.into_inner()) = ServerStatus::Stopped;
+
+        let published = self.published.lock().unwrap_or_else(|e| e.into_inner());
+        published.iter().cloned().collect()
     }
 }
 
@@ -654,24 +699,32 @@ mod tests {
         use std::sync::mpsc;
         use std::time::{Duration, Instant};
 
-        use crate::server::{LspServer, LspServerConfig, ServerStatus};
+        use crate::server::{CrashNotice, LspServer, LspServerConfig, ServerStatus};
 
         fn start(dir: &Path, script: &str) -> LspServer {
+            start_noticed(dir, script).0
+        }
+
+        /// A server whose crash notices (carrying id 7) can be watched.
+        fn start_noticed(dir: &Path, script: &str) -> (LspServer, mpsc::Receiver<u64>) {
             let (diagnostics_tx, _) = mpsc::channel();
             let (apply_edit_tx, _) = mpsc::channel();
+            let (crash_tx, crash_rx) = mpsc::channel();
             let config = LspServerConfig {
                 command: "sh".into(),
                 args: vec!["-c".into(), script.into()],
                 root_markers: Vec::new(),
             };
-            LspServer::start(
+            let server = LspServer::start(
                 "test".into(),
                 config,
                 dir.to_path_buf(),
                 diagnostics_tx,
                 apply_edit_tx,
+                CrashNotice::new(crash_tx, 7),
             )
-            .expect("sh starts")
+            .expect("sh starts");
+            (server, crash_rx)
         }
 
         fn hover(server: &LspServer, dir: &Path) -> mpsc::Receiver<Option<lsp_types::Hover>> {
@@ -708,6 +761,22 @@ mod tests {
             );
             assert_eq!(pending_count(&server), 0);
             server.shutdown_within(Duration::from_secs(5), Duration::from_secs(5));
+        }
+
+        /// A crash is reported once, under the server's id; a shutdown is
+        /// not a crash and reports nothing.
+        #[test]
+        fn a_crash_is_reported_once_and_a_shutdown_not_at_all() {
+            let dir = tempfile::tempdir().unwrap();
+            let (server, crashes) = start_noticed(dir.path(), "exit 0");
+            assert_eq!(crashes.recv_timeout(Duration::from_secs(5)), Ok(7));
+            server.shutdown_within(Duration::from_secs(5), Duration::from_secs(5));
+            assert!(crashes.try_recv().is_err());
+
+            let (server, crashes) = start_noticed(dir.path(), "exec sleep 60");
+            server.shutdown_within(Duration::from_millis(300), Duration::from_millis(300));
+            std::thread::sleep(Duration::from_millis(100));
+            assert!(crashes.try_recv().is_err());
         }
 
         /// Every request to a crashed server fails at once: nothing is left

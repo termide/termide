@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "সংযোগের টাইমআউট (
 lsp_rename_no_identifier = "কার্সারে কোনো আইডেন্টিফায়ার নেই"
 lsp_rename_unsaved_file = "রিনেম করতে সংরক্ষিত ফাইল প্রয়োজন"
 lsp_rename_no_changes = "রিনেম: কোনো পরিবর্তন হয়নি"
+lsp_restart_server = "ল্যাঙ্গুয়েজ সার্ভার আবার চালু করুন"
+lsp_restart_no_server = "এই ফাইলের জন্য কোনো ল্যাঙ্গুয়েজ সার্ভার চলছে না"
 
 help_desc_collapse_dir = "ডিরেক্টরি সংকুচিত করুন"
 help_desc_db_clear_filter = "সব ফিল্টার সাফ করুন"

@@ -37,3 +37,4 @@ pub use state::FileState;
 pub const START_DEBUG_ACTION: &str = "start_debug";
 pub const CLEAR_BREAKPOINTS_ACTION: &str = "clear_breakpoints";
 pub const CONFIGURE_DEBUG_ACTION: &str = "configure_debug";
+pub const RESTART_LANGUAGE_SERVER_ACTION: &str = "restart_language_server";

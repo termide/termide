@@ -255,6 +255,8 @@ pub trait Translation: Send + Sync {
     fn lsp_rename_no_identifier(&self) -> &str;
     fn lsp_rename_unsaved_file(&self) -> &str;
     fn lsp_rename_no_changes(&self) -> &str;
+    fn lsp_restart_server(&self) -> &str;
+    fn lsp_restart_no_server(&self) -> &str;
     fn lsp_rename_result(&self, count: usize) -> String;
 
     fn help_desc_word_nav(&self) -> &str;

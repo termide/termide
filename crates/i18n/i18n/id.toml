@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "Batas waktu koneksi (dtk)"
 lsp_rename_no_identifier = "Tidak ada pengenal di kursor"
 lsp_rename_unsaved_file = "Rename membutuhkan file tersimpan"
 lsp_rename_no_changes = "Rename: tidak ada perubahan"
+lsp_restart_server = "Mulai ulang server bahasa"
+lsp_restart_no_server = "Tidak ada server bahasa untuk file ini"
 
 help_desc_collapse_dir = "Ciutkan direktori"
 help_desc_db_clear_filter = "Hapus semua filter"

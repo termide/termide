@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "Hết thời gian kết nối (giây)"
 lsp_rename_no_identifier = "Không có định danh tại con trỏ"
 lsp_rename_unsaved_file = "Đổi tên yêu cầu tệp đã lưu"
 lsp_rename_no_changes = "Đổi tên: không có thay đổi"
+lsp_restart_server = "Khởi động lại máy chủ ngôn ngữ"
+lsp_restart_no_server = "Không có máy chủ ngôn ngữ nào cho tệp này"
 
 help_desc_collapse_dir = "Thu gọn thư mục"
 help_desc_db_clear_filter = "Xóa tất cả bộ lọc"

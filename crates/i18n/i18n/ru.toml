@@ -1005,6 +1005,8 @@ calendar_december = "Декабрь"
 lsp_rename_no_identifier = "Нет идентификатора под курсором"
 lsp_rename_unsaved_file = "Переименование требует сохранённый файл"
 lsp_rename_no_changes = "Переименование: изменений не произведено"
+lsp_restart_server = "Перезапустить языковой сервер"
+lsp_restart_no_server = "Для этого файла языковой сервер не запущен"
 
 # Просмотр баз данных
 db_connecting = "Подключение…"

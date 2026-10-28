@@ -926,6 +926,8 @@ settings_vfs_connection_timeout = "Bağlantı zaman aşımı (sn)"
 lsp_rename_no_identifier = "İmleç konumunda tanımlayıcı yok"
 lsp_rename_unsaved_file = "Yeniden adlandırma kaydedilmiş dosya gerektirir"
 lsp_rename_no_changes = "Yeniden adlandırma: değişiklik olmadı"
+lsp_restart_server = "Dil sunucusunu yeniden başlat"
+lsp_restart_no_server = "Bu dosya için çalışan dil sunucusu yok"
 
 help_desc_collapse_dir = "Dizini daralt"
 help_desc_db_clear_filter = "Tüm filtreleri temizle"

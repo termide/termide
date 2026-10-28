@@ -241,6 +241,14 @@ impl App {
                 },
             ),
             (
+                "restart_language_server",
+                CommandEntry {
+                    label: t.lsp_restart_server().into(),
+                    category: t.palette_category_application(),
+                    keybinding: String::new(),
+                },
+            ),
+            (
                 "menu",
                 CommandEntry {
                     label: t.help_desc_menu().into(),

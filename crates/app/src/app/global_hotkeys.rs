@@ -438,6 +438,14 @@ impl App {
                 self.open_debug_setup(file.as_deref());
             }
             "clear_breakpoints" => self.clear_breakpoints(),
+            "restart_language_server" => {
+                let file = self
+                    .layout_manager
+                    .active_panel()
+                    .and_then(|p| p.as_editor())
+                    .and_then(|e| e.file_path().map(|p| p.to_path_buf()));
+                self.restart_language_server(file);
+            }
             // Not a global binding (the panels own the key), but the palette
             // offers it for the focused panel.
             "switch_directory" => self.handle_open_directory_switcher()?,
