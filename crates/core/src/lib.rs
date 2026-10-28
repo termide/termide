@@ -3,10 +3,21 @@
 //! This crate provides the foundational abstractions for building panels
 //! in termide without coupling them to the application state.
 
+static VERSION: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+
 /// Full version string for display: the crate version plus the git commit it
-/// was built from, e.g. `"0.23.1 (50b81b1a)"`. Falls back to just the crate
-/// version when git is unavailable at build time. Stamped by `build.rs`.
-pub const VERSION: &str = env!("TERMIDE_VERSION");
+/// was built from, e.g. `"0.23.1 (50b81b1a)"`. The binary stamps it in its
+/// own build script and hands it over with [`set_version`] at startup, so a
+/// new commit rebuilds the binary alone rather than every crate depending on
+/// this one. Until then, and in tests, just the crate version.
+pub fn version() -> &'static str {
+    VERSION.get().copied().unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+/// Record the full version string; only the first call counts.
+pub fn set_version(version: &'static str) {
+    let _ = VERSION.set(version);
+}
 
 pub mod command;
 pub mod credentials;

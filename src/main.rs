@@ -17,7 +17,7 @@ use termide_i18n::init_with_language;
 use termide_theme::{set_ansi16_mode, set_themes_dir};
 
 #[derive(Parser)]
-#[command(name = "termide", version = termide_core::VERSION, about = "Terminal IDE")]
+#[command(name = "termide", version = env!("TERMIDE_VERSION"), about = "Terminal IDE")]
 #[command(group(ArgGroup::new("headless").args(["prompt", "recall"])))]
 struct Cli {
     /// Override minimum log level (trace, debug, info, warn, error)
@@ -354,6 +354,8 @@ fn handle_detached_instance_cli(cli: &Cli) -> Result<Option<i32>> {
 }
 
 fn main() -> Result<()> {
+    termide_core::set_version(env!("TERMIDE_VERSION"));
+
     // Askpass mode: when termide is set as ssh's or git's askpass helper for a
     // git network operation, ssh / git re-execute this binary to obtain the
     // SSH key passphrase or the HTTPS credentials. We detect that purely by

@@ -996,7 +996,7 @@ impl HelpGenerator {
         let desc_style = Style::default().fg(theme.disabled);
 
         // Version header: ═══════ Termide x.y.z (hash) ═══════
-        let version_text = format!("Termide {}", termide_core::VERSION);
+        let version_text = format!("Termide {}", termide_core::version());
         let version_len = version_text.chars().count();
         let side_padding = width.saturating_sub(version_len + 2) / 2;
         let left_pad = "═".repeat(side_padding);
