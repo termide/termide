@@ -3647,20 +3647,54 @@ fn rpc_reply(id: u64, result: Result<Value, String>) -> Value {
     }
 }
 
+/// Most bytes one `fs/read_text_file` returns: a whole file larger than this
+/// is refused, and a range stops at the last whole line within it.
+const READ_TEXT_MAX_BYTES: usize = 16 * 1024 * 1024;
+
 fn read_text_file(cwd: &Path, params: &Value) -> Result<Value, String> {
+    use std::io::Read as _;
     let path = absolute(cwd, params["path"].as_str().ok_or("path missing")?);
-    let text = std::fs::read_to_string(&path)
-        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let cannot_read = |error: std::io::Error| format!("cannot read {}: {error}", path.display());
+    let file = std::fs::File::open(&path).map_err(cannot_read)?;
     let line = params["line"].as_u64().map(|l| l.max(1) as usize - 1);
     let limit = params["limit"].as_u64().map(|l| l as usize);
     let content = match (line, limit) {
-        (None, None) => text,
-        (line, limit) => text
-            .lines()
-            .skip(line.unwrap_or(0))
-            .take(limit.unwrap_or(usize::MAX))
-            .collect::<Vec<_>>()
-            .join("\n"),
+        (None, None) => {
+            let mut bytes = Vec::new();
+            file.take(READ_TEXT_MAX_BYTES as u64 + 1)
+                .read_to_end(&mut bytes)
+                .map_err(cannot_read)?;
+            if bytes.len() > READ_TEXT_MAX_BYTES {
+                return Err(format!(
+                    "{} is larger than {} MiB; read it in parts with `line` and `limit`",
+                    path.display(),
+                    READ_TEXT_MAX_BYTES / (1024 * 1024)
+                ));
+            }
+            String::from_utf8(bytes).map_err(|_| {
+                format!(
+                    "cannot read {}: stream did not contain valid UTF-8",
+                    path.display()
+                )
+            })?
+        }
+        (line, limit) => termide_agent_core::read_line_window(
+            file,
+            termide_agent_core::WindowSpec {
+                first: line.unwrap_or(0),
+                max_lines: limit.unwrap_or(usize::MAX),
+                max_bytes: READ_TEXT_MAX_BYTES,
+                max_line_bytes: READ_TEXT_MAX_BYTES,
+                count_total: false,
+            },
+            &|| false,
+        )
+        .map_err(cannot_read)?
+        .lines
+        .into_iter()
+        .map(|line| line.text)
+        .collect::<Vec<_>>()
+        .join("\n"),
     };
     Ok(json!({ "content": content }))
 }
@@ -3684,6 +3718,31 @@ mod tests {
     use termide_agent_core::{
         permission_channel, PermissionAnswer, PermissionEnvelope, PermissionRules,
     };
+
+    /// `fs/read_text_file` serves a range of a file without loading it whole
+    /// and refuses a whole read past its cap.
+    #[test]
+    fn read_text_file_pages_ranges_and_caps_whole_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let body: String = (1..=1000).map(|n| format!("l{n}\r\n")).collect();
+        std::fs::write(dir.path().join("a.txt"), &body).unwrap();
+        let range = |params: Value| read_text_file(dir.path(), &params).unwrap()["content"].clone();
+        assert_eq!(
+            range(json!({ "path": "a.txt", "line": 500, "limit": 3 })),
+            "l500\nl501\nl502"
+        );
+        assert_eq!(
+            range(json!({ "path": "a.txt", "line": 999 })),
+            "l999\nl1000"
+        );
+        assert_eq!(range(json!({ "path": "a.txt", "limit": 1 })), "l1");
+        assert_eq!(range(json!({ "path": "a.txt" })), body.as_str());
+
+        let big = std::fs::File::create(dir.path().join("big.txt")).unwrap();
+        big.set_len(READ_TEXT_MAX_BYTES as u64 + 1).unwrap();
+        let error = read_text_file(dir.path(), &json!({ "path": "big.txt" })).unwrap_err();
+        assert!(error.contains("in parts"), "{error}");
+    }
 
     /// `fs/write_text_file` replaces a file whole, through a symlink to its
     /// target, keeping the target's permissions.
