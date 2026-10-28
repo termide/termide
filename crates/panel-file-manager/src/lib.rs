@@ -399,11 +399,6 @@ impl FileManager {
         cache.is_path_in_ignored(relative_path)
     }
 
-    /// Take the watched root (for cleanup when closing)
-    pub fn take_watched_root(&mut self) -> Option<PathBuf> {
-        self.git_root.take()
-    }
-
     /// Navigate to a specific directory
     pub fn navigate_to(&mut self, path: PathBuf) -> Result<()> {
         // Canonicalize to resolve symlinks — ensures paths match notify events

@@ -2,11 +2,11 @@
 //!
 //! Handles unified watcher events for filesystem changes and git operations.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
-use termide_core::{CommandResult, PanelCommand};
+use termide_core::{CommandResult, Panel, PanelCommand};
 use termide_git::find_repo_root;
-use termide_watcher::WatchEvent;
+use termide_watcher::{UnifiedWatcher, WatchEvent, WatchTarget};
 
 use super::App;
 
@@ -38,54 +38,90 @@ fn collapse_fs_burst(fs_paths: &HashSet<std::path::PathBuf>) -> Vec<&std::path::
         .collect()
 }
 
+/// What `panel` needs watched: the repository its directory belongs to, or
+/// the directory itself outside any repository. A file manager or git panel
+/// is told the repository root it is in.
+fn panel_watch_target(panel: &mut Box<dyn Panel>) -> Option<WatchTarget> {
+    let CommandResult::FsWatchInfo {
+        watched_root,
+        current_path,
+        is_git_repo,
+    } = panel.handle_command(PanelCommand::GetFsWatchInfo)
+    else {
+        return None;
+    };
+    if let (true, Some(root)) = (is_git_repo, watched_root) {
+        return Some(WatchTarget::Repo(root));
+    }
+    if current_path.as_os_str().is_empty() {
+        return None;
+    }
+    let repo_root = find_repo_root(&current_path);
+    let is_git_repo = repo_root.is_some();
+    let root = repo_root.unwrap_or(current_path);
+    panel.handle_command(PanelCommand::SetFsWatchRoot {
+        root: Some(root.clone()),
+        is_git_repo,
+    });
+    Some(if is_git_repo {
+        WatchTarget::Repo(root)
+    } else {
+        WatchTarget::Dir(root)
+    })
+}
+
+/// Bring the watches `held` on `watcher` to `wanted`, one per panel wanting a
+/// target: acquire what is missing, then release what no panel wants any
+/// more. A failed acquire is not held, so the next pass retries it.
+fn reconcile_watches(
+    watcher: &mut UnifiedWatcher,
+    held: &mut HashMap<WatchTarget, usize>,
+    wanted: &HashMap<WatchTarget, usize>,
+) {
+    for (target, &want) in wanted {
+        let have = held.get(target).copied().unwrap_or(0);
+        for _ in have..want {
+            match watcher.watch(target) {
+                Ok(()) => *held.entry(target.clone()).or_insert(0) += 1,
+                Err(e) => {
+                    log::warn!("Failed to watch {target:?}: {e}");
+                    break;
+                }
+            }
+        }
+    }
+    held.retain(|target, have| {
+        let want = wanted.get(target).copied().unwrap_or(0);
+        while *have > want {
+            watcher.unwatch(target);
+            *have -= 1;
+        }
+        *have > 0
+    });
+}
+
 impl App {
-    /// Register panel directories with the watcher (lazy registration).
-    /// Called when panels are added or navigated, not on every tick.
+    /// Bring the watcher in step with the panels: each panel, on screen or in
+    /// a project parked in the background, holds one watch on what it shows,
+    /// and a watch no panel wants any more — its panel closed or moved
+    /// elsewhere — is released. Called when panels are added, closed or
+    /// navigated, not on every tick.
     pub(super) fn register_panel_watchers(&mut self) {
         let Some(watcher) = &mut self.state.watcher else {
             return;
         };
 
-        for panel in self.layout_manager.iter_all_panels_mut() {
-            // Use GetFsWatchInfo to check watch state
-            if let CommandResult::FsWatchInfo {
-                watched_root,
-                current_path,
-                is_git_repo: _,
-            } = panel.handle_command(PanelCommand::GetFsWatchInfo)
-            {
-                if watched_root.is_none() {
-                    // Determine the new watched root
-                    let repo_root = find_repo_root(&current_path);
-                    let is_git_repo = repo_root.is_some();
-                    let new_root = repo_root.unwrap_or_else(|| current_path.clone());
-
-                    // Watch new root (now fast - respects .gitignore)
-                    if is_git_repo {
-                        if !watcher.is_watching_repo(&new_root) {
-                            let _ = watcher.watch_repository(new_root.clone());
-                        }
-                    } else if !watcher.is_watching_dir(&new_root) {
-                        let _ = watcher.watch_directory(new_root.clone());
-                    }
-
-                    // Update panel's watched root
-                    panel.handle_command(PanelCommand::SetFsWatchRoot {
-                        root: Some(new_root),
-                        is_git_repo,
-                    });
-                }
-            }
-
-            // Also handle Editor panels via GetRepoRoot
-            if let CommandResult::RepoRoot(Some(repo_root)) =
-                panel.handle_command(PanelCommand::GetRepoRoot)
-            {
-                if !watcher.is_watching_repo(&repo_root) {
-                    let _ = watcher.watch_repository(repo_root);
-                }
+        let mut wanted: HashMap<WatchTarget, usize> = HashMap::new();
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, parked)| parked.panels_mut());
+        for panel in self.layout_manager.iter_all_panels_mut().chain(parked) {
+            if let Some(target) = panel_watch_target(panel) {
+                *wanted.entry(target).or_insert(0) += 1;
             }
         }
+        reconcile_watches(watcher, &mut self.state.held_watches, &wanted);
 
         // Sync git panel repo lists with current panel paths so that git-status
         // and git-log panels update when the user navigates to a new directory.
@@ -133,10 +169,9 @@ impl App {
             }
         }
 
-        // Handle .gitignore changes - reinitialize watcher
+        // A changed .gitignore changes which directories need a watch
         for repo_root in gitignore_changed_repos {
-            watcher.unwatch_repository(&repo_root);
-            let _ = watcher.watch_repository(repo_root);
+            watcher.reload_repo_ignores(&repo_root);
         }
 
         // Invalidate cached commands registry on any filesystem change involving commands.toml.
@@ -279,6 +314,106 @@ mod tests {
                 "directory d{dir} lost its representative"
             );
         }
+    }
+
+    fn temp_repo() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        std::fs::create_dir(root.join(".git")).unwrap();
+        std::fs::create_dir(root.join("src")).unwrap();
+        (tmp, root)
+    }
+
+    fn wanted(targets: &[&WatchTarget]) -> HashMap<WatchTarget, usize> {
+        let mut wanted = HashMap::new();
+        for target in targets {
+            *wanted.entry((*target).clone()).or_insert(0) += 1;
+        }
+        wanted
+    }
+
+    /// Two panels in one repository hold a watch each: closing one keeps the
+    /// repository watched for the other, closing both releases it.
+    #[test]
+    fn a_shared_repo_stays_watched_until_its_last_panel_goes() {
+        let (_tmp, root) = temp_repo();
+        let repo = WatchTarget::Repo(root.clone());
+        let mut watcher = UnifiedWatcher::new().unwrap();
+        let mut held = HashMap::new();
+
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[&repo, &repo]));
+        assert_eq!(held[&repo], 2);
+
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[&repo]));
+        assert_eq!(held[&repo], 1);
+        assert!(
+            watcher.is_watching_repo(&root),
+            "the other panel still needs it"
+        );
+
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[]));
+        assert!(held.is_empty());
+        assert!(!watcher.is_watching_repo(&root));
+    }
+
+    /// Navigating away releases the directory left, git or not, and a pass
+    /// with nothing changed acquires nothing more.
+    #[test]
+    fn navigating_away_releases_the_directory_left() {
+        let a = tempfile::tempdir().unwrap();
+        let b = tempfile::tempdir().unwrap();
+        let dir_a = WatchTarget::Dir(dunce::canonicalize(a.path()).unwrap());
+        let dir_b = WatchTarget::Dir(dunce::canonicalize(b.path()).unwrap());
+        let mut watcher = UnifiedWatcher::new().unwrap();
+        let mut held = HashMap::new();
+
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[&dir_a]));
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[&dir_a]));
+        assert_eq!(held[&dir_a], 1, "a repeated pass is idempotent");
+
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[&dir_b]));
+        assert!(!held.contains_key(&dir_a));
+        let WatchTarget::Dir(path_a) = &dir_a else {
+            unreachable!()
+        };
+        assert!(!watcher.is_watching_dir(path_a));
+        assert_eq!(held[&dir_b], 1);
+    }
+
+    /// A directory that cannot be watched is not held, so nothing is
+    /// released for it later.
+    #[test]
+    fn a_failed_watch_is_not_held() {
+        let gone = WatchTarget::Dir(PathBuf::from("/nonexistent/termide-watch-test"));
+        let mut watcher = UnifiedWatcher::new().unwrap();
+        let mut held = HashMap::new();
+        reconcile_watches(&mut watcher, &mut held, &wanted(&[&gone]));
+        assert!(held.is_empty());
+    }
+
+    /// A file manager is watched by the repository it is in, and learns its
+    /// root; outside a repository by its directory.
+    #[test]
+    fn file_manager_targets_its_repo_or_its_directory() {
+        let (_tmp, root) = temp_repo();
+        let mut fm: Box<dyn Panel> = Box::new(
+            termide_panel_file_manager::FileManager::new_with_path(root.join("src")),
+        );
+        assert_eq!(
+            panel_watch_target(&mut fm),
+            Some(WatchTarget::Repo(root.clone()))
+        );
+        assert!(matches!(
+            fm.handle_command(PanelCommand::GetFsWatchInfo),
+            CommandResult::FsWatchInfo { watched_root: Some(r), is_git_repo: true, .. } if r == root
+        ));
+
+        let plain = tempfile::tempdir().unwrap();
+        let plain = dunce::canonicalize(plain.path()).unwrap();
+        let mut fm: Box<dyn Panel> = Box::new(
+            termide_panel_file_manager::FileManager::new_with_path(plain.clone()),
+        );
+        assert_eq!(panel_watch_target(&mut fm), Some(WatchTarget::Dir(plain)));
     }
 
     /// A root-level path has no parent; it must still survive the collapse.

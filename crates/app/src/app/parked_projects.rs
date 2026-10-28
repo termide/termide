@@ -707,6 +707,8 @@ impl App {
                 }
             }
             log::info!("Closed project {:?}", root);
+            // Release the watches its panels held.
+            self.state.needs_watcher_registration = true;
         }
         self.sync_open_projects();
         self.return_to_projects(from)

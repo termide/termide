@@ -16,7 +16,7 @@ use termide_lsp::{LspConfig, LspManager, LspServerConfig};
 use termide_panel_editor::EditorConfig;
 use termide_system_monitor::SystemMonitor;
 use termide_theme::Theme;
-use termide_watcher::UnifiedWatcher;
+use termide_watcher::{UnifiedWatcher, WatchTarget};
 
 // Import core traits
 use termide_app_core::{ModalManager, StateManager};
@@ -99,6 +99,9 @@ pub struct AppState {
     pub skip_refresh_after_upload: bool,
     /// Unified watcher for filesystem and git changes
     pub watcher: Option<UnifiedWatcher>,
+    /// Watches the app holds on `watcher`: one per panel wanting the target.
+    /// Reconciled against the panels by `register_panel_watchers`.
+    pub held_watches: HashMap<WatchTarget, usize>,
     /// Current theme
     pub theme: &'static Theme,
     /// Application configuration (effective: built-in defaults + global file
@@ -263,6 +266,7 @@ impl AppState {
             close_editor_after_upload: None,
             skip_refresh_after_upload: false,
             watcher: None,
+            held_watches: HashMap::new(),
             theme,
             config: Arc::new(config),
             global_baseline: Arc::new(global_baseline),
