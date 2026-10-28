@@ -853,6 +853,16 @@ impl PermissionHooks {
         if call.name == "bash" {
             return self.judge_command(&subject, ctx).decision;
         }
+        // What git keeps under `.git` — its config, its hooks — names programs
+        // that a look-only `git status` then runs, so no mode, `allow` rule or
+        // answer for the session lets an edit there through unasked.
+        if writes_git_dir(call, &subject) {
+            return match self.rule_for(call, &subject, ctx) {
+                Some(Decision::Deny) => Decision::Deny,
+                _ if mode == Mode::Plan => Decision::Deny,
+                _ => Decision::Ask,
+            };
+        }
 
         if let Some(decision) = self.rule_for(call, &subject, ctx) {
             return decision;
@@ -1104,7 +1114,8 @@ impl PermissionHooks {
                 } else {
                     (
                         Vec::new(),
-                        self.rule_for(call, &subject, ctx) == Some(Decision::Ask),
+                        self.rule_for(call, &subject, ctx) == Some(Decision::Ask)
+                            || writes_git_dir(call, &subject),
                     )
                 };
                 if let Some(judged) = self.review(call, ctx, forced, &parts) {
@@ -1117,7 +1128,9 @@ impl PermissionHooks {
                 // touches, and not one that runs some other program a rule for
                 // it would vouch for blindly.
                 let bundle = parts.len() > 1;
-                let destructive = parts.iter().any(|p| destructive_command(&p.text));
+                // An edit under `.git` asks every time, so no answer outlasts it.
+                let destructive = parts.iter().any(|p| destructive_command(&p.text))
+                    || writes_git_dir(call, &subject);
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
@@ -1364,6 +1377,16 @@ fn normalize(path: &Path) -> std::path::PathBuf {
         }
     }
     out
+}
+
+/// Whether `call` edits or writes a file under a `.git` directory, or the
+/// `.git` file of a worktree, its `subject` being the real path. The match
+/// ignores case, which file systems such as macOS's ignore too.
+fn writes_git_dir(call: &ToolCall, subject: &str) -> bool {
+    matches!(call.name.as_str(), "edit" | "write")
+        && Path::new(subject)
+            .components()
+            .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
 }
 
 fn inside_project(call: &ToolCall, ctx: &ToolContext) -> bool {
@@ -3875,6 +3898,83 @@ mod tests {
                 "{mode:?}"
             );
         }
+    }
+
+    /// An edit or a write under `.git` (its config can name a program that a
+    /// look-only `git status` runs) asks in every mode, whatever the rules
+    /// allow; a `deny` still refuses, plan mode still refuses, and no answer
+    /// outlasts the call.
+    #[test]
+    fn writing_under_git_asks_in_every_mode() {
+        let edit = |path: &str| call("edit", json!({ "path": path }));
+        for mode in [
+            Mode::Ask,
+            Mode::Edit,
+            Mode::Configured,
+            Mode::Auto,
+            Mode::All,
+        ] {
+            let mut rules = PermissionRules {
+                mode,
+                ..PermissionRules::default()
+            };
+            rules.add("edit", "**", Decision::Allow);
+            rules.add_session("edit", ".git/config", Decision::Allow);
+            let (hooks, _) = hooks(rules, vec![]);
+            for path in [
+                ".git/config",
+                ".git/hooks/pre-commit",
+                "/proj/.git/config",
+                ".GIT/config",
+                "sub/.git",
+                "/elsewhere/repo/.git/config",
+            ] {
+                assert_eq!(
+                    hooks.decide(&edit(path), &ctx()),
+                    Decision::Ask,
+                    "{mode:?} {path}"
+                );
+            }
+            assert_eq!(
+                hooks.decide(&call("write", json!({ "path": ".git/config" })), &ctx()),
+                Decision::Ask
+            );
+            // Reading git's files, and a file merely named like it, are not
+            // held back.
+            assert_ne!(
+                hooks.decide(&call("read", json!({ "path": ".git/config" })), &ctx()),
+                Decision::Deny
+            );
+            if matches!(mode, Mode::Edit | Mode::Auto | Mode::All) {
+                assert_eq!(hooks.decide(&edit(".gitignore"), &ctx()), Decision::Allow);
+                assert_eq!(
+                    hooks.decide(&edit("src/.github/x"), &ctx()),
+                    Decision::Allow
+                );
+            }
+        }
+        let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+        assert_eq!(plan.decide(&edit(".git/config"), &ctx()), Decision::Deny);
+        let mut denied = rules("mode = \"all\"");
+        denied.add("edit", ".git/**", Decision::Deny);
+        let (denied, _) = hooks(denied, vec![]);
+        assert_eq!(denied.decide(&edit(".git/config"), &ctx()), Decision::Deny);
+
+        // The reviewer is not asked, and no answer outlasts the call.
+        let (hooks, judged, asked) = auto_hooks(
+            "",
+            vec![allow("fine")],
+            vec![PermissionAnswer::AllowSession],
+        );
+        let mut hooks = hooks.with_persist(Box::new(|_, _, _, _| {}));
+        assert_eq!(
+            hooks.before_tool_call(&edit(".git/config"), &ctx()),
+            ToolDecision::Allow
+        );
+        assert!(judged.lock().unwrap().is_empty());
+        let request = asked.lock().unwrap()[0].clone();
+        assert!(!request.can_persist && !request.can_allow_session);
+        assert_eq!(hooks.decide(&edit(".git/config"), &ctx()), Decision::Ask);
     }
 
     #[test]
