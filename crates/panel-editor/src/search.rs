@@ -72,8 +72,6 @@ pub fn perform_search(buffer: &TextBuffer, search: &mut SearchState) {
     } else {
         search.query.to_lowercase()
     };
-    let query_glen = search.query.chars().count();
-
     for line_idx in 0..buffer.line_count() {
         if let Some(line_text) = buffer.line_cow(line_idx) {
             let search_text = if search.case_sensitive {
@@ -90,7 +88,14 @@ pub fn perform_search(buffer: &TextBuffer, search: &mut SearchState) {
                     line: line_idx,
                     column: match_grapheme_col,
                 });
-                search.match_lengths.push(query_glen);
+                // Lengths are in graphemes, the unit cursors and deletions
+                // use, so `नमस्ते` or `👍🏽` count as the clusters they are.
+                let match_end = match_byte_col + query.len();
+                search.match_lengths.push(
+                    search_text[match_byte_col..match_end]
+                        .graphemes(true)
+                        .count(),
+                );
                 if let Some(first_char) = search_text[match_byte_col..].chars().next() {
                     byte_col = match_byte_col + first_char.len_utf8();
                 } else {
@@ -163,7 +168,7 @@ pub fn replace_at_position(
 
     let new_cursor = Cursor {
         line: match_cursor.line,
-        column: match_cursor.column + replace_text.chars().count(),
+        column: match_cursor.column + replace_text.graphemes(true).count(),
     };
 
     Ok(ReplaceResult {
@@ -277,5 +282,34 @@ mod tests {
         assert_eq!(s.matches.len(), 1);
         replace_all_matches(&mut b, &s).unwrap();
         assert_eq!(b.line_cow(0).unwrap(), "a$1b");
+    }
+
+    #[test]
+    fn literal_match_lengths_count_graphemes() {
+        let b = buf("x नमस्ते y 👍🏽 z");
+        for query in ["नमस्ते", "👍🏽"] {
+            let graphemes = query.graphemes(true).count();
+            assert!(graphemes < query.chars().count());
+            let mut s = SearchState::new(query.to_string(), true);
+            perform_search(&b, &mut s);
+            assert_eq!(s.match_lengths, vec![graphemes], "{query}");
+        }
+    }
+
+    #[test]
+    fn literal_replace_keeps_the_text_after_a_cluster_match() {
+        for (query, expected) in [("नमस्ते", "x hi y 👍🏽 z"), ("👍🏽", "x नमस्ते y hi z")]
+        {
+            let mut b = buf("x नमस्ते y 👍🏽 z");
+            let mut s = SearchState::new_with_replace(query.to_string(), "hi".to_string(), true);
+            perform_search(&b, &mut s);
+            replace_all_matches(&mut b, &s).unwrap();
+            assert_eq!(b.line_cow(0).unwrap(), expected);
+
+            let mut b = buf("x नमस्ते y 👍🏽 z");
+            let r = replace_at_position(&mut b, &s.matches[0], s.match_len_at(0), "hi").unwrap();
+            assert_eq!(b.line_cow(0).unwrap(), expected);
+            assert_eq!(r.new_cursor.column, s.matches[0].column + 2);
+        }
     }
 }
