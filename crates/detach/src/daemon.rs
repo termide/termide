@@ -78,6 +78,7 @@ pub fn spawn_detached(project_root: &Path, args: &[OsString]) -> Result<String> 
             registry::write_info(&InstanceInfo {
                 id: id.clone(),
                 pid: child.as_raw(),
+                pid_start: registry::process_start(child.as_raw()),
                 project: project_root.to_path_buf(),
                 started: registry::now_unix(),
                 attached: false,
