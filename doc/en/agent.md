@@ -1416,10 +1416,11 @@ directory, writing `docs/.zshrc` is an edit outside the project, and a rule
 for `.env` also covers a link to it.
 
 An edit or a write under a `.git` directory, or to a worktree's `.git` file,
-asks in every mode, `all` included, and whatever the `allow` rules say: git's
-config and hooks name programs that even a look-only `git status` runs. A
-`deny` rule still refuses it, plan mode refuses it, and the answer holds for
-that one call.
+asks in every mode but `all`, whatever the `allow` rules say: git's config
+and hooks name programs that even a look-only `git status` runs. A `deny`
+rule still refuses it, plan mode refuses it, and the answer holds for that
+one call. `all` lets it through like everything else: that mode runs any
+shell command unasked, so a prompt there would guard nothing.
 
 ¹ In `plan` an MCP tool counts the configured `allow` rules too, and one its
 server marks read-only (`readOnlyHint`) runs without asking.
@@ -1450,7 +1451,15 @@ can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
 `ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
 the project (`cd /etc && cat passwd` included). So do `env` and `printenv`
 without arguments, which print every secret in the environment. A grep or
-`rg` pattern is not taken for a path (`rg /api/ src` does not ask). The rule
+`rg` pattern is not taken for a path (`rg /api/ src` does not ask), nor is a
+`$` that starts no expansion a variable (`rg "foo$" src` does not ask).
+The variable of a `for` loop over words that each name a path inside the
+project — literals or globs, as a path argument would — reads inside it:
+`for f in *.rs src/*.toml; do wc -l $f; done` does not ask. The loop's body
+must hold only look-only commands, without a `cd`, and nothing on the line
+may set that variable some other way; a list that cannot be seen
+(`for f in $(ls ~)`, `while read f`), a word outside the project
+(`for f in ~/*`) or a word with an option or a space still asks. The rule
 "allow always" keeps for such a read names that one command, not `cat *`. Loading a skill never asks.
 
 ### Plan mode

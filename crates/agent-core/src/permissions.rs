@@ -844,6 +844,12 @@ impl PermissionHooks {
         self.mode.clone()
     }
 
+    /// Whether `call` edits under `.git` in a mode that asks about it: every
+    /// mode but `all`.
+    fn guards_git_dir(&self, call: &ToolCall, subject: &str) -> bool {
+        self.mode.get() != Mode::All && writes_git_dir(call, subject)
+    }
+
     /// The verdict before any prompt: the rules that count in the mode
     /// (the strictest wins), then the mode's own answer and the built-in
     /// safe defaults.
@@ -855,9 +861,11 @@ impl PermissionHooks {
             return self.judge_command(&subject, ctx).decision;
         }
         // What git keeps under `.git` — its config, its hooks — names programs
-        // that a look-only `git status` then runs, so no mode, `allow` rule or
-        // answer for the session lets an edit there through unasked.
-        if writes_git_dir(call, &subject) {
+        // that a look-only `git status` then runs, so no `allow` rule or
+        // answer for the session lets an edit there through unasked. `all`
+        // runs any shell command unasked anyway, so a prompt there guards
+        // nothing the user has not chosen to give away.
+        if self.guards_git_dir(call, &subject) {
             return match self.rule_for(call, &subject, ctx) {
                 Some(Decision::Deny) => Decision::Deny,
                 _ if mode == Mode::Plan => Decision::Deny,
@@ -1132,7 +1140,7 @@ impl PermissionHooks {
                     (
                         Vec::new(),
                         self.rule_for(call, &subject, ctx) == Some(Decision::Ask)
-                            || writes_git_dir(call, &subject),
+                            || self.guards_git_dir(call, &subject),
                     )
                 };
                 if let Some(judged) = self.review(call, ctx, forced, &parts) {
@@ -1147,7 +1155,7 @@ impl PermissionHooks {
                 let bundle = parts.len() > 1;
                 // An edit under `.git` asks every time, so no answer outlasts it.
                 let destructive = parts.iter().any(|p| destructive_command(&p.text))
-                    || writes_git_dir(call, &subject);
+                    || self.guards_git_dir(call, &subject);
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
@@ -1465,6 +1473,16 @@ struct ParsedShell {
     substituted: Vec<bool>,
     /// Whether any part expands.
     has_substitution: bool,
+    /// The loops each part runs in, as indices into `loops`, outermost
+    /// first.
+    enclosing: Vec<Vec<usize>>,
+    /// Every `for`, `select`, `while` and `until` loop of the line, each
+    /// with the variable a `for NAME in WORDS` header binds and its words,
+    /// their quotes taken off; `None` for the rest, and for a header whose
+    /// words expand.
+    loops: Vec<Option<(String, Vec<String>)>>,
+    /// The loops open where the reading has got to.
+    open_loops: Vec<usize>,
 }
 
 /// Split a command line into its simple commands, honouring quotes,
@@ -1688,6 +1706,11 @@ pub struct ShellPart {
     /// The directory it runs in, as the `cd`s before it left it; `None` when
     /// that cannot be told.
     pub dir: Option<std::path::PathBuf>,
+    /// The variables of the `for NAME in WORDS` loops it runs in, innermost
+    /// last, with the words each takes in turn — only where nothing else
+    /// on the line can give that variable another value or move the loop
+    /// to another directory between its turns.
+    pub loop_values: Vec<(String, Vec<String>)>,
 }
 
 /// Split `command` into its parts, following `cd`, `pushd` and `popd` from
@@ -1699,11 +1722,13 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
     let mut dir = Some(normalize(cwd));
     let mut stack: Vec<Option<std::path::PathBuf>> = Vec::new();
     let parsed = split_shell(command);
+    let bindings = loop_bindings(command, &parsed);
     parsed
         .parts
         .iter()
         .zip(parsed.substituted.iter())
-        .map(|(text, &substituted)| {
+        .zip(parsed.enclosing.iter())
+        .map(|((text, &substituted), enclosing)| {
             let mut words = text.split_whitespace();
             let head = words.next().unwrap_or("");
             let rest = &text.trim_start()[head.len()..];
@@ -1732,9 +1757,70 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
                 text: text.clone(),
                 resolved,
                 dir: runs_in,
+                loop_values: enclosing
+                    .iter()
+                    .filter_map(|&l| bindings[l].clone())
+                    .collect(),
             }
         })
         .collect()
+}
+
+/// The binding of each loop of `parsed` that a part in it can rely on: its
+/// header's, while every part the loop runs is a look-only command of its
+/// own (no `cd`, no substitution, no subshell) and `command` names the
+/// variable nowhere but in a `for` header and as a plain `$NAME` or
+/// `${NAME}`, so no assignment, `read`, `${NAME:=…}` or function changes
+/// it. A line that touches `IFS` binds nothing, its words splitting
+/// differently.
+fn loop_bindings(command: &str, parsed: &ParsedShell) -> Vec<Option<(String, Vec<String>)>> {
+    parsed
+        .loops
+        .iter()
+        .enumerate()
+        .map(|(index, binding)| {
+            let (name, _) = binding.as_ref()?;
+            let body_looks_only = parsed
+                .parts
+                .iter()
+                .zip(&parsed.substituted)
+                .zip(&parsed.enclosing)
+                .filter(|(_, enclosing)| enclosing.contains(&index))
+                .all(|((text, &substituted), _)| {
+                    let head = text.split_whitespace().next().unwrap_or("");
+                    !substituted
+                        && !matches!(head, "cd" | "pushd" | "popd")
+                        && !text.starts_with('(')
+                        && !text.ends_with(')')
+                        && is_read_only_command(text)
+                });
+            (body_looks_only
+                && !command.contains("IFS")
+                && names_only_as_loop_variable(command, name))
+            .then(|| binding.clone())
+            .flatten()
+        })
+        .collect()
+}
+
+/// Whether `command` names the variable `name` only in a `for` header and
+/// in plain expansions of it.
+fn names_only_as_loop_variable(command: &str, name: &str) -> bool {
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    command.match_indices(name).all(|(at, _)| {
+        let before = &command[..at];
+        let after = &command[at + name.len()..];
+        if before.ends_with(is_name_char) || after.starts_with(is_name_char) {
+            return true; // part of a longer word
+        }
+        before.ends_with('$')
+            || (before.ends_with("${") && after.starts_with('}'))
+            || (before.ends_with(char::is_whitespace)
+                && before
+                    .trim_end()
+                    .strip_suffix("for")
+                    .is_some_and(|b| b.is_empty() || b.ends_with(|c: char| !is_name_char(c))))
+    })
 }
 
 /// The look-only commands that read the files their arguments name.
@@ -1753,16 +1839,64 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
     let text = without_harmless_redirections(&part.text);
     let head = text.split_whitespace().next().unwrap_or("");
     let reader = FILE_READERS.contains(&head);
-    let Some(words) = shell_words(&text) else {
-        // A variable expands to a path no one can see beforehand.
+    let project = real_path(project);
+    let dir = part.dir.as_deref();
+    // A loop variable counts when each word it takes is one the command
+    // could name itself: a path inside the project, no option, nothing the
+    // shell would split. The command is then judged with every value in.
+    let loop_values: Vec<(&str, &[String])> = part
+        .loop_values
+        .iter()
+        .filter(|(_, values)| {
+            values.iter().all(|value| {
+                !value.is_empty()
+                    && !value.starts_with('-')
+                    && !value.contains(char::is_whitespace)
+                    && !path_outside(value, dir, &project)
+            })
+        })
+        .map(|(name, values)| (name.as_str(), values.as_slice()))
+        .collect();
+    let turns: usize = loop_values.iter().map(|(_, v)| v.len()).product();
+    if turns > MAX_LOOP_TURNS {
         return reader || text.contains('<');
-    };
+    }
+    (0..turns).any(|turn| {
+        let mut rest = turn;
+        let values: Vec<(&str, &str)> = loop_values
+            .iter()
+            .map(|(name, values)| {
+                let value = values[rest % values.len()].as_str();
+                rest /= values.len();
+                (*name, value)
+            })
+            .collect();
+        match shell_words_with(&text, &values) {
+            Some(words) => words_read_outside(head, reader, &words, dir, &project),
+            // A variable expands to a path no one can see beforehand.
+            None => reader || text.contains('<'),
+        }
+    })
+}
+
+/// The most turns of the loops around a command [`reads_outside`] judges it
+/// for, one by one; beyond that it asks.
+const MAX_LOOP_TURNS: usize = 256;
+
+/// Whether the look-only command `head` with the shell `words` reads beyond
+/// `project` (a real path), run in `dir`; `reader` when it is one of
+/// [`FILE_READERS`].
+fn words_read_outside(
+    head: &str,
+    reader: bool,
+    words: &[String],
+    dir: Option<&Path>,
+    project: &Path,
+) -> bool {
     if matches!(head, "env" | "printenv") && words.len() == 1 {
         return true;
     }
-    let project = real_path(project);
-    let dir = part.dir.as_deref();
-    let outside = |word: &str| path_outside(word, dir, &project);
+    let outside = |word: &str| path_outside(word, dir, project);
     // The first operand of these is a pattern or a script, not a file,
     // unless an option gives that.
     let patterned = matches!(head, "grep" | "egrep" | "fgrep" | "rg" | "sed");
@@ -1862,7 +1996,7 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
         }
         _ => false,
     };
-    reads_dir && dir.is_none_or(|dir| !real_path(dir).starts_with(&project))
+    reads_dir && dir.is_none_or(|dir| !real_path(dir).starts_with(project))
 }
 
 /// Whether the shell word `word`, a path run from `dir`, leads outside
@@ -1952,16 +2086,69 @@ fn resolve_program(head: &str, dir: Option<&Path>, project: &Path) -> Option<Str
 /// what it expanded is still run, so `expands` is left set for the command
 /// that follows it to carry.
 fn push_part(parsed: &mut ParsedShell, current: &mut String, expands: bool) -> bool {
+    track_loops(parsed, current.trim());
     let kept = match without_shell_keywords(current.trim()) {
         Some(part) => {
             parsed.substituted.push(expands);
             parsed.parts.push(part.to_string());
+            parsed.enclosing.push(parsed.open_loops.clone());
             true
         }
         None => false,
     };
     current.clear();
     kept
+}
+
+/// Open the loops the segment `part` starts — a `while` or `until` among its
+/// leading reserved words, a `for` or `select` header — and close the one a
+/// `done` ends.
+fn track_loops(parsed: &mut ParsedShell, part: &str) {
+    let words: Vec<&str> = part.split_whitespace().collect();
+    let leading = words
+        .iter()
+        .take_while(|w| {
+            matches!(
+                **w,
+                "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
+            )
+        })
+        .count();
+    for word in &words[..leading] {
+        if matches!(*word, "while" | "until") {
+            parsed.open_loops.push(parsed.loops.len());
+            parsed.loops.push(None);
+        }
+    }
+    match words.get(leading) {
+        Some(&"done") => {
+            parsed.open_loops.pop();
+        }
+        Some(&head @ ("for" | "select")) => {
+            // The reserved words before the header are plain words, so the
+            // header's words start where they end.
+            let binding = (head == "for")
+                .then(|| shell_words(part))
+                .flatten()
+                .and_then(|words| match words.get(leading + 1..)? {
+                    [name, keyword, values @ ..]
+                        if keyword == "in" && is_shell_name(name) && !values.is_empty() =>
+                    {
+                        Some((name.clone(), values.to_vec()))
+                    }
+                    _ => None,
+                });
+            parsed.open_loops.push(parsed.loops.len());
+            parsed.loops.push(binding);
+        }
+        _ => {}
+    }
+}
+
+/// Whether `word` can name a shell variable.
+fn is_shell_name(word: &str) -> bool {
+    word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+        && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// `part` without the shell's reserved words, which run nothing of their
@@ -2082,12 +2269,20 @@ pub fn is_read_only_command(part: &str) -> bool {
 }
 
 /// The words of a simple command with their quotes taken off, or `None`
-/// where a word would expand (`$`, a backquote, a glob in double quotes is
-/// fine) or a quote is left open.
+/// where a word would expand (a parameter, a substitution, a backquote; a
+/// glob in double quotes is fine) or a quote is left open. A `$` that starts
+/// no expansion, as in `rg "foo$"`, is the character itself.
 fn shell_words(part: &str) -> Option<Vec<String>> {
+    shell_words_with(part, &[])
+}
+
+/// [`shell_words`] with the variables in `values` expanded, `$NAME` and
+/// `${NAME}` alike, to the value given (the last one for a name given
+/// twice); any other expansion still gives `None`.
+fn shell_words_with(part: &str, values: &[(&str, &str)]) -> Option<Vec<String>> {
     let mut words = Vec::new();
     let mut word: Option<String> = None;
-    let mut chars = part.chars();
+    let mut chars = part.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
             c if c.is_whitespace() => words.extend(word.take()),
@@ -2105,19 +2300,58 @@ fn shell_words(part: &str) -> Option<Vec<String>> {
                 loop {
                     match chars.next()? {
                         '"' => break,
-                        '$' | '`' => return None,
+                        '$' if starts_expansion(chars.peek().copied(), true) => {
+                            current.push_str(expand_variable(&mut chars, values)?);
+                        }
+                        '`' => return None,
                         '\\' => current.push(chars.next()?),
                         c => current.push(c),
                     }
                 }
             }
-            '$' | '`' => return None,
+            '$' if starts_expansion(chars.peek().copied(), false) => word
+                .get_or_insert_with(String::new)
+                .push_str(expand_variable(&mut chars, values)?),
+            '`' => return None,
             '\\' => word.get_or_insert_with(String::new).push(chars.next()?),
             c => word.get_or_insert_with(String::new).push(c),
         }
     }
     words.extend(word);
     Some(words)
+}
+
+/// The value in `values` of the variable `chars` names just after a `$`,
+/// as `NAME` or `{NAME}`; `None` for any other expansion or a name without
+/// a value given.
+fn expand_variable<'v>(
+    chars: &mut std::iter::Peekable<std::str::Chars>,
+    values: &[(&str, &'v str)],
+) -> Option<&'v str> {
+    let braced = chars.next_if_eq(&'{').is_some();
+    let mut name = String::new();
+    while let Some(c) = chars.next_if(|c| c.is_ascii_alphanumeric() || *c == '_') {
+        name.push(c);
+    }
+    if !is_shell_name(&name) || (braced && chars.next() != Some('}')) {
+        return None;
+    }
+    values
+        .iter()
+        .rev()
+        .find(|(n, _)| *n == name)
+        .map(|(_, value)| *value)
+}
+
+/// Whether a `$` followed by `next` expands: a name, a positional or special
+/// parameter, `${…}`, `$(…)` or `$[…]`. Outside double quotes `$'…'` and
+/// `$"…"` are quotes of their own whose escapes can spell any text.
+fn starts_expansion(next: Option<char>, in_double_quotes: bool) -> bool {
+    next.is_some_and(|c| {
+        c.is_ascii_alphanumeric()
+            || "_@*#?$!-{([".contains(c)
+            || (!in_double_quotes && (c == '\'' || c == '"'))
+    })
 }
 
 /// `sed` that only prints: no in-place edit, no script file, and every
@@ -3067,8 +3301,8 @@ mod tests {
         );
         assert_eq!(decide("[ -d target ] && cargo test"), Decision::Allow);
         assert_eq!(decide("for f in a b; do echo $f; done"), Decision::Allow);
-        // The loop header is no part, so what `$f` reads cannot be seen.
-        assert_eq!(decide("for f in a b; do cat $f; done"), Decision::Ask);
+        // The header is no part, but it tells what `$f` reads.
+        assert_eq!(decide("for f in a b; do cat $f; done"), Decision::Allow);
         assert_eq!(decide("if true; then rm -rf x; fi"), Decision::Ask);
         assert_eq!(
             decide("for f in $(ls); do cat $f; done"),
@@ -3659,6 +3893,178 @@ mod tests {
         assert_eq!(request.patterns(), vec!["cat /etc/hosts"]);
     }
 
+    /// A `$` expands only before a name, a parameter, a brace, a parenthesis
+    /// or a bracket (and outside double quotes before a quote, `$'…'` being a
+    /// quote of its own); anywhere else it is a plain character, so a pattern
+    /// anchored with `$` is no variable whose value cannot be seen.
+    #[test]
+    fn a_dollar_that_expands_nothing_is_no_variable() {
+        let words = |part: &str| shell_words(part);
+        assert_eq!(
+            words("rg \"foo$\" src"),
+            Some(vec!["rg".into(), "foo$".into(), "src".into()])
+        );
+        assert_eq!(
+            words("grep a$ x"),
+            Some(vec!["grep".into(), "a$".into(), "x".into()])
+        );
+        assert_eq!(
+            words("echo $ \"$\""),
+            Some(vec!["echo".into(), "$".into(), "$".into()])
+        );
+        assert_eq!(
+            words("sed 's/x$//'"),
+            Some(vec!["sed".into(), "s/x$//".into()])
+        );
+        assert_eq!(
+            words("echo \"a$'\""),
+            Some(vec!["echo".into(), "a$'".into()])
+        );
+        for expanding in [
+            "cat $HOME/x",
+            "cat \"$HOME\"",
+            "cat ${HOME}/x",
+            "cat $1",
+            "cat \"$@\"",
+            "cat $_x",
+            "cat $$",
+            "cat $(ls)",
+            "cat \"$(ls)\"",
+            "cat $[1]",
+            "cat $'\\x2e\\x2e/x'",
+            "cat $\"x\"",
+        ] {
+            assert_eq!(words(expanding), None, "{expanding}");
+        }
+
+        let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+        for command in [
+            "rg \"foo$\" src",
+            "rg 'foo$' src",
+            "grep \"a$\" src/lib.rs",
+            "grep -rn 'end$' src",
+            "sed -n \"/x$/p\" src/lib.rs",
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{command}"
+            );
+        }
+        for command in ["cat $HOME/x", "cat \"${HOME}/x\"", "cat $'\\x2e\\x2e/x'"] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{command}"
+            );
+        }
+    }
+
+    /// A `for` loop over words that each name a path inside the project lets
+    /// its variable stand for them in a look-only read; a variable bound any
+    /// other way, or one the line could change, still asks.
+    #[test]
+    fn loop_variables_over_paths_in_the_project_read_inside_it() {
+        let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+        let inside = [
+            "for f in *.rs src/*.toml; do wc -l $f; done",
+            "for f in a b c; do cat $f; done",
+            "for f in a b c; do cat ${f}; done",
+            "for f in a b c; do cat \"$f\"; done",
+            "for f in a b\ndo\n  head -n 3 src/$f.rs\ndone",
+            "for f in src/*.rs; do grep -n TODO $f | head -5; done",
+            "for d in src docs; do ls $d; done",
+            "for p in foo bar; do rg $p src; done",
+            "for f in a b; do for g in c d; do cat $f/$g; done; done",
+            "for f in a; do wc -l < $f; done",
+            "cd src && for f in *.rs; do cat $f; done",
+            "for f in /proj/src/a; do cat $f; done",
+            "for f in a; do cat $f; done; for f in b; do cat $f; done",
+        ];
+        for command in inside {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{command}"
+            );
+        }
+        let home = std::env::var("HOME").unwrap_or_default();
+        let outside = [
+            // A word outside the project, or one that could become one.
+            "for f in ~/*; do cat $f; done",
+            "for f in /etc/passwd; do cat $f; done",
+            "for f in a ../b; do cat $f; done",
+            "for f in .*; do cat $f; done",
+            "for f in --files-from=x; do wc $f; done",
+            "for f in 'a b' c; do cat $f; done",
+            // A list that cannot be seen.
+            "for f in $(ls ~); do cat $f; done",
+            "for f in `ls ~`; do cat $f; done",
+            "for f in $LIST; do cat $f; done",
+            "for f; do cat $f; done",
+            "while read f; do cat $f; done < list",
+            "ls | while read f; do cat $f; done",
+            // The value goes out, or another variable is read.
+            "for f in a; do cat /etc/$f; done",
+            "for f in a; do cat ../$f; done",
+            "for f in a; do cat $g; done",
+            "for f in a; do cat $HOME/$f; done",
+            "for f in a; do cat ${f:-/etc/passwd}; done",
+            "for f in a; do cat ${f}x; cat $SECRET_FILE; done",
+            // Something on the line can give it another value.
+            "for f in a; do f=/etc/passwd; cat $f; done",
+            "for f in a; do echo ${f:=x}; cat $f; done",
+            "for f in a; do read f; cat $f; done",
+            "g() { f=/etc/passwd; }; for f in a; do g; cat $f; done",
+            "for f in a; do cd /etc; cat $f; done",
+            "for f in a; do cat $f; cd ..; done",
+            "IFS=/; for f in a/b; do cat $f; done",
+            // The loop is over: the variable keeps its last value unseen.
+            "for f in a; do echo $f; done; cat $f",
+            "cat $HOME/x",
+        ];
+        for command in outside {
+            if home.is_empty() && command.contains('~') {
+                continue;
+            }
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{command}"
+            );
+        }
+
+        let values = |command: &str| -> Vec<Vec<(String, Vec<String>)>> {
+            shell_parts(command, Path::new("/proj"))
+                .into_iter()
+                .map(|p| p.loop_values)
+                .collect()
+        };
+        let bound = |name: &str, words: &[&str]| {
+            (
+                name.to_string(),
+                words.iter().map(|w| w.to_string()).collect(),
+            )
+        };
+        assert_eq!(
+            values("for f in a 'b c'; do cat $f; done; ls"),
+            vec![vec![bound("f", &["a", "b c"])], vec![]]
+        );
+        // A `while` inside is a loop of its own, closed by its own `done`.
+        assert_eq!(
+            values("for f in a; do while true; do cat $f; done; wc $f; done"),
+            vec![
+                vec![bound("f", &["a"])],
+                vec![bound("f", &["a"])],
+                vec![bound("f", &["a"])]
+            ]
+        );
+        assert_eq!(
+            values("for f in a; do while read g; do cat $f; done; done"),
+            vec![vec![], vec![]]
+        );
+    }
+
     /// A symlink in the project leading out of it carries a look-only read
     /// out too.
     #[cfg(unix)]
@@ -4212,15 +4618,9 @@ mod tests {
     /// allow; a `deny` still refuses, plan mode still refuses, and no answer
     /// outlasts the call.
     #[test]
-    fn writing_under_git_asks_in_every_mode() {
+    fn writing_under_git_asks_in_every_mode_but_all() {
         let edit = |path: &str| call("edit", json!({ "path": path }));
-        for mode in [
-            Mode::Ask,
-            Mode::Edit,
-            Mode::Configured,
-            Mode::Auto,
-            Mode::All,
-        ] {
+        for mode in [Mode::Ask, Mode::Edit, Mode::Configured, Mode::Auto] {
             let mut rules = PermissionRules {
                 mode,
                 ..PermissionRules::default()
@@ -4252,7 +4652,7 @@ mod tests {
                 hooks.decide(&call("read", json!({ "path": ".git/config" })), &ctx()),
                 Decision::Deny
             );
-            if matches!(mode, Mode::Edit | Mode::Auto | Mode::All) {
+            if matches!(mode, Mode::Edit | Mode::Auto) {
                 assert_eq!(hooks.decide(&edit(".gitignore"), &ctx()), Decision::Allow);
                 assert_eq!(
                     hooks.decide(&edit("src/.github/x"), &ctx()),
@@ -4262,6 +4662,18 @@ mod tests {
         }
         let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
         assert_eq!(plan.decide(&edit(".git/config"), &ctx()), Decision::Deny);
+        // `all` never asks, and runs any shell command anyway; its rules
+        // still count.
+        let mut all = rules("mode = \"all\"");
+        all.add("edit", ".git/hooks/**", Decision::Ask);
+        let (all, _) = hooks(all, vec![]);
+        for path in [".git/config", "/elsewhere/repo/.git/config", "sub/.git"] {
+            assert_eq!(all.decide(&edit(path), &ctx()), Decision::Allow, "{path}");
+        }
+        assert_eq!(
+            all.decide(&edit(".git/hooks/pre-commit"), &ctx()),
+            Decision::Ask
+        );
         let mut denied = rules("mode = \"all\"");
         denied.add("edit", ".git/**", Decision::Deny);
         let (denied, _) = hooks(denied, vec![]);
