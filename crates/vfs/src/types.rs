@@ -926,6 +926,10 @@ pub struct HostKey {
     pub host: String,
     /// Port connected to.
     pub port: u16,
+    /// Name the key is (to be) recorded under in `known_hosts`, and what
+    /// `ssh-keygen -R` takes: the `HostKeyAlias`, else the `HostName` as
+    /// `name` on port 22 or `[name]:port`.
+    pub known_as: String,
     /// Key type, e.g. `ssh-ed25519`.
     pub algorithm: String,
     /// OpenSSH SHA256 fingerprint, `SHA256:<base64>`.

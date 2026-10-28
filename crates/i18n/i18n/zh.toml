@@ -1156,6 +1156,7 @@ vfs_host_key_unknown = "无法确认 {host} 的真实性。仅当确知该密钥
 vfs_host_key_changed = "{host} 的密钥与 {location} 中记录的不一致。可能有人在拦截连接，或服务器密钥已被更换。如果更换是预期的，请删除旧密钥（ssh-keygen -R '{host}'）后重新连接。"
 vfs_host_key_changed_session = "{host} 的密钥与本次会话中先前接受的不同。可能有人在拦截连接。重启 termide 后会再次询问。"
 vfs_host_key_revoked = "{host} 的密钥在 {location} 中被标记为已吊销。连接已被拒绝。"
+vfs_host_key_strict = "known_hosts 中没有 {host} 的密钥，而 SSH 配置中的 StrictHostKeyChecking yes 禁止接受新密钥。服务器提供的密钥为 {fingerprint}。请先用 ssh 记录它，或为此主机将 StrictHostKeyChecking 设为 ask。"
 vault_password_prompt = "{target} 的密码："
 vault_stored_refused = "{target} 的已保存密码被拒绝。请输入当前密码："
 vault_password_refused = "{target} 的密码被拒绝。请重试："

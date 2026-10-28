@@ -1140,6 +1140,7 @@ vfs_host_key_unknown = "No se puede verificar la autenticidad de {host}. Acepte 
 vfs_host_key_changed = "La clave de {host} no coincide con la registrada en {location}. Alguien podría estar interceptando la conexión, o la clave del servidor fue reemplazada. Si el cambio es esperado, elimine la clave antigua (ssh-keygen -R '{host}') y vuelva a conectar."
 vfs_host_key_changed_session = "La clave de {host} difiere de la aceptada antes en esta sesión. Alguien podría estar interceptando la conexión. Reinicie termide para que se le vuelva a preguntar."
 vfs_host_key_revoked = "La clave de {host} está marcada como revocada en {location}. Se rechazó la conexión."
+vfs_host_key_strict = "No hay ninguna clave de {host} en known_hosts, y StrictHostKeyChecking yes en la configuración de SSH impide aceptar una nueva. El servidor ofreció la clave {fingerprint}. Regístrela primero con ssh o establezca StrictHostKeyChecking en ask para este host."
 vault_password_prompt = "Contraseña para {target}:"
 vault_stored_refused = "Se rechazó la contraseña guardada para {target}. Introduzca la actual:"
 vault_password_refused = "Se rechazó la contraseña para {target}. Inténtelo de nuevo:"

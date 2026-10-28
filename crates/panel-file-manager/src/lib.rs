@@ -30,7 +30,7 @@ use search_bar::{BarFocus, SearchBarKind};
 use selection::SelectionState;
 pub use utils::shared_dir_size_cache;
 pub use vfs_state::HostKeyAnswer;
-use vfs_state::{known_hosts_name, VfsState};
+use vfs_state::VfsState;
 
 /// Case-insensitive string comparison without allocation.
 fn cmp_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
@@ -1053,7 +1053,7 @@ impl FileManager {
     /// [`Self::answer_host_key`].
     fn request_host_key_decision(&mut self, url: String, key: termide_vfs::HostKey) {
         let t = termide_i18n::t();
-        let host = known_hosts_name(&key.host, key.port);
+        let host = key.known_as.clone();
         let modal = InfoActionModal::new(
             t.vfs_host_key_title(),
             vec![
@@ -1186,6 +1186,7 @@ mod tests {
         let key = termide_vfs::HostKey {
             host: "example.com".to_string(),
             port: 2222,
+            known_as: "[example.com]:2222".to_string(),
             algorithm: "ssh-ed25519".to_string(),
             fingerprint: "SHA256:Zm9vYmFy".to_string(),
             openssh: String::new(),

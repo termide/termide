@@ -220,7 +220,8 @@ impl VfsManager {
             }
         };
 
-        let port = path.effective_port().unwrap_or(22);
+        // Port and user only as given: `~/.ssh/config` fills in the rest.
+        let port = path.port;
         let username = path.username.clone();
 
         self.spawn_connect(options, path, move || {

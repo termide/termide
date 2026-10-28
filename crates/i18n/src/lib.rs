@@ -128,6 +128,7 @@ pub trait Translation: Send + Sync {
     fn vfs_host_key_changed(&self, host: &str, location: &str) -> String;
     fn vfs_host_key_changed_session(&self, host: &str) -> String;
     fn vfs_host_key_revoked(&self, host: &str, location: &str) -> String;
+    fn vfs_host_key_strict(&self, host: &str, fingerprint: &str) -> String;
     fn db_reconnect(&self) -> &str;
     fn db_close_panel(&self) -> &str;
     fn connection_timeout_title(&self) -> &str;

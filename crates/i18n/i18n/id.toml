@@ -1138,6 +1138,7 @@ vfs_host_key_unknown = "Keaslian {host} tidak dapat dipastikan. Terima kunci han
 vfs_host_key_changed = "Kunci {host} tidak cocok dengan yang tercatat di {location}. Seseorang mungkin menyadap koneksi, atau kunci server telah diganti. Jika perubahan ini memang diharapkan, hapus kunci lama (ssh-keygen -R '{host}') lalu hubungkan lagi."
 vfs_host_key_changed_session = "Kunci {host} berbeda dari yang diterima sebelumnya di sesi ini. Seseorang mungkin menyadap koneksi. Mulai ulang termide agar ditanya lagi."
 vfs_host_key_revoked = "Kunci {host} ditandai dicabut di {location}. Koneksi ditolak."
+vfs_host_key_strict = "Tidak ada kunci {host} yang tercatat di known_hosts, dan StrictHostKeyChecking yes dalam konfigurasi SSH melarang menerima kunci baru. Server menawarkan kunci {fingerprint}. Catat kunci itu terlebih dahulu dengan ssh, atau atur StrictHostKeyChecking ke ask untuk host ini."
 vault_password_prompt = "Kata sandi untuk {target}:"
 vault_stored_refused = "Kata sandi tersimpan untuk {target} ditolak. Masukkan yang sekarang:"
 vault_password_refused = "Kata sandi untuk {target} ditolak. Coba lagi:"

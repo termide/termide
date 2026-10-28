@@ -1174,6 +1174,7 @@ vfs_host_key_unknown = "The authenticity of {host} cannot be established. Accept
 vfs_host_key_changed = "The key of {host} does not match the one recorded in {location}. Someone may be intercepting the connection, or the server's key was replaced. If the change is expected, remove the old key (ssh-keygen -R '{host}') and connect again."
 vfs_host_key_changed_session = "The key of {host} differs from the one accepted earlier in this session. Someone may be intercepting the connection. Restart termide to be asked again."
 vfs_host_key_revoked = "The key of {host} is marked as revoked in {location}. The connection was refused."
+vfs_host_key_strict = "No key of {host} is recorded in known_hosts, and StrictHostKeyChecking yes in the SSH configuration forbids accepting a new one. The server offered the key {fingerprint}. Record it with ssh first, or set StrictHostKeyChecking to ask for this host."
 vault_password_prompt = "Password for {target}:"
 vault_stored_refused = "The stored password for {target} was refused. Enter the current one:"
 vault_password_refused = "The password for {target} was refused. Try again:"

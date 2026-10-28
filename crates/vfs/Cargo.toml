@@ -19,6 +19,8 @@ russh-sftp = "2.2"
 # Hashed known_hosts names (`|1|salt|hash`); the versions russh already uses.
 hmac = "0.13"
 sha1 = "0.11"
+# Salt for hashed known_hosts names; the version russh already uses.
+getrandom = "0.4"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "macros", "time", "net", "fs"] }
 
 # FTP support — rustls TLS provider (pure-Rust, enables musl-static builds).

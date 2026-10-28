@@ -1140,6 +1140,7 @@ vfs_host_key_unknown = "ไม่สามารถยืนยันควา�
 vfs_host_key_changed = "คีย์ของ {host} ไม่ตรงกับที่บันทึกไว้ใน {location} อาจมีผู้ดักฟังการเชื่อมต่อ หรือคีย์ของเซิร์ฟเวอร์ถูกเปลี่ยน หากการเปลี่ยนแปลงเป็นไปตามคาด ให้ลบคีย์เก่า (ssh-keygen -R '{host}') แล้วเชื่อมต่อใหม่"
 vfs_host_key_changed_session = "คีย์ของ {host} ต่างจากคีย์ที่ยอมรับไว้ก่อนหน้าในเซสชันนี้ อาจมีผู้ดักฟังการเชื่อมต่อ เริ่ม termide ใหม่เพื่อให้ถามอีกครั้ง"
 vfs_host_key_revoked = "คีย์ของ {host} ถูกทำเครื่องหมายว่าเพิกถอนแล้วใน {location} การเชื่อมต่อถูกปฏิเสธ"
+vfs_host_key_strict = "ไม่มีคีย์ของ {host} บันทึกอยู่ใน known_hosts และ StrictHostKeyChecking yes ในการตั้งค่า SSH ห้ามยอมรับคีย์ใหม่ เซิร์ฟเวอร์แสดงคีย์ {fingerprint} โปรดบันทึกคีย์ด้วย ssh ก่อน หรือตั้ง StrictHostKeyChecking เป็น ask สำหรับโฮสต์นี้"
 vault_password_prompt = "รหัสผ่านสำหรับ {target}:"
 vault_stored_refused = "รหัสผ่านที่บันทึกไว้สำหรับ {target} ถูกปฏิเสธ ป้อนรหัสผ่านปัจจุบัน:"
 vault_password_refused = "รหัสผ่านสำหรับ {target} ถูกปฏิเสธ ลองอีกครั้ง:"
