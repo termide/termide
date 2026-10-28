@@ -12,39 +12,40 @@ use super::{ConflictAction, ConflictContext, OperationWorker, CHUNK_SIZE};
 /// Number of files between progress updates during scanning phase.
 const PROGRESS_THROTTLE_FILES: usize = 50;
 
-/// Removes a half-written destination file unless the copy completes.
+/// Create something at a hidden, uniquely named sibling of `dest` with
+/// `make`, removed again on drop unless persisted.
 ///
-/// `File::create` truncates the destination up front, so a cancelled or
-/// failed transfer would otherwise leave a short file on disk that looks
-/// like a finished copy. Arm the guard before opening the destination and
-/// call [`PartialFile::keep`] once the copy has been verified.
-struct PartialFile<'a> {
-    path: Option<&'a Path>,
+/// A copy is written to such a sibling and renamed over `dest` only once
+/// it is complete. So an approved overwrite never truncates the user's
+/// file up front — a cancelled or failed copy removes only the sibling
+/// and leaves the original intact — and the rename replaces a symlink at
+/// `dest` instead of writing through it.
+fn make_sibling<F>(
+    dest: &Path,
+    make: impl Fn(&Path) -> std::io::Result<F>,
+) -> std::io::Result<tempfile::NamedTempFile<F>> {
+    let dir = match dest.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let prefix = format!(
+        ".{}.",
+        dest.file_name().unwrap_or_default().to_string_lossy()
+    );
+    tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(".termide-part")
+        .make_in(dir, |path| make(path))
 }
 
-impl<'a> PartialFile<'a> {
-    fn new(path: &'a Path) -> Self {
-        Self { path: Some(path) }
-    }
-
-    /// Disarm the guard: the destination is complete and must be kept.
-    fn keep(mut self) {
-        self.path = None;
-    }
+/// A new regular file next to `dest`, opened with `O_EXCL` so it never
+/// follows a link either.
+fn file_sibling(dest: &Path) -> std::io::Result<tempfile::NamedTempFile<File>> {
+    make_sibling(dest, |path| {
+        File::options().write(true).create_new(true).open(path)
+    })
 }
 
-impl Drop for PartialFile<'_> {
-    fn drop(&mut self) {
-        if let Some(path) = self.path {
-            match fs::remove_file(path) {
-                Ok(()) => log::debug!("removed partial copy {path:?}"),
-                // Nothing was created (the open itself failed).
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => log::warn!("failed to remove partial copy {path:?}: {e}"),
-            }
-        }
-    }
-}
 use crate::types::{
     OperationControl, OperationError, OperationPhase, OperationProgress, OperationResult,
 };
@@ -200,11 +201,15 @@ impl LocalCopyWorker {
         let metadata = fs::symlink_metadata(source)?;
 
         if metadata.is_symlink() {
-            // Copy symlink
+            // Copy symlink: create it next to `dest`, then rename it over
+            // whatever is there (a plain `symlink` fails with EEXIST when
+            // overwriting).
             #[cfg(unix)]
             {
                 let link_target = fs::read_link(source)?;
-                std::os::unix::fs::symlink(&link_target, dest)?;
+                make_sibling(dest, |path| std::os::unix::fs::symlink(&link_target, path))?
+                    .persist(dest)
+                    .map_err(|e| e.error)?;
             }
             #[cfg(not(unix))]
             {
@@ -215,10 +220,9 @@ impl LocalCopyWorker {
             // Copy regular file with chunked reading
             let file_size = metadata.len();
             let mut source_file = File::open(source)?;
-            // Declared before `dest_file` so the handle is closed before the
-            // guard removes the file (Windows refuses to unlink open files).
-            let partial = PartialFile::new(dest);
-            let mut dest_file = File::create(dest)?;
+            // Removed on every early return (cancel, error, size mismatch);
+            // `dest` itself is untouched until the final rename.
+            let mut dest_file = file_sibling(dest)?;
 
             let mut buffer = vec![0u8; CHUNK_SIZE];
             let mut file_bytes_copied = 0u64;
@@ -232,7 +236,7 @@ impl LocalCopyWorker {
                     break;
                 }
 
-                dest_file.write_all(&buffer[..bytes_read])?;
+                dest_file.as_file_mut().write_all(&buffer[..bytes_read])?;
                 file_bytes_copied += bytes_read as u64;
                 *bytes_copied += bytes_read as u64;
 
@@ -280,18 +284,18 @@ impl LocalCopyWorker {
                 ))));
             }
 
-            // The destination is complete — keep it.
-            partial.keep();
-
             // Preserve permissions from source
             #[cfg(unix)]
             {
                 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-                let perms = std::fs::Permissions::from_mode(metadata.mode());
-                if let Err(e) = fs::set_permissions(dest, perms) {
+                let perms = std::fs::Permissions::from_mode(metadata.mode() & 0o7777);
+                if let Err(e) = dest_file.as_file().set_permissions(perms) {
                     log::warn!("failed to preserve permissions on {dest:?}: {e}");
                 }
             }
+
+            // The copy is complete: replace the destination in one step.
+            dest_file.persist(dest).map_err(|e| e.error)?;
         }
 
         Ok(())
@@ -1043,33 +1047,86 @@ mod tests {
         );
     }
 
-    /// Every early return in `copy_file` (cancel, pause-cancel, read/write
-    /// error, size mismatch) relies on this guard to unlink the truncated
-    /// destination, so test the guard itself rather than racing a cancel.
+    /// A failed copy over an existing file must leave the original intact
+    /// and no temporary sibling behind. A FIFO source fails deterministically
+    /// mid-copy: it reports size 0 but yields bytes, a size mismatch.
+    #[cfg(unix)]
     #[test]
-    fn partial_file_guard_removes_unless_kept() {
+    fn failed_overwrite_keeps_the_original() {
         let tmp = TempDir::new().unwrap();
+        let fifo = tmp.path().join("src");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let writer = {
+            let fifo = fifo.clone();
+            std::thread::spawn(move || fs::write(fifo, b"surprise").unwrap())
+        };
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir(&dest_dir).unwrap();
+        fs::write(dest_dir.join("src"), b"original").unwrap();
 
-        let dropped = tmp.path().join("dropped.bin");
-        {
-            let guard = PartialFile::new(&dropped);
-            fs::write(&dropped, b"half").unwrap();
-            drop(guard);
-        }
-        assert!(!dropped.exists(), "a partial copy must be removed");
+        let result = run_overwriting(LocalCopyWorker::new(vec![fifo], dest_dir.clone(), false));
+        writer.join().unwrap();
 
-        let kept = tmp.path().join("kept.bin");
-        {
-            let guard = PartialFile::new(&kept);
-            fs::write(&kept, b"whole").unwrap();
-            guard.keep();
-        }
-        assert!(kept.exists(), "keep() must disarm the guard");
+        assert!(matches!(result, OperationResult::Failed(_)), "{result:?}");
+        assert_eq!(fs::read(dest_dir.join("src")).unwrap(), b"original");
+        assert_eq!(
+            fs::read_dir(&dest_dir).unwrap().count(),
+            1,
+            "temp left behind"
+        );
+    }
 
-        // The destination was never created: dropping must not warn or panic.
-        let missing = tmp.path().join("never.bin");
-        drop(PartialFile::new(&missing));
-        assert!(!missing.exists());
+    /// Overwriting a destination that is a symlink replaces the link; the
+    /// file it points to is never written.
+    #[cfg(unix)]
+    #[test]
+    fn overwrite_replaces_a_destination_symlink_instead_of_writing_through_it() {
+        let tmp = TempDir::new().unwrap();
+        let victim = tmp.path().join("victim");
+        fs::write(&victim, b"keep").unwrap();
+        let source = tmp.path().join("new.txt");
+        fs::write(&source, b"new").unwrap();
+        let dest = tmp.path().join("dest.txt");
+        std::os::unix::fs::symlink(&victim, &dest).unwrap();
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![source],
+            dest.clone(),
+            false,
+        )));
+
+        assert!(!fs::symlink_metadata(&dest).unwrap().is_symlink());
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert_eq!(fs::read(&victim).unwrap(), b"keep");
+    }
+
+    /// Overwriting an existing entry with a symlink used to fail with EEXIST.
+    #[cfg(unix)]
+    #[test]
+    fn overwrite_with_a_symlink_replaces_the_destination() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(&dest_dir).unwrap();
+        std::os::unix::fs::symlink("target.txt", src_dir.join("link")).unwrap();
+        fs::write(dest_dir.join("link"), b"old").unwrap();
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![src_dir.join("link")],
+            dest_dir.clone(),
+            false,
+        )));
+
+        assert_eq!(
+            fs::read_link(dest_dir.join("link")).unwrap(),
+            Path::new("target.txt")
+        );
+        assert_eq!(fs::read_dir(&dest_dir).unwrap().count(), 1);
     }
 
     #[test]
