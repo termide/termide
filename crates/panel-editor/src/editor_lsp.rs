@@ -153,10 +153,17 @@ impl Editor {
         let new_status_text = match status {
             Some(ServerStatus::Starting) => Some("starting".to_string()),
             Some(ServerStatus::Indexing) => Some("indexing".to_string()),
+            Some(ServerStatus::Crashed) => Some("crashed".to_string()),
             _ => None,
         };
         let status_text_changed = self.lsp.server_status_text != new_status_text;
         self.lsp.server_status_text = new_status_text;
+
+        // A crashed server will not become ready: stop the spinner.
+        if self.lsp.server_loading && status == Some(ServerStatus::Crashed) {
+            self.lsp.server_loading = false;
+            return true;
+        }
 
         // Check if server went back to indexing (e.g., after file changes)
         if !self.lsp.server_loading && lsp_manager.server_is_indexing(&lang, &file_path) {
@@ -172,5 +179,46 @@ impl Editor {
 
         // Return true if status text changed (for redraw)
         status_text_changed
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use termide_lsp::{LspConfig, LspServerConfig};
+
+    use super::*;
+    use crate::EditorConfig;
+
+    /// A server that dies shows as crashed in the title and stops the
+    /// spinner, instead of spinning on "starting" for good.
+    #[test]
+    fn a_crashed_server_shows_in_the_title_and_stops_the_spinner() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let mut config = LspConfig::default();
+        config.servers.insert(
+            "rust".into(),
+            LspServerConfig {
+                command: "sh".into(),
+                args: vec!["-c".into(), "exit 0".into()],
+                root_markers: Vec::new(),
+            },
+        );
+        let mut manager = LspManager::new(config);
+        let mut editor = Editor::open_file_with_config(file, EditorConfig::default()).unwrap();
+        editor.init_lsp(&mut manager);
+        assert!(editor.is_lsp_loading());
+
+        // It may look ready for a moment before the crash is noticed.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.lsp.server_status_text.as_deref() != Some("crashed") {
+            assert!(Instant::now() < deadline, "the crash never showed");
+            editor.update_lsp_loading_status(&manager);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!editor.is_lsp_loading());
     }
 }

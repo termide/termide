@@ -6,7 +6,6 @@
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
-use std::process::ChildStdin;
 use std::sync::atomic::Ordering;
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
@@ -55,15 +54,21 @@ pub(super) fn initialization_options(command: &str) -> Option<Value> {
 }
 
 impl LspServer {
+    /// Writer thread main loop. A failed write loses the connection.
     pub(super) fn writer_loop(
-        mut stdin: ChildStdin,
+        mut stdin: impl Write,
         writer_rx: mpsc::Receiver<String>,
         initialize_rx: mpsc::Receiver<Option<InitializeResult>>,
         status: Arc<Mutex<ServerStatus>>,
+        pending: PendingRequests,
     ) {
         let mut initialize_rx = Some(initialize_rx);
         while let Ok(msg) = writer_rx.recv() {
-            if Self::is_shutting_down(&status) || !Self::write_message(&mut stdin, &msg) {
+            if Self::is_shutting_down(&status) {
+                break;
+            }
+            if !Self::write_message(&mut stdin, &msg) {
+                Self::connection_lost(&pending, &status, "writing to the server failed");
                 break;
             }
             if let Some(initialize_rx) = initialize_rx.take() {
@@ -76,6 +81,7 @@ impl LspServer {
                     break;
                 };
                 if !Self::write_message(&mut stdin, &initialized) {
+                    Self::connection_lost(&pending, &status, "writing to the server failed");
                     break;
                 }
             }
@@ -115,7 +121,7 @@ impl LspServer {
         *status.lock().unwrap_or_else(|e| e.into_inner()) == ServerStatus::ShuttingDown
     }
 
-    fn write_message(stdin: &mut ChildStdin, msg: &str) -> bool {
+    fn write_message(stdin: &mut impl Write, msg: &str) -> bool {
         if let Err(e) = stdin.write_all(msg.as_bytes()) {
             log::error!("Failed to write to LSP server: {}", e);
             return false;
@@ -127,7 +133,8 @@ impl LspServer {
         true
     }
 
-    /// Reader thread main loop
+    /// Reader thread main loop: dispatch messages until the server's output
+    /// ends or stops making sense, then mark the connection lost.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn reader_loop(
         stdout: std::process::ChildStdout,
@@ -141,18 +148,15 @@ impl LspServer {
     ) {
         let mut reader = BufReader::new(stdout);
 
-        loop {
-            if *status.lock().unwrap_or_else(|e| e.into_inner()) == ServerStatus::ShuttingDown {
-                break;
+        let reason = loop {
+            if Self::is_shutting_down(&status) {
+                break "shutting down".to_string();
             }
 
             let content = match read_frame(&mut reader) {
                 Ok(Some(content)) => content,
-                Ok(None) => return,
-                Err(e) => {
-                    log::error!("Dropping the LSP connection: {}", e);
-                    return;
-                }
+                Ok(None) => break "the server closed its output".to_string(),
+                Err(e) => break format!("broken message stream: {e}"),
             };
 
             match serde_json::from_slice::<JsonRpcMessage>(&content) {
@@ -174,6 +178,36 @@ impl LspServer {
                 Err(e) => {
                     log::error!("Failed to parse LSP message: {}", e);
                 }
+            }
+        };
+
+        active_progress
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+        Self::connection_lost(&pending, &status, &reason);
+    }
+
+    /// The server can no longer be talked to. Every request still waiting is
+    /// released — its sender dropped, so the caller's receiver disconnects
+    /// instead of waiting forever — and later requests fail at once. Unless
+    /// the server is being shut down on purpose, it is marked crashed.
+    pub(super) fn connection_lost(
+        pending: &PendingRequests,
+        status: &Arc<Mutex<ServerStatus>>,
+        reason: &str,
+    ) {
+        {
+            let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
+            pending.closed = true;
+            pending.waiting.clear();
+        }
+        let mut status = status.lock().unwrap_or_else(|e| e.into_inner());
+        match *status {
+            ServerStatus::ShuttingDown | ServerStatus::Stopped | ServerStatus::Crashed => {}
+            _ => {
+                log::error!("LSP server crashed: {reason}");
+                *status = ServerStatus::Crashed;
             }
         }
     }
@@ -202,7 +236,7 @@ impl LspServer {
     ) {
         // Find and notify the waiting request
         let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(tx) = pending.remove(&response.id) {
+        if let Some(tx) = pending.waiting.remove(&response.id) {
             if let Some(result) = response.result {
                 // Try to parse as InitializeResult before sending
                 // This avoids cloning the entire JSON value
@@ -346,27 +380,37 @@ impl LspServer {
     ) -> Result<mpsc::Receiver<Option<T>>> {
         let id = self.next_request_id();
         let request = JsonRpcRequest::new(id.clone(), method, Some(serde_json::to_value(params)?));
+        let msg = encode_message(&request)?;
 
         let (tx, rx) = mpsc::channel();
+        {
+            // Checked and inserted under one lock with `connection_lost`, so
+            // no sender can slip in after the drain and wait forever.
+            let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+            if pending.closed {
+                anyhow::bail!("LSP server is not running");
+            }
+            pending.waiting.insert(id.clone(), tx);
+        }
+
+        if self.writer_tx.send(msg).is_err() {
+            self.pending
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .waiting
+                .remove(&id);
+            anyhow::bail!("LSP server is not accepting requests");
+        }
+
+        // Convert the reply to T; ends when the reply arrives or the pending
+        // entry is dropped (error reply, lost connection).
         let (result_tx, result_rx) = mpsc::channel();
-
-        // Store the sender for when response arrives
-        self.pending
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .insert(id, tx);
-
-        // Spawn thread to convert Value to T
         thread::spawn(move || {
             if let Ok(value) = rx.recv() {
                 let result = serde_json::from_value::<T>(value).ok();
                 let _ = result_tx.send(result);
             }
         });
-
-        // Send the request
-        let msg = encode_message(&request)?;
-        self.writer_tx.send(msg)?;
 
         Ok(result_rx)
     }

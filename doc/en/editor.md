@@ -485,6 +485,7 @@ When opening a file with LSP support, the panel title shows a loading spinner:
 - `⠋ main.rs (starting)` — Server is starting
 - `⠋ main.rs (indexing)` — Server is indexing the project
 - `main.rs` — Server is ready
+- `main.rs (crashed)` — The server exited or sent a message it could not frame; its requests fail until termide is restarted
 
 ### Supported Languages
 

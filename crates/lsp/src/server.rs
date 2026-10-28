@@ -55,10 +55,21 @@ pub enum ServerStatus {
     Running,
     ShuttingDown,
     Stopped,
+    /// The connection was lost without a shutdown: the process exited, its
+    /// output closed, or it sent a stream that cannot be framed. Requests
+    /// fail at once from then on.
+    Crashed,
 }
 
-/// Pending request tracking
-type PendingRequests = Arc<Mutex<HashMap<RequestId, mpsc::Sender<Value>>>>;
+/// Requests waiting for their reply, keyed by id.
+#[derive(Default)]
+struct Pending {
+    waiting: HashMap<RequestId, mpsc::Sender<Value>>,
+    /// Set once the connection is lost; no request is accepted after it.
+    closed: bool,
+}
+
+type PendingRequests = Arc<Mutex<Pending>>;
 
 /// LSP server instance
 pub struct LspServer {
@@ -118,7 +129,7 @@ impl LspServer {
         // Detach stderr thread - we don't need to join it
         drop(stderr_handle);
 
-        let pending: PendingRequests = Arc::new(Mutex::new(HashMap::new()));
+        let pending: PendingRequests = Arc::new(Mutex::new(Pending::default()));
         let status = Arc::new(Mutex::new(ServerStatus::Starting));
         let capabilities = Arc::new(Mutex::new(None));
         let active_progress = Arc::new(Mutex::new(HashSet::new()));
@@ -164,8 +175,9 @@ impl LspServer {
         // Writer thread - sends messages to server
         server.writer_handle = Some({
             let status = server.status.clone();
+            let pending = server.pending.clone();
             thread::spawn(move || {
-                Self::writer_loop(stdin, writer_rx, initialize_rx, status);
+                Self::writer_loop(stdin, writer_rx, initialize_rx, status, pending);
             })
         });
 
@@ -248,8 +260,13 @@ impl LspServer {
 
         let rx = self.send_request::<InitializeResult>("initialize", params)?;
 
-        // Set to Indexing - will become Running when all progress tokens complete
-        *self.status.lock().unwrap_or_else(|e| e.into_inner()) = ServerStatus::Indexing;
+        // Set to Indexing - will become Running when all progress tokens
+        // complete. A server that already died stays crashed.
+        let mut status = self.status.lock().unwrap_or_else(|e| e.into_inner());
+        if *status == ServerStatus::Starting {
+            *status = ServerStatus::Indexing;
+        }
+        drop(status);
         Ok(rx)
     }
 
@@ -611,8 +628,90 @@ mod tests {
             ServerStatus::Running,
             ServerStatus::ShuttingDown,
             ServerStatus::Stopped,
+            ServerStatus::Crashed,
         ] {
             assert_eq!(effective_status(status, false), status);
+        }
+    }
+
+    /// Stand-in servers written in `sh`, so the process side is real.
+    #[cfg(unix)]
+    mod process {
+        use std::path::Path;
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        use crate::server::{LspServer, LspServerConfig, ServerStatus};
+
+        fn start(dir: &Path, script: &str) -> LspServer {
+            let (diagnostics_tx, _) = mpsc::channel();
+            let (apply_edit_tx, _) = mpsc::channel();
+            let config = LspServerConfig {
+                command: "sh".into(),
+                args: vec!["-c".into(), script.into()],
+                root_markers: Vec::new(),
+            };
+            LspServer::start(
+                "test".into(),
+                config,
+                dir.to_path_buf(),
+                diagnostics_tx,
+                apply_edit_tx,
+            )
+            .expect("sh starts")
+        }
+
+        fn hover(server: &LspServer, dir: &Path) -> mpsc::Receiver<Option<lsp_types::Hover>> {
+            let uri = crate::path_to_uri(&dir.join("a.rs")).unwrap();
+            server.hover(uri, lsp_types::Position::new(0, 0))
+        }
+
+        fn wait_for(server: &LspServer, status: ServerStatus) {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while server.status() != status {
+                assert!(Instant::now() < deadline, "still {:?}", server.status());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+
+        fn pending_count(server: &LspServer) -> usize {
+            server.pending.lock().unwrap().waiting.len()
+        }
+
+        /// A server that dies shows as crashed instead of running forever,
+        /// and a request already waiting is released rather than holding its
+        /// thread for good.
+        #[test]
+        fn a_dead_server_is_crashed_and_releases_waiting_requests() {
+            let dir = tempfile::tempdir().unwrap();
+            // Alive long enough to take a request, never answering it.
+            let server = start(dir.path(), "sleep 0.3");
+            let waiting = hover(&server, dir.path());
+
+            wait_for(&server, ServerStatus::Crashed);
+            assert_eq!(
+                waiting.recv_timeout(Duration::from_secs(5)),
+                Err(mpsc::RecvTimeoutError::Disconnected)
+            );
+            assert_eq!(pending_count(&server), 0);
+            server.shutdown();
+        }
+
+        /// Every request to a crashed server fails at once: nothing is left
+        /// in `pending`, no thread waits on a reply that cannot come.
+        #[test]
+        fn requests_to_a_crashed_server_fail_fast() {
+            let dir = tempfile::tempdir().unwrap();
+            let server = start(dir.path(), "exit 0");
+            wait_for(&server, ServerStatus::Crashed);
+
+            for _ in 0..50 {
+                let rx = hover(&server, dir.path());
+                assert_eq!(rx.try_recv(), Err(mpsc::TryRecvError::Disconnected));
+            }
+            assert_eq!(pending_count(&server), 0);
+
+            server.shutdown();
         }
     }
 }
