@@ -3,8 +3,12 @@
 //! Collapsed it is a one-line field with `▼` at its right end; Tab or a
 //! press on the arrow opens the tree under it. While the field still holds
 //! its first value the tree lists the quick destinations (the panels'
-//! directories, recent destinations, mount points) as roots; once the path is edited it lists the directory
-//! the path names up to its last `/`, filtered fuzzily by what follows.
+//! directories, recent destinations, mount points) as roots, the ones not
+//! a panel's marked; once the path is edited it lists the directory the
+//! path names up to its last `/`, filtered fuzzily by what follows.
+//!
+//! The tree takes up to [`MAX_DROPDOWN_ROWS`] rows, fewer on a short
+//! screen, and keeps the cursor among the rows it shows.
 //!
 //! Down moves into the tree. Moving the cursor there writes the directory
 //! under it into the field, keeping the file name when the field names a
@@ -25,7 +29,7 @@ use std::path::{Path, PathBuf};
 use unicode_width::UnicodeWidthStr;
 
 use crate::base::{drag_field, press_field_box, render_text_input};
-use crate::dir_tree::DirTree;
+use crate::dir_tree::{DirTree, TreeRoot};
 use crate::input_keys::{handle_input_key, InputKeyResult};
 use crate::TextInputHandler;
 use termide_config::FileManagerKeybindings;
@@ -33,8 +37,66 @@ use termide_core::{HotkeyTable, KeyChord};
 use termide_theme::Theme;
 use termide_ui::path_utils::{expand_tilde, truncate_left};
 
-/// Rows of the tree under the field while it is open.
-pub(crate) const DROPDOWN_ROWS: usize = 10;
+/// Rows of the tree under the field while it is open, room allowing.
+pub(crate) const MAX_DROPDOWN_ROWS: u16 = 12;
+
+/// Rows the tree keeps however short the screen.
+const MIN_DROPDOWN_ROWS: u16 = 3;
+
+/// Where a quick destination comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DestinationKind {
+    /// A panel's directory.
+    Panel,
+    /// A destination confirmed recently.
+    Recent,
+    /// A drive or mount point.
+    Mount,
+}
+
+/// A directory (or remote URL) offered among the roots of the tree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QuickDestination {
+    /// The path as it goes into the field.
+    pub path: String,
+    pub kind: DestinationKind,
+}
+
+impl QuickDestination {
+    pub fn new(path: impl Into<String>, kind: DestinationKind) -> Self {
+        Self {
+            path: path.into(),
+            kind,
+        }
+    }
+
+    /// The mark its row carries: none for a panel's directory.
+    fn note(&self) -> Option<&'static str> {
+        let t = termide_i18n::t();
+        match self.kind {
+            DestinationKind::Panel => None,
+            DestinationKind::Recent => Some(t.path_field_recent()),
+            DestinationKind::Mount => Some(t.path_field_mount()),
+        }
+    }
+
+    /// Columns its row's text takes, the mark included.
+    pub(crate) fn width(&self) -> usize {
+        self.path.width() + self.note().map_or(0, |n| n.width() + 2)
+    }
+
+    /// The tree's row for it.
+    fn tree_root(&self) -> TreeRoot {
+        let note = self.note().map(str::to_string);
+        let trimmed = self.path.trim_end_matches('/');
+        TreeRoot {
+            label: self.path.clone(),
+            // `/` itself is the root, not an empty path.
+            path: PathBuf::from(if trimmed.is_empty() { "/" } else { trimmed }),
+            note,
+        }
+    }
+}
 
 /// The narrowest the field's text is laid out with while the tree is open:
 /// room for the tree's rows, so moving through it does not widen the modal.
@@ -57,7 +119,7 @@ pub(crate) struct PathField {
     /// the quick destinations.
     initial: String,
     /// Quick destinations: directories (or remote URLs) as typed.
-    roots: Vec<String>,
+    roots: Vec<QuickDestination>,
     /// Where a relative path is taken from.
     base_dir: PathBuf,
     /// The field names a file in a directory: picking a directory keeps the
@@ -82,10 +144,12 @@ pub(crate) struct PathField {
     dragging: bool,
     /// The widest the modal around the field has been, which it keeps.
     held_width: Cell<u16>,
+    /// Draw the border dim while the field is not focused.
+    dims_unfocused: bool,
 }
 
 impl PathField {
-    pub(crate) fn new(text: impl Into<String>, roots: Vec<String>) -> Self {
+    pub(crate) fn new(text: impl Into<String>, roots: Vec<QuickDestination>) -> Self {
         let text = text.into();
         let base_dir = Path::new(&text)
             .parent()
@@ -110,6 +174,7 @@ impl PathField {
             last_tree_area: None,
             dragging: false,
             held_width: Cell::new(0),
+            dims_unfocused: false,
         }
     }
 
@@ -134,8 +199,13 @@ impl PathField {
     }
 
     /// Offer `roots` as the quick destinations.
-    pub(crate) fn set_roots(&mut self, roots: Vec<String>) {
+    pub(crate) fn set_roots(&mut self, roots: Vec<QuickDestination>) {
         self.roots = roots;
+    }
+
+    /// Draw the border dim while the field is not focused.
+    pub(crate) fn set_dims_unfocused(&mut self, dims: bool) {
+        self.dims_unfocused = dims;
     }
 
     /// Take a relative path from `dir`.
@@ -173,6 +243,12 @@ impl PathField {
         self.sync_tree();
     }
 
+    /// Rows the open tree lists.
+    #[cfg(test)]
+    pub(crate) fn tree_len(&self) -> usize {
+        self.tree.as_ref().map_or(0, DirTree::visible_len)
+    }
+
     /// The field's text as last drawn.
     #[cfg(test)]
     pub(crate) fn text_area(&self) -> Option<Rect> {
@@ -183,10 +259,15 @@ impl PathField {
         self.tree.is_some()
     }
 
-    /// Lines the field takes: its box, and the tree under it while open.
-    pub(crate) fn height(&self) -> u16 {
+    /// Lines the field takes out of `room`: its box, and while open the
+    /// tree under it, as many rows as fit up to [`MAX_DROPDOWN_ROWS`] and
+    /// never fewer than [`MIN_DROPDOWN_ROWS`].
+    pub(crate) fn height_within(&self, room: u16) -> u16 {
         if self.is_open() {
-            2 + DROPDOWN_ROWS as u16 + 1
+            let rows = room
+                .saturating_sub(3)
+                .clamp(MIN_DROPDOWN_ROWS, MAX_DROPDOWN_ROWS);
+            2 + rows + 1
         } else {
             3
         }
@@ -198,7 +279,10 @@ impl PathField {
             return;
         }
         self.snapshot = self.input.text().to_string();
-        self.tree = Some(DirTree::new(self.base_dir.clone(), DROPDOWN_ROWS));
+        self.tree = Some(DirTree::new(
+            self.base_dir.clone(),
+            MAX_DROPDOWN_ROWS as usize,
+        ));
         self.sync_tree();
     }
 
@@ -260,12 +344,7 @@ impl PathField {
         };
         if untouched {
             if !tree.has_roots() {
-                tree.set_roots(
-                    roots
-                        .iter()
-                        .map(|r| (r.clone(), PathBuf::from(r.trim_end_matches('/'))))
-                        .collect(),
-                );
+                tree.set_roots(roots.iter().map(QuickDestination::tree_root).collect());
             }
             return;
         }
@@ -499,7 +578,11 @@ impl PathField {
     /// while open, below it. `focused` draws the cursor where it is.
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme, focused: bool) {
         let open = self.is_open();
-        let border = Style::default().fg(theme.accented_fg);
+        let border = Style::default().fg(if self.dims_unfocused && !focused {
+            theme.disabled
+        } else {
+            theme.accented_fg
+        });
         let box_area = Rect { height: 3, ..area };
         let block = Block::default()
             .borders(if open {
@@ -542,6 +625,7 @@ impl PathField {
             .border_style(border);
         let rows = block.inner(list_area);
         block.render(list_area, buf);
+        tree.set_max_visible(rows.height as usize);
         tree.render(rows, buf, theme, focused && self.in_tree);
         self.last_tree_area = Some(rows);
 

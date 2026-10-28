@@ -18,7 +18,9 @@ use std::path::PathBuf;
 
 use crate::base::{button_style, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
-use crate::path_field::{FieldKey, PathField};
+#[cfg(test)]
+use crate::path_field::MAX_DROPDOWN_ROWS;
+use crate::path_field::{FieldKey, PathField, QuickDestination};
 
 use termide_config::constants::{
     MODAL_BUTTON_SPACING, MODAL_MAX_WIDTH_PERCENTAGE_DEFAULT, MODAL_MIN_WIDTH_WIDE,
@@ -30,15 +32,6 @@ use termide_theme::Theme;
 use unicode_width::UnicodeWidthStr;
 
 use crate::{centered_rect_with_size, Modal, ModalResult};
-
-/// A quick destination offered at the top of the tree.
-#[derive(Debug, Clone)]
-pub struct SelectOption {
-    /// The path written into the field when it is picked.
-    pub value: String,
-    /// Display text for the option
-    pub display: String,
-}
 
 /// Focus area in the modal
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -119,18 +112,13 @@ impl EditableSelectModal {
         title: impl Into<String>,
         prompt: impl Into<String>,
         default_value: impl Into<String>,
-        options: Vec<SelectOption>,
+        options: Vec<QuickDestination>,
     ) -> Self {
-        let widest_option = options
-            .iter()
-            .map(|o| o.value.width().max(o.display.width()))
-            .max()
-            .unwrap_or(0);
-        let roots = options.into_iter().map(|o| o.value).collect();
+        let widest_option = widest_destination(&options);
         Self {
             title: title.into(),
             prompt: prompt.into(),
-            field: PathField::new(default_value, roots),
+            field: PathField::new(default_value, options),
             widest_option,
             focus: FocusArea::Input,
             selected_button: 0, // OK button selected by default
@@ -144,8 +132,8 @@ impl EditableSelectModal {
 
     /// Offer `dirs` as the quick destinations instead of the options given
     /// at construction.
-    pub fn set_quick_destinations(&mut self, dirs: Vec<String>) {
-        self.widest_option = dirs.iter().map(|d| d.width()).max().unwrap_or(0);
+    pub fn set_quick_destinations(&mut self, dirs: Vec<QuickDestination>) {
+        self.widest_option = widest_destination(&dirs);
         self.field.set_roots(dirs);
     }
 
@@ -373,15 +361,24 @@ impl EditableSelectModal {
             .min(max_width)
             .min(screen_width);
 
-        // Borders, prompt, field (and tree), choices, checkboxes, buttons.
-        let height = 1
-            + self.prompt_lines()
-            + self.field.height()
+        let height = self.rows_besides_field() + self.field_height(screen_height);
+        (width, height.min(screen_height))
+    }
+
+    /// Lines besides the field: borders, prompt, choices, checkboxes,
+    /// buttons.
+    fn rows_besides_field(&self) -> u16 {
+        1 + self.prompt_lines()
             + self.choices.len() as u16
             + self.visible_checkbox_indices().len() as u16
             + 1
-            + 1;
-        (width, height.min(screen_height))
+            + 1
+    }
+
+    /// Lines the field takes on a screen `screen_height` lines high.
+    fn field_height(&self, screen_height: u16) -> u16 {
+        self.field
+            .height_within(screen_height.saturating_sub(self.rows_besides_field()))
     }
 
     fn ok_or_cancel(&self, button: usize) -> ModalResult<String> {
@@ -422,7 +419,7 @@ impl Modal for EditableSelectModal {
         if prompt_lines > 0 {
             constraints.push(Constraint::Length(prompt_lines));
         }
-        constraints.push(Constraint::Length(self.field.height()));
+        constraints.push(Constraint::Length(self.field_height(area.height)));
         for _ in &self.choices {
             constraints.push(Constraint::Length(1));
         }
@@ -701,6 +698,23 @@ impl EditableSelectModal {
     }
 }
 
+/// Columns the widest of `destinations` takes, its mark included.
+fn widest_destination(destinations: &[QuickDestination]) -> usize {
+    destinations
+        .iter()
+        .map(QuickDestination::width)
+        .max()
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+impl EditableSelectModal {
+    /// Rows the open tree lists.
+    fn field_tree_len(&self) -> usize {
+        self.field.tree_len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -757,12 +771,11 @@ mod tests {
         Scratch(dir)
     }
 
-    fn option(path: &std::path::Path) -> SelectOption {
-        let value = format!("{}/", path.display());
-        SelectOption {
-            display: value.clone(),
-            value,
-        }
+    fn option(path: &std::path::Path) -> QuickDestination {
+        QuickDestination::new(
+            format!("{}/", path.display()),
+            crate::DestinationKind::Panel,
+        )
     }
 
     /// The tree's rows as drawn, one string per line, trailing blanks cut.
@@ -776,6 +789,104 @@ mod tests {
                 line.trim_end().to_string() + "\n"
             })
             .collect()
+    }
+
+    #[test]
+    fn roots_not_from_a_panel_are_marked_and_only_existing_ones_expand() {
+        let dir = project();
+        let missing = dir.path().join("not-yet");
+        let t = termide_i18n::t();
+        let mut modal = EditableSelectModal::new(
+            "Unpack",
+            "",
+            format!("{}/", dir.path().display()),
+            vec![
+                option(dir.path()),
+                QuickDestination::new(
+                    format!("{}/", missing.display()),
+                    crate::DestinationKind::Recent,
+                ),
+                QuickDestination::new("sftp://u@h/srv/", crate::DestinationKind::Mount),
+            ],
+        );
+        press(&mut modal, KeyCode::Tab);
+        let drawn = screen(&mut modal);
+        let row = |needle: &str| {
+            drawn
+                .lines()
+                .find(|l| l.contains(needle))
+                .unwrap_or_else(|| panic!("no row with {needle}:\n{drawn}"))
+                .to_string()
+        };
+        let name = dir.path().file_name().unwrap().to_string_lossy();
+        let own = drawn
+            .lines()
+            .find(|l| l.contains(&format!("{name}/")) && !l.contains("not-yet") && !l.contains('▲'))
+            .unwrap()
+            .to_string();
+        assert!(own.contains('▶'), "{own}");
+        assert!(!own.contains(t.path_field_recent()) && !own.contains(t.path_field_mount()));
+        let recent = row("not-yet/");
+        assert!(recent.contains(t.path_field_recent()), "{recent}");
+        assert!(
+            !recent.contains('▶'),
+            "a missing directory has nothing to show: {recent}"
+        );
+        let remote = row("sftp://u@h/srv/");
+        assert!(remote.contains(t.path_field_mount()), "{remote}");
+        assert!(!remote.contains('▶'), "{remote}");
+
+        // Right on a root that cannot expand leaves the tree as it is.
+        press(&mut modal, KeyCode::Down);
+        press(&mut modal, KeyCode::Down);
+        let rows = modal.field_tree_len();
+        press(&mut modal, KeyCode::Right);
+        assert_eq!(modal.field_tree_len(), rows);
+    }
+
+    #[test]
+    fn the_tree_fits_a_short_screen_and_keeps_the_cursor_in_view() {
+        let dir = project();
+        for i in 0..30 {
+            std::fs::create_dir_all(dir.path().join(format!("d{i:02}"))).unwrap();
+        }
+        let mut modal =
+            EditableSelectModal::new("Copy", "", format!("{}/x", dir.path().display()), vec![]);
+        press(&mut modal, KeyCode::Tab);
+        // Room enough: the most rows the tree takes.
+        let (_, tall) = modal.calculate_modal_size(100, 60);
+        assert_eq!(tall, modal.rows_besides_field() + 3 + MAX_DROPDOWN_ROWS);
+
+        // A short screen: the modal fits, the tree takes what is left.
+        let height = 14;
+        let (_, short) = modal.calculate_modal_size(100, height);
+        assert!(short <= height);
+        let area = Rect::new(0, 0, 100, height);
+        modal.render(area, &mut Buffer::empty(area), &Theme::default());
+        for _ in 0..20 {
+            press(&mut modal, KeyCode::Down);
+        }
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        let drawn: String = (0..area.height)
+            .map(|y| {
+                (0..area.width)
+                    .map(|x| buf[(x, y)].symbol())
+                    .collect::<String>()
+                    + "\n"
+            })
+            .collect();
+        let at = modal
+            .value()
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap()
+            .to_string();
+        assert!(
+            drawn.contains(&at),
+            "the cursor's row {at} is drawn:\n{drawn}"
+        );
     }
 
     #[test]

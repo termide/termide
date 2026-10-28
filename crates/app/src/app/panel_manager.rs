@@ -226,7 +226,7 @@ impl App {
     /// Find all panels that have working directories
     /// Returns deduplicated and sorted list of paths from all panel types (FM, Terminal, Editor)
     /// For remote file managers, returns full URLs (e.g., sftp://user@host/path)
-    pub(super) fn find_all_other_panel_paths(&self) -> Vec<termide_modal::SelectOption> {
+    pub(super) fn find_all_other_panel_paths(&self) -> Vec<String> {
         use std::collections::HashSet;
 
         let mut unique_paths: HashSet<String> = HashSet::new();
@@ -241,26 +241,19 @@ impl App {
             }
         }
 
-        // Convert to SelectOptions (add trailing slash for directories)
-        let mut options: Vec<_> = unique_paths
+        // Directories end in a slash; sorted for a steady order.
+        let mut paths: Vec<String> = unique_paths
             .into_iter()
-            .map(|path_str| {
-                let with_slash = if path_str.ends_with('/') {
-                    path_str
+            .map(|path| {
+                if path.ends_with('/') {
+                    path
                 } else {
-                    format!("{}/", path_str)
-                };
-                termide_modal::SelectOption {
-                    value: with_slash.clone(),
-                    display: with_slash,
+                    format!("{path}/")
                 }
             })
             .collect();
-
-        // Sort by value for consistent ordering
-        options.sort_by(|a, b| a.value.cmp(&b.value));
-
-        options
+        paths.sort();
+        paths
     }
 
     /// Working directories of the file managers other than the focused panel,

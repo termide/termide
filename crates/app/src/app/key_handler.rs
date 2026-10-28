@@ -456,19 +456,8 @@ impl App {
 
         // The directories of the panels and the recent destinations are the
         // quick destinations; the default is one of the panels'.
-        let panel_dirs: Vec<String> = self
-            .find_all_other_panel_paths()
-            .into_iter()
-            .map(|opt| opt.value)
-            .collect();
-        let options = self
-            .destination_roots()
-            .into_iter()
-            .map(|dir| termide_modal::SelectOption {
-                display: dir.clone(),
-                value: dir,
-            })
-            .collect();
+        let panel_dirs: Vec<String> = self.find_all_other_panel_paths();
+        let options = self.destination_roots();
         let dest_dir = default_destination_dir(
             source_dir.as_deref(),
             &self.other_file_manager_paths(),

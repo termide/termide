@@ -7,7 +7,7 @@ use std::path::{Component, Path, PathBuf};
 
 use super::App;
 use crate::state::{ActiveModal, PendingAction};
-use termide_modal::{ModalResult, SaveAsResult};
+use termide_modal::{DestinationKind, ModalResult, QuickDestination, SaveAsResult};
 use termide_ui::path_utils;
 
 /// How many destinations a project keeps.
@@ -90,25 +90,29 @@ impl App {
     /// this project's recent destinations, then the drives (Windows) or
     /// mount points (Unix: the root, disks, removable media, network
     /// shares), each once.
-    pub(super) fn destination_roots(&self) -> Vec<String> {
-        let mut roots: Vec<String> = self
+    pub(super) fn destination_roots(&self) -> Vec<QuickDestination> {
+        let panels = self
             .find_all_other_panel_paths()
             .into_iter()
-            .map(|option| option.value)
-            .collect();
-        let mounts = termide_vfs::drive_roots()
-            .into_iter()
-            .chain(termide_system_monitor::browsable_mount_points())
-            .map(|path| with_slash(path.display().to_string()));
-        for dir in self
+            .map(|dir| QuickDestination::new(dir, DestinationKind::Panel));
+        let recent = self
             .recent_destinations
             .of(&self.project_root)
             .iter()
-            .cloned()
-            .chain(mounts)
-        {
-            if !roots.contains(&dir) {
-                roots.push(dir);
+            .map(|dir| QuickDestination::new(dir.clone(), DestinationKind::Recent));
+        let mounts = termide_vfs::drive_roots()
+            .into_iter()
+            .chain(termide_system_monitor::browsable_mount_points())
+            .map(|path| {
+                QuickDestination::new(
+                    with_slash(path.display().to_string()),
+                    DestinationKind::Mount,
+                )
+            });
+        let mut roots: Vec<QuickDestination> = Vec::new();
+        for root in panels.chain(recent).chain(mounts) {
+            if !roots.iter().any(|known| known.path == root.path) {
+                roots.push(root);
             }
         }
         roots

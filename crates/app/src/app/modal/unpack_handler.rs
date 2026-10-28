@@ -9,6 +9,7 @@ use anyhow::Result;
 use super::super::App;
 use crate::state::{ActiveModal, OperationType, PendingAction};
 use termide_file_ops::{unpack_dir_name, unpack_targets, OperationRequest};
+use termide_modal::{DestinationKind, QuickDestination};
 use termide_state::UnpackPlan;
 use termide_ui::path_utils;
 
@@ -16,12 +17,12 @@ impl App {
     /// Build the destination prompt for unpacking `archives`.
     ///
     /// The default is the nearest other file manager's directory, as for
-    /// copy, falling back to the archive's own; the candidates are it, the
-    /// panels' directories, the archive's and the recent local destinations.
-    /// A single archive is offered
-    /// a directory named after it in each candidate as well as the candidate
-    /// itself; several archives always get a directory each, so only the
-    /// parent is asked for.
+    /// copy, falling back to the archive's own. The candidates are it, the
+    /// panels' directories and the archive's, then the recent destinations
+    /// and the mount points, local ones only. A single archive is offered a
+    /// directory named after it in each of the first ones as well as the
+    /// directory itself; several archives always get a directory each, so
+    /// only the parent is asked for.
     pub(in crate::app) fn prepare_unpack_modal(&mut self, archives: &[PathBuf]) -> ActiveModal {
         self.state.close_modal();
         let t = termide_i18n::t();
@@ -39,7 +40,6 @@ impl App {
         let panel_dirs: Vec<String> = self
             .find_all_other_panel_paths()
             .into_iter()
-            .map(|opt| opt.value)
             .filter(local)
             .collect();
         let default_dir = file_managers
@@ -49,16 +49,19 @@ impl App {
             .cloned()
             .unwrap_or_else(|| source_dir.clone());
 
-        let quick: Vec<String> = self.destination_roots().into_iter().filter(local).collect();
-        let mut dirs: Vec<String> = Vec::new();
-        for dir in std::iter::once(&default_dir)
-            .chain(&panel_dirs)
-            .chain(std::iter::once(&source_dir))
-            .chain(&quick)
+        // The panels' directories and the archive's, then the recent ones
+        // and the mount points, each once.
+        let panel = |dir: &String| QuickDestination::new(dir.clone(), DestinationKind::Panel);
+        let mut dirs: Vec<QuickDestination> = Vec::new();
+        for root in std::iter::once(panel(&default_dir))
+            .chain(panel_dirs.iter().map(panel))
+            .chain(std::iter::once(panel(&source_dir)))
+            .chain(self.destination_roots())
+            .filter(|root| local(&root.path))
         {
-            let dir = dir.trim_end_matches('/').to_string();
-            if !dirs.contains(&dir) {
-                dirs.push(dir);
+            let path = root.path.trim_end_matches('/').to_string();
+            if !dirs.iter().any(|known| known.path == path) {
+                dirs.push(QuickDestination::new(path, root.kind));
             }
         }
 
@@ -69,21 +72,22 @@ impl App {
             ),
             many => (t.fm_unpack_prompt_multiple(many.len()), None),
         };
-        let mut values: Vec<String> = Vec::new();
+        // A panel's directory is offered with the archive's own directory in
+        // it as well; the recent ones and the mount points as they are.
+        let mut options: Vec<QuickDestination> = Vec::new();
         for dir in &dirs {
-            if let Some(name) = &subdir {
-                values.push(format!("{dir}/{name}/"));
+            if let Some(name) = subdir
+                .as_ref()
+                .filter(|_| dir.kind == DestinationKind::Panel)
+            {
+                options.push(QuickDestination::new(
+                    format!("{}/{name}/", dir.path),
+                    dir.kind,
+                ));
             }
-            values.push(format!("{dir}/"));
+            options.push(QuickDestination::new(format!("{}/", dir.path), dir.kind));
         }
-        let default = values[0].clone();
-        let options = values
-            .into_iter()
-            .map(|value| termide_modal::SelectOption {
-                display: value.clone(),
-                value,
-            })
-            .collect();
+        let default = options[0].path.clone();
         ActiveModal::EditableSelect(Box::new(
             termide_modal::EditableSelectModal::new(
                 t.modal_unpack_title(),
