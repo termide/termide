@@ -1452,7 +1452,14 @@ can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
 the project (`cd /etc && cat passwd` included). So do `env` and `printenv`
 without arguments, which print every secret in the environment. A grep or
 `rg` pattern is not taken for a path (`rg /api/ src` does not ask), nor is a
-`$` that starts no expansion a variable (`rg "foo$" src` does not ask). The rule
+`$` that starts no expansion a variable (`rg "foo$" src` does not ask).
+The variable of a `for` loop over words that each name a path inside the
+project — literals or globs, as a path argument would — reads inside it:
+`for f in *.rs src/*.toml; do wc -l $f; done` does not ask. The loop's body
+must hold only look-only commands, without a `cd`, and nothing on the line
+may set that variable some other way; a list that cannot be seen
+(`for f in $(ls ~)`, `while read f`), a word outside the project
+(`for f in ~/*`) or a word with an option or a space still asks. The rule
 "allow always" keeps for such a read names that one command, not `cat *`. Loading a skill never asks.
 
 ### Plan mode
