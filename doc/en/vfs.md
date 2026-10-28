@@ -90,6 +90,32 @@ plain (`sftp://my-build-host/path`) and let SSH config supply the
 real hostname, user and key file. Same configuration as the `ssh`
 CLI uses.
 
+## Server keys (SFTP)
+
+Before anything is sent to an SFTP server — a password included —
+Termide checks the server's key the way OpenSSH does, against
+`~/.ssh/known_hosts`, `~/.ssh/known_hosts2` and
+`/etc/ssh/ssh_known_hosts`. Hashed entries (`|1|…`), `[host]:port`
+entries for other ports, wildcards and `!` negations are understood.
+
+- **Recorded key** — the connection goes ahead without a word.
+- **Unknown host** — the connection stops and a dialog shows the host,
+  key type and SHA256 fingerprint, as `ssh` prints them. Compare the
+  fingerprint with one you trust, then choose:
+  - **Accept and remember** — the key is appended to
+    `~/.ssh/known_hosts` in OpenSSH format (`~/.ssh` is created with
+    mode 0700 and the file with 0600 if missing), and the connection
+    is made again. Next time, here and in `ssh`, it goes ahead
+    silently.
+  - **Accept once** — the key is trusted until Termide exits and
+    nothing is written.
+  - **Cancel** *(preselected)* — nothing is connected.
+- **Changed key** — when the recorded key of that type differs, or the
+  key is marked `@revoked`, the connection is refused and the dialog
+  names the `known_hosts` file and line. There is no override: if the
+  change is expected, remove the old key (`ssh-keygen -R host`, or
+  `ssh-keygen -R '[host]:port'`) and connect again.
+
 ## How remote panels feel
 
 Remote operations are all asynchronous:
@@ -252,3 +278,7 @@ the password before starting and asks again after a wrong one.
   uploads start over from the beginning if re-issued.
 - The passphrase of an encrypted SSH key is not asked for in remote
   panels; load the key into your SSH agent.
+- Server-key checks read the default `known_hosts` locations only:
+  `UserKnownHostsFile`, `HashKnownHosts` and `HostKeyAlias` in
+  `~/.ssh/config` are not applied, and host certificates
+  (`@cert-authority`) are not accepted.

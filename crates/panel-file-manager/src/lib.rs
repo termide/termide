@@ -29,7 +29,8 @@ pub use operations::{is_database_file, is_raster_image, CreateOutcome};
 use search_bar::{BarFocus, SearchBarKind};
 use selection::SelectionState;
 pub use utils::shared_dir_size_cache;
-use vfs_state::VfsState;
+pub use vfs_state::HostKeyAnswer;
+use vfs_state::{known_hosts_name, VfsState};
 
 /// Case-insensitive string comparison without allocation.
 fn cmp_ignore_case(a: &str, b: &str) -> std::cmp::Ordering {
@@ -1051,6 +1052,60 @@ impl FileManager {
         ));
     }
 
+    /// Ask whether to trust the SSH server key that stopped the connection
+    /// to `url`. Cancel is preselected, so Enter alone connects nothing; the
+    /// answer comes back through `PendingAction::HostKey` to
+    /// [`Self::answer_host_key`].
+    fn request_host_key_decision(&mut self, url: String, key: termide_vfs::HostKey) {
+        let t = termide_i18n::t();
+        let host = known_hosts_name(&key.host, key.port);
+        let modal = InfoActionModal::new(
+            t.vfs_host_key_title(),
+            vec![
+                (String::new(), t.vfs_host_key_unknown(&host)),
+                (t.vfs_host_key_host().to_string(), host.clone()),
+                (t.vfs_host_key_type().to_string(), key.algorithm.clone()),
+                (
+                    t.vfs_host_key_fingerprint().to_string(),
+                    key.fingerprint.clone(),
+                ),
+            ],
+            vec![
+                ActionButton::new(t.vfs_host_key_remember(), HostKeyAnswer::REMEMBER),
+                ActionButton::new(t.vfs_host_key_once(), HostKeyAnswer::ONCE),
+                ActionButton::new(t.ui_cancel(), HostKeyAnswer::CANCEL),
+            ],
+        )
+        .with_selected_button(2);
+        self.modal_request = Some((
+            PendingAction::HostKey {
+                url,
+                fingerprint: key.fingerprint,
+            },
+            ActiveModal::InfoAction(Box::new(modal)),
+        ));
+    }
+
+    /// Answer the unknown-host-key question for `url`. Returns `false` when
+    /// this panel is not waiting on the key with `fingerprint`. A key that
+    /// cannot be recorded is reported and nothing is connected.
+    pub fn answer_host_key(&mut self, url: &str, fingerprint: &str, answer: HostKeyAnswer) -> bool {
+        match self.vfs.answer_host_key(url, fingerprint, answer) {
+            None => false,
+            Some(Ok(())) => {
+                if answer != HostKeyAnswer::Cancel {
+                    self.navigation.prepare_for_going_down();
+                }
+                true
+            }
+            Some(Err(e)) => {
+                let t = termide_i18n::t();
+                self.show_info_modal(t.connection_error_title(), &e.to_string());
+                true
+            }
+        }
+    }
+
     /// Ask for the password of the encrypted archive whose root is `archive`;
     /// `wrong` says the last one was rejected.
     fn request_archive_password(&mut self, archive: termide_vfs::VfsPath, wrong: bool) {
@@ -1126,6 +1181,45 @@ mod tests {
     /// The row shown while a directory is still being listed stands for no
     /// file: Enter, F3, F4 and Shift+Enter must not open it, and selection
     /// and batch operations must not pick it up.
+    /// The unknown-key question names host, key type and fingerprint and
+    /// answers through `PendingAction::HostKey`; an answer for a key this
+    /// panel is not waiting on is left for another panel.
+    #[test]
+    fn an_unknown_host_key_is_put_to_the_user() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        let key = termide_vfs::HostKey {
+            host: "example.com".to_string(),
+            port: 2222,
+            algorithm: "ssh-ed25519".to_string(),
+            fingerprint: "SHA256:Zm9vYmFy".to_string(),
+            openssh: String::new(),
+        };
+        fm.request_host_key_decision("sftp://example.com:2222/".to_string(), key);
+
+        let (action, modal) = fm.modal_request.take().expect("a question");
+        match action {
+            PendingAction::HostKey { url, fingerprint } => {
+                assert_eq!(url, "sftp://example.com:2222/");
+                assert_eq!(fingerprint, "SHA256:Zm9vYmFy");
+            }
+            other => panic!("unexpected action {other:?}"),
+        }
+        let ActiveModal::InfoAction(modal) = modal else {
+            panic!("an info modal with buttons");
+        };
+        let text = modal.message_text();
+        for part in ["[example.com]:2222", "ssh-ed25519", "SHA256:Zm9vYmFy"] {
+            assert!(text.contains(part), "{part} missing from {text}");
+        }
+
+        assert!(!fm.answer_host_key(
+            "sftp://example.com:2222/",
+            "SHA256:Zm9vYmFy",
+            HostKeyAnswer::Remember
+        ));
+    }
+
     #[test]
     fn the_listing_placeholder_is_no_file() {
         let temp_dir = TempDir::new().unwrap();

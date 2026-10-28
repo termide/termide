@@ -309,6 +309,25 @@ impl App {
         }
     }
 
+    /// Hand the unknown-host-key answer to the file manager waiting on that
+    /// key. Any panel may have raised the question, not only the active one.
+    fn answer_host_key(&mut self, url: &str, fingerprint: &str, value: Box<dyn std::any::Any>) {
+        use termide_modal::InfoActionResult;
+        use termide_panel_file_manager::HostKeyAnswer;
+        let answer = match value.downcast_ref::<InfoActionResult>() {
+            Some(InfoActionResult::Action(id)) => HostKeyAnswer::from_action(id),
+            _ => HostKeyAnswer::Cancel,
+        };
+        for panel in self.layout_manager.iter_all_panels_mut() {
+            if let Some(fm) = panel.as_file_manager_mut() {
+                if fm.answer_host_key(url, fingerprint, answer) {
+                    break;
+                }
+            }
+        }
+        self.state.needs_redraw = true;
+    }
+
     /// Handle modal window result
     pub(super) fn handle_modal_result(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
         use termide_state::PendingAction;
@@ -522,6 +541,9 @@ impl App {
                             fm.open_archive_with_password(archive, password.clone());
                         }
                     }
+                }
+                PendingAction::HostKey { url, fingerprint } => {
+                    self.answer_host_key(&url, &fingerprint, value);
                 }
                 PendingAction::BatchFileOperation { operation } => {
                     self.process_batch_operation(operation);

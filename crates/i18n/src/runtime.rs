@@ -260,6 +260,13 @@ impl Translation for RuntimeTranslation {
         vfs_reconnect,
         vfs_open_local,
         vfs_close_panel,
+        vfs_host_key_title,
+        vfs_host_key_host,
+        vfs_host_key_type,
+        vfs_host_key_fingerprint,
+        vfs_host_key_remember,
+        vfs_host_key_once,
+        vfs_host_key_changed_title,
         app_quit_confirm,
         app_quit_title,
         help_global_keys,
@@ -1980,6 +1987,28 @@ impl Translation for RuntimeTranslation {
 
     fn op_pack_failed(&self, name: &str, error: &str) -> String {
         self.format("op_pack_failed", &[("name", name), ("error", error)])
+    }
+
+    fn vfs_host_key_unknown(&self, host: &str) -> String {
+        self.format("vfs_host_key_unknown", &[("host", host)])
+    }
+
+    fn vfs_host_key_changed(&self, host: &str, location: &str) -> String {
+        self.format(
+            "vfs_host_key_changed",
+            &[("host", host), ("location", location)],
+        )
+    }
+
+    fn vfs_host_key_changed_session(&self, host: &str) -> String {
+        self.format("vfs_host_key_changed_session", &[("host", host)])
+    }
+
+    fn vfs_host_key_revoked(&self, host: &str, location: &str) -> String {
+        self.format(
+            "vfs_host_key_revoked",
+            &[("host", host), ("location", location)],
+        )
     }
 
     fn fm_archive_password_prompt(&self, name: &str) -> String {

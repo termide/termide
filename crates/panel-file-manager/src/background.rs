@@ -72,7 +72,12 @@ impl FileManager {
                     // user reconnects/refreshes explicitly.
                     self.current_path = self.vfs.path_buf();
                     if !self.is_stale {
-                        if e.is_archive_error() {
+                        if let Some(refusal) = crate::vfs_state::host_key_refusal(&e) {
+                            // A changed or revoked server key: no reconnect
+                            // button, the user fixes known_hosts by hand.
+                            let t = termide_i18n::t();
+                            self.show_info_modal(t.vfs_host_key_changed_title(), &refusal);
+                        } else if e.is_archive_error() {
                             let t = termide_i18n::t();
                             self.show_info_modal(t.modal_error_title(), &format!("{}", e));
                         } else if self.vfs.is_remote() && e.is_connection_lost() {
@@ -133,6 +138,15 @@ impl FileManager {
         // An archive needs its password: ask for it.
         if let Some((archive, wrong)) = self.vfs.take_password_request() {
             self.request_archive_password(archive, wrong);
+            events.push(PanelEvent::ClearStatus);
+            events.push(PanelEvent::NeedsRedraw);
+            return events;
+        }
+
+        // An unknown SSH server key stopped a connection: ask whether to
+        // trust it.
+        if let Some((url, key)) = self.vfs.take_host_key_request() {
+            self.request_host_key_decision(url, key);
             events.push(PanelEvent::ClearStatus);
             events.push(PanelEvent::NeedsRedraw);
             return events;
