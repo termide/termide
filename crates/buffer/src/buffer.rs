@@ -179,7 +179,7 @@ impl TextBuffer {
             }
         }
 
-        std::fs::write(path, contents)
+        crate::write::write_file(path, contents.as_bytes())
             .with_context(|| format!("Failed to write file: {}", path.display()))?;
 
         self.file_path = Some(path.to_path_buf());

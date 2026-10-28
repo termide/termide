@@ -10,6 +10,7 @@ mod line_marks;
 mod search;
 mod viewport;
 mod wrap;
+mod write;
 
 pub use buffer::{LspContentChange, TextBuffer};
 pub use cursor::{Cursor, Selection};
