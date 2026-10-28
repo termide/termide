@@ -399,14 +399,7 @@ impl App {
         let entered = self.enter_project(new_project_root)?;
         match entered.restored {
             Some(parked) => self.restore_parked_project(parked),
-            None => {
-                if let Err(e) = self.load_layout() {
-                    log::warn!(
-                        "Could not load the project layout ({e}); starting with the default layout."
-                    );
-                    self.setup_default_layout();
-                }
-            }
+            None => self.load_layout_or_default(),
         }
         self.carry_operations_panel(entered.operations_panel);
         self.update_terminal_title();

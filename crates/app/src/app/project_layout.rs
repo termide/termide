@@ -23,10 +23,27 @@ impl App {
         save_layout_of(&self.project_root, &mut self.layout_manager)
     }
 
+    /// Restore the current project's saved layout, or set up the default
+    /// one when there is none or it cannot be read. Either way the unsaved
+    /// buffers kept in the project's directory are brought back: with no
+    /// layout to name them, the next save would delete them as stale.
+    pub fn load_layout_or_default(&mut self) {
+        if let Err(e) = self.load_layout() {
+            // Surface the reason in the Journal so a damaged layout is
+            // diagnosable instead of silently snapping to defaults.
+            log::warn!(
+                "Could not load the project layout ({e:#}); starting with the default layout."
+            );
+            self.setup_default_layout();
+            self.recover_orphaned_buffers();
+        }
+    }
+
     /// Load the current project's layout from its file and restore it
     pub fn load_layout(&mut self) -> Result<()> {
-        // Load the layout of this project
-        let layout = termide_project::ProjectLayout::load(&self.project_root)?;
+        // Load the layout of this project; one that cannot be parsed is
+        // moved aside rather than left for the next save to overwrite.
+        let layout = termide_project::ProjectLayout::load_for_restore(&self.project_root)?;
 
         // Get the project directory for restoring temporary buffers
         let project_dir = termide_project::ProjectLayout::get_project_dir(&self.project_root)?;
@@ -68,6 +85,19 @@ impl App {
             }
         }
 
+        self.recover_orphaned_buffers();
+
+        // A restored outline is empty until something pushes the editor's
+        // content to it; a freshly loaded buffer has no edits for the live
+        // sync to notice.
+        self.resync_outline();
+
+        Ok(())
+    }
+
+    /// Open the unsaved buffers in the project's directory that no saved
+    /// layout refers to as new editor panels.
+    fn recover_orphaned_buffers(&mut self) {
         // Restore orphaned buffer files (not referenced in the layout anymore).
         // The recovery itself is automatic — orphans appear as new
         // editor panels so user data from a crashed run isn't lost
@@ -75,6 +105,10 @@ impl App {
         // tabs had no way to tell what they were. Surface a Journal
         // entry per restored buffer plus a single summary so the
         // information is one panel open away.
+        let Ok(project_dir) = termide_project::ProjectLayout::get_project_dir(&self.project_root)
+        else {
+            return;
+        };
         match termide_project::restore_orphaned_buffers(&project_dir) {
             Ok(orphaned_files) => {
                 let mut restored = 0usize;
@@ -103,13 +137,6 @@ impl App {
             }
             Err(e) => log::warn!("Failed to restore orphaned buffers: {}", e),
         }
-
-        // A restored outline is empty until something pushes the editor's
-        // content to it; a freshly loaded buffer has no edits for the live
-        // sync to notice.
-        self.resync_outline();
-
-        Ok(())
     }
 
     /// Auto-save the project layout (ignores errors to not disrupt user experience)

@@ -647,16 +647,7 @@ fn main() -> Result<()> {
     // layout (restoring or overwriting it when editing e.g. a commit message
     // would be surprising and could clobber the real layout).
     if cli.files.is_empty() {
-        // Try to load the project layout, fallback to default layout on error
-        if let Err(e) = app.load_layout() {
-            // Layout file doesn't exist or is corrupted - use default layout.
-            // Surface the reason in the Journal so a corrupted layout is
-            // diagnosable instead of silently snapping to defaults.
-            log::warn!(
-                "Could not load the project layout ({e}); starting with the default layout."
-            );
-            app.setup_default_layout();
-        }
+        app.load_layout_or_default();
         if cli.restore {
             app.restore_projects_on_start();
         }

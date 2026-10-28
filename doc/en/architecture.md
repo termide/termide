@@ -630,7 +630,13 @@ winning. The **Journal** panel reports each move and any failure.
 - Project switching via the Projects menu
 - Retention (`project_retention_days`) with automatic cleanup of old layouts
 
-The file keeps its historical name, `session.toml`.
+The file keeps its historical name, `session.toml`. It is replaced atomically
+(written to a temporary file, synced, renamed), as are the backups of unsaved
+buffers beside it, so a crash never leaves half a file. A `session.toml` that
+cannot be parsed — damaged, or written by a newer termide — is renamed to
+`session.toml.broken-<time>` and reported in the **Journal**; the project then
+opens in the default layout with its unsaved buffers recovered as editor
+panels, and the next save writes a fresh file without destroying the old one.
 
 **Layout File Format:**
 ```toml
