@@ -12838,6 +12838,40 @@ fn a_fresh_picture_shows_under_its_folded_block() {
 }
 
 #[test]
+fn a_picture_is_centred_across_the_panel() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(400, 400));
+    let buf = render_buf(&mut panel, 60, 30);
+    let spot = panel.transcript.pictures()[0];
+    // 59 text columns, the gutter left out; 15 rows of 20 px are 30 columns
+    // of 10 px, centred in the 57 after the indent.
+    assert_eq!((spot.cols, spot.rows), (30, 15));
+    assert_eq!(spot.col, crate::transcript::PICTURE_INDENT + 13);
+    let y = (spot.line - panel.top) as u16;
+    let painted_cols: Vec<u16> = (0..60)
+        .filter(|&x| matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(..)))
+        .collect();
+    assert_eq!(painted_cols.first(), Some(&spot.col));
+    assert_eq!(painted_cols.last(), Some(&(spot.col + spot.cols - 1)));
+}
+
+#[test]
+fn a_wide_panel_lets_a_picture_take_half_its_width() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(1000, 1000));
+    let _ = render_buf(&mut panel, 120, 30);
+    // Half the width, 60 columns of 10 px, is 30 rows of 20 px: more than
+    // half the height, so the bound, but the input bar stays in sight.
+    assert_eq!(panel.transcript.pictures()[0].rows, 26);
+    let _ = render_buf(&mut panel, 80, 30);
+    // 40 columns are 20 rows: still more than half the height.
+    assert_eq!(panel.transcript.pictures()[0].rows, 20);
+    let _ = render_buf(&mut panel, 20, 30);
+    // A narrow panel keeps half its height, the width bounding it anyway.
+    assert_eq!(panel.transcript.pictures()[0].cols, 16);
+}
+
+#[test]
 fn a_picture_cut_by_the_edge_shows_its_placeholder() {
     let mut panel = picture_panel();
     panel.transcript.push(picture_read(400, 400));
@@ -12945,7 +12979,7 @@ fn where_moving_resends_a_picture_it_is_a_frame_until_it_stands_still() {
     // A picture just come into view stands nowhere yet: a frame.
     let buf = render_buf(&mut panel, 60, 40);
     let spot = panel.transcript.pictures()[0];
-    let (x, y) = (crate::transcript::PICTURE_INDENT, spot.line as u16);
+    let (x, y) = (spot.col, spot.line as u16);
     assert!(!has_graphics(&buf));
     assert_eq!(buf[(x, y)].symbol(), "┌");
     assert!(!panel.pictures_settled());

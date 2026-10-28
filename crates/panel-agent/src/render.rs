@@ -16,7 +16,7 @@ use termide_ui::ScrollBar;
 
 use crate::pan::{pan_line, DiagramSpot};
 use crate::toolset::TOOLSET_ACTION;
-use crate::transcript::{PictureLayout, PICTURE_INDENT};
+use crate::transcript::PictureLayout;
 use crate::{
     format_tokens, provider_label, shorten_path, single_line, transcript, truncate_title,
     AgentEntry, AgentPanel, BannerHit, Phase, RunButton, ViewButton, AGENT_ACTION,
@@ -80,6 +80,19 @@ pub(crate) struct PictureMotion {
     rect: Rect,
     since: Instant,
     framed: bool,
+}
+
+/// The most rows a picture takes in a panel of `area`: as tall as half the
+/// panel's height or half its width, whichever is more, so a picture in a
+/// wide panel is not shrunk to half of a few rows. It leaves the input bar
+/// and a couple of rows in sight, though: a picture is drawn only whole.
+fn picture_max_rows(area: Rect, cell_px: (u16, u16)) -> u16 {
+    let (cw, ch) = (u32::from(cell_px.0.max(1)), u32::from(cell_px.1.max(1)));
+    let half_height = u32::from(area.height / 2);
+    let half_width = u32::from(area.width / 2) * cw / ch;
+    let room = u32::from(area.height.saturating_sub(4)).max(half_height);
+    let rows = half_height.max(half_width).min(room);
+    (rows as u16).max(1)
 }
 
 /// A box of `rect`'s size where a picture goes, drawn while it moves.
@@ -150,7 +163,7 @@ impl AgentPanel {
                 continue;
             };
             let rect = Rect {
-                x: area.x + PICTURE_INDENT,
+                x: area.x + spot.col,
                 y: area.y + (spot.line - top) as u16,
                 width: spot.cols,
                 height: spot.rows,
@@ -993,14 +1006,15 @@ impl AgentPanel {
         // the last block while the agent works, animating on the ~10 fps redraw.
         let footer = self.live_footer_lines(text_width);
         self.transcript.set_live_footer(footer);
-        // A picture or diagram takes at most half the panel: the work around
-        // it stays in sight. The panel's height rather than the transcript's,
-        // which the input and the strip change as one types.
+        // A diagram takes at most half the panel, a picture half its height
+        // or half its width (`picture_max_rows`): the work around it stays in
+        // sight. The panel's height rather than the transcript's, which the
+        // input and the strip change as one types.
         self.transcript
             .set_artifact_rows(Some((area.height / 2).max(1)));
         let layout = self.graphics.as_ref().map(|graphics| PictureLayout {
             cell_px: graphics.cell_px(),
-            max_rows: (area.height / 2).max(1),
+            max_rows: picture_max_rows(area, graphics.cell_px()),
         });
         self.transcript.set_picture_layout(layout);
         let total = self.transcript.lines(text_width, &colors, is_light).len();

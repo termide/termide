@@ -385,6 +385,7 @@ struct Cached {
 
 /// How pictures are laid out: the size of a terminal cell in pixels and the
 /// most rows one takes. Without it (no graphics) a picture is a one-row card.
+/// A picture is centred in the columns it may take.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PictureLayout {
     pub cell_px: (u16, u16),
@@ -395,11 +396,12 @@ pub struct PictureLayout {
 pub(crate) const PICTURE_INDENT: u16 = 2;
 
 /// Where a picture goes on the rendered lines: `rows` rows from `line`,
-/// `cols` wide from [`PICTURE_INDENT`]; the rows hold a placeholder the
-/// picture is drawn over.
+/// `cols` wide from column `col` (at least [`PICTURE_INDENT`]); the rows
+/// hold a placeholder the picture is drawn over.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct PictureSpot {
     pub line: usize,
+    pub col: u16,
     pub cols: u16,
     pub rows: u16,
     /// The picture's [`termide_panel_image::inline::picture_key`].
@@ -2392,8 +2394,11 @@ fn picture_rows(
                 // The scrollbar gutter stays free.
                 let max_cols = width.saturating_sub(PICTURE_INDENT + 1).max(1);
                 let (cols, rows) = fit_cells(px, layout.cell_px, (max_cols, layout.max_rows));
+                // Centred across the block, the gutter left out.
+                let col = PICTURE_INDENT + (max_cols - cols) / 2;
                 spots.push(PictureSpot {
                     line: lines.len(),
+                    col,
                     cols,
                     rows,
                     key: picture_key(data),
@@ -2401,7 +2406,8 @@ fn picture_rows(
                     ordinal,
                 });
                 // Seen only while the picture is not drawn over it.
-                lines.push(Line::styled(format!("{indent}{label}"), dim));
+                let pad = " ".repeat(usize::from(col));
+                lines.push(Line::styled(format!("{pad}{label}"), dim));
                 lines.extend((1..rows).map(|_| Line::default()));
             }
             (Some(_), Some(_)) => lines.push(Line::styled(format!("{indent}▸ {label}"), dim)),

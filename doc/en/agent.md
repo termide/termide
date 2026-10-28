@@ -509,7 +509,8 @@ Pictures show the same way: one `read` returned, under its headline even
 while the call is folded, and one you pasted, inside your message. A picture
 is drawn with the terminal's graphics (Kitty, Sixel, iTerm2, or half blocks
 where there are none), no larger than itself, as wide as the panel and at
-most half its height. It is drawn only while all of it is on screen; a picture
+most as tall as half its height or half its width, whichever is more, centred
+across the panel. It is drawn only while all of it is on screen; a picture
 cut by the panel's edge shows its placeholder, `PNG 1280×800`, where terminal
 graphics would leave debris. With Sixel or iTerm2, which send a picture
 again wherever it moves, a picture that is moving — scrolled, or pushed up by
