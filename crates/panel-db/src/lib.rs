@@ -1124,8 +1124,11 @@ impl Panel for DbPanel {
     }
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<termide_core::PanelState> {
+        // The layout is a plain file: a password written into the URL stays
+        // out of it. On restore the server refuses the login and the panel
+        // takes the password from the vault or asks, as for any URL.
         Some(termide_core::PanelState::Database {
-            url: self.url.clone(),
+            url: self.login_url(),
             label: self.label.clone(),
         })
     }
@@ -1219,6 +1222,19 @@ mod tests {
         assert!(panel.cancel_password(url));
         assert!(matches!(&panel.conn, ConnState::Failed(m) if m == "refused"));
         assert!(panel.take_modal_request().is_some());
+    }
+
+    #[test]
+    fn the_saved_layout_never_holds_a_password_from_the_url() {
+        let panel = DbPanel::new("postgres://u:secret@127.0.0.1:1/app", "prod");
+        let state = panel.to_state(std::path::Path::new("/")).unwrap();
+        match state {
+            termide_core::PanelState::Database { url, label } => {
+                assert_eq!(url, "postgres://u@127.0.0.1:1/app");
+                assert_eq!(label, "prod");
+            }
+            other => panic!("unexpected state {other:?}"),
+        }
     }
 
     #[test]

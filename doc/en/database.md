@@ -41,9 +41,10 @@ part of the panel's URL, so the saved layout does not contain it.
 
 Password-less authentication (PostgreSQL `~/.pgpass`/peer/trust, a Unix
 socket, `PGPASSWORD`, …) keeps working as before. A password written into
-the URL (`postgres://user:secret@host/db`) is still used. When you save
-such a URL as a bookmark, Termide offers to move the password into the
-vault.
+the URL (`postgres://user:secret@host/db`) is still used, but it is not
+saved with the layout: when the panel is restored, it takes the password
+from the vault or asks for it, as above. When you save such a URL as a
+bookmark, Termide offers to move the password into the vault.
 
 ## Layout
 
