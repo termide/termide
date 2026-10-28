@@ -883,13 +883,25 @@ fn repo_walker(start: &Path) -> WalkBuilder {
 
 /// The directories of `walk` that get a watch.
 fn watchable_dirs(walk: ignore::Walk, repo_root: &Path) -> impl Iterator<Item = PathBuf> {
-    let git_objects_dir = repo_root.join(".git/objects");
+    let repo_root = repo_root.to_path_buf();
     walk.filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_some_and(|ft| ft.is_dir()))
         .map(|e| e.into_path())
-        // Skip `.git/objects/<hash-prefix>/` — hundreds of subdirs that
-        // emit no commit-relevant events.
-        .filter(move |path| !(path.starts_with(&git_objects_dir) && path != &git_objects_dir))
+        .filter(move |path| !under_git_objects(path, &repo_root))
+}
+
+/// Whether `path` lies below a `.git/objects` directory inside `repo_root`:
+/// its own or that of a repository nested in it. The hash-prefix
+/// subdirectories there number in the hundreds and emit no commit-relevant
+/// events; `objects` itself stays watched.
+fn under_git_objects(path: &Path, repo_root: &Path) -> bool {
+    let Ok(relative) = path.strip_prefix(repo_root) else {
+        return false;
+    };
+    let parts: Vec<_> = relative.components().map(|c| c.as_os_str()).collect();
+    parts
+        .windows(3)
+        .any(|w| w[0] == ".git" && w[1] == "objects")
 }
 
 #[cfg(test)]
@@ -907,6 +919,38 @@ mod tests {
         assert!(!UnifiedWatcher::is_git_path(Path::new(
             "/home/user/project/src/main.rs"
         )));
+    }
+
+    #[test]
+    fn object_subdirectories_of_any_nested_repo_are_not_watched() {
+        let root = Path::new("/project");
+        assert!(under_git_objects(
+            Path::new("/project/.git/objects/ab"),
+            root
+        ));
+        assert!(under_git_objects(
+            Path::new("/project/vendor/lib/.git/objects/ab"),
+            root
+        ));
+        assert!(under_git_objects(
+            Path::new("/project/vendor/lib/.git/objects/pack/x"),
+            root
+        ));
+        assert!(!under_git_objects(Path::new("/project/.git/objects"), root));
+        assert!(!under_git_objects(
+            Path::new("/project/vendor/lib/.git/objects"),
+            root
+        ));
+        assert!(!under_git_objects(
+            Path::new("/project/.git/refs/heads"),
+            root
+        ));
+        assert!(!under_git_objects(
+            Path::new("/project/src/objects/ab"),
+            root
+        ));
+        // Above the repository root nothing counts.
+        assert!(!under_git_objects(Path::new("/.git/objects/ab"), root));
     }
 
     #[test]
