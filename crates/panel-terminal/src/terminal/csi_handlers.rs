@@ -32,10 +32,8 @@ pub fn handle_private_sequence(screen: &mut TerminalScreen, params: &Params, c: 
         (1049, 'l') => {
             // Return to main screen and restore cursor
             screen.switch_to_main_screen();
-            if let Some(saved) = screen.saved_cursor {
-                screen.cursor = saved;
-                screen.saved_cursor = None;
-            }
+            screen.restore_cursor();
+            screen.saved_cursor = None;
         }
         (47, 'h') => {
             // Switch to alternate screen (without saving cursor)
@@ -235,13 +233,13 @@ pub fn handle_cursor_movement(screen: &mut TerminalScreen, params: &Params, c: c
             // CUD - Cursor Down
             let n = param1.max(1);
             screen.wrap_pending = false;
-            screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows - 1);
+            screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows.saturating_sub(1));
         }
         'C' => {
             // CUF - Cursor Forward (Right)
             let n = param1.max(1);
             screen.wrap_pending = false;
-            screen.cursor.1 = (screen.cursor.1 + n).min(screen.cols - 1);
+            screen.cursor.1 = (screen.cursor.1 + n).min(screen.cols.saturating_sub(1));
         }
         'D' => {
             // CUB - Cursor Back (Left)
@@ -253,7 +251,7 @@ pub fn handle_cursor_movement(screen: &mut TerminalScreen, params: &Params, c: c
             // CNL - Cursor Next Line
             let n = param1.max(1);
             screen.wrap_pending = false;
-            screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows - 1);
+            screen.cursor.0 = (screen.cursor.0 + n).min(screen.rows.saturating_sub(1));
             screen.cursor.1 = 0;
         }
         'F' => {
@@ -267,13 +265,13 @@ pub fn handle_cursor_movement(screen: &mut TerminalScreen, params: &Params, c: c
             // CHA - Cursor Horizontal Absolute
             let col = param1.max(1);
             screen.wrap_pending = false;
-            screen.cursor.1 = col.saturating_sub(1).min(screen.cols - 1);
+            screen.cursor.1 = col.saturating_sub(1).min(screen.cols.saturating_sub(1));
         }
         'd' => {
             // VPA - Vertical Position Absolute
             let row = param1.max(1);
             screen.wrap_pending = false;
-            screen.cursor.0 = row.saturating_sub(1).min(screen.rows - 1);
+            screen.cursor.0 = row.saturating_sub(1).min(screen.rows.saturating_sub(1));
         }
         _ => return false,
     }

@@ -33,7 +33,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use terminal::{Cell, CellStyle, KeyboardProtocolMode, MouseTrackingMode, TerminalScreen};
+use terminal::{KeyboardProtocolMode, MouseTrackingMode, TerminalScreen};
 use vte::Parser;
 
 use termide_config::{Config, TerminalKeybindings};
@@ -585,6 +585,9 @@ impl Terminal {
 
     /// Resize terminal
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
+        // The screen never goes below 1×1; tell the program the same size.
+        let rows = rows.max(1);
+        let cols = cols.max(1);
         self.size = PtySize {
             rows,
             cols,
@@ -596,66 +599,8 @@ impl Terminal {
             pty.resize(self.size)?;
         }
 
-        // Update virtual screen size - in-place resize without cloning
         if let Ok(mut screen) = self.screen.write() {
-            let new_rows = rows as usize;
-            let new_cols = cols as usize;
-
-            // If size changed, resize in-place
-            if screen.rows != new_rows || screen.cols != new_cols {
-                let empty_cell = Cell::blank(CellStyle::default());
-
-                // Adjust row count
-                while screen.lines.len() > new_rows {
-                    screen.lines.pop_back();
-                }
-                while screen.lines.len() < new_rows {
-                    screen.lines.push_back(vec![empty_cell; new_cols]);
-                }
-                while screen.lines_wrapped.len() > new_rows {
-                    screen.lines_wrapped.pop_back();
-                }
-                while screen.lines_wrapped.len() < new_rows {
-                    screen.lines_wrapped.push_back(false);
-                }
-
-                // Adjust column count for each existing row
-                for row in screen.lines.iter_mut() {
-                    row.resize(new_cols, empty_cell);
-                }
-
-                // Adjust row count for alternate buffer
-                while screen.alt_lines.len() > new_rows {
-                    screen.alt_lines.pop_back();
-                }
-                while screen.alt_lines.len() < new_rows {
-                    screen.alt_lines.push_back(vec![empty_cell; new_cols]);
-                }
-                while screen.alt_lines_wrapped.len() > new_rows {
-                    screen.alt_lines_wrapped.pop_back();
-                }
-                while screen.alt_lines_wrapped.len() < new_rows {
-                    screen.alt_lines_wrapped.push_back(false);
-                }
-
-                // Adjust column count for each existing row in alternate buffer
-                for row in screen.alt_lines.iter_mut() {
-                    row.resize(new_cols, empty_cell);
-                }
-
-                screen.rows = new_rows;
-                screen.cols = new_cols;
-
-                // Reset scroll region to match new dimensions
-                screen.reset_scroll_region();
-
-                // Limit cursor position to new dimensions
-                screen.cursor.0 = screen.cursor.0.min(new_rows.saturating_sub(1));
-                screen.cursor.1 = screen.cursor.1.min(new_cols.saturating_sub(1));
-
-                // Mark dirty to force re-render
-                screen.dirty = true;
-            }
+            screen.resize(rows as usize, cols as usize);
         }
 
         // Invalidate render cache on resize

@@ -813,12 +813,47 @@ impl TerminalScreen {
         self.saved_cursor = Some(self.cursor);
     }
 
-    /// Restore cursor position
+    /// Restore cursor position, clamped to the grid: the screen may have
+    /// shrunk since the position was saved.
     pub fn restore_cursor(&mut self) {
-        if let Some(saved) = self.saved_cursor {
-            self.cursor = saved;
-            self.wrap_pending = false;
+        if let Some((row, col)) = self.saved_cursor {
+            self.move_cursor(row, col);
         }
+    }
+
+    /// Resize the grid in place, never below 1×1.
+    ///
+    /// Every position kept across the resize (cursor, saved cursor, scroll
+    /// region) is brought back inside the new grid, so later edits at those
+    /// positions cannot index past a row.
+    pub fn resize(&mut self, rows: usize, cols: usize) {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        if self.rows == rows && self.cols == cols {
+            return;
+        }
+        let empty_cell = Cell::blank(CellStyle::default());
+
+        for (lines, wrapped) in [
+            (&mut self.lines, &mut self.lines_wrapped),
+            (&mut self.alt_lines, &mut self.alt_lines_wrapped),
+        ] {
+            lines.resize(rows, vec![empty_cell; cols]);
+            wrapped.resize(rows, false);
+            for line in lines.iter_mut() {
+                line.resize(cols, empty_cell);
+            }
+        }
+
+        self.rows = rows;
+        self.cols = cols;
+        self.reset_scroll_region();
+        self.cursor.0 = self.cursor.0.min(rows - 1);
+        self.cursor.1 = self.cursor.1.min(cols - 1);
+        if let Some((row, col)) = self.saved_cursor {
+            self.saved_cursor = Some((row.min(rows - 1), col.min(cols - 1)));
+        }
+        self.dirty = true;
     }
 
     /// Convert visual row (0-based on screen) to absolute buffer index

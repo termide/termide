@@ -332,21 +332,17 @@ impl Perform for VtPerformer {
                         .copied()
                         .unwrap_or(1) as usize;
                     let (row, col) = screen.cursor;
-                    let cols = screen.cols;
                     let style = screen.current_style;
+                    let cols = screen.active_buffer().get(row).map_or(0, Vec::len);
 
-                    if row < screen.active_buffer().len() {
-                        let n = n.min(cols.saturating_sub(col));
+                    if col < cols {
+                        let n = n.min(cols - col);
                         // Cutting through a wide character removes both halves.
                         screen.split_wide_at(row, col, style);
                         screen.split_wide_at(row, col + n, style);
-                        let buffer = screen.active_buffer_mut();
-                        // Shift characters left from deleted position using copy_within (3-5x faster)
-                        if col + n < cols {
-                            buffer[row].copy_within(col + n..cols, col);
-                        }
-                        // Fill freed space with blanks
-                        buffer[row][cols - n..cols].fill(Cell::blank(style));
+                        let line = &mut screen.active_buffer_mut()[row];
+                        line.copy_within(col + n..cols, col);
+                        line[cols - n..].fill(Cell::blank(style));
                     }
                     // Force cache invalidation after character deletion
                     screen.force_cache_invalidation = true;
@@ -374,22 +370,18 @@ impl Perform for VtPerformer {
                         .copied()
                         .unwrap_or(1) as usize;
                     let (row, col) = screen.cursor;
-                    let cols = screen.cols;
                     let style = screen.current_style;
+                    let cols = screen.active_buffer().get(row).map_or(0, Vec::len);
 
-                    if row < screen.active_buffer().len() {
-                        let n = n.min(cols.saturating_sub(col));
+                    if col < cols {
+                        let n = n.min(cols - col);
                         // Inserting inside a wide character erases it, and a wide
                         // character pushed past the right edge goes entirely.
                         screen.split_wide_at(row, col, style);
                         screen.split_wide_at(row, cols - n, style);
-                        let buffer = screen.active_buffer_mut();
-                        // Shift characters right using copy_within (3-5x faster)
-                        if col + n < cols {
-                            buffer[row].copy_within(col..cols - n, col + n);
-                        }
-                        // Insert blanks at freed positions
-                        buffer[row][col..col + n].fill(Cell::blank(style));
+                        let line = &mut screen.active_buffer_mut()[row];
+                        line.copy_within(col..cols - n, col + n);
+                        line[col..col + n].fill(Cell::blank(style));
                     }
                     // Force cache invalidation after character insertion
                     screen.force_cache_invalidation = true;
@@ -835,6 +827,50 @@ mod tests {
             screen.read().unwrap().keyboard_protocol,
             KeyboardProtocolMode::Legacy
         );
+    }
+
+    /// A cursor saved on a large screen, restored after the panel shrank,
+    /// used to land outside the grid; the next insert sliced past the row
+    /// and panicked the reader thread.
+    #[test]
+    fn cursor_saved_before_a_shrink_is_restored_inside_the_grid() {
+        let cases: [(&[u8], &[u8]); 2] = [
+            (b"\x1b[20;70H\x1b[s", b"\x1b[u"),
+            (b"\x1b[20;70H\x1b[?1049h", b"\x1b[?1049l"),
+        ];
+        for (save, restore) in cases {
+            let (mut performer, _capture, screen) = performer();
+            feed(&mut performer, save);
+            screen.write().unwrap().resize(5, 10);
+            feed(&mut performer, restore);
+            assert_eq!(screen.read().unwrap().cursor, (4, 9));
+            feed(&mut performer, b"\x1b[3@\x1b[3P\x1b[3X\x1b[2L\x1b[2Mx");
+            performer.flush();
+            assert_eq!(row_text(&screen, 4), "         x");
+        }
+
+        // A saved position outside the grid is clamped on restore as well.
+        let (mut performer, _capture, screen) = performer();
+        screen.write().unwrap().saved_cursor = Some((99, 999));
+        feed(&mut performer, b"\x1b[u\x1b[@");
+        assert_eq!(screen.read().unwrap().cursor, (23, 79));
+    }
+
+    #[test]
+    fn resize_to_zero_is_floored_and_cursor_motion_stays_safe() {
+        let (mut performer, _capture, screen) = performer();
+        screen.write().unwrap().resize(0, 0);
+        {
+            let s = screen.read().unwrap();
+            assert_eq!((s.rows, s.cols), (1, 1));
+        }
+        feed(
+            &mut performer,
+            b"\x1b[5B\x1b[5C\x1b[9E\x1b[9G\x1b[9d\x1b[@\x1b[Px",
+        );
+        performer.flush();
+        assert_eq!(screen.read().unwrap().cursor, (0, 0));
+        assert_eq!(row_text(&screen, 0), "x");
     }
 
     #[test]
