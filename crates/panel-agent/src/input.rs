@@ -9,7 +9,7 @@ use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList,
 
 use crate::slash::user_skill_description;
 use crate::{
-    select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
+    pan, select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
     ViewButton, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
     HANDOFF_COMMAND, LOOP_COMMAND, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION,
     PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, TRUST_COMMAND,
@@ -346,11 +346,7 @@ impl AgentPanel {
             return false;
         };
         let width = self.transcript_area.width.saturating_sub(1).max(1) as usize;
-        let text = selection.text(
-            self.transcript.rendered(),
-            self.transcript.rendered_copy(),
-            width,
-        );
+        let text = selection.text(&self.shown_rows(), self.transcript.rendered_copy(), width);
         if text.trim().is_empty() {
             return false;
         }
@@ -1336,6 +1332,19 @@ impl AgentPanel {
                     self.transcript.toggle_expanded(self.selected);
                     return vec![PanelEvent::NeedsRedraw];
                 }
+                // Shift+←/→ pan the block's diagram too wide for the panel.
+                KeyCode::Left | KeyCode::Right if shift && !ctrl && !alt => {
+                    let Some(spot) = self.selected_wide_diagram() else {
+                        return vec![];
+                    };
+                    let step = pan::KEY_STEP as isize;
+                    let delta = if key.code == KeyCode::Right {
+                        step
+                    } else {
+                        -step
+                    };
+                    return self.pan_diagram(&spot, delta);
+                }
                 KeyCode::Left | KeyCode::Right if !ctrl && !alt && !shift => {
                     let expand = key.code == KeyCode::Right;
                     if !self.transcript.set_expanded(self.selected, expand) {
@@ -1613,6 +1622,43 @@ impl AgentPanel {
                 }
             }
         }
+        // A diagram too wide for the panel pans under the horizontal wheel
+        // (or Shift+wheel) and by its scrollbar, whose drag holds the mouse
+        // until the button is let go.
+        let step = pan::WHEEL_STEP as isize;
+        let shift = event.modifiers.contains(KeyModifiers::SHIFT);
+        let pan = match event.kind {
+            MouseEventKind::ScrollRight => Some(step),
+            MouseEventKind::ScrollLeft => Some(-step),
+            MouseEventKind::ScrollDown if shift => Some(step),
+            MouseEventKind::ScrollUp if shift => Some(-step),
+            _ => None,
+        };
+        if let Some(delta) = pan {
+            return match self.diagram_under(event.column, event.row) {
+                Some(spot) => self.pan_diagram(&spot, delta),
+                None if matches!(
+                    event.kind,
+                    MouseEventKind::ScrollLeft | MouseEventKind::ScrollRight
+                ) =>
+                {
+                    vec![]
+                }
+                None => {
+                    self.scroll_by(if delta > 0 { 3 } else { -3 });
+                    vec![PanelEvent::NeedsRedraw]
+                }
+            };
+        }
+        match event.kind {
+            MouseEventKind::Drag(MouseButton::Left) if self.diagram_drag.is_some() => {
+                return self.drag_diagram_bar(event.column).unwrap_or_default();
+            }
+            MouseEventKind::Up(MouseButton::Left) if self.diagram_drag.take().is_some() => {
+                return vec![];
+            }
+            _ => {}
+        }
         match event.kind {
             MouseEventKind::ScrollDown => self.scroll_by(3),
             MouseEventKind::ScrollUp => self.scroll_by(-3),
@@ -1714,6 +1760,9 @@ impl AgentPanel {
                     if let Some(index) = picker.list.hit(event.column, event.row) {
                         return self.choose_rewind(index);
                     }
+                }
+                if let Some(events) = self.press_diagram_bar(event.column, event.row) {
+                    return events;
                 }
                 // A click on a re-pickable field in the welcome banner opens its
                 // picker — the same one its status-bar chip opens — and one on

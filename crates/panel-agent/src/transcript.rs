@@ -13,6 +13,8 @@ use termide_panel_image::inline::{fit_cells, picture_key, picture_size};
 use termide_panel_markdown::render_markdown_with;
 use termide_richtext::{Builder, DiagramFold, RowCopy};
 
+use crate::pan::DiagramSpot;
+
 /// Lines of tool output shown when a call is expanded.
 const EXPANDED_OUTPUT_LINES: usize = 60;
 /// A block whose foldable content is this many lines or fewer is shown in full,
@@ -377,6 +379,8 @@ struct Cached {
     copy: Vec<RowCopy>,
     /// The pictures drawn over its lines, on its own lines.
     pictures: Vec<PictureSpot>,
+    /// The diagrams too wide for it, on its own lines.
+    wide_diagrams: Vec<DiagramSpot>,
 }
 
 /// How pictures are laid out: the size of a terminal cell in pixels and the
@@ -502,6 +506,11 @@ pub struct Transcript {
     flat_links: Vec<(usize, RowLink)>,
     /// The pictures on the flattened lines.
     flat_pictures: Vec<PictureSpot>,
+    /// The diagrams too wide for the panel, on the flattened lines.
+    flat_diagrams: Vec<DiagramSpot>,
+    /// How far each item's diagrams are panned, by their ordinal in the
+    /// item; parallel to `items`. Kept across widths, clamped when read.
+    pans: Vec<Vec<usize>>,
     flat_dirty: bool,
     /// Live footer lines appended after the last item while the agent works
     /// (the ticking generation and clock meta with the spinner); empty when
@@ -563,6 +572,7 @@ impl Transcript {
         self.collapsed.push(collapsed);
         self.pinned.push(false);
         self.artifacts_folded.push(false);
+        self.pans.push(Vec::new());
         self.cache.push(None);
         self.flat_dirty = true;
     }
@@ -572,6 +582,7 @@ impl Transcript {
         self.collapsed.clear();
         self.pinned.clear();
         self.artifacts_folded.clear();
+        self.pans.clear();
         self.any_pictures = false;
         self.cache.clear();
         self.flat.clear();
@@ -579,6 +590,7 @@ impl Transcript {
         self.flat_copy.clear();
         self.flat_links.clear();
         self.flat_pictures.clear();
+        self.flat_diagrams.clear();
         self.flat_dirty = true;
     }
 
@@ -702,6 +714,7 @@ impl Transcript {
                 self.collapsed.remove(index);
                 self.pinned.remove(index);
                 self.artifacts_folded.remove(index);
+                self.pans.remove(index);
                 self.cache.remove(index);
                 self.flat_dirty = true;
                 return;
@@ -972,6 +985,43 @@ impl Transcript {
         &self.flat_pictures
     }
 
+    /// The diagrams too wide for the panel on the flattened lines, as last
+    /// laid out.
+    pub(crate) fn wide_diagrams(&self) -> &[DiagramSpot] {
+        &self.flat_diagrams
+    }
+
+    /// How far `spot` is panned, within its width.
+    pub(crate) fn pan_of(&self, spot: &DiagramSpot) -> usize {
+        self.pans
+            .get(spot.item)
+            .and_then(|pans| pans.get(spot.index))
+            .map_or(0, |&pan| pan.min(spot.max_pan()))
+    }
+
+    /// Pan `spot` to `to` columns, within its width. Returns whether it
+    /// moved, so a pan against an edge redraws nothing.
+    pub(crate) fn set_pan(&mut self, spot: &DiagramSpot, to: usize) -> bool {
+        let to = to.min(spot.max_pan());
+        if self.pan_of(spot) == to {
+            return false;
+        }
+        let Some(pans) = self.pans.get_mut(spot.item) else {
+            return false;
+        };
+        if pans.len() <= spot.index {
+            pans.resize(spot.index + 1, 0);
+        }
+        pans[spot.index] = to;
+        true
+    }
+
+    /// Pan `spot` by `delta` columns, as [`Transcript::set_pan`].
+    pub(crate) fn pan_by(&mut self, spot: &DiagramSpot, delta: isize) -> bool {
+        let to = self.pan_of(spot).saturating_add_signed(delta);
+        self.set_pan(spot, to)
+    }
+
     /// The base64 data of picture `ordinal` of item `item`.
     pub(crate) fn picture_data(&self, item: usize, ordinal: usize) -> Option<&str> {
         let item = self.items.get(item)?;
@@ -1129,9 +1179,16 @@ impl Transcript {
             self.flat_copy.clear();
             self.flat_links.clear();
             self.flat_pictures.clear();
+            self.flat_diagrams.clear();
             for (index, cached) in self.cache.iter().enumerate() {
                 if let Some(cached) = cached {
                     let base = self.flat.len();
+                    self.flat_diagrams
+                        .extend(cached.wide_diagrams.iter().map(|spot| DiagramSpot {
+                            line: base + spot.line,
+                            item: index,
+                            ..*spot
+                        }));
                     self.flat_pictures
                         .extend(cached.pictures.iter().map(|spot| PictureSpot {
                             line: base + spot.line,
@@ -2217,6 +2274,7 @@ fn render_item(
             colors,
             is_light,
             fold_diagrams(0),
+            false,
         )
         .diagrams
             > 0;
@@ -2256,6 +2314,7 @@ fn render_item(
     let Marks {
         mut links,
         copy: copy_marks,
+        mut wide_diagrams,
         ..
     } = marks;
     let mut copy = vec![RowCopy::default(); lines.len()];
@@ -2271,6 +2330,9 @@ fn render_item(
         copy.insert(0, RowCopy::default());
         for link in &mut links {
             link.line += 1;
+        }
+        for spot in &mut wide_diagrams {
+            spot.line += 1;
         }
     }
     // Under the block's text, inside the gap a message of yours ends with.
@@ -2289,6 +2351,11 @@ fn render_item(
             link.line += rows.len();
         }
     }
+    for spot in &mut wide_diagrams {
+        if spot.line >= at {
+            spot.line += rows.len();
+        }
+    }
     copy.splice(at..at, std::iter::repeat_n(RowCopy::default(), rows.len()));
     lines.splice(at..at, rows);
     Cached {
@@ -2300,6 +2367,7 @@ fn render_item(
         links,
         copy,
         pictures,
+        wide_diagrams,
     }
 }
 
@@ -2353,6 +2421,8 @@ struct Marks {
     diagrams: Option<DiagramFold>,
     /// How many diagrams did.
     folded_diagrams: usize,
+    /// The diagrams too wide for the block, kept whole to be panned.
+    wide_diagrams: Vec<DiagramSpot>,
 }
 
 /// The lines of `item` itself, without the gap [`render_item`] puts above it;
@@ -2600,8 +2670,25 @@ fn render_body(
                     colors,
                     is_light,
                     marks.diagrams,
+                    true,
                 );
                 marks.folded_diagrams = body.folded_diagrams;
+                // Past the `› ` mark, a wide diagram's content starts four
+                // columns in and has the rest of the width.
+                marks
+                    .wide_diagrams
+                    .extend(body.wide_diagrams.iter().map(|wide| {
+                        let col = wide.lead + 2;
+                        DiagramSpot {
+                            line: lines.len() + wide.line,
+                            rows: wide.rows,
+                            col,
+                            cols: wide.cols,
+                            view: width.saturating_sub(col),
+                            item: 0,
+                            index: wide.index,
+                        }
+                    }));
                 // Past the `› ` mark the answer's links sit two columns in.
                 // Copied, the mark and the indent under it are decoration.
                 marks

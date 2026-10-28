@@ -16,11 +16,13 @@ pub use termide_richtext::{LinkSpan, Rendered};
 /// Render `src` for the given inner `width`.
 #[must_use]
 pub fn render_markdown(src: &str, width: u16, colors: &ThemeColors, is_light: bool) -> Rendered {
-    render_markdown_with(src, width, colors, is_light, None)
+    render_markdown_with(src, width, colors, is_light, None, false)
 }
 
 /// Render `src` as [`render_markdown`] does, with the diagrams `fold`
-/// covers folded to a card.
+/// covers folded to a card; with `pan_wide`, a diagram wider than `width`
+/// gets a row for a horizontal scrollbar under it
+/// ([`Builder::pan_wide_diagrams`]).
 #[must_use]
 pub fn render_markdown_with(
     src: &str,
@@ -28,9 +30,11 @@ pub fn render_markdown_with(
     colors: &ThemeColors,
     is_light: bool,
     fold: Option<DiagramFold>,
+    pan_wide: bool,
 ) -> Rendered {
     let mut b = Builder::new(width, colors, is_light);
     b.fold_diagrams(fold);
+    b.pan_wide_diagrams(pan_wide);
     // Embedded HTML (block and inline) is driven through the shared HTML engine
     // with a persistent state, so elements that CommonMark splits across events
     // (e.g. a `<details>` wrapping Markdown) still nest correctly.
@@ -465,14 +469,14 @@ mod tests {
                 taller_than,
             })
         };
-        let folded = render_markdown_with(md, 80, &colors(), false, card(0));
+        let folded = render_markdown_with(md, 80, &colors(), false, card(0), false);
         assert_eq!((whole.diagrams, folded.diagrams), (1, 1));
         assert_eq!((whole.folded_diagrams, folded.folded_diagrams), (0, 1));
         // Only a diagram taller than the limit folds.
         let rows = whole.lines.len() - folded.lines.len() + 1;
-        let fits = render_markdown_with(md, 80, &colors(), false, card(rows));
+        let fits = render_markdown_with(md, 80, &colors(), false, card(rows), false);
         assert_eq!(fits.lines.len(), whole.lines.len());
-        let tall = render_markdown_with(md, 80, &colors(), false, card(rows - 1));
+        let tall = render_markdown_with(md, 80, &colors(), false, card(rows - 1), false);
         assert_eq!(tall.lines.len(), folded.lines.len());
         let text: Vec<String> = folded
             .lines

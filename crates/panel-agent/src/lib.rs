@@ -13,6 +13,7 @@ mod held;
 mod input;
 pub mod live;
 mod mcp;
+mod pan;
 mod parked;
 mod peers;
 mod pending;
@@ -38,7 +39,7 @@ use std::sync::mpsc::Receiver;
 use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
-use crossterm::event::MouseEvent;
+use crossterm::event::{KeyModifiers, MouseEvent};
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use termide_agent_core::{
@@ -1100,6 +1101,12 @@ pub struct AgentPanel {
     transcript_area: Rect,
     input_area: Rect,
     scrollbars: ScrollBars,
+    /// The scrollbars drawn under wide diagrams this frame, for clicks and
+    /// drags on them.
+    diagram_bars: Vec<(pan::DiagramSpot, termide_core::ScrollBarGeometry)>,
+    /// A diagram's scrollbar thumb being dragged: which diagram, and where
+    /// in the thumb it was grabbed.
+    diagram_drag: Option<(pan::DiagramKey, u16)>,
     /// Clickable rows drawn in the welcome banner, each with what a click on
     /// it does (re-pick the model or the agent, open a recent session).
     /// Rebuilt every render; empty once the session has content and the
@@ -1424,6 +1431,8 @@ impl AgentPanel {
             transcript_area: Rect::default(),
             input_area: Rect::default(),
             scrollbars: ScrollBars::default(),
+            diagram_bars: Vec::new(),
+            diagram_drag: None,
             banner_hits: Vec::new(),
             graphics: None,
             graphics_asked: false,
@@ -1910,6 +1919,16 @@ impl Panel for AgentPanel {
     fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
         self.scroll_by(delta);
         vec![PanelEvent::NeedsRedraw]
+    }
+
+    fn handle_wheel(&mut self, event: MouseEvent, delta: i32, panel_area: Rect) -> Vec<PanelEvent> {
+        // Shift+wheel over a diagram too wide for the panel pans it.
+        if event.modifiers.contains(KeyModifiers::SHIFT) {
+            if let Some(spot) = self.diagram_under(event.column, event.row) {
+                return self.pan_diagram(&spot, delta as isize * pan::WHEEL_STEP as isize);
+            }
+        }
+        self.handle_scroll(delta, panel_area)
     }
 
     fn handle_mouse(&mut self, event: MouseEvent, _panel_area: Rect) -> Vec<PanelEvent> {

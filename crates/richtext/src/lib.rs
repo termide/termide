@@ -71,6 +71,22 @@ pub struct Rendered {
     pub diagrams: usize,
     /// How many of those diagrams were folded to a card.
     pub folded_diagrams: usize,
+    /// The diagrams wider than their room, shown whole with a track row
+    /// under each (see [`Builder::pan_wide_diagrams`]).
+    pub wide_diagrams: Vec<WideDiagram>,
+}
+
+/// A diagram wider than the room it has: its `rows` rows from `line` keep
+/// their full width past `lead` columns of bar, `cols` wide, and row
+/// `line + rows` under them is left for a horizontal scrollbar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WideDiagram {
+    pub line: usize,
+    pub rows: usize,
+    pub lead: u16,
+    pub cols: u16,
+    /// Which diagram of the document it is, folded ones counted.
+    pub index: usize,
 }
 
 /// The text of a folded diagram's card, given how many rows the diagram has.
@@ -170,6 +186,9 @@ pub struct Builder<'c> {
     /// Diagrams rendered so far, and how many of them folded.
     diagrams: usize,
     folded_diagrams: usize,
+    /// Whether a diagram wider than the room gets a track row under it.
+    pan_wide: bool,
+    wide_diagrams: Vec<WideDiagram>,
 }
 
 impl<'c> Builder<'c> {
@@ -198,7 +217,16 @@ impl<'c> Builder<'c> {
             diagram_fold: None,
             diagrams: 0,
             folded_diagrams: 0,
+            pan_wide: false,
+            wide_diagrams: Vec::new(),
         }
+    }
+
+    /// Leave a row under each diagram wider than the room it has, for a
+    /// horizontal scrollbar the front-end draws, and report the diagram in
+    /// [`Rendered::wide_diagrams`]. Off, such a diagram is cut at the edge.
+    pub fn pan_wide_diagrams(&mut self, on: bool) {
+        self.pan_wide = on;
     }
 
     /// Fold the diagrams `fold` covers to a single card line each, or show
@@ -645,6 +673,17 @@ impl<'c> Builder<'c> {
                     self.lines.push(Line::from(spans));
                     return;
                 }
+                let cols = diagram.iter().map(|row| row.width()).max().unwrap_or(0);
+                let wide = self.pan_wide && cols > self.width.saturating_sub(2);
+                if wide {
+                    self.wide_diagrams.push(WideDiagram {
+                        line: self.lines.len(),
+                        rows: diagram.len(),
+                        lead: 2,
+                        cols: u16::try_from(cols).unwrap_or(u16::MAX),
+                        index: self.diagrams - 1,
+                    });
+                }
                 for line in diagram {
                     let spans = vec![
                         Span::styled("┊ ", bar),
@@ -652,6 +691,11 @@ impl<'c> Builder<'c> {
                     ];
                     self.mark_copy(2, Join::Break);
                     self.lines.push(Line::from(spans));
+                }
+                if wide {
+                    // The track row: the bar runs on, the scrollbar goes past it.
+                    self.mark_copy(2, Join::Break);
+                    self.lines.push(Line::from(vec![Span::styled("┊ ", bar)]));
                 }
                 return;
             }
@@ -1032,6 +1076,7 @@ impl<'c> Builder<'c> {
             anchors,
             diagrams: self.diagrams,
             folded_diagrams: self.folded_diagrams,
+            wide_diagrams: self.wide_diagrams,
         }
     }
 }
@@ -1245,6 +1290,53 @@ mod tests {
         for row in &rows {
             assert!(row.width() <= 12, "{row:?} is wider than the block");
         }
+    }
+
+    fn diagram_at(width: u16, pan_wide: bool) -> Rendered {
+        let colors = ThemeColors::default();
+        let mut b = Builder::new(width, &colors, false);
+        b.pan_wide_diagrams(pan_wide);
+        b.text("before");
+        b.end_paragraph();
+        b.start_code_block("mermaid");
+        b.text("sequenceDiagram\nAlice->>Bob: a rather long message\n");
+        b.end_code_block();
+        b.text("after");
+        b.end_paragraph();
+        b.finish()
+    }
+
+    /// A diagram wider than its room keeps its rows whole and leaves a
+    /// track row under them; one that fits renders as it always has.
+    #[test]
+    fn a_wide_diagram_reports_its_rows_and_leaves_a_track_row() {
+        let roomy = diagram_at(200, true);
+        assert!(roomy.wide_diagrams.is_empty());
+        assert_eq!(text_of(&roomy), text_of(&diagram_at(200, false)));
+        let cols = text_of(&roomy)
+            .iter()
+            .filter_map(|row| row.strip_prefix("┊ "))
+            .map(UnicodeWidthStr::width)
+            .max()
+            .unwrap();
+
+        let narrow = diagram_at(20, true);
+        let rows = text_of(&narrow);
+        let [wide] = narrow.wide_diagrams[..] else {
+            panic!("{:?}", narrow.wide_diagrams);
+        };
+        assert_eq!((wide.lead, usize::from(wide.cols)), (2, cols));
+        assert_eq!(wide.index, 0);
+        assert!(rows[wide.line].starts_with("┊ "), "{rows:#?}");
+        assert!(rows[wide.line..wide.line + wide.rows]
+            .iter()
+            .any(|row| row.width() > 20));
+        assert_eq!(rows[wide.line + wide.rows], "┊ ", "{rows:#?}");
+        assert_eq!(narrow.copy[wide.line + wide.rows].lead, 2);
+        // Off, the same diagram is cut at the edge as before: no track row.
+        let cut = diagram_at(20, false);
+        assert!(cut.wide_diagrams.is_empty());
+        assert_eq!(text_of(&cut).len() + 1, rows.len());
     }
 
     /// gopls and Go sources indent with tabs. A tab in a buffer cell reaches
