@@ -408,7 +408,7 @@ Options:
   -f, --force          With --attach: take the instance over from a client
                        already attached to it, detaching that client
   --kill <ID>          End a detached instance with every shell and job in it
-                       and exit; unsaved changes in it are lost
+                       and exit; unsaved changes in it are kept for next time
   --list-instances     List detached instances and exit
   --completions <SHELL>
                        Print a completion script (bash, zsh, fish) and exit

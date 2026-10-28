@@ -5268,6 +5268,7 @@ dependencies = [
  "open",
  "ratatui",
  "serde_json",
+ "signal-hook",
  "tempfile",
  "termide-agent-acp",
  "termide-agent-core",

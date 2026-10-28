@@ -688,10 +688,25 @@ impl Panel for Editor {
 
     fn to_state(&self, project_dir: &std::path::Path) -> Option<PanelState> {
         if let Some(path) = self.file_path() {
-            // Named file - save path
+            // Named file - save its path, and its unsaved changes when it was
+            // given a backup file for them (`ensure_unsaved_changes_backup`).
+            // Empty content is a change like any other here.
+            let unsaved_buffer_file = self
+                .unsaved_buffer_file()
+                .filter(|_| self.buffer_is_modified())
+                .and_then(|filename| {
+                    let content = self.buffer.text();
+                    match termide_project::save_unsaved_buffer(project_dir, filename, &content) {
+                        Ok(()) => Some(filename.to_string()),
+                        Err(e) => {
+                            log::warn!("Failed to save the unsaved changes: {e}");
+                            None
+                        }
+                    }
+                });
             Some(PanelState::Editor {
                 path: Some(path.to_path_buf()),
-                unsaved_buffer_file: None,
+                unsaved_buffer_file,
             })
         } else if self.buffer_is_modified() {
             // Unnamed buffer with unsaved content - save to the project dir

@@ -144,10 +144,16 @@ it gone — end it from outside:
 termide --kill my-project
 ```
 
-Termide inside gets SIGTERM, then SIGKILL if it is still there three seconds
-later; if the host process does not go either, `--kill` kills it too. Unsaved
-changes in that instance are lost, and its shells and jobs end with it. A
-client attached at the time is told the instance ended.
+Termide inside gets SIGTERM and shuts down without asking anything: unsaved
+changes in that instance are kept, together with its layout, and come back
+when the project is next opened (see
+[Ending termide from outside](editor.md#ending-termide-from-outside)). Its
+shells and jobs end with it. Should it still be there three seconds later it
+gets SIGKILL, and if the host process does not go either, `--kill` kills that
+too. A client attached at the time is told the instance ended.
+
+Closing the terminal of an attached client ends only the client: the hangup
+reaches the client, never the instance, which goes on detached.
 
 ## Only one client at a time
 

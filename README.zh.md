@@ -404,7 +404,7 @@ termide [OPTIONS] [FILE]...
   -f, --force          与 --attach 连用：从已接入的客户端接管该实例，
                        并使该客户端分离
   --kill <ID>          结束某个可分离实例及其中所有 shell 和任务后退出；
-                       其中未保存的更改将丢失
+                       其中未保存的更改会保留到下次启动
   --list-instances     列出可分离实例并退出
   --completions <SHELL>
                        打印补全脚本（bash、zsh、fish）并退出

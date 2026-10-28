@@ -909,3 +909,60 @@ fn clipboard_commands_edit_the_focused_find_bar_not_the_buffer() {
     assert_eq!(editor.find_bar.as_ref().unwrap().find_text(), "");
     assert!(editor.buffer.line(0).unwrap().contains('X'));
 }
+
+/// Changes to a file that termide has to end on without asking are kept in
+/// a backup the layout names beside the file's path, empty content included;
+/// a file without changes gets none.
+#[test]
+fn unsaved_changes_to_a_file_are_backed_up_with_its_path() {
+    use termide_project::PanelState;
+    let project_dir = tempfile::tempdir().unwrap();
+    let (mut editor, file) = create_editor_with_content("on disk");
+    assert!(!editor.ensure_unsaved_changes_backup());
+    assert_eq!(
+        editor.to_state(project_dir.path()),
+        Some(PanelState::Editor {
+            path: Some(file.path().to_path_buf()),
+            unsaved_buffer_file: None,
+        })
+    );
+
+    editor.restore_unsaved_changes("").unwrap();
+    assert!(editor.ensure_unsaved_changes_backup());
+    let Some(PanelState::Editor {
+        path,
+        unsaved_buffer_file: Some(backup),
+    }) = editor.to_state(project_dir.path())
+    else {
+        panic!("the changes were not backed up");
+    };
+    assert_eq!(path.as_deref(), Some(file.path()));
+    assert_eq!(
+        termide_project::load_unsaved_buffer(project_dir.path(), &backup).unwrap(),
+        ""
+    );
+}
+
+/// A backup put back over the file it was taken from makes the buffer
+/// modified, with the file on disk untouched.
+#[test]
+fn restoring_unsaved_changes_modifies_the_buffer_not_the_file() {
+    let (mut editor, file) = create_editor_with_content("line one\nline two\n");
+    editor.restore_unsaved_changes("edited\n").unwrap();
+    assert!(editor.buffer_is_modified());
+    assert_eq!(editor.buffer.text(), "edited\n");
+    assert_eq!(
+        std::fs::read_to_string(file.path()).unwrap(),
+        "line one\nline two\n"
+    );
+}
+
+/// Once a file's changes are saved its backup name goes, so changes made
+/// later are not backed up unasked and the stale backup is cleaned up.
+#[test]
+fn a_saved_file_drops_its_backup_name() {
+    let (mut editor, _file) = create_editor_with_content("text");
+    editor.set_unsaved_buffer_file(Some("unsaved-1.txt".into()));
+    editor.ensure_unsaved_buffer_file();
+    assert_eq!(editor.unsaved_buffer_file(), None);
+}

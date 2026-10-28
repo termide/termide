@@ -227,6 +227,50 @@ impl LayoutPersistence for LayoutManager {
     }
 }
 
+/// Reopen the file of a saved editor, with the unsaved changes kept in the
+/// backup `unsaved_buffer_file` when there is one (left by a termide that was
+/// ended without asking). Should the file be gone, the changes still open,
+/// in an editor of their own.
+fn restore_file_editor(
+    file_path: PathBuf,
+    unsaved_buffer_file: Option<String>,
+    project_dir: &Path,
+    editor_config: EditorConfig,
+) -> Option<Editor> {
+    let opened = Editor::open_file_with_config(file_path.clone(), editor_config.clone());
+    let Some(buffer_file) = unsaved_buffer_file else {
+        return opened.ok();
+    };
+    let changes = match load_unsaved_buffer(project_dir, &buffer_file) {
+        Ok(changes) => changes,
+        Err(e) => {
+            log::warn!("Failed to load the unsaved changes to {file_path:?}: {e:#}");
+            return opened.ok();
+        }
+    };
+    let restored = opened.and_then(|mut editor| {
+        editor.restore_unsaved_changes(&changes)?;
+        Ok(editor)
+    });
+    let mut editor = match restored {
+        Ok(editor) => {
+            log::warn!("Restored unsaved changes to {file_path:?} from a previous run");
+            editor
+        }
+        Err(e) => {
+            log::warn!(
+                "Could not reopen {file_path:?} with its unsaved changes ({e:#}); \
+                 the changes open in a new editor"
+            );
+            let mut editor = Editor::with_config(editor_config);
+            editor.insert_text(&changes).ok()?;
+            editor
+        }
+    };
+    editor.set_unsaved_buffer_file(Some(buffer_file));
+    Some(editor)
+}
+
 /// Build one panel from its saved descriptor.
 ///
 /// Runs from a worker thread (see `from_layout`), so any blocking I/O
@@ -269,8 +313,7 @@ fn construct_panel(
             unsaved_buffer_file,
         } => {
             if let Some(file_path) = path {
-                Editor::open_file_with_config(file_path, editor_config)
-                    .ok()
+                restore_file_editor(file_path, unsaved_buffer_file, project_dir, editor_config)
                     .map(|e| Box::new(e) as Box<dyn Panel + Send>)
             } else if let Some(ref buffer_file) = unsaved_buffer_file {
                 match load_unsaved_buffer(project_dir, buffer_file) {
@@ -382,5 +425,38 @@ mod tests {
             nearest_existing_dir(&gone).as_deref(),
             Some(std::env::temp_dir().as_path())
         );
+    }
+
+    /// A saved editor with a backup reopens its file with the changes over
+    /// it; with the file gone, the changes still open, in an editor without
+    /// a file.
+    #[test]
+    fn a_file_editor_reopens_with_its_unsaved_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("notes.txt");
+        std::fs::write(&file, "on disk\n").unwrap();
+        let project_dir = tmp.path().join("state");
+        termide_project::save_unsaved_buffer(&project_dir, "unsaved-1.txt", "edited\n").unwrap();
+        let reopen = |path: &Path| {
+            restore_file_editor(
+                path.to_path_buf(),
+                Some("unsaved-1.txt".into()),
+                &project_dir,
+                EditorConfig::default(),
+            )
+            .unwrap()
+        };
+
+        let editor = reopen(&file);
+        assert_eq!(editor.file_path(), Some(file.as_path()));
+        assert_eq!(editor.buffer().text(), "edited\n");
+        assert!(editor.buffer_is_modified());
+        assert_eq!(editor.unsaved_buffer_file(), Some("unsaved-1.txt"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "on disk\n");
+
+        let editor = reopen(&tmp.path().join("gone.txt"));
+        assert_eq!(editor.file_path(), None);
+        assert_eq!(editor.buffer().text(), "edited\n");
+        assert_eq!(editor.unsaved_buffer_file(), Some("unsaved-1.txt"));
     }
 }

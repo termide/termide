@@ -20,6 +20,7 @@ lsp-types.workspace = true
 open = "5"
 unicode-width.workspace = true
 libc.workspace = true
+signal-hook.workspace = true
 zeroize = "1"
 
 # All app-* foundation crates

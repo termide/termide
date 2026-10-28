@@ -64,7 +64,7 @@ struct Cli {
     force: bool,
 
     /// End a detached instance, with every shell and job inside it, and exit.
-    /// Unsaved changes in it are lost.
+    /// Unsaved changes in it are kept for its next start.
     #[cfg(unix)]
     #[arg(long, value_name = "ID")]
     kill: Option<String>,
@@ -590,6 +590,13 @@ fn main() -> Result<()> {
         log::warn!("Could not install the reattach handler: {e:#}");
     }
 
+    // SIGHUP (the terminal closed), SIGTERM (`termide --kill`) and SIGINT end
+    // the run through its shutdown, keeping unsaved changes, instead of
+    // killing it outright. See `termide_app::termination`.
+    if let Err(e) = termide_app::termination::install_handlers() {
+        log::warn!("Could not install the termination signal handlers: {e}");
+    }
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -671,15 +678,25 @@ fn main() -> Result<()> {
     }
     restore_terminal();
 
-    // A failed run must not look like a clean exit: `EDITOR=termide git
-    // commit` would take the message as edited. The journal has the error
-    // already; stderr is the terminal's again after `restore_terminal`.
-    if let Err(err) = result {
-        eprintln!("termide: {err:#}");
+    // A run ended by a signal or an error must not look like a clean exit:
+    // `EDITOR=termide git commit` would take the message as edited. The
+    // journal has the reason already; stderr is the terminal's again after
+    // `restore_terminal` — unless the terminal is gone, hence no `eprintln!`,
+    // which panics when the write fails.
+    let status = match (termide_app::termination::ended_by(), &result) {
+        (Some(signal), _) => Some(termide_app::termination::exit_status(signal)),
+        (None, Err(err)) => {
+            use std::io::Write;
+            let _ = writeln!(io::stderr(), "termide: {err:#}");
+            Some(1)
+        }
+        (None, Ok(())) => None,
+    };
+    if let Some(status) = status {
         // `exit` runs no destructors: stop the shells and language servers
         // the panels own first.
         drop(app);
-        std::process::exit(1);
+        std::process::exit(status);
     }
 
     Ok(())
