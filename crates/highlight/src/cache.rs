@@ -380,10 +380,13 @@ impl HighlightCache {
         };
 
         let mut segments = Vec::new();
-        let mut current_style = default_style;
+        // Highlights nest; when an inner one ends the enclosing one resumes,
+        // as on the whole-document path.
+        let mut styles: Vec<Style> = Vec::new();
         let mut current_text = String::new();
 
         for event in highlights {
+            let current_style = styles.last().copied().unwrap_or(default_style);
             match event {
                 Ok(HighlightEvent::Source { start, end }) => {
                     if let Ok(text) = std::str::from_utf8(&source[start..end]) {
@@ -396,9 +399,12 @@ impl HighlightCache {
                         segments
                             .push((Cow::Owned(std::mem::take(&mut current_text)), current_style));
                     }
-                    current_style = self
-                        .syntax_highlighter
-                        .style_for_highlight(highlight.0, self.is_light_theme);
+                    styles.push(
+                        self.highlight_styles
+                            .get(highlight.0)
+                            .copied()
+                            .unwrap_or(default_style),
+                    );
                 }
                 Ok(HighlightEvent::HighlightEnd) => {
                     if !current_text.is_empty() {
@@ -406,7 +412,7 @@ impl HighlightCache {
                         segments
                             .push((Cow::Owned(std::mem::take(&mut current_text)), current_style));
                     }
-                    current_style = default_style;
+                    styles.pop();
                 }
                 Err(_) => {
                     return vec![(Cow::Owned(line_text.to_string()), default_style)];
@@ -415,6 +421,7 @@ impl HighlightCache {
         }
 
         if !current_text.is_empty() {
+            let current_style = styles.last().copied().unwrap_or(default_style);
             segments.push((Cow::Owned(current_text), current_style));
         }
 
@@ -698,6 +705,32 @@ mod tests {
         let segs = cache.get_line_segments(1, "$totally = different;");
         let rebuilt: String = segs.iter().map(|(t, _)| t.as_ref()).collect();
         assert_eq!(rebuilt, "$totally = different;");
+    }
+
+    /// The style of every byte of `segments`.
+    fn byte_styles(segments: &[(Cow<'_, str>, Style)]) -> Vec<Style> {
+        segments
+            .iter()
+            .flat_map(|(text, style)| std::iter::repeat_n(*style, text.len()))
+            .collect()
+    }
+
+    #[test]
+    fn the_per_line_path_resumes_the_enclosing_highlight() {
+        // Regression: when an inner highlight ended (an escape in a string)
+        // the rest of the outer one dropped to the default colour.
+        let line = r#"let s = "a\nb"; // c"#;
+        let mut cache = HighlightCache::new(global_highlighter(), false, Color::White);
+        cache.set_syntax("rust");
+        let whole = cache.highlight_whole_text(line).expect("rust parses");
+        let per_line = cache.compute_line_segments(line);
+        assert_eq!(byte_styles(&per_line), byte_styles(&whole[0]));
+        let string = cache.highlight_styles[HIGHLIGHT_NAMES
+            .iter()
+            .position(|&name| name == "string")
+            .unwrap()];
+        let b = line.find("b\"").unwrap();
+        assert_eq!(byte_styles(&per_line)[b], string, "after the escape");
     }
 
     #[test]
