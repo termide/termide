@@ -54,7 +54,9 @@ pub(super) fn initialization_options(command: &str) -> Option<Value> {
 }
 
 impl LspServer {
-    /// Writer thread main loop. A failed write loses the connection.
+    /// Writer thread main loop. It writes everything queued, `shutdown` and
+    /// `exit` included, and ends when every sender is gone or a write fails;
+    /// a failed write loses the connection.
     pub(super) fn writer_loop(
         mut stdin: impl Write,
         writer_rx: mpsc::Receiver<String>,
@@ -64,25 +66,23 @@ impl LspServer {
     ) {
         let mut initialize_rx = Some(initialize_rx);
         while let Ok(msg) = writer_rx.recv() {
-            if Self::is_shutting_down(&status) {
-                break;
-            }
             if !Self::write_message(&mut stdin, &msg) {
                 Self::connection_lost(&pending, &status, "writing to the server failed");
                 break;
             }
-            if let Some(initialize_rx) = initialize_rx.take() {
-                if !Self::await_initialize(&initialize_rx, &status, INITIALIZE_TIMEOUT) {
-                    break;
-                }
+            // A shutdown during the wait skips `initialized`, but the loop
+            // goes on to write the `shutdown` and `exit` queued behind it.
+            let initialize_rx = initialize_rx.take();
+            if initialize_rx
+                .is_some_and(|rx| Self::await_initialize(&rx, &status, INITIALIZE_TIMEOUT))
+            {
                 let initialized =
                     JsonRpcNotification::new("initialized", Some(serde_json::json!({})));
-                let Ok(initialized) = encode_message(&initialized) else {
-                    break;
-                };
-                if !Self::write_message(&mut stdin, &initialized) {
-                    Self::connection_lost(&pending, &status, "writing to the server failed");
-                    break;
+                if let Ok(initialized) = encode_message(&initialized) {
+                    if !Self::write_message(&mut stdin, &initialized) {
+                        Self::connection_lost(&pending, &status, "writing to the server failed");
+                        break;
+                    }
                 }
             }
         }
@@ -148,11 +148,9 @@ impl LspServer {
     ) {
         let mut reader = BufReader::new(stdout);
 
+        // Runs through shutdown too: the reply to `shutdown` arrives here.
+        // The loop ends when the process is gone and its output closes.
         let reason = loop {
-            if Self::is_shutting_down(&status) {
-                break "shutting down".to_string();
-            }
-
             let content = match read_frame(&mut reader) {
                 Ok(Some(content)) => content,
                 Ok(None) => break "the server closed its output".to_string(),

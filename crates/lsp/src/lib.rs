@@ -507,11 +507,21 @@ impl LspManager {
             .unwrap_or(false)
     }
 
-    /// Shutdown all servers
+    /// Shut down all servers side by side, so the bounded wait of each
+    /// (see [`LspServer::shutdown`]) is paid once, not once per server.
     pub fn shutdown(&mut self) {
-        for (key, server) in self.servers.drain() {
-            log::info!("Shutting down LSP server for {:?}", key);
-            server.shutdown();
+        let handles: Vec<_> = self
+            .servers
+            .drain()
+            .map(|(key, server)| {
+                std::thread::spawn(move || {
+                    log::info!("Shutting down LSP server for {:?}", key);
+                    server.shutdown();
+                })
+            })
+            .collect();
+        for handle in handles {
+            let _ = handle.join();
         }
     }
 }
