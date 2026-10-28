@@ -5,6 +5,44 @@ use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use crate::layout_manager::MIN_GROUP_WIDTH;
 use crate::PanelGroup;
 
+/// Split `main_area` into one column per panel group: a group's stored
+/// width, or the whole area for an auto-width group, at least
+/// [`MIN_GROUP_WIDTH`], squeezed by the layout solver when they do not fit.
+///
+/// The one source of group geometry: the renderer draws the groups in these
+/// rectangles, and the dividers between them are hit-tested and drawn at
+/// their edges ([`divider_positions`]).
+pub fn calculate_group_rects(panel_groups: &[PanelGroup], main_area: Rect) -> Vec<Rect> {
+    if panel_groups.is_empty() {
+        return Vec::new();
+    }
+    let group_constraints: Vec<Constraint> = panel_groups
+        .iter()
+        .map(|g| {
+            let width = g.width.unwrap_or(main_area.width);
+            Constraint::Length(width.max(MIN_GROUP_WIDTH))
+        })
+        .collect();
+
+    Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(group_constraints)
+        .split(main_area)
+        .to_vec()
+}
+
+/// The dividers between the groups laid out in `group_rects`, as
+/// `(divider_idx, x)`: divider N sits at the right edge of group N, where
+/// group N + 1 starts.
+pub fn divider_positions(group_rects: &[Rect]) -> Vec<(usize, u16)> {
+    group_rects
+        .iter()
+        .take(group_rects.len().saturating_sub(1))
+        .enumerate()
+        .map(|(idx, rect)| (idx, rect.x + rect.width))
+        .collect()
+}
+
 /// Compute per-panel rectangles inside `main_area` using the same Layout
 /// constraints as the renderer. Returns
 /// `Vec<(group_idx, panel_idx, rect, is_expanded)>` — the authoritative
@@ -14,22 +52,7 @@ pub fn calculate_panel_rects(
     main_area: Rect,
 ) -> Vec<(usize, usize, Rect, bool)> {
     let mut result = Vec::new();
-    if panel_groups.is_empty() {
-        return result;
-    }
-
-    let group_constraints: Vec<Constraint> = panel_groups
-        .iter()
-        .map(|g| {
-            let width = g.width.unwrap_or(main_area.width);
-            Constraint::Length(width.max(MIN_GROUP_WIDTH))
-        })
-        .collect();
-
-    let group_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints(group_constraints)
-        .split(main_area);
+    let group_chunks = calculate_group_rects(panel_groups, main_area);
 
     for (group_idx, group) in panel_groups.iter().enumerate() {
         if group.is_empty() || group_chunks[group_idx].height == 0 {

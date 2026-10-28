@@ -954,7 +954,7 @@ impl App {
                     // Update terminal dimensions in state
                     self.state.update_terminal_size(width, height);
 
-                    // Пропорционально перераспределить ширины групп при изменении размера терминала
+                    // Redistribute group widths proportionally to the new terminal width
                     self.layout_manager
                         .redistribute_widths_proportionally(width);
                     self.state.needs_redraw = true;
@@ -1236,6 +1236,7 @@ impl App {
             // Check background command operation result (.report. commands)
             self.check_command_operation_result();
             self.check_bg_command_completion();
+            self.start_pending_command_launches();
 
             // Poll unified operation manager for events (new system)
             self.poll_operation_manager();

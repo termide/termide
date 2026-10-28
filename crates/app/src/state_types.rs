@@ -77,6 +77,20 @@ pub struct CommandOperationHandle {
     pub project: std::path::PathBuf,
 }
 
+/// A background or report command waiting for `direnv export json` of its
+/// directory before it starts.
+#[derive(Debug)]
+pub struct PendingCommandLaunch {
+    /// The command, for its mode, name and label.
+    pub command: termide_config::commands::CommandItem,
+    /// The line `sh -c` runs, placeholders expanded.
+    pub line: String,
+    /// Where it runs.
+    pub cwd: PathBuf,
+    /// Its parameters as environment variables.
+    pub env: Vec<(String, String)>,
+}
+
 /// Kill a background command process by PID (cross-platform).
 /// On Unix, uses negative PID to kill the entire process session.
 /// Requires the child to have been started with `setsid()` via `pre_exec`

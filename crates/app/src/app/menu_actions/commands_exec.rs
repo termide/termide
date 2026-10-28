@@ -7,6 +7,8 @@ use termide_config::commands::{decode_command_menu_key, CommandItem, CommandMenu
 use termide_config::{PlaceholderValue, Quoting, CONTEXT_PLACEHOLDERS};
 
 use super::super::App;
+use super::direnv;
+use crate::state::PendingCommandLaunch;
 
 impl App {
     pub(in crate::app) fn run_command_by_menu_key(&mut self, key: &str) -> Result<()> {
@@ -151,48 +153,13 @@ impl App {
         );
 
         match command.mode {
-            CommandMode::Report => {
-                let mut cmd = build_command_command(&sh_line(), &cwd);
-                cmd.envs(env);
-                self.run_report_command_with_cmd(command, cmd)?;
-            }
-            CommandMode::Background => {
-                let mut cmd = build_command_command(&sh_line(), &cwd);
-                cmd.envs(env);
-                match cmd
-                    .stdout(std::process::Stdio::null())
-                    .stderr(std::process::Stdio::null())
-                    .stdin(std::process::Stdio::null())
-                    .spawn()
-                {
-                    Ok(mut child) => {
-                        let pid = child.id();
-                        let op_id = self.state.next_synthetic_operation_id();
-                        self.state.track_operation(
-                            op_id,
-                            termide_state::OperationType::CommandBackground,
-                            command_label(command),
-                            String::new(),
-                            0,
-                            0,
-                        );
-                        // Track completion in a background thread, polled
-                        // from the main loop.
-                        let (tx, rx) = std::sync::mpsc::channel::<()>();
-                        std::thread::spawn(move || {
-                            let _ = child.wait();
-                            let _ = tx.send(());
-                        });
-                        self.state.bg_command_handles.push((op_id, rx, pid));
-                        let _ = self.open_operations_panel();
-                    }
-                    Err(e) => {
-                        log::error!("Failed to run background command '{}': {}", command.name, e);
-                        self.show_error_modal(
-                            termide_i18n::t().command_run_failed_fmt(&e.to_string()),
-                        );
-                    }
-                }
+            CommandMode::Report | CommandMode::Background => {
+                self.launch_shell_command(PendingCommandLaunch {
+                    command: command.clone(),
+                    line: sh_line(),
+                    cwd,
+                    env,
+                });
             }
             CommandMode::Terminal => {
                 self.close_help_panels();
@@ -222,6 +189,95 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Start a background or report command with its directory's direnv
+    /// environment, or queue it until direnv answers for the directory.
+    fn launch_shell_command(&mut self, launch: PendingCommandLaunch) {
+        match direnv::lookup(&launch.cwd) {
+            direnv::Lookup::Ready(direnv_env) => self.spawn_shell_command(launch, direnv_env),
+            direnv::Lookup::Pending => {
+                log::info!(
+                    "Command '{}' waits for direnv in {:?}",
+                    launch.command.name,
+                    launch.cwd
+                );
+                self.state.pending_command_launches.push(launch);
+            }
+        }
+    }
+
+    /// Start the queued commands whose direnv environment has come.
+    pub(in crate::app) fn start_pending_command_launches(&mut self) {
+        if self.state.pending_command_launches.is_empty() {
+            return;
+        }
+        let mut waiting = Vec::new();
+        for launch in std::mem::take(&mut self.state.pending_command_launches) {
+            match direnv::lookup(&launch.cwd) {
+                direnv::Lookup::Ready(direnv_env) => {
+                    self.spawn_shell_command(launch, direnv_env);
+                    self.state.needs_redraw = true;
+                }
+                direnv::Lookup::Pending => waiting.push(launch),
+            }
+        }
+        self.state.pending_command_launches = waiting;
+    }
+
+    fn spawn_shell_command(
+        &mut self,
+        launch: PendingCommandLaunch,
+        direnv_env: Option<direnv::DirenvEnv>,
+    ) {
+        use termide_config::commands::CommandMode;
+
+        let PendingCommandLaunch {
+            command,
+            line,
+            cwd,
+            env,
+        } = launch;
+        let mut cmd = build_command_command(&line, &cwd, direnv_env.as_ref());
+        cmd.envs(env);
+        if command.mode == CommandMode::Report {
+            if let Err(e) = self.run_report_command_with_cmd(&command, cmd) {
+                log::error!("Failed to run report command '{}': {}", command.name, e);
+            }
+            return;
+        }
+        match cmd
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null())
+            .spawn()
+        {
+            Ok(mut child) => {
+                let pid = child.id();
+                let op_id = self.state.next_synthetic_operation_id();
+                self.state.track_operation(
+                    op_id,
+                    termide_state::OperationType::CommandBackground,
+                    command_label(&command),
+                    String::new(),
+                    0,
+                    0,
+                );
+                // Track completion in a background thread, polled
+                // from the main loop.
+                let (tx, rx) = std::sync::mpsc::channel::<()>();
+                std::thread::spawn(move || {
+                    let _ = child.wait();
+                    let _ = tx.send(());
+                });
+                self.state.bg_command_handles.push((op_id, rx, pid));
+                let _ = self.open_operations_panel();
+            }
+            Err(e) => {
+                log::error!("Failed to run background command '{}': {}", command.name, e);
+                self.show_error_modal(termide_i18n::t().command_run_failed_fmt(&e.to_string()));
+            }
+        }
     }
 
     /// Run a report command with a pre-built Command (e.g. with env vars from params).
@@ -462,8 +518,13 @@ fn expand_debug_command(
     command
 }
 
-/// Build a Command for executing a command via `sh -c`.
-fn build_command_command(line: &str, cwd: &std::path::Path) -> std::process::Command {
+/// Build a Command for executing a command via `sh -c`, with the direnv
+/// environment of its directory applied.
+fn build_command_command(
+    line: &str,
+    cwd: &std::path::Path,
+    direnv_env: Option<&direnv::DirenvEnv>,
+) -> std::process::Command {
     let mut cmd = std::process::Command::new("sh");
     cmd.arg("-c").arg(line);
     cmd.current_dir(cwd);
@@ -479,8 +540,8 @@ fn build_command_command(line: &str, cwd: &std::path::Path) -> std::process::Com
         }
     }
 
-    if let Some(env) = get_direnv_json(cwd) {
-        for (key, value) in &env {
+    if let Some(env) = direnv_env {
+        for (key, value) in env {
             match value {
                 Some(v) => {
                     cmd.env(key, v);
@@ -493,107 +554,6 @@ fn build_command_command(line: &str, cwd: &std::path::Path) -> std::process::Com
     }
 
     cmd
-}
-
-/// Get project environment via `direnv export json`.
-///
-/// Returns a map of KEY → Some(value) for set vars, KEY → None for unset vars.
-/// Uses caching with 60s TTL to avoid repeated subprocess calls.
-#[cfg(unix)]
-fn get_direnv_json(
-    cwd: &std::path::Path,
-) -> Option<std::collections::HashMap<String, Option<String>>> {
-    use std::sync::{Mutex, PoisonError};
-
-    // Check if direnv is available
-    static DIRENV_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    let available = *DIRENV_AVAILABLE.get_or_init(|| {
-        std::process::Command::new("direnv")
-            .arg("--version")
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .is_ok()
-    });
-    if !available {
-        return None;
-    }
-
-    // Cache with TTL
-    type Cache = std::collections::HashMap<
-        std::path::PathBuf,
-        (
-            std::collections::HashMap<String, Option<String>>,
-            std::time::Instant,
-        ),
-    >;
-    static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
-    const TTL: std::time::Duration = std::time::Duration::from_secs(60);
-
-    let mut cache = CACHE.lock().unwrap_or_else(PoisonError::into_inner);
-    let cache = cache.get_or_insert_with(std::collections::HashMap::new);
-
-    if let Some((env, ts)) = cache.get(cwd) {
-        if ts.elapsed() < TTL {
-            return Some(env.clone());
-        }
-    }
-
-    // Run direnv export json
-    let output = std::process::Command::new("direnv")
-        .args(["export", "json"])
-        .current_dir(cwd)
-        .stderr(std::process::Stdio::null())
-        .output()
-        .ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    if stdout.trim().is_empty() {
-        return None;
-    }
-
-    // Parse JSON: { "KEY": "value", "KEY2": null }
-    // Minimal JSON parser — no serde dependency needed
-    let mut env = std::collections::HashMap::new();
-    // Simple line-by-line parse of direnv JSON output
-    for line in stdout.lines() {
-        let line = line.trim().trim_end_matches(',');
-        if line.starts_with('{') || line.starts_with('}') {
-            continue;
-        }
-        // "KEY": "VALUE" or "KEY": null
-        if let Some((key_part, val_part)) = line.split_once(':') {
-            let key = key_part.trim().trim_matches('"').to_string();
-            let val = val_part.trim();
-            if val == "null" {
-                env.insert(key, None);
-            } else {
-                // Remove surrounding quotes, handle escaped chars
-                let v = val.trim_matches('"');
-                // Unescape JSON string basics
-                let v = v
-                    .replace("\\\"", "\"")
-                    .replace("\\\\", "\\")
-                    .replace("\\n", "\n")
-                    .replace("\\t", "\t");
-                env.insert(key, Some(v));
-            }
-        }
-    }
-
-    cache.insert(cwd.to_path_buf(), (env.clone(), std::time::Instant::now()));
-    Some(env)
-}
-
-#[cfg(not(unix))]
-fn get_direnv_json(
-    _cwd: &std::path::Path,
-) -> Option<std::collections::HashMap<String, Option<String>>> {
-    None
 }
 
 /// Everything a command runs, as one line: what its approval is for.
@@ -737,7 +697,7 @@ mod placeholder_tests {
             &v,
             Quoting::Posix,
         );
-        let out = build_command_command(&line, std::path::Path::new("."))
+        let out = build_command_command(&line, std::path::Path::new("."), None)
             .output()
             .unwrap();
         assert_eq!(

@@ -10,25 +10,18 @@ impl App {
     /// Handle click on divider to start resize drag.
     /// Returns true if click was on a divider.
     pub(in crate::app) fn handle_divider_click(&mut self, x: u16, y: u16) -> Result<bool> {
-        let terminal_height = self.state.terminal.height;
-
-        if let Some(divider_idx) =
-            self.layout_manager
-                .find_divider_at_position(x, y, terminal_height)
+        let main_area = self.main_area();
+        if let Some(divider_idx) = self
+            .layout_manager
+            .find_divider_at_position(x, y, main_area)
         {
-            // Get current widths of adjacent groups
-            let left_width = self
-                .layout_manager
-                .panel_groups
-                .get(divider_idx)
-                .and_then(|g| g.width)
-                .unwrap_or(0);
-            let right_width = self
-                .layout_manager
-                .panel_groups
-                .get(divider_idx + 1)
-                .and_then(|g| g.width)
-                .unwrap_or(0);
+            // The widths of the adjacent groups as they are drawn, which on
+            // a narrow terminal is less than they ask for.
+            let group_rects =
+                termide_layout::calculate_group_rects(&self.layout_manager.panel_groups, main_area);
+            let width_of = |idx: usize| group_rects.get(idx).map_or(0, |rect| rect.width);
+            let left_width = width_of(divider_idx);
+            let right_width = width_of(divider_idx + 1);
 
             // Start drag
             self.state
@@ -72,7 +65,8 @@ impl App {
 
             let new_left = (start_left as i32 + delta)
                 .max(min_width as i32)
-                .min((total_width - min_width) as i32) as u16;
+                .min(total_width.saturating_sub(min_width) as i32)
+                as u16;
             let new_right = total_width - new_left;
 
             self.layout_manager
@@ -192,14 +186,7 @@ impl App {
 
     /// Returns `Vec<(group_idx, panel_idx, rect, is_expanded)>`.
     pub(in crate::app) fn calculate_panel_rects(&self) -> Vec<(usize, usize, Rect, bool)> {
-        let width = self.state.terminal.width;
-        let main_area = Rect {
-            x: 0,
-            y: 1,
-            width,
-            height: self.panel_area_height(),
-        };
-        termide_layout::calculate_panel_rects(&self.layout_manager.panel_groups, main_area)
+        termide_layout::calculate_panel_rects(&self.layout_manager.panel_groups, self.main_area())
     }
 
     /// Handle coalesced scroll events (batched for performance).

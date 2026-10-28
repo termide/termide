@@ -49,22 +49,6 @@ impl App {
             }
         }
 
-        // Before closing, unwatch filesystem if this is a FileManager panel
-        if let Some(panel) = self.layout_manager.active_panel_mut() {
-            if let Some(fm) = panel.as_file_manager_mut() {
-                // Unwatch the filesystem root for this FileManager
-                if let Some(watched_root) = fm.take_watched_root() {
-                    if let Some(watcher) = &mut self.state.watcher {
-                        if termide_git::find_repo_root(&watched_root).is_some() {
-                            watcher.unwatch_repository(&watched_root);
-                        } else {
-                            watcher.unwatch_directory(&watched_root);
-                        }
-                    }
-                }
-            }
-        }
-
         // An agent panel's delegated tasks are its own: they stop with it.
         // One following another agent's task gives the cards it holds back
         // to the panel that delegated it.
@@ -88,6 +72,8 @@ impl App {
 
         // Close active panel (LayoutManager handles active panel tracking)
         let _ = self.layout_manager.close_active_panel(terminal_width);
+        // Release the watch the closed panel held.
+        self.state.needs_watcher_registration = true;
         if let Some((parent, cards)) = cards {
             self.give_cards(parent, cards);
         }
