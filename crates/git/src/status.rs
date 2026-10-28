@@ -5,7 +5,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 
-use crate::command::git_command_stdout;
+use crate::command::{
+    git_command_stdout, git_command_stdout_bytes, nul_fields, path_from_git_bytes,
+};
 use crate::is_available;
 
 /// How `git status` reports ignored paths.
@@ -39,6 +41,56 @@ fn parse_status_code(code: &str) -> GitStatus {
         "??" => GitStatus::Added,
         _ => GitStatus::Unmodified,
     }
+}
+
+/// One entry of `git status --porcelain=v1 -z`.
+#[derive(Debug, PartialEq)]
+struct PorcelainEntry {
+    code: [u8; 2],
+    path: PathBuf,
+    /// The source of a rename or copy.
+    from: Option<PathBuf>,
+}
+
+/// Parse `git status --porcelain=v1 -z`: `XY path`, NUL-terminated and
+/// unquoted; a rename or copy is followed by its source as one more field.
+fn parse_porcelain_z(stdout: &[u8]) -> Vec<PorcelainEntry> {
+    let mut fields = nul_fields(stdout);
+    let mut entries = Vec::new();
+    while let Some(field) = fields.next() {
+        let (Some(code), Some(path)) = (field.get(..2), field.get(3..)) else {
+            continue;
+        };
+        let code = [code[0], code[1]];
+        let from = if code.iter().any(|c| matches!(c, b'R' | b'C')) {
+            fields.next().map(path_from_git_bytes)
+        } else {
+            None
+        };
+        entries.push(PorcelainEntry {
+            code,
+            path: path_from_git_bytes(path),
+            from,
+        });
+    }
+    entries
+}
+
+/// Insert under the real path and, when that is not valid UTF-8, also
+/// under its lossy rendering: lookups by `&str` (the file manager's display
+/// names) find the lossy key, lookups by `&Path` the real one.
+fn insert_path<V: Copy>(map: &mut HashMap<PathBuf, V>, path: &Path, value: V) {
+    if path.to_str().is_none() {
+        map.insert(PathBuf::from(path.to_string_lossy().into_owned()), value);
+    }
+    map.insert(path.to_path_buf(), value);
+}
+
+fn insert_path_set(set: &mut HashSet<PathBuf>, path: &Path) {
+    if path.to_str().is_none() {
+        set.insert(PathBuf::from(path.to_string_lossy().into_owned()));
+    }
+    set.insert(path.to_path_buf());
 }
 
 /// Get git status for directory (synchronous version for compatibility).
@@ -82,41 +134,39 @@ pub fn get_git_status(dir: &Path) -> Option<GitStatusCache> {
         }
     };
 
-    // Single git status command - parse both status and ignored files
-    // Use -c core.quotepath=false to show non-ASCII characters properly
+    // Single git status command - parse both status and ignored files.
+    // `-z` gives raw, unquoted names, so one name that is not UTF-8 (or that
+    // holds a quote or a tab) cannot drop or garble the whole status.
     let mut status_map = HashMap::new();
     let mut ignored_files = HashSet::new();
 
-    if let Some(stdout) = git_command_stdout(
+    if let Some(stdout) = git_command_stdout_bytes(
         &repo_root,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "status",
-            "--porcelain=v1",
-            IGNORED_MODE,
-        ],
+        &["status", "--porcelain=v1", "-z", IGNORED_MODE],
     ) {
-        for line in stdout.lines() {
-            if line.len() < 4 {
-                continue;
-            }
-
-            let status_code = &line[0..2];
-            let file_path = &line[3..];
-
-            let status = if status_code == "!!" {
+        for entry in parse_porcelain_z(&stdout) {
+            let status = if &entry.code == b"!!" {
                 // Also add to ignored_files for parent directory checks
-                ignored_files.insert(PathBuf::from(file_path));
+                insert_path_set(&mut ignored_files, &entry.path);
                 GitStatus::Ignored
+            } else if let Some(from) = &entry.from {
+                // A rename shows its destination as new and its source as
+                // gone, as an undetected rename (`D` + `??`) would; a copy
+                // leaves its source alone.
+                if entry.code.contains(&b'R') {
+                    insert_path(&mut status_map, from, GitStatus::Deleted);
+                }
+                GitStatus::Added
             } else {
-                match parse_status_code(status_code) {
+                match std::str::from_utf8(&entry.code)
+                    .map_or(GitStatus::Unmodified, parse_status_code)
+                {
                     GitStatus::Unmodified => continue,
                     s => s,
                 }
             };
 
-            status_map.insert(PathBuf::from(file_path), status);
+            insert_path(&mut status_map, &entry.path, status);
         }
     }
 
@@ -366,8 +416,9 @@ pub fn get_repo_status(repo_path: &Path, item_path: &Path) -> Option<GitRepoStat
     //   ## branch...origin/branch [ahead N, behind M]
     //   !! ignored/file
     //    M modified/file
-    // Use -c core.quotepath=false to show non-ASCII characters properly
-    let status_output = git_command_stdout(
+    // Only lines are counted here, so a name that is not UTF-8 is decoded
+    // lossily rather than discarding the whole output.
+    let status_output = git_command_stdout_bytes(
         &repo_root,
         &[
             "-c",
@@ -380,6 +431,7 @@ pub fn get_repo_status(repo_path: &Path, item_path: &Path) -> Option<GitRepoStat
             &git_path_str,
         ],
     )
+    .map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
     .unwrap_or_default();
 
     let (ahead, behind, uncommitted_changes, is_ignored) =
@@ -538,5 +590,65 @@ mod tests {
         // A directory no pattern matches is reported file by file.
         assert!(cache.ignored_files.contains(Path::new("logs/run.log")));
         assert!(!cache.ignored_files.contains(Path::new("logs")));
+    }
+
+    #[test]
+    fn porcelain_z_parses_renames_and_unquoted_names() {
+        let out = b"R  new.rs\0old.rs\0 M a \"b\".rs\0?? dir/\0C  copy\0orig\0!! target/\0";
+        let entries = parse_porcelain_z(out);
+        let simple = |code: &[u8; 2], path: &str| PorcelainEntry {
+            code: *code,
+            path: PathBuf::from(path),
+            from: None,
+        };
+        assert_eq!(
+            entries,
+            [
+                PorcelainEntry {
+                    code: *b"R ",
+                    path: PathBuf::from("new.rs"),
+                    from: Some(PathBuf::from("old.rs")),
+                },
+                simple(b" M", "a \"b\".rs"),
+                simple(b"??", "dir/"),
+                PorcelainEntry {
+                    code: *b"C ",
+                    path: PathBuf::from("copy"),
+                    from: Some(PathBuf::from("orig")),
+                },
+                simple(b"!!", "target/"),
+            ]
+        );
+    }
+
+    #[test]
+    fn staged_renames_and_non_utf8_names_keep_status_working() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = &dunce::canonicalize(dir.path()).unwrap();
+        git(root, &["init", "-q"]);
+        touch(root, "old.rs");
+        touch(root, "keep.rs");
+        git(root, &["add", "."]);
+        git(root, &["commit", "-q", "-m", "init"]);
+        git(root, &["mv", "old.rs", "new.rs"]);
+        std::fs::write(root.join("keep.rs"), "changed").unwrap();
+        // APFS refuses names that are not UTF-8; where the filesystem takes
+        // them, one must not switch status off for the whole repository.
+        #[cfg(unix)]
+        let odd = {
+            use std::os::unix::ffi::OsStrExt;
+            let name = std::ffi::OsStr::from_bytes(b"odd\xff");
+            std::fs::write(root.join(name), "").is_ok()
+        };
+
+        let cache = get_git_status(root).unwrap();
+
+        assert_eq!(cache.get_status("new.rs"), GitStatus::Added);
+        assert_eq!(cache.get_status("keep.rs"), GitStatus::Modified);
+        assert_eq!(cache.get_deleted_files(), ["old.rs"]);
+        #[cfg(unix)]
+        if odd {
+            assert_eq!(cache.get_status("odd\u{FFFD}"), GitStatus::Added);
+        }
     }
 }

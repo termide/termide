@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::command::git_command_stdout;
+use crate::command::{git_command_stdout_bytes, nul_fields, path_from_git_bytes};
 
 /// Staged file information
 #[derive(Debug, Clone)]
@@ -26,81 +26,89 @@ pub struct UnstagedFile {
     pub untracked: bool,
 }
 
+/// Parse `git diff --name-status -z`: a status field, then one path, or
+/// two (source, destination) for a rename or copy, which is listed under
+/// its destination.
+fn parse_name_status_z(stdout: &[u8]) -> Vec<(char, PathBuf)> {
+    let mut fields = nul_fields(stdout);
+    let mut result = Vec::new();
+    while let Some(status) = fields.next() {
+        let Some(&code) = status.first() else {
+            continue;
+        };
+        let mut path = fields.next();
+        if matches!(code, b'R' | b'C') {
+            path = fields.next();
+        }
+        if let Some(path) = path {
+            result.push((char::from(code), path_from_git_bytes(path)));
+        }
+    }
+    result
+}
+
 /// Get staged files (files in index ready for commit)
 pub fn get_staged_files(repo: &Path) -> Vec<StagedFile> {
-    let mut result = Vec::new();
+    git_command_stdout_bytes(repo, &["diff", "--cached", "--name-status", "-z"])
+        .map(|stdout| parse_name_status_z(&stdout))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(status, path)| StagedFile { path, status })
+        .collect()
+}
 
-    // Use -c core.quotepath=false to show non-ASCII characters properly
-    if let Some(stdout) = git_command_stdout(
-        repo,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "diff",
-            "--cached",
-            "--name-status",
-        ],
-    ) {
-        for line in stdout.lines() {
-            if let Some((status, path)) = line.split_once('\t') {
-                if let Some(status_char) = status.chars().next() {
-                    result.push(StagedFile {
-                        path: PathBuf::from(path),
-                        status: status_char,
-                    });
-                }
-            }
-        }
+/// Get unstaged files (modified files not in index) and untracked files
+pub fn get_unstaged_files(repo: &Path) -> Vec<UnstagedFile> {
+    let mut result: Vec<UnstagedFile> =
+        git_command_stdout_bytes(repo, &["diff", "--name-status", "-z"])
+            .map(|stdout| parse_name_status_z(&stdout))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(status, path)| UnstagedFile {
+                path,
+                status,
+                untracked: false,
+            })
+            .collect();
+
+    if let Some(stdout) =
+        git_command_stdout_bytes(repo, &["ls-files", "--others", "--exclude-standard", "-z"])
+    {
+        result.extend(nul_fields(&stdout).map(|path| UnstagedFile {
+            path: path_from_git_bytes(path),
+            status: '?',
+            untracked: true,
+        }));
     }
 
     result
 }
 
-/// Get unstaged files (modified files not in index) and untracked files
-pub fn get_unstaged_files(repo: &Path) -> Vec<UnstagedFile> {
-    let mut result = Vec::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // Get modified but not staged files
-    // Use -c core.quotepath=false to show non-ASCII characters properly
-    if let Some(stdout) = git_command_stdout(
-        repo,
-        &["-c", "core.quotepath=false", "diff", "--name-status"],
-    ) {
-        for line in stdout.lines() {
-            if let Some((status, path)) = line.split_once('\t') {
-                if let Some(status_char) = status.chars().next() {
-                    result.push(UnstagedFile {
-                        path: PathBuf::from(path),
-                        status: status_char,
-                        untracked: false,
-                    });
-                }
-            }
-        }
+    #[test]
+    fn name_status_lists_renames_under_their_destination() {
+        let out = b"M\0src/a.rs\0R087\0old name.rs\0new\tname.rs\0C100\0x\0y\0D\0gone\0";
+        assert_eq!(
+            parse_name_status_z(out),
+            [
+                ('M', PathBuf::from("src/a.rs")),
+                ('R', PathBuf::from("new\tname.rs")),
+                ('C', PathBuf::from("y")),
+                ('D', PathBuf::from("gone")),
+            ]
+        );
     }
 
-    // Get untracked files
-    // Use -c core.quotepath=false to show non-ASCII characters properly
-    if let Some(stdout) = git_command_stdout(
-        repo,
-        &[
-            "-c",
-            "core.quotepath=false",
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-        ],
-    ) {
-        for line in stdout.lines() {
-            if !line.is_empty() {
-                result.push(UnstagedFile {
-                    path: PathBuf::from(line),
-                    status: '?',
-                    untracked: true,
-                });
-            }
-        }
+    #[cfg(unix)]
+    #[test]
+    fn name_status_keeps_non_utf8_paths() {
+        use std::os::unix::ffi::OsStrExt;
+        let out = b"M\0ok.rs\0A\0a\xff\0";
+        let parsed = parse_name_status_z(out);
+        assert_eq!(parsed[0].1, PathBuf::from("ok.rs"));
+        assert_eq!(parsed[1].1.as_os_str().as_bytes(), b"a\xff");
     }
-
-    result
 }
