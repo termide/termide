@@ -10,7 +10,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::{HashMap, HashSet};
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -350,8 +350,11 @@ fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
     let reader = BufReader::new(File::open(path)?);
     let mut header = None;
     let mut entries = Vec::new();
-    for (index, line) in reader.lines().enumerate() {
+    // Split on bytes: a write torn inside a character must not make the
+    // whole log unreadable.
+    for (index, line) in reader.split(b'\n').enumerate() {
         let line = line?;
+        let line = String::from_utf8_lossy(&line);
         if line.trim().is_empty() {
             continue;
         }
@@ -361,11 +364,21 @@ fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
                 log::warn!("{}: duplicate header at line {}", path.display(), index + 1)
             }
             Ok(Line::Entry(entry)) => entries.push(entry),
-            Err(error) => log::warn!(
-                "{}: skipping malformed line {}: {error}",
-                path.display(),
-                index + 1
-            ),
+            Err(error) => match salvage_entry(&line) {
+                Some(entry) => {
+                    log::warn!(
+                        "{}: line {} starts with a torn write; kept the entry after it",
+                        path.display(),
+                        index + 1
+                    );
+                    entries.push(entry);
+                }
+                None => log::warn!(
+                    "{}: skipping malformed line {}: {error}",
+                    path.display(),
+                    index + 1
+                ),
+            },
         }
     }
     let header = header.ok_or_else(|| {
@@ -375,6 +388,35 @@ fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
         )
     })?;
     Ok((header, entries))
+}
+
+/// The entry at the end of a line that does not parse as a whole: a write cut
+/// off by a crash, with the next entry appended to it before the file was
+/// mended (see [`end_with_newline`]). An entry's line starts with `{"id":"`;
+/// inside one, that text is either escaped in a string or a nested object
+/// followed by more of its parent, so only a whole entry at the end parses.
+fn salvage_entry(line: &str) -> Option<Entry> {
+    line.match_indices(r#"{"id":""#)
+        .filter(|(at, _)| *at > 0)
+        .find_map(|(at, _)| serde_json::from_str::<Entry>(&line[at..]).ok())
+}
+
+/// Before appending to a log, finish a last line a crash left without its
+/// newline, so the next entry starts a line of its own instead of being
+/// glued to the torn one and lost with it.
+fn end_with_newline(file: &mut File) -> std::io::Result<()> {
+    if file.metadata()?.len() == 0 {
+        return Ok(());
+    }
+    file.seek(SeekFrom::End(-1))?;
+    let mut last = [0u8; 1];
+    file.read_exact(&mut last)?;
+    if last[0] != b'\n' {
+        // The file is in append mode: the write lands at the end.
+        file.write_all(b"\n")?;
+        file.flush()?;
+    }
+    Ok(())
 }
 
 /// The failed request `branch` last left held, when nothing took it back:
@@ -392,17 +434,39 @@ fn last_retry<'a>(branch: impl IntoIterator<Item = &'a Entry>) -> Option<Failure
 
 /// The entries from the root to `leaf`, oldest first; `path` names the log
 /// in the warning about a dangling parent.
+///
+/// A parent that is not in the log was lost to a torn write. The branch then
+/// carries on from the entry written just before its child — where the lost
+/// one was in a log that was not rewound there — so one lost line does not
+/// cut off everything said before it.
 fn branch_of<'a>(entries: &'a [Entry], leaf: Option<&str>, path: &Path) -> Vec<&'a Entry> {
-    let by_id: HashMap<&str, &Entry> = entries.iter().map(|e| (e.id.as_str(), e)).collect();
+    let by_id: HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, e)| (e.id.as_str(), index))
+        .collect();
     let mut branch = Vec::new();
     let mut current = leaf;
+    let mut child: Option<usize> = None;
     while let Some(id) = current {
-        let Some(entry) = by_id.get(id) else {
-            log::warn!("{}: dangling parent id {id}", path.display());
-            break;
+        let index = match by_id.get(id) {
+            Some(&index) => index,
+            None => {
+                log::warn!("{}: dangling parent id {id}", path.display());
+                match child.and_then(|child| child.checked_sub(1)) {
+                    Some(before) => before,
+                    None => break,
+                }
+            }
         };
-        branch.push(*entry);
-        current = entry.parent_id.as_deref();
+        // Parents come before their children; anything else is a loop.
+        if child.is_some_and(|child| index >= child) {
+            log::warn!("{}: parent chain loops at {id}", path.display());
+            break;
+        }
+        branch.push(&entries[index]);
+        child = Some(index);
+        current = entries[index].parent_id.as_deref();
     }
     branch.reverse();
     branch
@@ -610,7 +674,8 @@ impl Session {
     pub fn open(path: &Path) -> std::io::Result<Self> {
         let (header, entries) = read_file(path)?;
         let leaf = entries.last().map(|e| e.id.clone());
-        let file = OpenOptions::new().append(true).open(path)?;
+        let mut file = OpenOptions::new().read(true).append(true).open(path)?;
+        end_with_newline(&mut file)?;
         Ok(Self {
             path: path.to_path_buf(),
             header,
@@ -2259,6 +2324,92 @@ mod tests {
             .collect();
         assert_eq!(texts, ["one", "kept"]);
         assert!(branch.iter().any(|e| matches!(e.kind, EntryKind::Rewind)));
+    }
+
+    /// A crash mid-write leaves a torn last line. Reopening finishes it, so
+    /// the next entry starts its own line, and the conversation before the
+    /// tear stays whole.
+    #[test]
+    fn a_torn_last_line_does_not_swallow_the_next_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        for text in ["one", "two"] {
+            session
+                .append_message(&Message::User(UserMessage::text(text)))
+                .unwrap();
+        }
+        let path = session.path().to_path_buf();
+        drop(session);
+        // Torn inside a two-byte character, as a crash may leave it.
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        file.write_all(b"{\"id\":\"lost\",\"parent_id\":null,\"text\":\"\xd0")
+            .unwrap();
+        drop(file);
+
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.entries().len(), 2);
+        assert!(std::fs::read(&path).unwrap().ends_with(b"\xd0\n"));
+        reopened
+            .append_message(&Message::User(UserMessage::text("three")))
+            .unwrap();
+        drop(reopened);
+
+        let again = Session::open(&path).unwrap();
+        let texts: Vec<_> = again
+            .context_messages()
+            .iter()
+            .map(|m| match m {
+                Message::User(user) => user.plain_text(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(texts, ["one", "two", "three"]);
+    }
+
+    /// A log written before the mend has the next entry glued to the torn
+    /// line: that entry is recovered, and when an entry is lost outright the
+    /// branch carries on from the one written before it rather than ending.
+    #[test]
+    fn a_glued_entry_is_recovered_and_a_lost_parent_does_not_cut_the_branch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        let first = session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        let path = session.path().to_path_buf();
+        drop(session);
+
+        let entry = |id: &str, parent: &str, text: &str| {
+            let entry = Entry {
+                id: id.into(),
+                parent_id: Some(parent.into()),
+                timestamp: 1,
+                kind: EntryKind::Message {
+                    message: Message::User(UserMessage::text(text)),
+                    timing: None,
+                },
+            };
+            serde_json::to_string(&Line::Entry(entry)).unwrap()
+        };
+        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
+        // A torn write with "two" glued on, then "three" on it.
+        writeln!(file, "{{\"id\":\"torn\",\"pa{}", entry("b", &first, "two")).unwrap();
+        writeln!(file, "{}", entry("c", "b", "three")).unwrap();
+        // "four" lost outright; "five" names it as its parent.
+        writeln!(file, "{{\"id\":\"d\",\"parent_id\":\"c\",\"tim").unwrap();
+        writeln!(file, "{}", entry("e", "d", "five")).unwrap();
+        drop(file);
+
+        let reopened = Session::open(&path).unwrap();
+        let texts: Vec<_> = reopened
+            .context_messages()
+            .iter()
+            .map(|m| match m {
+                Message::User(user) => user.plain_text(),
+                _ => String::new(),
+            })
+            .collect();
+        assert_eq!(texts, ["one", "two", "three", "five"]);
     }
 
     #[test]
