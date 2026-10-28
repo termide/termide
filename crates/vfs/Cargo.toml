@@ -16,6 +16,9 @@ log = "0.4"
 # SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed).
 russh = "0.64"
 russh-sftp = "2.2"
+# Hashed known_hosts names (`|1|salt|hash`); the versions russh already uses.
+hmac = "0.13"
+sha1 = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "macros", "time", "net", "fs"] }
 
 # FTP support — rustls TLS provider (pure-Rust, enables musl-static builds).

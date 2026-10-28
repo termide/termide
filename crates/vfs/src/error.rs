@@ -71,6 +71,34 @@ pub enum VfsError {
     #[error("Wrong password")]
     WrongPassword,
 
+    /// The SSH server offered a key that no `known_hosts` file records for
+    /// the host. Nothing was sent to the server; trust the key with
+    /// `VfsManager::trust_host_key` and connect again.
+    #[error("Unknown host key for {}:{} ({} {})", .0.host, .0.port, .0.algorithm, .0.fingerprint)]
+    UnknownHostKey(Box<crate::types::HostKey>),
+
+    /// The SSH server offered a different key than the one recorded for the
+    /// host: someone may be intercepting the connection. `recorded_in` is
+    /// the `file:line` of the recorded key, `None` when it was accepted
+    /// earlier in this run.
+    #[error(
+        "Host key for {host}:{port} does not match the one recorded in {}",
+        recorded_in.as_deref().unwrap_or("this session")
+    )]
+    HostKeyChanged {
+        host: String,
+        port: u16,
+        recorded_in: Option<String>,
+    },
+
+    /// The SSH server offered a key marked `@revoked` at `location`.
+    #[error("Host key for {host}:{port} is revoked in {location}")]
+    HostKeyRevoked {
+        host: String,
+        port: u16,
+        location: String,
+    },
+
     /// Provider is already connected.
     #[error("Already connected")]
     AlreadyConnected,
