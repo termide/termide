@@ -23,9 +23,13 @@ const MAX_CACHE_SIZE: usize = 1000;
 ///
 /// Whole-document highlighting is the only way to resolve cross-line context
 /// (PHP's HTML/PHP mode switches, multi-line strings and comments). Edits are
-/// followed incrementally, but opening a file still parses it whole. Past
-/// this size callers fall back to the per-line path.
-pub const WHOLE_DOCUMENT_BYTE_LIMIT: usize = 1024 * 1024;
+/// followed incrementally, but opening a file still parses it whole, and the
+/// incremental re-parse grows with the file: at 2 MiB a release build opens
+/// Rust in ~110 ms and keeps a keystroke under ~4 ms (JS, TS, HTML and
+/// Markdown under that), while 4 MiB doubles the open and brings Rust
+/// keystrokes near 9 ms. A kept tree also costs 10-40 times the text in
+/// memory. Past this size callers fall back to the per-line path.
+pub const WHOLE_DOCUMENT_BYTE_LIMIT: usize = 2 * 1024 * 1024;
 
 /// Trait for line-based syntax highlighting.
 /// Allows custom highlighters (e.g., for log files) to integrate with Editor.
