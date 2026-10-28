@@ -5150,6 +5150,7 @@ dependencies = [
 name = "termide-agent-acp"
 version = "0.46.0"
 dependencies = [
+ "libc",
  "log",
  "serde_json",
  "tempfile",

@@ -14,5 +14,8 @@ serde_json.workspace = true
 termide-agent-core = { path = "../agent-core" }
 termide-agent-mcp = { path = "../agent-mcp" }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

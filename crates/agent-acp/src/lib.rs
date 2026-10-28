@@ -413,17 +413,10 @@ impl AcpRuntime {
         setup: BackendSetup,
         service: bool,
     ) -> Result<Self, String> {
-        let mut command = Command::new(&config.command);
-        command
-            .args(&config.args)
-            .current_dir(&setup.cwd)
+        let mut child = agent_command(config, &setup.cwd)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        for (key, value) in &config.env {
-            command.env(key, expand_env(value, |var| std::env::var(var).ok()));
-        }
-        let mut child = command
+            .stderr(Stdio::piped())
             .spawn()
             .map_err(|error| format!("cannot start {}: {error}", config.command))?;
         let stdin = child.stdin.take().ok_or("no stdin")?;
@@ -1022,6 +1015,32 @@ impl Backend for AcpRuntime {
     fn into_agent(self: Box<Self>) -> Option<Agent> {
         None
     }
+}
+
+/// The agent's process, in `cwd` with its environment, in a session of its
+/// own with no controlling terminal.
+///
+/// Left on termide's terminal, the agent or anything it runs could open
+/// `/dev/tty`: a read takes keys and halves of escape sequences from
+/// termide, and a mode change takes the terminal out of raw mode.
+fn agent_command(config: &AcpConfig, cwd: &Path) -> Command {
+    let mut command = Command::new(&config.command);
+    command.args(&config.args).current_dir(cwd);
+    for (key, value) in &config.env {
+        command.env(key, expand_env(value, |var| std::env::var(var).ok()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setsid is async-signal-safe and touches no Rust state.
+        unsafe {
+            command.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+    command
 }
 
 impl Drop for AcpRuntime {
@@ -3665,6 +3684,29 @@ mod tests {
     use termide_agent_core::{
         permission_channel, PermissionAnswer, PermissionEnvelope, PermissionRules,
     };
+
+    /// Only meaningful when the test itself runs with a controlling
+    /// terminal; without one both answers are `NO_TTY`.
+    #[cfg(unix)]
+    #[test]
+    fn an_agent_cannot_open_termides_terminal() {
+        let config = AcpConfig {
+            command: "sh".into(),
+            args: vec![
+                "-c".into(),
+                "if (exec 3</dev/tty) 2>/dev/null; then echo TTY; else echo NO_TTY; fi".into(),
+            ],
+            env: Default::default(),
+            timeout_secs: 5,
+            flavor: AcpFlavor::default(),
+            context_limit: None,
+        };
+        let out = agent_command(&config, Path::new("/"))
+            .stdin(Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "NO_TTY");
+    }
 
     /// An agent on the other end of two pipes, scripted for one prompt: it
     /// thinks, speaks, edits a file through our fs methods after asking for
