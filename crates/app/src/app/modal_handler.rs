@@ -161,6 +161,11 @@ impl App {
                                 self.vault_prompt_cancelled();
                                 return Ok(());
                             }
+                            PendingAction::HostKey { .. } => {
+                                self.state.close_modal();
+                                self.dismiss_host_key(action);
+                                return Ok(());
+                            }
                             // A refused quit is answered by the refusal. Keeping
                             // it pending — as before — let a later modal's Enter
                             // run it: a quit dismissed with Esc came back to end
@@ -270,6 +275,11 @@ impl App {
                     self.vault_prompt_cancelled();
                     return Ok(());
                 }
+                if matches!(result, ModalResult::Cancelled) {
+                    if let Some(action) = self.state.pending_action.take() {
+                        self.state.pending_action = self.dismiss_host_key(action);
+                    }
+                }
                 self.capture_vault_checkbox();
                 self.remember_destination(&result);
                 self.state.close_modal();
@@ -309,15 +319,29 @@ impl App {
         }
     }
 
+    /// Answer a host-key question whose dialog was closed without a button
+    /// (Esc) as Cancel, so the file manager stops waiting on it; any other
+    /// action is handed back.
+    fn dismiss_host_key(
+        &mut self,
+        action: termide_state::PendingAction,
+    ) -> Option<termide_state::PendingAction> {
+        let Some((url, fingerprint, answer)) = dismissed_host_key(&action) else {
+            return Some(action);
+        };
+        let (url, fingerprint) = (url.to_string(), fingerprint.to_string());
+        self.answer_host_key(&url, &fingerprint, answer);
+        None
+    }
+
     /// Hand the unknown-host-key answer to the file manager waiting on that
     /// key. Any panel may have raised the question, not only the active one.
-    fn answer_host_key(&mut self, url: &str, fingerprint: &str, value: Box<dyn std::any::Any>) {
-        use termide_modal::InfoActionResult;
-        use termide_panel_file_manager::HostKeyAnswer;
-        let answer = match value.downcast_ref::<InfoActionResult>() {
-            Some(InfoActionResult::Action(id)) => HostKeyAnswer::from_action(id),
-            _ => HostKeyAnswer::Cancel,
-        };
+    fn answer_host_key(
+        &mut self,
+        url: &str,
+        fingerprint: &str,
+        answer: termide_panel_file_manager::HostKeyAnswer,
+    ) {
         for panel in self.layout_manager.iter_all_panels_mut() {
             if let Some(fm) = panel.as_file_manager_mut() {
                 if fm.answer_host_key(url, fingerprint, answer) {
@@ -543,7 +567,7 @@ impl App {
                     }
                 }
                 PendingAction::HostKey { url, fingerprint } => {
-                    self.answer_host_key(&url, &fingerprint, value);
+                    self.answer_host_key(&url, &fingerprint, host_key_answer(&*value));
                 }
                 PendingAction::BatchFileOperation { operation } => {
                     self.process_batch_operation(operation);
@@ -1126,9 +1150,35 @@ fn paste_into_modal(modal: Option<&mut termide_modal::ActiveModal>, text: &str) 
     }
 }
 
+/// The host-key answer a dialog result stands for: the button pressed, and
+/// Cancel for anything else.
+fn host_key_answer(value: &dyn std::any::Any) -> termide_panel_file_manager::HostKeyAnswer {
+    use termide_panel_file_manager::HostKeyAnswer;
+    match value.downcast_ref::<termide_modal::InfoActionResult>() {
+        Some(termide_modal::InfoActionResult::Action(id)) => HostKeyAnswer::from_action(id),
+        _ => HostKeyAnswer::Cancel,
+    }
+}
+
+/// A dialog closed without an answer: for the host-key question, its key
+/// and the answer that stands for (Cancel, as the preselected button);
+/// `None` for any other action.
+fn dismissed_host_key(
+    action: &termide_state::PendingAction,
+) -> Option<(&str, &str, termide_panel_file_manager::HostKeyAnswer)> {
+    match action {
+        termide_state::PendingAction::HostKey { url, fingerprint } => Some((
+            url,
+            fingerprint,
+            termide_panel_file_manager::HostKeyAnswer::Cancel,
+        )),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{paste_into_modal, quit_is_confirmed};
+    use super::{dismissed_host_key, host_key_answer, paste_into_modal, quit_is_confirmed};
     use termide_modal::{ActiveModal, ConfirmModal};
 
     #[test]
@@ -1141,6 +1191,37 @@ mod tests {
     #[test]
     fn without_a_modal_a_paste_goes_to_the_panel() {
         assert!(!paste_into_modal(None, "text"));
+    }
+
+    /// Esc on the unknown-host-key dialog answers Cancel, as the button
+    /// does: the file manager used to keep waiting on the key until its next
+    /// connect attempt, and the stale action stayed pending.
+    #[test]
+    fn a_dismissed_host_key_dialog_answers_cancel() {
+        use termide_panel_file_manager::HostKeyAnswer;
+        use termide_state::PendingAction;
+        let action = PendingAction::HostKey {
+            url: "sftp://example.com:2222/".to_string(),
+            fingerprint: "SHA256:abc".to_string(),
+        };
+        let (url, fingerprint, answer) = dismissed_host_key(&action).unwrap();
+        assert_eq!(url, "sftp://example.com:2222/");
+        assert_eq!(fingerprint, "SHA256:abc");
+        assert_eq!(answer, HostKeyAnswer::Cancel);
+        assert_eq!(answer, host_key_answer(&()));
+
+        // Other actions are left alone.
+        assert!(dismissed_host_key(&PendingAction::QuitApplication).is_none());
+    }
+
+    #[test]
+    fn host_key_buttons_give_their_answers() {
+        use termide_modal::InfoActionResult;
+        use termide_panel_file_manager::HostKeyAnswer;
+        let pressed = |id: &str| host_key_answer(&InfoActionResult::Action(id.to_string()));
+        assert_eq!(pressed(HostKeyAnswer::REMEMBER), HostKeyAnswer::Remember);
+        assert_eq!(pressed(HostKeyAnswer::ONCE), HostKeyAnswer::Once);
+        assert_eq!(pressed(HostKeyAnswer::CANCEL), HostKeyAnswer::Cancel);
     }
 
     #[test]
