@@ -79,6 +79,18 @@ struct ServerSlot {
     id: u64,
     /// When the automatic restarts within the policy window were made.
     restarts: Vec<Instant>,
+    /// Whether a process of this slot ever went live. A slot whose first
+    /// start failed (say, the binary is missing) is kept, so that a manual
+    /// restart can start it, but it is never retried on its own.
+    started: bool,
+}
+
+impl ServerSlot {
+    /// No process ever ran: the first start failed, and so did any manual
+    /// retry since. Such a slot is not a server for anything but a restart.
+    fn never_started(&self) -> bool {
+        !self.started && matches!(self.state, SlotState::Failed)
+    }
 }
 
 enum SlotState {
@@ -288,11 +300,16 @@ impl LspManager {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .get(lang)
             .cloned();
-        last.filter(|root| self.servers.contains_key(&(lang.to_string(), root.clone())))
+        let runs = |key: &ServerKey| {
+            self.servers
+                .get(key)
+                .is_some_and(|slot| !slot.never_started())
+        };
+        last.filter(|root| runs(&(lang.to_string(), root.clone())))
             .or_else(|| {
                 self.servers
                     .keys()
-                    .filter(|(l, _)| l == lang)
+                    .filter(|key| key.0 == lang && runs(key))
                     .map(|(_, root)| root.clone())
                     .min()
             })
@@ -317,31 +334,43 @@ impl LspManager {
                 .insert(lang.to_string(), workspace_root.clone());
         }
 
-        if self.servers.contains_key(&key) {
+        // A server whose start failed is tried again when another of its
+        // files is opened, as before it had a slot; any other slot stands.
+        if self
+            .servers
+            .get(&key)
+            .is_some_and(|slot| !slot.never_started())
+        {
             return Ok(());
         }
 
         log::info!("Starting LSP server for {} in {:?}", lang, workspace_root);
 
         let id = self.next_id();
-        let server = LspServer::start(
+        let started = LspServer::start(
             lang.to_string(),
             server_config,
             workspace_root,
             self.diagnostics_tx.clone(),
             self.apply_edit_tx.clone(),
             CrashNotice::new(self.crash_tx.clone(), id),
-        )?;
-
+        );
+        let (state, result) = match started {
+            Ok(server) => (SlotState::Live(server), Ok(())),
+            // Remembered, so "Restart language server" can start it later.
+            Err(e) => (SlotState::Failed, Err(e)),
+        };
+        let started = matches!(state, SlotState::Live(_));
         self.servers.insert(
             key,
             ServerSlot {
-                state: SlotState::Live(server),
+                state,
                 id,
                 restarts: Vec::new(),
+                started,
             },
         );
-        Ok(())
+        result
     }
 
     fn next_id(&mut self) -> u64 {
@@ -357,8 +386,19 @@ impl LspManager {
         Some((lang.to_string(), workspace_root))
     }
 
+    /// The slot of the server handling this file, unless none ever started.
     fn get_slot(&self, lang: &str, file_path: &Path) -> Option<&ServerSlot> {
-        self.servers.get(&self.server_key(lang, file_path)?)
+        self.servers
+            .get(&self.server_key(lang, file_path)?)
+            .filter(|slot| !slot.never_started())
+    }
+
+    /// Whether this file's server could not be started, and so far was not
+    /// started by hand either: [`Self::restart_server`] starts it.
+    pub fn server_start_failed(&self, lang: &str, file_path: &Path) -> bool {
+        self.server_key(lang, file_path)
+            .and_then(|key| self.servers.get(&key))
+            .is_some_and(ServerSlot::never_started)
     }
 
     /// Get server for language and file (if running)
@@ -396,7 +436,14 @@ impl LspManager {
                 Ok(server) => {
                     log::info!("LSP server for {:?} restarted", restarted.key);
                     slot.state = SlotState::Live(server);
+                    slot.started = true;
                     went_live = true;
+                }
+                // A server that never started is only started by hand: a
+                // missing binary is not looked for again and again.
+                Err(e) if !slot.started => {
+                    log::error!("LSP server for {:?} failed to start: {e:#}", restarted.key);
+                    slot.state = SlotState::Failed;
                 }
                 Err(e) => {
                     log::error!(
@@ -453,8 +500,9 @@ impl LspManager {
     }
 
     /// Restart the server handling this file by hand, whatever its state,
-    /// with a fresh budget of automatic restarts. `false` when no server was
-    /// ever started for it.
+    /// with a fresh budget of automatic restarts. A server whose start failed
+    /// is started; once live, editors open their documents in it as after
+    /// any restart. `false` when no server was ever tried for the file.
     pub fn restart_server(&mut self, lang: &str, file_path: &Path) -> bool {
         let Some(key) = self.server_key(lang, file_path) else {
             return false;
@@ -1002,6 +1050,94 @@ mod tests {
                 "restarting shows at once"
             );
             assert_stays_crashed(&mut manager, dir.path(), &file, 2 + 2 * budget);
+        }
+
+        /// Writes an executable `sh` script at `path`: a server installed
+        /// after its first start failed. Written aside and renamed in, so no
+        /// thread forking meanwhile holds it open for writing (`ETXTBSY`).
+        fn install(path: &Path, script: &str) {
+            use std::os::unix::fs::PermissionsExt;
+            let staged = path.with_extension("new");
+            std::fs::write(&staged, format!("#!/bin/sh\n{script}\n")).unwrap();
+            std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::rename(staged, path).unwrap();
+        }
+
+        /// A server whose binary is missing is remembered: it is not
+        /// retried on its own, a manual restart tries it again, and once
+        /// it is installed the manual restart starts it.
+        #[test]
+        fn a_server_that_failed_to_start_is_started_by_a_manual_restart() {
+            let dir = tempfile::tempdir().unwrap();
+            let binary = dir.path().join("server");
+            let mut config = LspConfig::default();
+            config.servers.insert(
+                "test".into(),
+                LspServerConfig {
+                    command: binary.to_string_lossy().into_owned(),
+                    args: Vec::new(),
+                    root_markers: Vec::new(),
+                },
+            );
+            let mut manager = LspManager::new(config);
+            manager.restart_policy.base_backoff = Duration::from_millis(10);
+            let file = dir.path().join("a.rs");
+            std::fs::write(&file, "").unwrap();
+
+            assert!(manager.ensure_server("test", &file).is_err());
+            assert!(manager.server_start_failed("test", &file));
+            assert_eq!(manager.server_status("test", &file), None);
+            assert_eq!(manager.server_generation("test", &file), None);
+
+            // Still missing: the manual start fails, and nothing retries it.
+            assert!(manager.restart_server("test", &file));
+            assert_eq!(
+                manager.server_status("test", &file),
+                Some(ServerStatus::Restarting)
+            );
+            poll_until(&mut manager, |m| m.server_start_failed("test", &file));
+            for _ in 0..30 {
+                assert!(!manager.poll_restarts());
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(manager.server_start_failed("test", &file));
+
+            install(&binary, "echo >> starts; exec sleep 60");
+            assert!(manager.restart_server("test", &file));
+            let mut went_live = false;
+            poll_until(&mut manager, |m| {
+                went_live |= m.poll_restarts();
+                m.server_generation("test", &file).is_some()
+            });
+            assert!(went_live, "editors are told to open their documents");
+            assert!(!manager.server_start_failed("test", &file));
+            assert_eq!(starts(dir.path()), 1);
+        }
+
+        /// Opening another file of a server that failed to start tries the
+        /// start again, as before the failure was remembered.
+        #[test]
+        fn opening_a_file_retries_a_failed_start() {
+            let dir = tempfile::tempdir().unwrap();
+            let binary = dir.path().join("server");
+            let mut config = LspConfig::default();
+            config.servers.insert(
+                "test".into(),
+                LspServerConfig {
+                    command: binary.to_string_lossy().into_owned(),
+                    args: Vec::new(),
+                    root_markers: Vec::new(),
+                },
+            );
+            let mut manager = LspManager::new(config);
+            let file = dir.path().join("a.rs");
+            std::fs::write(&file, "").unwrap();
+            assert!(manager.ensure_server("test", &file).is_err());
+
+            install(&binary, "exec sleep 60");
+            manager.ensure_server("test", &file).unwrap();
+            assert!(manager.server_generation("test", &file).is_some());
+            assert!(!manager.server_start_failed("test", &file));
         }
 
         /// Restarting a file no server was started for does nothing.

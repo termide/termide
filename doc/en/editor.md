@@ -507,7 +507,7 @@ When opening a file with LSP support, the panel title shows a loading spinner:
 - `⠋ main.rs (restarting)` — The server exited or sent a message it could not frame, and a new one is being started; every open file of that server is sent to it again, and the old server's diagnostics are cleared
 - `main.rs (crashed)` — The server crashed again after 3 restarts within 3 minutes and is not restarted on its own any more; its requests fail
 
-A crashed server is restarted on its own after a short pause (half a second, then 1 and 2 seconds), at most 3 times within 3 minutes. **Restart language server** in the command palette or the editor's `[≡]` menu restarts the server of the current file at once, whatever its state, and gives it 3 automatic restarts again.
+A crashed server is restarted on its own after a short pause (half a second, then 1 and 2 seconds), at most 3 times within 3 minutes. **Restart language server** in the command palette or the editor's `[≡]` menu restarts the server of the current file at once, whatever its state, and gives it 3 automatic restarts again. It also starts a server that could not be started when the file was opened, for instance one installed since: the open files of that server are sent to it once it runs. A server that could not be started is not retried on its own.
 
 ### Supported Languages
 
