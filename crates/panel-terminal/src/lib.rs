@@ -7,6 +7,7 @@ mod link_detection;
 #[cfg(target_os = "macos")]
 mod macos_proc;
 mod mouse;
+mod pty_input;
 mod render;
 mod search;
 mod selection;
@@ -29,7 +30,7 @@ use nix::unistd::Pid;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use ratatui::{buffer::Buffer, layout::Rect, prelude::Widget, style::Style, text::Line};
 use std::any::Any;
-use std::io::{Read, Write};
+use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
@@ -51,16 +52,14 @@ struct TerminalSearchState {
     current_match: Option<usize>,
 }
 
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
-
 /// Full-featured terminal with PTY
 pub struct Terminal {
     /// Scrollbar drawn by the last render, for mouse thumb dragging.
     scrollbars: termide_core::ScrollBars,
     /// PTY master (wrapped in Arc<Mutex<>> for shared access)
     pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-    /// Writer for writing to PTY
-    writer: SharedWriter,
+    /// Queue of bytes for the program; a writer thread drains it.
+    input: pty_input::PtyInput,
     /// Shell process
     child: Box<dyn Child + Send>,
     /// Shell process PID
@@ -219,7 +218,7 @@ impl Terminal {
     /// Spawn a PTY reader thread that feeds output into the terminal screen.
     fn spawn_reader(
         mut reader: Box<dyn std::io::Read + Send>,
-        writer: SharedWriter,
+        replies: pty_input::ReplySink,
         screen: &Arc<RwLock<TerminalScreen>>,
         is_alive: &Arc<Mutex<bool>>,
         has_new_data: &Arc<AtomicBool>,
@@ -230,7 +229,7 @@ impl Terminal {
         thread::spawn(move || {
             let mut parser = terminal::VtParser::new();
             let mut buf = [0u8; 16384];
-            let mut performer = terminal::VtPerformer::new(writer, Arc::clone(&screen_clone));
+            let mut performer = terminal::VtPerformer::new(replies, Arc::clone(&screen_clone));
 
             loop {
                 match reader.read(&mut buf) {
@@ -256,7 +255,7 @@ impl Terminal {
     #[allow(clippy::too_many_arguments)]
     fn build(
         pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
-        writer: SharedWriter,
+        input: pty_input::PtyInput,
         child: Box<dyn portable_pty::Child + Send + Sync>,
         shell_pid: Option<u32>,
         screen: Arc<RwLock<TerminalScreen>>,
@@ -267,7 +266,7 @@ impl Terminal {
         Self {
             scrollbars: termide_core::ScrollBars::default(),
             pty,
-            writer,
+            input,
             child,
             shell_pid,
             screen,
@@ -386,18 +385,12 @@ impl Terminal {
             cols as usize,
         )));
         let reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let input = pty_input::PtyInput::spawn(pair.master.take_writer()?);
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
 
-        Self::spawn_reader(
-            reader,
-            Arc::clone(&writer),
-            &screen,
-            &is_alive,
-            &has_new_data,
-        );
+        Self::spawn_reader(reader, input.replies(), &screen, &is_alive, &has_new_data);
 
         let username = std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))
@@ -409,7 +402,7 @@ impl Terminal {
 
         let mut term = Self::build(
             pty,
-            writer,
+            input,
             child,
             shell_pid,
             screen,
@@ -455,22 +448,16 @@ impl Terminal {
             cols as usize,
         )));
         let reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let input = pty_input::PtyInput::spawn(pair.master.take_writer()?);
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
 
-        Self::spawn_reader(
-            reader,
-            Arc::clone(&writer),
-            &screen,
-            &is_alive,
-            &has_new_data,
-        );
+        Self::spawn_reader(reader, input.replies(), &screen, &is_alive, &has_new_data);
 
         let mut term = Self::build(
             pty,
-            writer,
+            input,
             child,
             shell_pid,
             screen,
@@ -556,27 +543,12 @@ impl Terminal {
             cols as usize,
         )));
         let reader = pair.master.try_clone_reader()?;
-        let writer = Arc::new(Mutex::new(pair.master.take_writer()?));
+        let input = pty_input::PtyInput::spawn(pair.master.take_writer()?);
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
-        Self::spawn_reader(
-            reader,
-            Arc::clone(&writer),
-            &screen,
-            &is_alive,
-            &has_new_data,
-        );
-        let mut term = Self::build(
-            pty,
-            writer,
-            child,
-            pid,
-            screen,
-            size,
-            is_alive,
-            has_new_data,
-        );
+        Self::spawn_reader(reader, input.replies(), &screen, &is_alive, &has_new_data);
+        let mut term = Self::build(pty, input, child, pid, screen, size, is_alive, has_new_data);
         term.title = TitleSource::Command(title);
         term.initial_cwd = working_dir;
         Ok((term, device))
@@ -670,11 +642,9 @@ impl Terminal {
         })
     }
 
-    /// Send input to PTY
+    /// Queue input for the program; never waits for it to be read.
     fn send_input(&mut self, data: &[u8]) -> Result<()> {
-        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        writer.write_all(data)?;
-        writer.flush()?;
+        self.input.send(data.to_vec())?;
         Ok(())
     }
 
@@ -690,8 +660,10 @@ impl Terminal {
 
     /// Send a command to the terminal and execute it (adds Enter)
     pub fn send_command(&mut self, command: &str) -> Result<()> {
-        self.send_input(command.as_bytes())?;
-        self.send_input(b"\r")?;
+        let mut line = Vec::with_capacity(command.len() + 1);
+        line.extend_from_slice(command.as_bytes());
+        line.push(b'\r');
+        self.input.send(line)?;
         Ok(())
     }
 
@@ -733,8 +705,8 @@ impl Terminal {
         // Always use bracketed paste - the outer terminal (where termide runs)
         // already stripped the brackets, so we need to re-add them for the
         // inner shell/application running in our PTY
-        let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
-        clipboard::paste_atomic(&mut *writer, text, true)
+        self.input.send(clipboard::paste_bytes(text, true))?;
+        Ok(())
     }
 
     /// Start of the synchronized update in progress, once it has run past
@@ -1670,6 +1642,35 @@ impl Drop for Terminal {
 #[cfg(all(test, unix))]
 mod device_tests {
     use super::*;
+    use std::io::Write;
+
+    /// A program that stops reading its input (here the holder, which reads
+    /// nothing) must not freeze the UI: typing and pasting far past the PTY
+    /// buffer return at once, and so does closing the panel.
+    #[test]
+    fn input_to_a_program_that_does_not_read_never_blocks() {
+        let Ok((mut term, _device)) = Terminal::new_for_device(10, 40, "app") else {
+            return; // No PTY available.
+        };
+        let start = std::time::Instant::now();
+        let text = "x".repeat(64 * 1024);
+        for _ in 0..16 {
+            term.paste_text(&text).unwrap();
+            term.send_input(b"typed").unwrap();
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(1),
+            "input waited for the program: {:?}",
+            start.elapsed()
+        );
+        let start = std::time::Instant::now();
+        drop(term);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "closing waited for the program: {:?}",
+            start.elapsed()
+        );
+    }
 
     /// What another process writes to the device shows in the panel, and the
     /// panel's input goes to whoever reads the device — the holder reads none.

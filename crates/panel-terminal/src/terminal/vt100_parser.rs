@@ -6,9 +6,11 @@
 #![allow(clippy::needless_range_loop)]
 
 use std::io::Write;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use vte::{Params, Parser, Perform};
+
+use crate::pty_input::ReplySink;
 
 use super::{
     csi_handlers::{handle_cursor_movement, handle_private_sequence, handle_sgr},
@@ -40,7 +42,8 @@ pub enum ScreenOp {
 /// Uses batching to reduce lock contention: simple operations (print, execute)
 /// are collected in a buffer and applied with a single lock via `flush()`.
 pub struct VtPerformer {
-    pub writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Where replies to the program's queries go; never blocks.
+    pub replies: ReplySink,
     pub screen: Arc<RwLock<TerminalScreen>>,
     /// Buffer for batching screen operations
     pub pending_ops: Vec<ScreenOp>,
@@ -75,13 +78,10 @@ fn apply_ops(ops: &mut Vec<ScreenOp>, screen: &mut TerminalScreen) {
 }
 
 impl VtPerformer {
-    pub fn new(
-        writer: Arc<Mutex<Box<dyn Write + Send>>>,
-        screen: Arc<RwLock<TerminalScreen>>,
-    ) -> Self {
+    pub fn new(replies: ReplySink, screen: Arc<RwLock<TerminalScreen>>) -> Self {
         let sync_output = screen.read().map(|s| s.sync_output).unwrap_or(false);
         Self {
-            writer,
+            replies,
             screen,
             pending_ops: Vec::with_capacity(8192),
             sync_output,
@@ -103,10 +103,7 @@ impl VtPerformer {
     }
 
     fn write_response(&self, data: &[u8]) {
-        if let Ok(mut writer) = self.writer.lock() {
-            let _ = writer.write_all(data);
-            let _ = writer.flush();
-        }
+        self.replies.reply(data);
     }
 }
 
@@ -780,37 +777,16 @@ impl Perform for VtPerformer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Result as IoResult;
+    use crate::pty_input::PtyInput;
 
-    struct SharedCapture(Arc<Mutex<Vec<u8>>>);
+    type PerformerHarness = (VtPerformer, PtyInput, Arc<RwLock<TerminalScreen>>);
 
-    impl Write for SharedCapture {
-        fn write(&mut self, buf: &[u8]) -> IoResult<usize> {
-            self.0.lock().unwrap().extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> IoResult<()> {
-            Ok(())
-        }
-    }
-
-    type PerformerHarness = (
-        VtPerformer,
-        Arc<Mutex<Vec<u8>>>,
-        Arc<RwLock<TerminalScreen>>,
-    );
-
+    /// A performer whose replies stay queued in the returned input.
     fn performer() -> PerformerHarness {
-        let capture = Arc::new(Mutex::new(Vec::new()));
+        let input = PtyInput::unspawned();
         let screen = Arc::new(RwLock::new(TerminalScreen::new(24, 80)));
-        let performer = VtPerformer::new(
-            Arc::new(Mutex::new(
-                Box::new(SharedCapture(Arc::clone(&capture))) as Box<dyn Write + Send>
-            )),
-            Arc::clone(&screen),
-        );
-        (performer, capture, screen)
+        let performer = VtPerformer::new(input.replies(), Arc::clone(&screen));
+        (performer, input, screen)
     }
 
     fn feed(performer: &mut VtPerformer, bytes: &[u8]) {
@@ -957,7 +933,7 @@ mod tests {
     fn keyboard_query_reply_is_emitted() {
         let (mut performer, capture, _screen) = performer();
         feed(&mut performer, b"\x1b[?u");
-        assert_eq!(&*capture.lock().unwrap(), b"\x1b[?0u");
+        assert_eq!(capture.take_queued(), b"\x1b[?0u");
     }
 
     #[test]
@@ -1099,6 +1075,6 @@ mod tests {
         feed(&mut performer, b"\x1b[c");
         feed(&mut performer, b"\x1b[6n");
 
-        assert_eq!(&*capture.lock().unwrap(), b"\x1b[?62c\x1b[2;3R");
+        assert_eq!(capture.take_queued(), b"\x1b[?62c\x1b[2;3R");
     }
 }
