@@ -91,9 +91,11 @@ or click the `▼` at its right end. While the field still holds the suggested
 path, the tree lists the panels' directories, then the directories this
 project's prompts were recently confirmed with (kept until termide quits,
 never written to disk), then the drives or mount points: the root, disks,
-removable media and network shares. Once the path is edited, it lists the
-directory the path names up to its last `/`, narrowed fuzzily by what
-follows; a name starting with `.` brings in hidden directories.
+removable media and network shares. A recent directory is marked *recent*
+at the right end of its row and a mount point *drive*. Once the path is
+edited, the tree lists the directory the path names up to its last `/`,
+narrowed fuzzily by what follows; a name starting with `.` brings in hidden
+directories. The tree takes up to 12 rows, fewer on a short screen.
 
 | Key                                  | In the tree                                             |
 |--------------------------------------|---------------------------------------------------------|
@@ -112,8 +114,8 @@ When the path names a file — copying a single item, packing, Save As —
 picking a directory keeps the file name. The directory keys are the file
 manager's own (`toggle_hidden`, `create_dir`, `rename`, `delete`); bindings
 that are plain letters, such as `D` and `R`, are typed into the field
-instead. The other panels' directories at the top of the tree are not
-renamed or deleted, and remote ones are listed but not expanded.
+instead. The directories at the top of the tree are not renamed or deleted;
+those that do not exist yet, or are remote, carry no `▶` and do not expand.
 
 ## Search
 

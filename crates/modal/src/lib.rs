@@ -65,13 +65,14 @@ pub use db_filter::{DbFilterColumn, DbFilterCondition, DbFilterModal, DbFilterRe
 pub use db_row_edit::{DbRowEditColumn, DbRowEditModal, DbRowEditResult};
 pub use directory_picker::DirectoryPickerModal;
 pub use directory_switcher::{DirectoryItem, DirectorySwitcherModal};
-pub use editable_select::{EditableSelectModal, SelectOption};
+pub use editable_select::EditableSelectModal;
 pub use find_bar::{Btn as FindBarBtn, FindBar, FindBarAction, FindBarConfig, FindField};
 pub use info::{InfoModal, ModalValue, SegmentStyle, StyledSegment};
 pub use info_action::{
     ActionButton, InfoActionModal, InfoActionResult, PermAccess, PermissionsState,
 };
 pub use input::{InputModal, Suggest};
+pub use path_field::{DestinationKind, QuickDestination};
 pub use projects::{ProjectAction, ProjectItem, ProjectsModal};
 pub use rename_pattern::RenamePatternModal;
 pub use save_as::{SaveAsModal, SaveAsResult};

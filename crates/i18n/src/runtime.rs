@@ -1005,6 +1005,8 @@ impl Translation for RuntimeTranslation {
         op_error_not_found,
         op_error_already_exists,
         op_error_archive,
+        path_field_recent,
+        path_field_mount,
         pack_format_label,
         pack_compression_label,
         pack_level_store,

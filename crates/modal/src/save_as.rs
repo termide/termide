@@ -15,7 +15,7 @@ use ratatui::{
 
 use crate::base::{button_style, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
-use crate::path_field::{FieldKey, PathField};
+use crate::path_field::{FieldKey, PathField, QuickDestination};
 use std::path::PathBuf;
 
 use termide_config::constants::MODAL_BUTTON_SPACING;
@@ -57,11 +57,15 @@ pub struct SaveAsModal {
     last_checkbox_area: Option<Rect>,
 }
 
+/// Lines besides the field: border, checkbox, buttons, border.
+const ROWS_BESIDES_FIELD: u16 = 4;
+
 impl SaveAsModal {
     /// Create a new Save As modal window with default value
     pub fn new(title: impl Into<String>, default: impl Into<String>) -> Self {
         let mut field = PathField::new(default, Vec::new());
         field.set_keeps_name(true);
+        field.set_dims_unfocused(true);
         Self {
             title: title.into(),
             field,
@@ -74,7 +78,7 @@ impl SaveAsModal {
     }
 
     /// Offer `dirs` at the top of the tree while the path is untouched.
-    pub fn set_quick_destinations(&mut self, dirs: Vec<String>) {
+    pub fn set_quick_destinations(&mut self, dirs: Vec<QuickDestination>) {
         self.field.set_roots(dirs);
     }
 
@@ -123,10 +127,15 @@ impl SaveAsModal {
             },
         );
 
-        // Border, field (and its tree), checkbox, buttons, border.
-        let height = (1 + self.field.height() + 1 + 1 + 1).min(screen_height);
+        let height = (ROWS_BESIDES_FIELD + self.field_height(screen_height)).min(screen_height);
 
         (width, height)
+    }
+
+    /// Lines the field takes on a screen `screen_height` lines high.
+    fn field_height(&self, screen_height: u16) -> u16 {
+        self.field
+            .height_within(screen_height.saturating_sub(ROWS_BESIDES_FIELD))
     }
 
     /// Move focus to next element
@@ -178,9 +187,9 @@ impl Modal for SaveAsModal {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(self.field.height()), // Input
-                Constraint::Length(1),                   // Checkbox
-                Constraint::Length(1),                   // Buttons
+                Constraint::Length(self.field_height(area.height)), // Input
+                Constraint::Length(1),                              // Checkbox
+                Constraint::Length(1),                              // Buttons
             ])
             .split(inner);
 
@@ -424,6 +433,23 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
         modal.handle_mouse(event, Rect::default()).unwrap();
+    }
+
+    #[test]
+    fn the_field_border_dims_while_focus_is_elsewhere() {
+        let theme = Theme::default();
+        let border_at = |modal: &mut SaveAsModal| {
+            let area = Rect::new(0, 0, 80, 20);
+            let mut buf = Buffer::empty(area);
+            modal.render(area, &mut buf, &theme);
+            let text = modal.field.text_area().unwrap();
+            // The box's top-left corner, above and left of the text.
+            buf[(text.x - 1, text.y - 1)].fg
+        };
+        let mut modal = SaveAsModal::new("Save As", "a.txt");
+        assert_eq!(border_at(&mut modal), theme.accented_fg);
+        modal.focus = FocusArea::Checkbox;
+        assert_eq!(border_at(&mut modal), theme.disabled);
     }
 
     #[test]

@@ -1667,6 +1667,10 @@ pub trait Translation: Send + Sync {
     fn op_error_not_found(&self) -> &str;
     fn op_error_already_exists(&self) -> &str;
     fn op_error_archive(&self) -> &str;
+    /// Mark of a recent destination among the roots of a path field's tree.
+    fn path_field_recent(&self) -> &str;
+    /// Mark of a drive or mount point among the roots of a path field's tree.
+    fn path_field_mount(&self) -> &str;
     /// Label of the pack modal's archive format row.
     fn pack_format_label(&self) -> &str;
     /// Label of the pack modal's compression level row.

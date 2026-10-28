@@ -31,6 +31,22 @@ pub(crate) struct DirEntry {
     pub(crate) depth: usize,
     /// `Some(true)` = expanded, `Some(false)` = collapsed, `None` = ".." entry
     pub(crate) expanded: Option<bool>,
+    /// Whether there is a directory to read under it: not so for a root
+    /// that does not exist (yet) or is remote.
+    pub(crate) expandable: bool,
+    /// A dim mark at the right end of the row, telling roots apart.
+    pub(crate) note: Option<String>,
+}
+
+/// A row of the top level when it is a list of roots.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct TreeRoot {
+    /// The text of the row: the path as given.
+    pub(crate) label: String,
+    /// The directory it stands for.
+    pub(crate) path: PathBuf,
+    /// A dim mark at the right end of the row.
+    pub(crate) note: Option<String>,
 }
 
 /// What an inline row edit does on Enter.
@@ -67,7 +83,7 @@ pub(crate) struct DirTree {
     dir: PathBuf,
     /// The top level instead of `dir`'s children: a label and the
     /// directory it stands for. Roots are neither renamed nor deleted.
-    roots: Option<Vec<(String, PathBuf)>>,
+    roots: Option<Vec<TreeRoot>>,
     /// Only `dir`'s children this matches fuzzily are listed.
     filter: Option<String>,
     pub(crate) entries: Vec<DirEntry>,
@@ -116,6 +132,15 @@ impl DirTree {
         &self.dir
     }
 
+    /// Show at most `rows` rows at once, keeping the cursor among them.
+    pub(crate) fn set_max_visible(&mut self, rows: usize) {
+        let rows = rows.max(1);
+        if rows != self.max_visible {
+            self.max_visible = rows;
+            self.adjust_scroll();
+        }
+    }
+
     /// Rows in the tree as it is expanded now.
     pub(crate) fn visible_len(&self) -> usize {
         self.visible_indices.len()
@@ -125,7 +150,10 @@ impl DirTree {
     pub(crate) fn content_width(&self) -> usize {
         self.entries
             .iter()
-            .map(|e| e.depth * 3 + e.name.len() + 5)
+            .map(|e| {
+                let note = e.note.as_deref().map_or(0, |n| n.width() + 1);
+                e.depth * 3 + e.name.width() + note + 5
+            })
             .max()
             .unwrap_or(0)
     }
@@ -168,7 +196,7 @@ impl DirTree {
     }
 
     /// List `roots` as the top level, collapsed, the cursor at the top.
-    pub(crate) fn set_roots(&mut self, roots: Vec<(String, PathBuf)>) {
+    pub(crate) fn set_roots(&mut self, roots: Vec<TreeRoot>) {
         self.roots = Some(roots);
         self.load_root();
     }
@@ -226,11 +254,13 @@ impl DirTree {
         if let Some(roots) = &self.roots {
             self.entries = roots
                 .iter()
-                .map(|(label, path)| DirEntry {
-                    name: label.clone(),
-                    full_path: path.clone(),
+                .map(|root| DirEntry {
+                    name: root.label.clone(),
+                    full_path: root.path.clone(),
                     depth: 0,
                     expanded: Some(false),
+                    expandable: root.path.is_dir(),
+                    note: root.note.clone(),
                 })
                 .collect();
             self.recompute_visible();
@@ -244,6 +274,8 @@ impl DirTree {
                 full_path: self.dir.clone(),
                 depth: 0,
                 expanded: None,
+                expandable: false,
+                note: None,
             });
         }
 
@@ -279,6 +311,8 @@ impl DirTree {
                     full_path: path,
                     depth,
                     expanded: Some(false),
+                    expandable: true,
+                    note: None,
                 });
             }
         }
@@ -296,7 +330,7 @@ impl DirTree {
         let Some(&tree_idx) = self.visible_indices.get(vis_idx) else {
             return;
         };
-        if self.entries[tree_idx].expanded != Some(false) {
+        if self.entries[tree_idx].expanded != Some(false) || !self.entries[tree_idx].expandable {
             return;
         }
 
@@ -477,6 +511,8 @@ impl DirTree {
                 full_path: parent.clone(),
                 depth,
                 expanded: Some(false),
+                expandable: true,
+                note: None,
             },
         );
         let prev_cursor = self.cursor;
@@ -774,13 +810,12 @@ impl DirTree {
                 .map(|s| s.as_str())
                 .unwrap_or("");
 
-            // Icon: ".." = special, expanded = ▼, collapsed = ▶
-            let icon = if entry.expanded.is_none() {
-                " "
-            } else if entry.expanded == Some(true) {
-                "▼"
-            } else {
-                "▶"
+            // Icon: ".." and what cannot be expanded = none, expanded = ▼,
+            // collapsed = ▶
+            let icon = match entry.expanded {
+                Some(true) => "▼",
+                Some(false) if entry.expandable => "▶",
+                _ => " ",
             };
 
             // Cursor style: invert fg/bg like file manager
@@ -794,6 +829,13 @@ impl DirTree {
                 (Style::default().fg(theme.fg), prefix_style)
             };
 
+            // The mark goes at the right end, before the margin column.
+            let note = entry
+                .note
+                .as_deref()
+                .filter(|_| !is_edited)
+                .map(|n| format!(" {n} "))
+                .unwrap_or_default();
             let text = if is_edited {
                 let x = 1 + tree_prefix.width() as u16 + icon.width() as u16 + 1;
                 let y = area.y + (vis_pos - self.scroll_offset) as u16;
@@ -803,7 +845,7 @@ impl DirTree {
                 // A root is a whole path: its end tells it apart, so it is
                 // cut on the left; a name is cut on the right.
                 let room = (area.width as usize)
-                    .saturating_sub(1 + tree_prefix.width() + icon.width() + 1);
+                    .saturating_sub(1 + tree_prefix.width() + icon.width() + 1 + note.width());
                 let name = if self.roots.is_some() && entry.depth == 0 {
                     termide_ui::path_utils::truncate_left(&entry.name, room)
                 } else {
@@ -811,7 +853,7 @@ impl DirTree {
                 };
                 format!("{} {}", icon, name)
             };
-            let line_width = 1 + tree_prefix.width() + text.width();
+            let line_width = 1 + tree_prefix.width() + text.width() + note.width();
             let padding = " ".repeat((area.width as usize).saturating_sub(line_width));
 
             let line = Line::from(vec![
@@ -820,6 +862,7 @@ impl DirTree {
                 Span::styled(tree_prefix, prefix_row_style),
                 Span::styled(text, row_style),
                 Span::styled(padding, row_style),
+                Span::styled(note, prefix_row_style),
             ]);
 
             list_items.push(ListItem::new(line));
