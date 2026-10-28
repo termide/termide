@@ -211,6 +211,7 @@ impl Connections {
                     State::Withheld => LateTools::NeedsApproval {
                         source,
                         launch: entry.config.launch_line(),
+                        fingerprint: entry.config.fingerprint(),
                     },
                 };
                 let _ = tx.send(event);
@@ -254,6 +255,7 @@ impl Connections {
             self.broadcast(&LateTools::NeedsApproval {
                 source: name.to_string(),
                 launch: entry.config.launch_line(),
+                fingerprint: entry.config.fingerprint(),
             });
             return;
         }
@@ -390,6 +392,7 @@ impl Connections {
             .map(|(name, status, config)| McpServerState {
                 sign_in: self.sign_in_state(&config),
                 launch: config.launch_line(),
+                fingerprint: config.fingerprint(),
                 name,
                 status,
             })
@@ -802,9 +805,14 @@ mod withheld_tests {
         let connections = Connections::new(BTreeMap::from([("p".to_string(), config.clone())]));
         let events = connections.subscribe();
         match events.recv_timeout(Duration::from_secs(2)).unwrap() {
-            LateTools::NeedsApproval { source, launch } => {
+            LateTools::NeedsApproval {
+                source,
+                launch,
+                fingerprint,
+            } => {
                 assert_eq!(source, "p");
                 assert_eq!(launch, "/nonexistent/termide-mcp-withheld --x");
+                assert_eq!(fingerprint, config.fingerprint());
             }
             _ => panic!("expected a request for approval"),
         }

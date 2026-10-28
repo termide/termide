@@ -6883,12 +6883,14 @@ impl AgentCatalog for Servers {
                 status: McpStatus::Ready { tools: 4 },
                 sign_in: McpSignIn::None,
                 launch: "db-server".into(),
+                fingerprint: String::new(),
             },
             McpServerState {
                 name: "plane".into(),
                 status: McpStatus::NeedsLogin,
                 sign_in: McpSignIn::SignedOut,
                 launch: "https://plane.example/mcp".into(),
+                fingerprint: String::new(),
             },
         ]
     }
@@ -7606,6 +7608,7 @@ fn an_agent_that_lists_its_tools_once_is_told_when_the_mcp_servers_answered() {
         status,
         sign_in: McpSignIn::None,
         launch: String::new(),
+        fingerprint: String::new(),
     };
     let statuses = Arc::new(Mutex::new(vec![state(McpStatus::Connecting)]));
     let served = Arc::new(Mutex::new(Vec::new()));
@@ -12060,8 +12063,26 @@ fn the_session_waits_for_the_tasks_handed_over_in_the_background() {
     assert!(panel.switch_session(None));
 }
 
-/// A catalog whose project brings a server and a hook not approved yet.
-struct Untrusted(Arc<Mutex<Vec<String>>>);
+/// A catalog whose project brings a server and a hook not approved yet; the
+/// server's launch is what `ext` holds now, and a test may change it.
+struct Untrusted {
+    asked: Arc<Mutex<Vec<String>>>,
+    ext: Arc<Mutex<&'static str>>,
+}
+
+impl Untrusted {
+    fn new(asked: &Arc<Mutex<Vec<String>>>) -> Self {
+        Self {
+            asked: Arc::clone(asked),
+            ext: Arc::new(Mutex::new("npx ext-server")),
+        }
+    }
+}
+
+/// The mock's fingerprint of a launch.
+fn mock_fingerprint(launch: &str) -> String {
+    format!("fp-{}", launch.replace(' ', "-"))
+}
 
 impl AgentCatalog for Untrusted {
     fn list(&self) -> Vec<AgentEntry> {
@@ -12072,26 +12093,42 @@ impl AgentCatalog for Untrusted {
     }
     fn mcp_status(&self) -> Vec<termide_agent_core::McpServerState> {
         use termide_agent_core::{McpServerState, McpSignIn, McpStatus};
+        let launch = *self.ext.lock().unwrap();
         vec![McpServerState {
             name: "ext".into(),
             status: McpStatus::NeedsApproval,
             sign_in: McpSignIn::None,
-            launch: "npx ext-server".into(),
+            launch: launch.into(),
+            fingerprint: mock_fingerprint(launch),
         }]
     }
-    fn held_hooks(&self) -> Vec<(String, String)> {
-        vec![("check".into(), "./check.sh".into())]
+    fn held_hooks(&self) -> Vec<crate::HeldHook> {
+        vec![crate::HeldHook {
+            name: "check".into(),
+            launch: "./check.sh".into(),
+            fingerprint: mock_fingerprint("./check.sh"),
+        }]
     }
-    fn trust(&self, name: &str) -> Result<Option<termide_agent_core::McpReload>, String> {
-        self.0.lock().unwrap().push(format!("trust {name}"));
-        match name {
-            "ext" => Ok(Some(termide_agent_core::McpReload {
+    fn trust(&self, name: &str, shown: &str) -> Result<crate::Trusted, String> {
+        self.asked.lock().unwrap().push(format!("trust {name}"));
+        let (hook, launch) = match name {
+            "ext" => (false, *self.ext.lock().unwrap()),
+            "check" => (true, "./check.sh"),
+            _ => return Err(format!("Nothing named {name} waits for approval")),
+        };
+        if shown != mock_fingerprint(launch) {
+            return Ok(crate::Trusted::Changed {
+                hook,
+                launch: launch.into(),
+                fingerprint: mock_fingerprint(launch),
+            });
+        }
+        Ok(crate::Trusted::Approved((!hook).then(|| {
+            termide_agent_core::McpReload {
                 started: vec!["ext".into()],
                 ..Default::default()
-            })),
-            "check" => Ok(None),
-            _ => Err(format!("Nothing named {name} waits for approval")),
-        }
+            }
+        })))
     }
 }
 
@@ -12099,7 +12136,7 @@ impl AgentCatalog for Untrusted {
 fn trust_lists_what_the_project_brings_and_approves_it() {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let mut panel = AgentPanel::new(AgentPanelSetup {
-        catalog: Arc::new(Untrusted(Arc::clone(&asked))),
+        catalog: Arc::new(Untrusted::new(&asked)),
         ..setup(vec![])
     });
     // The held hook is said when the panel opens.
@@ -12130,12 +12167,90 @@ fn trust_lists_what_the_project_brings_and_approves_it() {
     assert!(!panel.is_busy());
 }
 
+/// `/trust <name>` approves the launch last shown for it: one never shown,
+/// or changed since, is shown instead, and approved only when asked again.
+#[test]
+fn trust_approves_only_the_launch_that_was_shown() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let catalog = Untrusted::new(&asked);
+    let ext = Arc::clone(&catalog.ext);
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(catalog),
+        ..setup(vec![])
+    });
+    // Never shown: shown now, not approved.
+    type_text(&mut panel, "/trust ext");
+    panel.submit();
+    // Shown by the listing, then changed before the approval.
+    type_text(&mut panel, "/trust");
+    panel.submit();
+    *ext.lock().unwrap() = "npx evil-server";
+    type_text(&mut panel, "/trust ext");
+    panel.submit();
+    // What was shown last is what this one approves.
+    type_text(&mut panel, "/trust ext");
+    panel.submit();
+    // The hook shown when the panel opened is approved as it was.
+    type_text(&mut panel, "/trust check");
+    panel.submit();
+    assert_eq!(
+        &notices(&panel)[1..],
+        [
+            "mcp ext: from the project, runs `npx ext-server` — /trust ext to start it",
+            "mcp ext: from the project, runs `npx ext-server` — /trust ext to start it",
+            "hook check: from the project, runs `./check.sh` — /trust check to let it run",
+            "mcp ext: from the project, runs `npx evil-server` — /trust ext to start it",
+            "ext: approved for this project",
+            "mcp ext: connecting",
+            "check: approved for this project",
+        ]
+    );
+}
+
+/// A tick on a held server approves the launch shown beside the box: one
+/// changed since is shown instead, and its tools are not switched on.
+#[test]
+fn a_tick_on_a_server_changed_since_the_list_opened_approves_nothing() {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let catalog = Untrusted::new(&asked);
+    let ext = Arc::clone(&catalog.ext);
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(catalog),
+        ..setup(vec![])
+    });
+    let events = panel.handle_status_action(crate::toolset::TOOLSET_ACTION);
+    let Some(PanelEvent::ShowChecklist { groups, .. }) = events.first() else {
+        panic!("the toolset list opens: {events:?}");
+    };
+    let key = groups
+        .iter()
+        .find_map(|g| g.switch.as_ref())
+        .unwrap()
+        .key
+        .clone();
+    *ext.lock().unwrap() = "npx evil-server";
+    panel.handle_command(PanelCommand::ChecklistButton {
+        action: crate::toolset::TOOLSET_ACTION.into(),
+        id: key,
+    });
+    assert_eq!(*asked.lock().unwrap(), ["trust ext"]);
+    assert!(panel.mcp_enable.is_empty());
+    assert_eq!(
+        notices(&panel).last().unwrap(),
+        "mcp ext: from the project, runs `npx evil-server` — /trust ext to start it"
+    );
+    // `/trust ext` now approves what that notice showed.
+    type_text(&mut panel, "/trust ext");
+    panel.submit();
+    assert_eq!(notices(&panel).last().unwrap(), "mcp ext: connecting");
+}
+
 #[test]
 fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let (tx, rx) = mpsc::channel();
     let mut panel = AgentPanel::new(AgentPanelSetup {
-        catalog: Arc::new(Untrusted(Arc::clone(&asked))),
+        catalog: Arc::new(Untrusted::new(&asked)),
         late_tools: Some(rx),
         ..setup(vec![])
     });
@@ -12154,7 +12269,7 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
     assert_eq!(
         ext.switch,
         Some(termide_core::ChecklistSwitch {
-            key: "mcp-trust:ext".into(),
+            key: "mcp-trust:fp-npx-ext-server:ext".into(),
             checked: false,
         })
     );
@@ -12175,7 +12290,7 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
     panel.pending_events.clear();
     panel.handle_command(PanelCommand::ChecklistButton {
         action: crate::toolset::TOOLSET_ACTION.into(),
-        id: "mcp-trust:ext".into(),
+        id: "mcp-trust:fp-npx-ext-server:ext".into(),
     });
     assert_eq!(*asked.lock().unwrap(), ["trust ext"]);
     assert!(panel.toolset_list_open);

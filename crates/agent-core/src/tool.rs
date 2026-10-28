@@ -226,10 +226,12 @@ pub enum LateTools {
         url: String,
     },
     /// The source comes from a project and waits for the user to approve
-    /// what it runs, `launch`.
+    /// what it runs, `launch`; `fingerprint` names that launch, so the
+    /// approval is of it and no other.
     NeedsApproval {
         source: String,
         launch: String,
+        fingerprint: String,
     },
 }
 

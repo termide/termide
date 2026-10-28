@@ -2460,7 +2460,11 @@ the toolset list) approves it and connects it. The approval is for the launch as
 it is now — command, arguments, environment, working directory, or URL,
 headers and OAuth client — and is kept in termide's data directory under the
 project (`trust/<project path>/approved.toml`), never in the project. If the
-repository changes any of it, it waits again.
+repository changes any of it, it waits again. The approval is also bound to
+what you were shown: `/trust <name>` and the tick approve the launch of the
+last notice or of the heading beside the box, and if the file says something
+else by then — or nothing was shown yet — nothing is approved and the launch
+it holds now is shown instead, for the next `/trust <name>` to approve.
 
 An MCP tool asks for permission like a command: it runs in `all`, goes to
 the reviewer in `auto`, and asks elsewhere unless a rule covers it in
@@ -2504,7 +2508,8 @@ and ignored, so a broken hook never stops the agent.
 A project's hook waits for approval as a project's MCP server does: the panel
 says so when it opens, it does not run until `/trust <name>`, and the approval
 holds while its command, arguments, event, tools and timeout stay as they were; it then runs from
-the next run on. A project can neither switch off nor replace a hook of the
+the next run on. As for a server, `/trust <name>` approves the hook as it was
+last shown; one changed since is shown again instead. A project can neither switch off nor replace a hook of the
 configuration level: one of yours may be a guard.
 
 ### Command shims

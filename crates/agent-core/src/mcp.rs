@@ -116,6 +116,13 @@ impl McpServerConfig {
         .to_string()
     }
 
+    /// The [`crate::approvals::fingerprint`] of [`Self::launch_spec`]: what
+    /// a notice of the launch carries to the approval it asks for.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        crate::approvals::fingerprint(&self.launch_spec())
+    }
+
     /// What the server runs or reaches, for a person to read when approving
     /// it: the command line or the URL, then every other part of
     /// [`Self::launch_spec`] that is set — `env`, `headers`, the OAuth client
@@ -213,6 +220,9 @@ pub struct McpServerState {
     pub sign_in: McpSignIn,
     /// What it runs or reaches, for a person to read.
     pub launch: String,
+    /// The [`McpServerConfig::fingerprint`] of the launch `launch`
+    /// describes, for approving that one.
+    pub fingerprint: String,
 }
 
 /// What a reload of the configuration did, by server name.

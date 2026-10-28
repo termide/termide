@@ -6,6 +6,11 @@
 //! it ([`McpServerConfig::launch_spec`], [`HookConfig::launch_spec`]). A
 //! repository that changes the command after the fact is asked about again.
 //! The file lives in termide's data directory, never in the project.
+//!
+//! What is shown and what is approved are bound by a [`fingerprint`] of the
+//! launch: the notice carries the one of the launch it describes, and an
+//! approval is kept only while the configuration read at that moment still
+//! has it, so a file changed between the two is not approved unseen.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -68,28 +73,48 @@ impl Approvals {
         self.read().hooks.get(name) == Some(&config.launch_spec())
     }
 
-    /// Approve the server `name` as `config` starts it.
+    /// Approve the server `name` as `config` starts it, when that is the
+    /// launch the user was shown — `shown` is its [`fingerprint`]. `false`,
+    /// and nothing kept, when `config` is another one.
     ///
     /// # Errors
     ///
     /// When the approval cannot be kept.
-    pub fn approve_mcp(&self, name: &str, config: &McpServerConfig) -> Result<(), String> {
+    pub fn approve_mcp(
+        &self,
+        name: &str,
+        config: &McpServerConfig,
+        shown: &str,
+    ) -> Result<bool, String> {
+        let spec = config.launch_spec();
+        if fingerprint(&spec) != shown {
+            return Ok(false);
+        }
         let mut approved = self.read();
-        approved.mcp.insert(name.to_string(), config.launch_spec());
-        self.write(&approved)
+        approved.mcp.insert(name.to_string(), spec);
+        self.write(&approved).map(|()| true)
     }
 
-    /// Approve the hook `name` as `config` runs it.
+    /// Approve the hook `name` as `config` runs it, when that is the launch
+    /// the user was shown — `shown` is its [`fingerprint`]. `false`, and
+    /// nothing kept, when `config` is another one.
     ///
     /// # Errors
     ///
     /// When the approval cannot be kept.
-    pub fn approve_hook(&self, name: &str, config: &HookConfig) -> Result<(), String> {
+    pub fn approve_hook(
+        &self,
+        name: &str,
+        config: &HookConfig,
+        shown: &str,
+    ) -> Result<bool, String> {
+        let spec = config.launch_spec();
+        if fingerprint(&spec) != shown {
+            return Ok(false);
+        }
         let mut approved = self.read();
-        approved
-            .hooks
-            .insert(name.to_string(), config.launch_spec());
-        self.write(&approved)
+        approved.hooks.insert(name.to_string(), spec);
+        self.write(&approved).map(|()| true)
     }
 
     /// Whether the project's command `name` may run as `spec` describes it
@@ -138,6 +163,18 @@ impl Approvals {
     }
 }
 
+/// The fingerprint of a launch spec ([`McpServerConfig::launch_spec`],
+/// [`HookConfig::launch_spec`]): its SHA-256 in hex, so no other spec a
+/// project could write has the same one.
+#[must_use]
+pub fn fingerprint(spec: &str) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(spec.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn write_file(path: &Path, approved: &Approved) -> Result<(), String> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)
@@ -177,7 +214,8 @@ mod tests {
         assert!(servers["p"].withheld);
         assert!(!servers["mine"].withheld, "the user's own servers start");
 
-        approvals.approve_mcp("p", &servers["p"]).unwrap();
+        let shown = servers["p"].fingerprint();
+        assert!(approvals.approve_mcp("p", &servers["p"], &shown).unwrap());
         approvals.withhold_mcp(&mut servers);
         assert!(!servers["p"].withheld);
 
@@ -205,7 +243,9 @@ mod tests {
         let hooks = BTreeMap::from([("check".to_string(), hook.clone())]);
         let (run, held) = approvals.split_hooks(hooks.clone());
         assert!(run.is_empty() && held.len() == 1);
-        approvals.approve_hook("check", &hook).unwrap();
+        assert!(approvals
+            .approve_hook("check", &hook, &hook.fingerprint())
+            .unwrap());
         let (run, held) = approvals.split_hooks(hooks);
         assert!(run.len() == 1 && held.is_empty());
         // Approved for some tools, it is asked about again for every tool.
@@ -231,6 +271,48 @@ mod tests {
     fn without_a_place_nothing_is_approved() {
         let approvals = Approvals::default();
         assert!(!approvals.mcp_approved("p", &server("x")));
-        assert!(approvals.approve_mcp("p", &server("x")).is_err());
+        let shown = server("x").fingerprint();
+        assert!(approvals.approve_mcp("p", &server("x"), &shown).is_err());
+    }
+
+    /// A launch changed after it was shown is not approved: what is kept is
+    /// only ever what the user saw.
+    #[test]
+    fn only_the_launch_that_was_shown_is_approved() {
+        let dir = tempfile::tempdir().unwrap();
+        let approvals = Approvals::new(Some(dir.path().join("approved.toml")));
+        let shown = server("npx").fingerprint();
+        let changed = McpServerConfig {
+            args: vec!["evil".into()],
+            ..server("npx")
+        };
+        assert!(!approvals.approve_mcp("p", &changed, &shown).unwrap());
+        assert!(!approvals.mcp_approved("p", &changed));
+        assert!(!approvals.mcp_approved("p", &server("npx")));
+        assert!(!approvals.approve_mcp("p", &server("npx"), "").unwrap());
+        assert!(approvals.approve_mcp("p", &server("npx"), &shown).unwrap());
+        assert!(approvals.mcp_approved("p", &server("npx")));
+
+        let hook = HookConfig {
+            event: crate::hooks::HookEvent::BeforeToolCall,
+            command: "./check.sh".into(),
+            args: Vec::new(),
+            tools: Vec::new(),
+            timeout_secs: 30,
+            enabled: true,
+            from_project: true,
+        };
+        let wider = HookConfig {
+            tools: vec!["*".into()],
+            ..hook.clone()
+        };
+        assert!(!approvals
+            .approve_hook("check", &wider, &hook.fingerprint())
+            .unwrap());
+        assert!(!approvals.hook_approved("check", &wider));
+        assert!(approvals
+            .approve_hook("check", &hook, &hook.fingerprint())
+            .unwrap());
+        assert!(approvals.hook_approved("check", &hook));
     }
 }

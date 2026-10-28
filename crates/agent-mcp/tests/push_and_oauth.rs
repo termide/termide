@@ -369,6 +369,7 @@ fn a_change_pushed_on_the_stream_brings_the_new_tools() {
             status: McpStatus::Ready { tools: 3 },
             sign_in: McpSignIn::None,
             launch: connections.status()[0].launch.clone(),
+            fingerprint: connections.status()[0].fingerprint.clone(),
         }]
     );
 }
