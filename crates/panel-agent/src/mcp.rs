@@ -227,9 +227,10 @@ impl AgentPanel {
             .map(|server| {
                 let held = server.status == McpStatus::NeedsApproval;
                 if held {
+                    // Ticking approves; what it approves is said beside it.
                     return ChecklistGroup {
                         name: t.agent_toolset_mcp_fmt(&server.name),
-                        note: String::new(),
+                        note: server.launch,
                         buttons: Vec::new(),
                         switch: Some(ChecklistSwitch {
                             key: format!("{TRUST_SWITCH}{}", server.name),
