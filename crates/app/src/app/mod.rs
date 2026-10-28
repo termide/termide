@@ -899,7 +899,27 @@ impl App {
         }
     }
 
+    /// Run the event loop until the user quits, then shut down: save what
+    /// quitting leaves and stop the debug session and the plugins. The
+    /// shutdown runs however the loop ended, an error included; the error is
+    /// returned after it.
     pub fn run<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        render_fn: impl Fn(&mut ratatui::Frame<'_>, &mut AppState, &mut LayoutManager),
+    ) -> Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
+        let result = self.run_loop(terminal, render_fn);
+        if let Err(e) = &result {
+            log::error!("The event loop failed: {e:?}");
+        }
+        self.shut_down();
+        result
+    }
+
+    fn run_loop<B: Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
         render_fn: impl Fn(&mut ratatui::Frame<'_>, &mut AppState, &mut LayoutManager),
@@ -1031,13 +1051,16 @@ impl App {
                 self.state.needs_redraw = false;
             }
         }
+        Ok(())
+    }
 
+    /// What every end of [`Self::run`] goes through.
+    fn shut_down(&mut self) {
         self.save_parked_layouts();
         self.sync_editor_breakpoints();
         termide_debug::breakpoints::flush();
         self.end_debug_session();
         self.shutdown_plugins();
-        Ok(())
     }
 
     /// Per-tick background polling batch, run once for every `Event::Tick`.

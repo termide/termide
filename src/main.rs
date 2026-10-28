@@ -671,9 +671,15 @@ fn main() -> Result<()> {
     }
     restore_terminal();
 
-    // Print error if there was one
+    // A failed run must not look like a clean exit: `EDITOR=termide git
+    // commit` would take the message as edited. The journal has the error
+    // already; stderr is the terminal's again after `restore_terminal`.
     if let Err(err) = result {
-        log::error!("Error: {:?}", err);
+        eprintln!("termide: {err:#}");
+        // `exit` runs no destructors: stop the shells and language servers
+        // the panels own first.
+        drop(app);
+        std::process::exit(1);
     }
 
     Ok(())
