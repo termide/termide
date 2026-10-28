@@ -38,6 +38,10 @@ pub struct TextBuffer {
     file_path: Option<PathBuf>,
     /// Modified flag
     modified: bool,
+    /// The content as last loaded or saved. Undo and redo compare against it
+    /// to tell whether the buffer is back to that state; cloning a rope
+    /// shares its nodes, so keeping it costs only what edits replace.
+    saved: Rope,
     /// Line ending type (for saving)
     line_ending: LineEnding,
     /// Edit history for undo/redo
@@ -63,6 +67,7 @@ impl TextBuffer {
             rope: Rope::new(),
             file_path: None,
             modified: false,
+            saved: Rope::new(),
             line_ending: LineEnding::LF,
             history: History::new(),
             edit_version: 0,
@@ -76,6 +81,7 @@ impl TextBuffer {
     /// Create buffer from Rope (for use from Editor::from_text)
     pub fn from_rope(rope: Rope) -> Self {
         Self {
+            saved: rope.clone(),
             rope,
             file_path: None,
             modified: false,
@@ -91,8 +97,10 @@ impl TextBuffer {
 
     /// Create buffer from text string.
     pub fn from_text(text: &str) -> Self {
+        let rope = Rope::from_str(text);
         Self {
-            rope: Rope::from_str(text),
+            saved: rope.clone(),
+            rope,
             file_path: None,
             modified: false,
             line_ending: LineEnding::LF,
@@ -125,6 +133,7 @@ impl TextBuffer {
         let rope = Rope::from_str(&contents);
 
         Ok(Self {
+            saved: rope.clone(),
             rope,
             file_path: Some(path.to_path_buf()),
             modified: false,
@@ -179,28 +188,8 @@ impl TextBuffer {
 
         self.file_path = Some(path.to_path_buf());
         self.modified = false;
+        self.saved = self.rope.clone();
         Ok(())
-    }
-
-    /// Check if buffer content differs from file on disk
-    fn is_content_modified(&self) -> Result<bool> {
-        // If no file path, use current modified flag
-        let Some(path) = &self.file_path else {
-            return Ok(self.modified);
-        };
-
-        // Try to read file content
-        match std::fs::read_to_string(path) {
-            Ok(file_content) => {
-                // Compare buffer content with file content
-                let buffer_content = self.rope.to_string();
-                Ok(buffer_content != file_content)
-            }
-            Err(_) => {
-                // If can't read file (deleted, permissions, etc.), keep current flag
-                Ok(self.modified)
-            }
-        }
     }
 
     /// Get line count
@@ -623,6 +612,9 @@ impl TextBuffer {
         self.rope.insert(len, text);
         self.edit_version += 1;
         // Don't mark as modified - this is for internal use (log viewer)
+        if !self.modified {
+            self.saved = self.rope.clone();
+        }
     }
 
     /// Line ending type detected on file load.
@@ -650,8 +642,8 @@ impl TextBuffer {
     pub fn undo(&mut self) -> Result<Option<Cursor>> {
         if let Some(action) = self.history.undo() {
             let cursor = self.apply_action(&action)?;
-            // Check if buffer content actually differs from file
-            self.modified = self.is_content_modified()?;
+            // Back at the saved content means nothing is left to save.
+            self.modified = self.rope != self.saved;
             Ok(Some(cursor))
         } else {
             Ok(None)
@@ -662,8 +654,8 @@ impl TextBuffer {
     pub fn redo(&mut self) -> Result<Option<Cursor>> {
         if let Some(action) = self.history.redo() {
             let cursor = self.apply_action(&action)?;
-            // Check if buffer content actually differs from file
-            self.modified = self.is_content_modified()?;
+            // Back at the saved content means nothing is left to save.
+            self.modified = self.rope != self.saved;
             Ok(Some(cursor))
         } else {
             Ok(None)
@@ -1186,6 +1178,46 @@ mod lsp_change_tests {
     fn pure_files_keep_their_line_endings() {
         assert_eq!(round_trip("a\r\nb"), (LineEnding::CRLF, "a\r\nb".into()));
         assert_eq!(round_trip("a\nb\n"), (LineEnding::LF, "a\nb\n".into()));
+    }
+
+    #[test]
+    fn undo_back_to_the_loaded_content_of_a_crlf_file_clears_modified() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "a\r\nb\r\n").unwrap();
+        let mut buf = TextBuffer::from_file(&path).unwrap();
+
+        buf.insert(&Cursor::at(0, 1), "x").unwrap();
+        assert!(buf.is_modified());
+        buf.undo().unwrap();
+        assert!(!buf.is_modified());
+        buf.redo().unwrap();
+        assert!(buf.is_modified());
+    }
+
+    #[test]
+    fn undo_compares_with_the_last_save_not_the_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.txt");
+        std::fs::write(&path, "one").unwrap();
+        let mut buf = TextBuffer::from_file(&path).unwrap();
+        buf.insert(&Cursor::at(0, 3), " two").unwrap();
+        buf.save().unwrap();
+
+        // The disk changing behind the buffer's back does not matter.
+        std::fs::write(&path, "one").unwrap();
+        buf.undo().unwrap();
+        assert!(buf.is_modified());
+        buf.redo().unwrap();
+        assert!(!buf.is_modified());
+    }
+
+    #[test]
+    fn undo_back_to_the_initial_text_of_an_untitled_buffer_clears_modified() {
+        let mut buf = TextBuffer::new();
+        buf.insert(&Cursor::at(0, 0), "hi").unwrap();
+        buf.undo().unwrap();
+        assert!(!buf.is_modified());
     }
 
     #[test]
