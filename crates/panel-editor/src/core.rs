@@ -271,6 +271,13 @@ impl Editor {
     /// Assign a filename to this unsaved buffer if it doesn't have one yet.
     /// Called before the layout is saved so that to_state() has a stable name.
     pub fn ensure_unsaved_buffer_file(&mut self) {
+        // A file whose changes are saved needs no backup any more — one kept
+        // from before a Save As, or from an end without asking. Dropping the
+        // name keeps later changes from being backed up behind the user's
+        // back, and the next layout save deletes the file.
+        if self.file_path().is_some() && !self.buffer_is_modified() {
+            self.file_state.unsaved_buffer_file = None;
+        }
         if self.file_path().is_none()
             && self.buffer_is_modified()
             && self.file_state.unsaved_buffer_file.is_none()
@@ -278,6 +285,40 @@ impl Editor {
             self.file_state.unsaved_buffer_file =
                 Some(termide_project::generate_unsaved_filename());
         }
+    }
+
+    /// Assign a backup file name to a buffer with unsaved changes, whether or
+    /// not it has a file of its own, so that the next layout save keeps the
+    /// changes (see `to_state`). For a termide that has to end without
+    /// asking, where an ordinary quit would ask about them.
+    ///
+    /// Returns whether the buffer has changes to keep.
+    pub fn ensure_unsaved_changes_backup(&mut self) -> bool {
+        if !self.buffer_is_modified() {
+            return false;
+        }
+        if self.file_state.unsaved_buffer_file.is_none() {
+            self.file_state.unsaved_buffer_file =
+                Some(termide_project::generate_unsaved_filename());
+        }
+        true
+    }
+
+    /// Put unsaved changes kept in a backup back over the file just opened:
+    /// the buffer becomes `text`, modified, and undo goes back to what is on
+    /// disk.
+    pub fn restore_unsaved_changes(&mut self, text: &str) -> Result<()> {
+        if self.buffer.text() == text {
+            return Ok(());
+        }
+        let (_, end) = crate::selection::select_all(&self.buffer);
+        let start = Cursor::new();
+        self.buffer.delete_range(&start, &end)?;
+        self.buffer.insert(&start, text)?;
+        self.cursor = start;
+        self.selection = None;
+        self.invalidate_cache_after_edit(0, true);
+        Ok(())
     }
 
     /// Check if buffer has unsaved modifications

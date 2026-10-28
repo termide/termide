@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod atomic;
 mod maintenance;
 pub use maintenance::*;
 mod open_list;
@@ -399,6 +400,15 @@ impl ProjectLayout {
         Ok(layout)
     }
 
+    /// Load the saved layout of a project to restore it, as [`Self::load`]
+    /// does, but move a file that cannot be parsed — damaged, or written by
+    /// a newer termide — aside first, so that the default layout the caller
+    /// falls back to does not overwrite it at the next save. The error names
+    /// where the file went.
+    pub fn load_for_restore(project_root: &Path) -> Result<Self> {
+        load_or_set_aside(&Self::get_project_path(project_root)?)
+    }
+
     /// Save this layout for a specific project
     pub fn save(&self, project_root: &Path) -> Result<()> {
         let project_dir = Self::get_project_dir(project_root)?;
@@ -414,16 +424,80 @@ impl ProjectLayout {
         let path = project_dir.join("session.toml");
         let contents = toml::to_string_pretty(self).context("Failed to serialize layout")?;
 
-        fs::write(&path, contents)
+        atomic::write_atomic(&path, contents.as_bytes())
             .with_context(|| format!("Failed to write layout file: {}", path.display()))?;
 
         Ok(())
     }
 }
 
+/// Parse the layout file at `path`; when it is there but unreadable as a
+/// layout, rename it to `session.toml.broken-<local time>` beside itself.
+fn load_or_set_aside(path: &Path) -> Result<ProjectLayout> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("Failed to read layout file: {}", path.display()))?;
+    let error = match toml::from_str::<ProjectLayout>(&contents) {
+        Ok(layout) => return Ok(layout),
+        Err(e) => e,
+    };
+    let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f");
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(format!(".broken-{stamp}"));
+    let aside = PathBuf::from(aside);
+    match fs::rename(path, &aside) {
+        Ok(()) => Err(anyhow::anyhow!(
+            "Failed to parse layout file {} ({}); it was kept as {}",
+            path.display(),
+            error.message().trim(),
+            aside.display()
+        )),
+        Err(e) => Err(anyhow::anyhow!(
+            "Failed to parse layout file {} ({}), and could not move it aside: {e}",
+            path.display(),
+            error.message().trim()
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A layout that does not parse is moved aside, not left to be
+    /// overwritten by the default layout's first save; a readable one and a
+    /// missing one are left alone.
+    #[test]
+    fn an_unreadable_layout_is_moved_aside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("session.toml");
+        let names = || {
+            let mut names: Vec<String> = fs::read_dir(tmp.path())
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            names
+        };
+
+        assert!(load_or_set_aside(&path).is_err());
+        assert!(names().is_empty());
+
+        fs::write(&path, "focused_group = 0\npanel_groups = []\n").unwrap();
+        assert!(load_or_set_aside(&path).is_ok());
+        assert_eq!(names(), ["session.toml"]);
+
+        let broken = "focused_group = 0\n[[panel_groups]\n";
+        fs::write(&path, broken).unwrap();
+        let error = load_or_set_aside(&path).unwrap_err().to_string();
+        let left = names();
+        assert_eq!(left.len(), 1, "{left:?}");
+        assert!(left[0].starts_with("session.toml.broken-"), "{left:?}");
+        assert!(error.contains(&left[0]), "{error}");
+        assert_eq!(
+            fs::read_to_string(tmp.path().join(&left[0])).unwrap(),
+            broken
+        );
+    }
 
     #[derive(Serialize, Deserialize)]
     struct Panels {

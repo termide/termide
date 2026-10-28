@@ -899,7 +899,38 @@ impl App {
         }
     }
 
+    /// Run the event loop until the user quits, then shut down: save what
+    /// quitting leaves and stop the debug session and the plugins. The
+    /// shutdown runs however the loop ended — a quit, a termination signal
+    /// (see [`crate::termination`]) or an error, which is returned after it.
+    /// Ended without a quit, nobody confirmed discarding anything, so every
+    /// unsaved change is kept for the next start first, before the slower
+    /// teardown: `termide --kill` allows a few seconds.
     pub fn run<B: Backend>(
+        &mut self,
+        terminal: &mut Terminal<B>,
+        render_fn: impl Fn(&mut ratatui::Frame<'_>, &mut AppState, &mut LayoutManager),
+    ) -> Result<()>
+    where
+        B::Error: Send + Sync + 'static,
+    {
+        let result = self.run_loop(terminal, render_fn);
+        crate::termination::loop_stopped();
+        if let Some(signal) = crate::termination::ended_by() {
+            log::warn!(
+                "{} received: ending without asking, unsaved changes are kept",
+                crate::termination::name(signal)
+            );
+        }
+        if let Err(e) = &result {
+            log::error!("The event loop failed: {e:?}");
+        }
+        let quit = self.state.should_quit;
+        self.shut_down(quit);
+        result
+    }
+
+    fn run_loop<B: Backend>(
         &mut self,
         terminal: &mut Terminal<B>,
         render_fn: impl Fn(&mut ratatui::Frame<'_>, &mut AppState, &mut LayoutManager),
@@ -921,7 +952,7 @@ impl App {
         }
         self.sync_open_projects();
 
-        while !self.state.should_quit {
+        while !self.state.should_quit && crate::termination::received().is_none() {
             // Process events
             match self.event_handler.next()? {
                 Event::Key(key) => {
@@ -1031,13 +1062,21 @@ impl App {
                 self.state.needs_redraw = false;
             }
         }
+        Ok(())
+    }
 
-        self.save_parked_layouts();
+    /// What every end of [`Self::run`] goes through; `quit` when the user
+    /// quit, and was asked about unsaved changes then.
+    fn shut_down(&mut self, quit: bool) {
+        if quit {
+            self.save_parked_layouts();
+        } else {
+            self.keep_unsaved_changes();
+        }
         self.sync_editor_breakpoints();
         termide_debug::breakpoints::flush();
         self.end_debug_session();
         self.shutdown_plugins();
-        Ok(())
     }
 
     /// Per-tick background polling batch, run once for every `Event::Tick`.

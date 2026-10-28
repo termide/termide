@@ -64,7 +64,7 @@ struct Cli {
     force: bool,
 
     /// End a detached instance, with every shell and job inside it, and exit.
-    /// Unsaved changes in it are lost.
+    /// Unsaved changes in it are kept for its next start.
     #[cfg(unix)]
     #[arg(long, value_name = "ID")]
     kill: Option<String>,
@@ -590,6 +590,13 @@ fn main() -> Result<()> {
         log::warn!("Could not install the reattach handler: {e:#}");
     }
 
+    // SIGHUP (the terminal closed), SIGTERM (`termide --kill`) and SIGINT end
+    // the run through its shutdown, keeping unsaved changes, instead of
+    // killing it outright. See `termide_app::termination`.
+    if let Err(e) = termide_app::termination::install_handlers() {
+        log::warn!("Could not install the termination signal handlers: {e}");
+    }
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
@@ -647,16 +654,7 @@ fn main() -> Result<()> {
     // layout (restoring or overwriting it when editing e.g. a commit message
     // would be surprising and could clobber the real layout).
     if cli.files.is_empty() {
-        // Try to load the project layout, fallback to default layout on error
-        if let Err(e) = app.load_layout() {
-            // Layout file doesn't exist or is corrupted - use default layout.
-            // Surface the reason in the Journal so a corrupted layout is
-            // diagnosable instead of silently snapping to defaults.
-            log::warn!(
-                "Could not load the project layout ({e}); starting with the default layout."
-            );
-            app.setup_default_layout();
-        }
+        app.load_layout_or_default();
         if cli.restore {
             app.restore_projects_on_start();
         }
@@ -680,9 +678,25 @@ fn main() -> Result<()> {
     }
     restore_terminal();
 
-    // Print error if there was one
-    if let Err(err) = result {
-        log::error!("Error: {:?}", err);
+    // A run ended by a signal or an error must not look like a clean exit:
+    // `EDITOR=termide git commit` would take the message as edited. The
+    // journal has the reason already; stderr is the terminal's again after
+    // `restore_terminal` — unless the terminal is gone, hence no `eprintln!`,
+    // which panics when the write fails.
+    let status = match (termide_app::termination::ended_by(), &result) {
+        (Some(signal), _) => Some(termide_app::termination::exit_status(signal)),
+        (None, Err(err)) => {
+            use std::io::Write;
+            let _ = writeln!(io::stderr(), "termide: {err:#}");
+            Some(1)
+        }
+        (None, Ok(())) => None,
+    };
+    if let Some(status) = status {
+        // `exit` runs no destructors: stop the shells and language servers
+        // the panels own first.
+        drop(app);
+        std::process::exit(status);
     }
 
     Ok(())

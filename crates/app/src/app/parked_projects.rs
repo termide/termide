@@ -746,6 +746,15 @@ impl App {
         Some(message)
     }
 
+    /// Keep the unsaved changes of the parked projects with their layouts,
+    /// as [`Self::keep_unsaved_changes`] does for all projects.
+    pub(super) fn keep_parked_unsaved_changes(&mut self) {
+        let persist = self.persist_layout;
+        for (root, parked) in self.open_projects.parked_mut() {
+            super::project_layout::keep_unsaved_changes_of(root, &mut parked.layout, persist);
+        }
+    }
+
     /// Save the layouts of the parked projects, as quitting leaves them.
     pub(super) fn save_parked_layouts(&mut self) {
         if !self.persist_layout {

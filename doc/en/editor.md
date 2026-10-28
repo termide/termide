@@ -66,6 +66,25 @@ with unsaved work keeps it: the title shows `[changed on disk]`, saving is
 refused, and you choose between `Ctrl+Shift+R` to take the disk version
 (discarding your changes) and `Ctrl+Shift+S` to save yours elsewhere.
 
+## Ending termide from outside
+
+Quitting asks about unsaved changes. When termide is ended from outside
+instead — its terminal window closed or the SSH connection dropped (SIGHUP),
+`termide --kill` or `kill` (SIGTERM), SIGINT from another process — there is
+nobody to ask, so nothing is discarded: each buffer with unsaved changes, file
+or unnamed, is written to a backup in the project's state directory, the
+layouts of all open projects are saved, and termide exits with status 128 plus
+the signal's number (129 for SIGHUP), never 0. A crash of the event loop ends
+the same way, with status 1 and the error on stderr.
+
+On the next start the file reopens with your changes on top of it: the buffer
+shows as modified and the file on disk is untouched until you save, so undo
+goes back to the disk version. If the file is gone, the changes open in an
+editor of their own. The **Journal** lists what was kept and what was
+restored. Started with file arguments (as `$EDITOR`), termide saves no layout,
+so the changes are recovered as separate editors the next time termide opens
+that directory as a project.
+
 ## Search and Replace
 
 ### Inline Search Bar (Ctrl+F)

@@ -23,10 +23,27 @@ impl App {
         save_layout_of(&self.project_root, &mut self.layout_manager)
     }
 
+    /// Restore the current project's saved layout, or set up the default
+    /// one when there is none or it cannot be read. Either way the unsaved
+    /// buffers kept in the project's directory are brought back: with no
+    /// layout to name them, the next save would delete them as stale.
+    pub fn load_layout_or_default(&mut self) {
+        if let Err(e) = self.load_layout() {
+            // Surface the reason in the Journal so a damaged layout is
+            // diagnosable instead of silently snapping to defaults.
+            log::warn!(
+                "Could not load the project layout ({e:#}); starting with the default layout."
+            );
+            self.setup_default_layout();
+            self.recover_orphaned_buffers();
+        }
+    }
+
     /// Load the current project's layout from its file and restore it
     pub fn load_layout(&mut self) -> Result<()> {
-        // Load the layout of this project
-        let layout = termide_project::ProjectLayout::load(&self.project_root)?;
+        // Load the layout of this project; one that cannot be parsed is
+        // moved aside rather than left for the next save to overwrite.
+        let layout = termide_project::ProjectLayout::load_for_restore(&self.project_root)?;
 
         // Get the project directory for restoring temporary buffers
         let project_dir = termide_project::ProjectLayout::get_project_dir(&self.project_root)?;
@@ -68,6 +85,19 @@ impl App {
             }
         }
 
+        self.recover_orphaned_buffers();
+
+        // A restored outline is empty until something pushes the editor's
+        // content to it; a freshly loaded buffer has no edits for the live
+        // sync to notice.
+        self.resync_outline();
+
+        Ok(())
+    }
+
+    /// Open the unsaved buffers in the project's directory that no saved
+    /// layout refers to as new editor panels.
+    fn recover_orphaned_buffers(&mut self) {
         // Restore orphaned buffer files (not referenced in the layout anymore).
         // The recovery itself is automatic — orphans appear as new
         // editor panels so user data from a crashed run isn't lost
@@ -75,6 +105,10 @@ impl App {
         // tabs had no way to tell what they were. Surface a Journal
         // entry per restored buffer plus a single summary so the
         // information is one panel open away.
+        let Ok(project_dir) = termide_project::ProjectLayout::get_project_dir(&self.project_root)
+        else {
+            return;
+        };
         match termide_project::restore_orphaned_buffers(&project_dir) {
             Ok(orphaned_files) => {
                 let mut restored = 0usize;
@@ -103,13 +137,15 @@ impl App {
             }
             Err(e) => log::warn!("Failed to restore orphaned buffers: {}", e),
         }
+    }
 
-        // A restored outline is empty until something pushes the editor's
-        // content to it; a freshly loaded buffer has no edits for the live
-        // sync to notice.
-        self.resync_outline();
-
-        Ok(())
+    /// Keep every unsaved change, in the current project and the parked
+    /// ones, for the next start, together with the layouts: for an end
+    /// nobody was asked about (a signal, an error).
+    pub(super) fn keep_unsaved_changes(&mut self) {
+        let persist = self.persist_layout;
+        keep_unsaved_changes_of(&self.project_root, &mut self.layout_manager, persist);
+        self.keep_parked_unsaved_changes();
     }
 
     /// Auto-save the project layout (ignores errors to not disrupt user experience)
@@ -153,4 +189,46 @@ pub(super) fn save_layout_of(
 
     log::info!("Project layout saved");
     Ok(())
+}
+
+/// Back up the unsaved changes of every editor of the project at
+/// `project_root`, files and unnamed buffers alike, and save its layout.
+///
+/// The layout names the backups, so the next start reopens each file with its
+/// changes. Without layout persistence (termide as `$EDITOR`) no layout is
+/// written: the backups are left in the project's directory unnamed, where
+/// the next ordinary start there recovers them as editors of their own.
+pub(super) fn keep_unsaved_changes_of(
+    project_root: &std::path::Path,
+    layout_manager: &mut LayoutManager,
+    persist_layout: bool,
+) {
+    let mut kept = 0usize;
+    for group in &mut layout_manager.panel_groups {
+        for panel in group.panels_mut() {
+            if let Some(editor) = panel.as_editor_mut() {
+                if editor.ensure_unsaved_changes_backup() {
+                    kept += 1;
+                    log::info!(
+                        "Keeping the unsaved changes to {} as {}",
+                        editor
+                            .file_path()
+                            .map_or_else(|| "an unnamed buffer".to_string(), |p| format!("{p:?}")),
+                        editor.unsaved_buffer_file().unwrap_or_default()
+                    );
+                }
+            }
+        }
+    }
+    if persist_layout {
+        if let Err(e) = save_layout_of(project_root, layout_manager) {
+            log::error!("Failed to save the layout of {project_root:?}: {e:#}");
+        }
+    } else if kept > 0 {
+        match termide_project::ProjectLayout::get_project_dir(project_root) {
+            // Serialising writes the backups; the layout itself is dropped.
+            Ok(project_dir) => drop(layout_manager.to_state(&project_dir)),
+            Err(e) => log::error!("Nowhere to keep unsaved changes: {e:#}"),
+        }
+    }
 }

@@ -17,6 +17,7 @@ pub mod projects_menu;
 pub mod state;
 mod state_operations;
 mod state_types;
+pub mod termination;
 
 // Re-export main types for convenience
 pub use app::agent_panel::{run_agent_headless, run_recall, web_browser_shown, HeadlessOutput};
