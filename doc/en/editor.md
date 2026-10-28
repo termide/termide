@@ -289,7 +289,7 @@ When working in the editor, the status bar displays:
 - File name and modification indicator (*)
 - Current cursor position (line:column)
 - Tab size (`Tab: N`) — **clickable**: opens a small input modal that overrides `tab_size` for this editor panel only. The override wins over the global `[editor].tab_size` and survives the per-frame config resync, but doesn't touch `config.toml`. Accepts 1..=16; empty/invalid input is ignored.
-- Line ending format (LF / CRLF) and encoding (UTF-8)
+- Line ending format (LF / CRLF) and encoding (UTF-8). A file with mixed line endings is saved with the one most of its lines use (LF on a tie), applied to every line
 - Search information (number of matches)
 - File type (plain text / read-only)
 

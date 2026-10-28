@@ -11,6 +11,7 @@ use termide_buffer::SearchState;
 
 use termide_core::{PanelEvent, Searchable};
 use termide_modal::{FindBar, FindBarAction, FindBarBtn, FindBarConfig, FindField};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::search;
 
@@ -215,7 +216,7 @@ impl Editor {
                     &mut search_state.matches,
                     &match_cursor,
                     match_len,
-                    replace_text.chars().count(),
+                    replace_text.graphemes(true).count(),
                 );
 
                 // Update current match index

@@ -144,4 +144,41 @@ mod tests {
         std::fs::remove_file(&path).ok();
         std::fs::remove_file(&bak).ok();
     }
+
+    #[test]
+    fn save_never_overwrites_an_existing_backup() {
+        use crossterm::event::{KeyEvent, KeyModifiers};
+        let path = std::env::temp_dir().join(format!("termide_hex_bak_{}.bin", std::process::id()));
+        let sibling = |suffix: &str| {
+            let mut name = path.clone().into_os_string();
+            name.push(suffix);
+            std::path::PathBuf::from(name)
+        };
+        std::fs::write(&path, b"ABCDE").unwrap();
+        std::fs::write(sibling(".bak"), b"older backup").unwrap();
+
+        let mut p = BinaryPanel::new_editable(path.clone()).unwrap();
+        p.zone = Zone::Ascii;
+        p.try_edit(KeyEvent::new(KeyCode::Char('X'), KeyModifiers::NONE));
+        let first = p.save().unwrap();
+        p.try_edit(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::NONE));
+        let second = p.save().unwrap();
+
+        assert_eq!(std::fs::read(sibling(".bak")).unwrap(), b"older backup");
+        assert_eq!(first, Some(sibling(".bak.1")));
+        assert_eq!(std::fs::read(sibling(".bak.1")).unwrap(), b"ABCDE");
+        assert_eq!(second, Some(sibling(".bak.2")));
+        assert_eq!(std::fs::read(sibling(".bak.2")).unwrap(), b"XBCDE");
+        assert_eq!(std::fs::read(&path).unwrap(), b"XYCDE");
+        assert_eq!(p.save().unwrap(), None, "nothing left to save");
+
+        for f in [
+            path.clone(),
+            sibling(".bak"),
+            sibling(".bak.1"),
+            sibling(".bak.2"),
+        ] {
+            std::fs::remove_file(f).ok();
+        }
+    }
 }

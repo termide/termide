@@ -441,9 +441,14 @@ impl App {
                                 .downcast_mut::<termide_panel_binary::BinaryPanel>()
                             {
                                 match bin.save() {
-                                    Ok(()) => {
-                                        self.state.set_info("Saved (backup: .bak)".to_string())
+                                    Ok(Some(bak)) => {
+                                        let name = bak
+                                            .file_name()
+                                            .map(|n| n.to_string_lossy().into_owned())
+                                            .unwrap_or_default();
+                                        self.state.set_info(format!("Saved (backup: {name})"))
                                     }
+                                    Ok(None) => {}
                                     Err(e) => self.show_error_modal(format!("Save failed: {e}")),
                                 }
                             }
