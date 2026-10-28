@@ -134,6 +134,7 @@ impl FileManager {
         let placeholder = tree::TreeEntry {
             file_entry: FileEntry {
                 name: "…".to_string(),
+                os_name: None,
                 is_dir: false,
                 is_symlink: false,
                 is_executable: false,
@@ -183,6 +184,7 @@ impl FileManager {
         let placeholder = tree::TreeEntry {
             file_entry: FileEntry {
                 name: "…".to_string(),
+                os_name: None,
                 is_dir: false,
                 is_symlink: false,
                 is_executable: false,
@@ -310,7 +312,7 @@ impl FileManager {
                 let children: Vec<tree::TreeEntry> = file_entries
                     .into_iter()
                     .map(|fe| {
-                        let full_path = dir_path_owned.join(&fe.name);
+                        let full_path = dir_path_owned.join(fe.path_name());
                         let expanded = if fe.is_dir {
                             let is_exp = self.expanded_dirs.contains(&full_path);
                             Some(is_exp)
@@ -347,6 +349,7 @@ impl FileManager {
                 let placeholder = tree::TreeEntry {
                     file_entry: FileEntry {
                         name: format!("<error: {e}>"),
+                        os_name: None,
                         is_dir: false,
                         is_symlink: false,
                         is_executable: false,

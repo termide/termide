@@ -48,6 +48,14 @@ pub trait VfsProvider: Send + Sync {
     /// Get metadata for a path.
     fn metadata(&self, path: &VfsPath) -> VfsOperation<VfsMetadata>;
 
+    /// Get metadata for a path without following a final symlink: a link
+    /// reports `VfsFileType::Symlink`. Recursive deletes must decide from
+    /// this, never from `metadata`, or they descend into a link's target.
+    /// Providers without symlinks keep the default, which is `metadata`.
+    fn symlink_metadata(&self, path: &VfsPath) -> VfsOperation<VfsMetadata> {
+        self.metadata(path)
+    }
+
     // === File operations ===
 
     /// Read entire file contents into memory.

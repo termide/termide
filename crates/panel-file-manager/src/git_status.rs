@@ -91,6 +91,7 @@ impl FileManager {
                         tree::TreeEntry {
                             file_entry: FileEntry {
                                 name: deleted_name,
+                                os_name: None,
                                 is_dir: false,
                                 is_symlink: false,
                                 is_executable: false,

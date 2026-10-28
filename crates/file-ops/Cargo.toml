@@ -9,11 +9,12 @@ description = "Unified file operations system for termide with queue, progress, 
 
 [dependencies]
 dunce.workspace = true
+filetime = "0.2"
 thiserror = "2.0"
 log = "0.4"
 termide-vfs = { path = "../vfs" }
 termide-i18n = { path = "../i18n" }
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true
 zip = { version = "9.0", default-features = false, features = ["deflate-flate2", "aes-crypto"] }

@@ -45,7 +45,10 @@ pub(crate) fn read_dir_entries_standalone(
     if let Ok(read_dir) = fs::read_dir(dir_path) {
         for entry in read_dir.flatten() {
             if let Ok(metadata) = entry.metadata() {
-                let name = entry.file_name().to_string_lossy().into_owned();
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy().into_owned();
+                // Keep the real name for paths when display had to replace bytes.
+                let os_name = file_name.to_str().is_none().then_some(file_name);
 
                 if !show_hidden && name.starts_with('.') {
                     continue;
@@ -107,6 +110,7 @@ pub(crate) fn read_dir_entries_standalone(
 
                 entries.push(FileEntry {
                     name,
+                    os_name,
                     is_dir,
                     is_symlink,
                     is_executable,
@@ -194,6 +198,7 @@ impl FileManager {
         if self.current_path.parent().is_some() || termide_vfs::is_drive_root(&self.current_path) {
             entries.push(FileEntry {
                 name: "..".to_string(),
+                os_name: None,
                 is_dir: true,
                 is_symlink: false,
                 is_executable: false,
@@ -263,7 +268,7 @@ impl FileManager {
                         .unwrap_or(&self.current_path)
                         .to_path_buf()
                 } else {
-                    self.current_path.join(&fe.name)
+                    self.current_path.join(fe.path_name())
                 };
                 let expanded = if fe.is_dir && fe.name != ".." {
                     let is_expanded = self.expanded_dirs.contains(&full_path);
@@ -364,6 +369,7 @@ impl FileManager {
         if self.vfs.current_path().parent().is_some() || self.vfs.at_archive_root() {
             entries.push(FileEntry {
                 name: "..".to_string(),
+                os_name: None,
                 is_dir: true,
                 is_symlink: false,
                 is_executable: false,

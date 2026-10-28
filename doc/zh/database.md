@@ -38,7 +38,8 @@ Termide 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** �
 
 免密码的认证方式（PostgreSQL 的 `~/.pgpass`/peer/trust、Unix 套接字、
 `PGPASSWORD` 等）照常可用。写入 URL 的密码（`postgres://user:secret@host/db`）
-仍会被使用。将这样的 URL 保存为书签时，Termide 会提议将密码移入密码库。
+仍会被使用，但不会随布局保存：恢复面板时，它会如上所述从密码库获取密码或询问密码。
+将这样的 URL 保存为书签时，Termide 会提议将密码移入密码库。
 
 ## 布局
 

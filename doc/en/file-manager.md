@@ -83,6 +83,14 @@ asking to overwrite the original; moving an item onto itself does nothing.
 A directory cannot be copied or moved into itself or any of its
 subdirectories — the operation is refused before anything is written.
 
+A local copy is written next to its destination under a hidden temporary
+name and replaces the destination only once it is complete. Overwriting
+a file therefore never loses it: a cancelled or failed copy leaves the
+original as it was. A symbolic link at the destination is replaced by
+the copy, never written through. Copies and moves between filesystems
+keep the permission bits and the modification and access times of files,
+directories and links.
+
 ### Destination path
 
 Copy, move, [pack](vfs.md#packing), [unpack](vfs.md#unpacking) and Save As

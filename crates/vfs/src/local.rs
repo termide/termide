@@ -450,6 +450,17 @@ impl VfsProvider for LocalFileSystem {
         VfsOperation::new(rx)
     }
 
+    fn symlink_metadata(&self, path: &VfsPath) -> VfsOperation<VfsMetadata> {
+        let local_path = match Self::to_local_path(path) {
+            Ok(p) => p.to_path_buf(),
+            Err(e) => return VfsOperation::error(e),
+        };
+        let result = fs::symlink_metadata(&local_path)
+            .map(VfsMetadata::from)
+            .map_err(|e| map_io_error(e, local_path));
+        VfsOperation::ready(result)
+    }
+
     fn read_file(&self, path: &VfsPath) -> VfsOperation<Vec<u8>> {
         let local_path = match Self::to_local_path(path) {
             Ok(p) => p.to_path_buf(),
@@ -489,7 +500,9 @@ impl VfsProvider for LocalFileSystem {
 
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            let result = if local_path.is_dir() {
+            // A symlink to a directory is unlinked, not treated as a dir.
+            let is_dir = fs::symlink_metadata(&local_path).is_ok_and(|m| m.is_dir());
+            let result = if is_dir {
                 fs::remove_dir(&local_path)
             } else {
                 fs::remove_file(&local_path)

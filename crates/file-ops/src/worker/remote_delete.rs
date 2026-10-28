@@ -111,10 +111,11 @@ impl RemoteDeleteWorker {
     ) -> Result<usize, OperationError> {
         control.check_cancelled()?;
 
-        // Check if path is a directory
+        // lstat: a symlink to a directory is deleted as a link, never
+        // descended into (that would delete the target's contents).
         let metadata = self
             .vfs_manager
-            .metadata(path)
+            .symlink_metadata(path)
             .recv()
             .map_err(OperationError::Vfs)?;
 
@@ -169,10 +170,11 @@ impl RemoteDeleteWorker {
         control.check_cancelled()?;
         control.wait_if_paused()?;
 
-        // Check if path is a directory
+        // lstat: a symlink to a directory is deleted as a link, never
+        // descended into (that would delete the target's contents).
         let metadata = self
             .vfs_manager
-            .metadata(path)
+            .symlink_metadata(path)
             .recv()
             .map_err(OperationError::Vfs)?;
 
@@ -296,5 +298,43 @@ impl RemoteDeleteWorker {
             }
             return result;
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use crate::types::OperationControl;
+    use std::fs;
+
+    /// The worker drives the VFS the same way for every protocol; local
+    /// paths exercise its directory/symlink decisions without a server.
+    #[test]
+    fn deleting_a_dir_with_a_symlinked_dir_keeps_the_link_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("www");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("index.html"), b"keep").unwrap();
+        let victim = tmp.path().join("victim");
+        fs::create_dir(&victim).unwrap();
+        fs::write(victim.join("f.txt"), b"x").unwrap();
+        std::os::unix::fs::symlink(&target, victim.join("data")).unwrap();
+        std::os::unix::fs::symlink(&target, tmp.path().join("top-link")).unwrap();
+
+        let manager = std::sync::Arc::new(VfsManager::new());
+        let mut worker = RemoteDeleteWorker::new(
+            manager,
+            vec![
+                VfsPath::local(&victim),
+                VfsPath::local(tmp.path().join("top-link")),
+            ],
+        );
+        let (tx, _rx) = mpsc::channel();
+        let result = worker.execute(&OperationControl::new(), &tx);
+
+        assert!(matches!(result, OperationResult::Success), "{result:?}");
+        assert!(!victim.exists());
+        assert!(fs::symlink_metadata(tmp.path().join("top-link")).is_err());
+        assert_eq!(fs::read(target.join("index.html")).unwrap(), b"keep");
     }
 }

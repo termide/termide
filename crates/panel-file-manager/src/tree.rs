@@ -143,6 +143,7 @@ mod tests {
     fn make_file_entry(name: &str, is_dir: bool) -> FileEntry {
         FileEntry {
             name: name.to_string(),
+            os_name: None,
             is_dir,
             is_symlink: false,
             is_executable: false,

@@ -2,7 +2,7 @@
 //!
 //! Internal helpers for executing git commands with proper error handling.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
 /// Build a `git` command hardened so it can never block on or corrupt the
@@ -90,6 +90,35 @@ pub(crate) fn git_command(dir: &Path, args: &[&str]) -> Option<Output> {
 /// Execute a git command and return stdout as String.
 pub(crate) fn git_command_stdout(dir: &Path, args: &[&str]) -> Option<String> {
     git_command(dir, args).and_then(|output| String::from_utf8(output.stdout).ok())
+}
+
+/// Execute a git command and return raw stdout. For output that carries
+/// file names: one name that is not UTF-8 must not discard the rest.
+pub(crate) fn git_command_stdout_bytes(dir: &Path, args: &[&str]) -> Option<Vec<u8>> {
+    git_command(dir, args).map(|output| output.stdout)
+}
+
+/// A path as git printed it with `-z`: raw bytes, unquoted. Lossless on
+/// Unix; elsewhere git writes UTF-8 and anything else is replaced.
+pub(crate) fn path_from_git_bytes(bytes: &[u8]) -> PathBuf {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+    }
+    #[cfg(not(unix))]
+    {
+        PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+    }
+}
+
+/// Split `-z` output into its NUL-terminated fields.
+pub(crate) fn nul_fields(stdout: &[u8]) -> impl Iterator<Item = &[u8]> {
+    stdout
+        .strip_suffix(b"\0")
+        .unwrap_or(stdout)
+        .split(|&b| b == 0)
+        .filter(|field| !field.is_empty())
 }
 
 /// Read a file's content as of `HEAD`, using hardened git so a credential or

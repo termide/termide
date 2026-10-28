@@ -12,39 +12,40 @@ use super::{ConflictAction, ConflictContext, OperationWorker, CHUNK_SIZE};
 /// Number of files between progress updates during scanning phase.
 const PROGRESS_THROTTLE_FILES: usize = 50;
 
-/// Removes a half-written destination file unless the copy completes.
+/// Create something at a hidden, uniquely named sibling of `dest` with
+/// `make`, removed again on drop unless persisted.
 ///
-/// `File::create` truncates the destination up front, so a cancelled or
-/// failed transfer would otherwise leave a short file on disk that looks
-/// like a finished copy. Arm the guard before opening the destination and
-/// call [`PartialFile::keep`] once the copy has been verified.
-struct PartialFile<'a> {
-    path: Option<&'a Path>,
+/// A copy is written to such a sibling and renamed over `dest` only once
+/// it is complete. So an approved overwrite never truncates the user's
+/// file up front — a cancelled or failed copy removes only the sibling
+/// and leaves the original intact — and the rename replaces a symlink at
+/// `dest` instead of writing through it.
+fn make_sibling<F>(
+    dest: &Path,
+    make: impl Fn(&Path) -> std::io::Result<F>,
+) -> std::io::Result<tempfile::NamedTempFile<F>> {
+    let dir = match dest.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
+    let prefix = format!(
+        ".{}.",
+        dest.file_name().unwrap_or_default().to_string_lossy()
+    );
+    tempfile::Builder::new()
+        .prefix(&prefix)
+        .suffix(".termide-part")
+        .make_in(dir, |path| make(path))
 }
 
-impl<'a> PartialFile<'a> {
-    fn new(path: &'a Path) -> Self {
-        Self { path: Some(path) }
-    }
-
-    /// Disarm the guard: the destination is complete and must be kept.
-    fn keep(mut self) {
-        self.path = None;
-    }
+/// A new regular file next to `dest`, opened with `O_EXCL` so it never
+/// follows a link either.
+fn file_sibling(dest: &Path) -> std::io::Result<tempfile::NamedTempFile<File>> {
+    make_sibling(dest, |path| {
+        File::options().write(true).create_new(true).open(path)
+    })
 }
 
-impl Drop for PartialFile<'_> {
-    fn drop(&mut self) {
-        if let Some(path) = self.path {
-            match fs::remove_file(path) {
-                Ok(()) => log::debug!("removed partial copy {path:?}"),
-                // Nothing was created (the open itself failed).
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => log::warn!("failed to remove partial copy {path:?}: {e}"),
-            }
-        }
-    }
-}
 use crate::types::{
     OperationControl, OperationError, OperationPhase, OperationProgress, OperationResult,
 };
@@ -113,6 +114,43 @@ fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
         }
         missing.push(current.file_name()?);
         current = current.parent()?;
+    }
+}
+
+/// Whether a failed `rename` means source and destination are on different
+/// filesystems, so a move has to fall back to copy + delete. std reports
+/// EXDEV (Unix) and ERROR_NOT_SAME_DEVICE (Windows) as `CrossesDevices`.
+/// Off Unix, `Other` is kept as well: errors std does not map (some
+/// network redirectors) land there, and the fallback is safe for them.
+fn is_cross_device(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::CrossesDevices
+        || (cfg!(not(unix)) && e.kind() == std::io::ErrorKind::Other)
+}
+
+/// Access and modification times of `metadata` (from lstat).
+fn source_times(metadata: &fs::Metadata) -> (filetime::FileTime, filetime::FileTime) {
+    (
+        filetime::FileTime::from_last_access_time(metadata),
+        filetime::FileTime::from_last_modification_time(metadata),
+    )
+}
+
+/// Best-effort: give the copied directory `dest` the permission bits and
+/// times of `source`, so a copy or a cross-device move keeps them.
+fn copy_dir_attributes(source: &Path, dest: &Path) {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("failed to read attributes of {source:?}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = fs::set_permissions(dest, metadata.permissions()) {
+        log::warn!("failed to preserve permissions on {dest:?}: {e}");
+    }
+    let (atime, mtime) = source_times(&metadata);
+    if let Err(e) = filetime::set_file_times(dest, atime, mtime) {
+        log::warn!("failed to preserve times on {dest:?}: {e}");
     }
 }
 
@@ -200,11 +238,19 @@ impl LocalCopyWorker {
         let metadata = fs::symlink_metadata(source)?;
 
         if metadata.is_symlink() {
-            // Copy symlink
+            // Copy symlink: create it next to `dest`, then rename it over
+            // whatever is there (a plain `symlink` fails with EEXIST when
+            // overwriting).
             #[cfg(unix)]
             {
                 let link_target = fs::read_link(source)?;
-                std::os::unix::fs::symlink(&link_target, dest)?;
+                make_sibling(dest, |path| std::os::unix::fs::symlink(&link_target, path))?
+                    .persist(dest)
+                    .map_err(|e| e.error)?;
+                let (atime, mtime) = source_times(&metadata);
+                if let Err(e) = filetime::set_symlink_file_times(dest, atime, mtime) {
+                    log::debug!("failed to preserve times on link {dest:?}: {e}");
+                }
             }
             #[cfg(not(unix))]
             {
@@ -215,10 +261,9 @@ impl LocalCopyWorker {
             // Copy regular file with chunked reading
             let file_size = metadata.len();
             let mut source_file = File::open(source)?;
-            // Declared before `dest_file` so the handle is closed before the
-            // guard removes the file (Windows refuses to unlink open files).
-            let partial = PartialFile::new(dest);
-            let mut dest_file = File::create(dest)?;
+            // Removed on every early return (cancel, error, size mismatch);
+            // `dest` itself is untouched until the final rename.
+            let mut dest_file = file_sibling(dest)?;
 
             let mut buffer = vec![0u8; CHUNK_SIZE];
             let mut file_bytes_copied = 0u64;
@@ -232,7 +277,7 @@ impl LocalCopyWorker {
                     break;
                 }
 
-                dest_file.write_all(&buffer[..bytes_read])?;
+                dest_file.as_file_mut().write_all(&buffer[..bytes_read])?;
                 file_bytes_copied += bytes_read as u64;
                 *bytes_copied += bytes_read as u64;
 
@@ -280,18 +325,25 @@ impl LocalCopyWorker {
                 ))));
             }
 
-            // The destination is complete — keep it.
-            partial.keep();
-
             // Preserve permissions from source
             #[cfg(unix)]
             {
                 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-                let perms = std::fs::Permissions::from_mode(metadata.mode());
-                if let Err(e) = fs::set_permissions(dest, perms) {
+                let perms = std::fs::Permissions::from_mode(metadata.mode() & 0o7777);
+                if let Err(e) = dest_file.as_file().set_permissions(perms) {
                     log::warn!("failed to preserve permissions on {dest:?}: {e}");
                 }
             }
+
+            let (atime, mtime) = source_times(&metadata);
+            if let Err(e) =
+                filetime::set_file_handle_times(dest_file.as_file(), Some(atime), Some(mtime))
+            {
+                log::warn!("failed to preserve times on {dest:?}: {e}");
+            }
+
+            // The copy is complete: replace the destination in one step.
+            dest_file.persist(dest).map_err(|e| e.error)?;
         }
 
         Ok(())
@@ -359,6 +411,10 @@ impl LocalCopyWorker {
                 )?;
             }
         }
+
+        // Only now: copying the contents changes the directory's times, and
+        // a read-only mode would have refused them.
+        copy_dir_attributes(source, dest);
 
         Ok(())
     }
@@ -533,27 +589,10 @@ impl OperationWorker for LocalCopyWorker {
                         // Already moved — no need to track for delete phase
                         continue;
                     }
-                    #[cfg(unix)]
-                    Err(e) if e.raw_os_error() == Some(18 /* EXDEV */) => {
+                    Err(e) if is_cross_device(&e) => {
                         // Cross-device move — fall through to copy+delete. This
                         // source really will be walked, so account for it now:
                         // drop the placeholder count of 1 and scan it for real.
-                        total_files = total_files.saturating_sub(1);
-                        match self.scan_source(
-                            source,
-                            control,
-                            progress_tx,
-                            &mut total_files,
-                            &mut total_bytes,
-                        ) {
-                            Ok(()) => {}
-                            Err(OperationError::Cancelled) => return OperationResult::Cancelled,
-                            Err(e) => return OperationResult::Failed(e.to_string()),
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    Err(e) if e.kind() == std::io::ErrorKind::Other => {
-                        // Cross-device move on non-Unix — same fallback.
                         total_files = total_files.saturating_sub(1);
                         match self.scan_source(
                             source,
@@ -1043,33 +1082,147 @@ mod tests {
         );
     }
 
-    /// Every early return in `copy_file` (cancel, pause-cancel, read/write
-    /// error, size mismatch) relies on this guard to unlink the truncated
-    /// destination, so test the guard itself rather than racing a cancel.
+    /// A failed copy over an existing file must leave the original intact
+    /// and no temporary sibling behind. A FIFO source fails deterministically
+    /// mid-copy: it reports size 0 but yields bytes, a size mismatch.
+    #[cfg(unix)]
     #[test]
-    fn partial_file_guard_removes_unless_kept() {
+    fn failed_overwrite_keeps_the_original() {
         let tmp = TempDir::new().unwrap();
+        let fifo = tmp.path().join("src");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+        let writer = {
+            let fifo = fifo.clone();
+            std::thread::spawn(move || fs::write(fifo, b"surprise").unwrap())
+        };
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir(&dest_dir).unwrap();
+        fs::write(dest_dir.join("src"), b"original").unwrap();
 
-        let dropped = tmp.path().join("dropped.bin");
+        let result = run_overwriting(LocalCopyWorker::new(vec![fifo], dest_dir.clone(), false));
+        writer.join().unwrap();
+
+        assert!(matches!(result, OperationResult::Failed(_)), "{result:?}");
+        assert_eq!(fs::read(dest_dir.join("src")).unwrap(), b"original");
+        assert_eq!(
+            fs::read_dir(&dest_dir).unwrap().count(),
+            1,
+            "temp left behind"
+        );
+    }
+
+    /// Overwriting a destination that is a symlink replaces the link; the
+    /// file it points to is never written.
+    #[cfg(unix)]
+    #[test]
+    fn overwrite_replaces_a_destination_symlink_instead_of_writing_through_it() {
+        let tmp = TempDir::new().unwrap();
+        let victim = tmp.path().join("victim");
+        fs::write(&victim, b"keep").unwrap();
+        let source = tmp.path().join("new.txt");
+        fs::write(&source, b"new").unwrap();
+        let dest = tmp.path().join("dest.txt");
+        std::os::unix::fs::symlink(&victim, &dest).unwrap();
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![source],
+            dest.clone(),
+            false,
+        )));
+
+        assert!(!fs::symlink_metadata(&dest).unwrap().is_symlink());
+        assert_eq!(fs::read(&dest).unwrap(), b"new");
+        assert_eq!(fs::read(&victim).unwrap(), b"keep");
+    }
+
+    /// Overwriting an existing entry with a symlink used to fail with EEXIST.
+    #[cfg(unix)]
+    #[test]
+    fn overwrite_with_a_symlink_replaces_the_destination() {
+        let tmp = TempDir::new().unwrap();
+        let src_dir = tmp.path().join("src");
+        let dest_dir = tmp.path().join("dest");
+        fs::create_dir(&src_dir).unwrap();
+        fs::create_dir(&dest_dir).unwrap();
+        std::os::unix::fs::symlink("target.txt", src_dir.join("link")).unwrap();
+        fs::write(dest_dir.join("link"), b"old").unwrap();
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![src_dir.join("link")],
+            dest_dir.clone(),
+            false,
+        )));
+
+        assert_eq!(
+            fs::read_link(dest_dir.join("link")).unwrap(),
+            Path::new("target.txt")
+        );
+        assert_eq!(fs::read_dir(&dest_dir).unwrap().count(), 1);
+    }
+
+    /// Copies keep modification and access times on files, directories and
+    /// links, and the permission bits of directories.
+    #[test]
+    fn copy_preserves_times_and_directory_permissions() {
+        use filetime::{set_file_times, FileTime};
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("proj");
+        tree(&source);
+        let old = FileTime::from_unix_time(1_600_000_000, 0);
+        let older = FileTime::from_unix_time(1_500_000_000, 0);
+        set_file_times(source.join("a.txt"), older, old).unwrap();
+        #[cfg(unix)]
         {
-            let guard = PartialFile::new(&dropped);
-            fs::write(&dropped, b"half").unwrap();
-            drop(guard);
+            std::os::unix::fs::symlink("a.txt", source.join("link")).unwrap();
+            filetime::set_symlink_file_times(source.join("link"), older, old).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(source.join("sub"), fs::Permissions::from_mode(0o700)).unwrap();
         }
-        assert!(!dropped.exists(), "a partial copy must be removed");
+        set_file_times(source.join("sub"), older, old).unwrap();
+        set_file_times(&source, older, old).unwrap();
+        let dest_parent = tmp.path().join("dest");
+        fs::create_dir(&dest_parent).unwrap();
 
-        let kept = tmp.path().join("kept.bin");
+        let (result, _) = run(LocalCopyWorker::new(
+            vec![source],
+            dest_parent.clone(),
+            false,
+        ));
+        assert_success(&result);
+
+        let copy = dest_parent.join("proj");
+        for rel in ["a.txt", "sub", ""] {
+            let meta = fs::metadata(copy.join(rel)).unwrap();
+            assert_eq!(FileTime::from_last_modification_time(&meta), old, "{rel}");
+        }
+        // A file carries the access time it had before the copy read it.
+        // (Directory access times move while the walk lists them.)
+        let file = fs::metadata(copy.join("a.txt")).unwrap();
+        assert_eq!(FileTime::from_last_access_time(&file), older);
+        #[cfg(unix)]
         {
-            let guard = PartialFile::new(&kept);
-            fs::write(&kept, b"whole").unwrap();
-            guard.keep();
+            use std::os::unix::fs::PermissionsExt;
+            let link = fs::symlink_metadata(copy.join("link")).unwrap();
+            assert_eq!(FileTime::from_last_modification_time(&link), old);
+            let mode = fs::metadata(copy.join("sub")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
         }
-        assert!(kept.exists(), "keep() must disarm the guard");
+    }
 
-        // The destination was never created: dropping must not warn or panic.
-        let missing = tmp.path().join("never.bin");
-        drop(PartialFile::new(&missing));
-        assert!(!missing.exists());
+    #[test]
+    fn cross_device_rename_errors_are_recognised() {
+        use std::io::{Error, ErrorKind};
+        assert!(is_cross_device(&Error::from(ErrorKind::CrossesDevices)));
+        assert!(!is_cross_device(&Error::from(ErrorKind::PermissionDenied)));
+        assert!(!is_cross_device(&Error::from(ErrorKind::NotFound)));
+        #[cfg(unix)]
+        assert!(is_cross_device(&Error::from_raw_os_error(18)));
+        #[cfg(windows)]
+        assert!(is_cross_device(&Error::from_raw_os_error(17))); // ERROR_NOT_SAME_DEVICE
     }
 
     #[test]

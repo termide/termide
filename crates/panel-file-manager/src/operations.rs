@@ -627,6 +627,7 @@ mod tests {
     fn entry(name: &str) -> FileEntry {
         FileEntry {
             name: name.to_string(),
+            os_name: None,
             is_dir: false,
             is_symlink: false,
             is_executable: false,

@@ -244,25 +244,20 @@ impl CrossProtocolWorker {
             }
         }
 
-        // Create temp directory for intermediate file.
-        // Use a RAII guard to ensure cleanup on panic or early return.
-        let temp_dir = std::env::temp_dir().join(format!("termide_xfer_{}", std::process::id()));
-        if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-            return OperationResult::Failed(format!("Failed to create temp directory: {}", e));
-        }
-        struct TempDirGuard(PathBuf);
-        impl Drop for TempDirGuard {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
+        // The intermediate copy lives in a directory of its own, removed
+        // when `temp_dir` drops (also on early return and panic).
+        let temp_dir = match transfer_temp_dir() {
+            Ok(dir) => dir,
+            Err(e) => {
+                return OperationResult::Failed(format!("Failed to create temp directory: {}", e))
             }
-        }
-        let _temp_guard = TempDirGuard(temp_dir.clone());
+        };
 
         let file_name = source_path
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("transfer_file");
-        let temp_file = temp_dir.join(file_name);
+        let temp_file = temp_dir.path().join(file_name);
 
         // Phase 1: Download to temp
         let _ = progress_tx.send(OperationProgress {
@@ -281,11 +276,11 @@ impl CrossProtocolWorker {
 
         let download_result = download_worker.execute(control, progress_tx);
         if !download_result.is_success() {
-            return download_result; // _temp_guard cleans up on drop
+            return download_result;
         }
 
         if control.is_cancelled() {
-            return OperationResult::Cancelled; // _temp_guard cleans up on drop
+            return OperationResult::Cancelled;
         }
 
         // Phase 2: Upload from temp
@@ -304,8 +299,6 @@ impl CrossProtocolWorker {
         );
 
         let upload_result = upload_worker.execute(control, progress_tx);
-
-        // _temp_guard will clean up temp dir on drop
 
         if !upload_result.is_success() {
             return upload_result;
@@ -341,5 +334,41 @@ impl CrossProtocolWorker {
             fs::remove_file(path)?;
         }
         Ok(())
+    }
+}
+
+/// A fresh, private (0700 on Unix), unpredictably named directory for one
+/// remote-to-remote transfer. The manager runs several operations at
+/// once, so a directory shared per process would be removed under the
+/// others by whichever finishes first.
+fn transfer_temp_dir() -> std::io::Result<tempfile::TempDir> {
+    let mut builder = tempfile::Builder::new();
+    builder.prefix("termide_xfer_");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        builder.permissions(fs::Permissions::from_mode(0o700));
+    }
+    builder.tempdir()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_transfer_gets_its_own_private_temp_dir() {
+        let a = transfer_temp_dir().unwrap();
+        let b = transfer_temp_dir().unwrap();
+        assert_ne!(a.path(), b.path());
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(a.path()).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
+        let kept = b.path().to_path_buf();
+        drop(a);
+        assert!(kept.is_dir(), "dropping one leaves the other alone");
     }
 }

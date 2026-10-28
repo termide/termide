@@ -155,6 +155,68 @@ impl ArchiveIndex {
         None
     }
 
+    /// Where a symlink at `link` pointing to `target` lands when it is
+    /// extracted with `top` as the extraction root, or `None` when the
+    /// kernel's resolution would leave `top` at any step.
+    ///
+    /// Unlike [`symlink_target_key`], which applies `..` textually, this
+    /// walks the target the way the kernel does: a component that is itself
+    /// a link in the archive is expanded before the next `..` is applied.
+    /// So `s/up -> ..` plus `esc -> s/up/../..` is rejected, although both
+    /// look harmless one at a time.
+    pub(crate) fn link_target_within(
+        &self,
+        link: &Path,
+        target: &str,
+        top: &Path,
+    ) -> Option<PathBuf> {
+        let plain = |path: &Path| -> Vec<String> {
+            path.components()
+                .filter_map(|c| match c {
+                    Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+                    _ => None,
+                })
+                .collect()
+        };
+        let floor = plain(top).len();
+        let mut stack = plain(link.parent()?);
+        if stack.len() < floor || !link.starts_with(top) {
+            return None;
+        }
+        let mut pending: std::collections::VecDeque<String> = split_link_target(target)?.collect();
+        let mut hops = 0;
+        while let Some(part) = pending.pop_front() {
+            if part == ".." {
+                if stack.len() <= floor {
+                    return None;
+                }
+                stack.pop();
+                continue;
+            }
+            stack.push(part);
+            let key = root().join(stack.join("/"));
+            if let Some(Node {
+                kind: NodeKind::Symlink(next),
+                ..
+            }) = self.nodes.get(&key)
+            {
+                hops += 1;
+                if hops > MAX_LINK_HOPS {
+                    return None;
+                }
+                stack.pop();
+                for part in split_link_target(next)?
+                    .collect::<Vec<_>>()
+                    .into_iter()
+                    .rev()
+                {
+                    pending.push_front(part);
+                }
+            }
+        }
+        Some(root().join(stack.join("/")))
+    }
+
     /// Names of the direct children of the directory `key`.
     pub(crate) fn children(&self, key: &Path) -> Option<&BTreeSet<String>> {
         self.children.get(key)
@@ -249,6 +311,29 @@ pub(crate) fn symlink_target_key(link: &Path, target: &str) -> Option<PathBuf> {
         }
     }
     normalize_entry_name(&parts.join("/"))
+}
+
+/// The components of a relative link target, `.` and empty ones dropped;
+/// `None` for an absolute target or a component that is not a plain name.
+fn split_link_target(target: &str) -> Option<impl Iterator<Item = String> + '_> {
+    if target.starts_with('/') || target.starts_with('\\') {
+        return None;
+    }
+    let parts = target
+        .split(['/', '\\'])
+        .filter(|p| !p.is_empty() && *p != ".");
+    if parts.clone().any(|p| {
+        p != ".." && {
+            let mut parsed = Path::new(p).components();
+            !matches!(
+                (parsed.next(), parsed.next()),
+                (Some(Component::Normal(_)), None)
+            ) || p.contains('\0')
+        }
+    }) {
+        return None;
+    }
+    Some(parts.map(str::to_owned))
 }
 
 #[cfg(test)]
@@ -391,5 +476,48 @@ mod tests {
             Some(PathBuf::from("/a/c"))
         );
         assert_eq!(normalize_query(Path::new("/..")), None);
+    }
+
+    #[test]
+    fn link_chains_are_resolved_like_the_kernel_does() {
+        let mut index = ArchiveIndex::new();
+        index.insert("lib/libx.so.1", file(), VfsMetadata::file(1));
+        let link = |index: &mut ArchiveIndex, name: &str, target: &str| {
+            index.insert(name, NodeKind::Symlink(target.into()), VfsMetadata::file(0));
+        };
+        link(&mut index, "s/up", "..");
+        link(&mut index, "esc", "s/up/../..");
+        link(&mut index, "lib/libx.so", "libx.so.1");
+        link(&mut index, "usr", "lib");
+        link(&mut index, "via", "usr/libx.so");
+        link(&mut index, "a", "b");
+        link(&mut index, "b", "a");
+        link(&mut index, "loop", "a/x");
+        let top = Path::new("/");
+        let within =
+            |name: &str, target: &str| index.link_target_within(Path::new(name), target, top);
+
+        // Each looks harmless textually; the chain climbs above the root.
+        assert_eq!(
+            symlink_target_key(Path::new("/esc"), "s/up/../.."),
+            Some(root())
+        );
+        assert_eq!(within("/s/up", ".."), Some(root()));
+        assert_eq!(within("/esc", "s/up/../.."), None);
+
+        assert_eq!(
+            within("/lib/libx.so", "libx.so.1"),
+            Some(PathBuf::from("/lib/libx.so.1"))
+        );
+        assert_eq!(
+            within("/via", "usr/libx.so"),
+            Some(PathBuf::from("/lib/libx.so.1"))
+        );
+        assert_eq!(within("/loop", "a/x"), None);
+        assert_eq!(within("/abs", "/etc"), None);
+        assert_eq!(
+            index.link_target_within(Path::new("/s/up"), "..", Path::new("/s")),
+            None
+        );
     }
 }
