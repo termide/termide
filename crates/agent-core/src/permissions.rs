@@ -1251,7 +1251,7 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
         "bash" => call.arguments["command"].as_str().unwrap_or("").to_string(),
         "read" | "edit" | "write" => {
             let raw = call.arguments["path"].as_str().unwrap_or("");
-            relative_to_project(raw, &ctx.cwd)
+            real_relative_to_project(raw, &ctx.cwd)
         }
         "fetch" => call.arguments["url"]
             .as_str()
@@ -1301,6 +1301,54 @@ fn relative_to_project(raw: &str, cwd: &Path) -> String {
         Ok(_) => ".".to_string(),
         Err(_) => normalized.to_string_lossy().into_owned(),
     }
+}
+
+/// [`relative_to_project`] for the file a file tool acts on, with symlinks
+/// resolved: the file the system opens, which a link in the project (`docs`
+/// pointing at the home directory) may put outside it, or a link to `.env`
+/// may hide from the rule that guards it. A path outside the project that
+/// stays outside keeps the spelling it was given (`/etc/hosts`, not the
+/// `/private/etc/hosts` macOS resolves it to).
+fn real_relative_to_project(raw: &str, cwd: &Path) -> String {
+    let real = real_path(&cwd.join(raw));
+    match real.strip_prefix(real_path(cwd)) {
+        Ok(relative) if !relative.as_os_str().is_empty() => relative.to_string_lossy().into_owned(),
+        Ok(_) => ".".to_string(),
+        Err(_) => {
+            let lexical = relative_to_project(raw, cwd);
+            if Path::new(&lexical).is_absolute() {
+                lexical
+            } else {
+                real.to_string_lossy().into_owned()
+            }
+        }
+    }
+}
+
+/// `path` as the file system resolves it, symlinks included, so far as it
+/// exists; the part that does not yet exist (a file to create) is appended
+/// as written. A `..` steps out of what the link before it points at, as
+/// the system's own lookup does.
+fn real_path(path: &Path) -> std::path::PathBuf {
+    let mut out = std::path::PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                out.pop();
+            }
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => {
+                out.push(name);
+                // Each existing prefix is made real before the next step, so
+                // a `..` after a link leaves its target, not the link.
+                if let Ok(real) = dunce::canonicalize(&out) {
+                    out = real;
+                }
+            }
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 /// Resolve `.` and `..` lexically; the file need not exist.
@@ -3759,6 +3807,74 @@ mod tests {
         assert_eq!(subject_of(&search, &ctx()), "rust tui");
         assert!(is_read_only_call(&fetch));
         assert!(is_read_only_call(&search));
+    }
+
+    /// A symlink in the project does not carry a file tool past its edge: the
+    /// subject is the file the system opens, outside the project when the
+    /// link points out, and the edit asks.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_out_of_the_project_is_outside_it() {
+        let outside = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir(project.path().join("src")).unwrap();
+        std::fs::write(project.path().join(".env"), "SECRET=1").unwrap();
+        std::os::unix::fs::symlink(outside.path(), project.path().join("docs")).unwrap();
+        std::os::unix::fs::symlink(project.path().join(".env"), project.path().join("env.txt"))
+            .unwrap();
+        let ctx = ToolContext::new(project.path().to_path_buf());
+        let real_outside = dunce::canonicalize(outside.path()).unwrap();
+        let path = |p: &str| json!({ "path": p, "content": "x" });
+
+        let write = call("write", path("docs/.zshrc"));
+        assert_eq!(
+            subject_of(&write, &ctx),
+            real_outside.join(".zshrc").to_string_lossy()
+        );
+        // `..` after the link leaves its target, as the system's lookup does.
+        let up = call("write", path("docs/../escape"));
+        assert_eq!(
+            subject_of(&up, &ctx),
+            real_outside
+                .parent()
+                .unwrap()
+                .join("escape")
+                .to_string_lossy()
+        );
+        // A file not yet there, inside, stays inside.
+        assert_eq!(
+            subject_of(&call("write", path("src/new.rs")), &ctx),
+            "src/new.rs"
+        );
+        assert_eq!(
+            subject_of(&call("write", path("new/../src/x.rs")), &ctx),
+            "src/x.rs"
+        );
+        // A link to a guarded file is judged as that file.
+        assert_eq!(subject_of(&call("read", path("env.txt")), &ctx), ".env");
+
+        let mut rules = rules("mode = \"edit\"");
+        rules.add("read", ".env", Decision::Deny);
+        let (hooks, _) = hooks(rules, vec![]);
+        assert_eq!(hooks.decide(&write, &ctx), Decision::Ask);
+        assert_eq!(hooks.decide(&up, &ctx), Decision::Ask);
+        assert_eq!(
+            hooks.decide(&call("write", path("src/new.rs")), &ctx),
+            Decision::Allow
+        );
+        assert_eq!(
+            hooks.decide(&call("read", path("env.txt")), &ctx),
+            Decision::Deny
+        );
+        for mode in [Mode::Auto, Mode::Plan] {
+            hooks.set_mode(mode);
+            assert_ne!(hooks.decide(&write, &ctx), Decision::Allow, "{mode:?}");
+            assert_ne!(
+                hooks.decide(&call("read", path("docs/secret")), &ctx),
+                Decision::Allow,
+                "{mode:?}"
+            );
+        }
     }
 
     #[test]

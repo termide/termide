@@ -1409,6 +1409,11 @@ matching rule and asks without one. Whatever the mode, a rule's `deny` refuses a
 the modes set the configured `allow` rules aside, never the refusals. Your
 answers for the session count in every mode but `all`.
 
+A file counts as inside or outside the project by where its symlinks lead,
+not by how its path is spelled: with a link `docs` pointing at your home
+directory, writing `docs/.zshrc` is an edit outside the project, and a rule
+for `.env` also covers a link to it.
+
 ¹ In `plan` an MCP tool counts the configured `allow` rules too, and one its
 server marks read-only (`readOnlyHint`) runs without asking.
 ² In `edit` too an MCP tool its server marks read-only runs without asking.
