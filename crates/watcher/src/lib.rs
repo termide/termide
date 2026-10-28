@@ -9,11 +9,11 @@ use anyhow::{Context, Result};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, DebouncedEvent, Debouncer};
+use notify_debouncer_mini::{new_debouncer, Debouncer};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::mpsc::{channel, Receiver};
 use std::time::{Duration, Instant};
 
 /// Debounce duration for filesystem events.
@@ -41,16 +41,147 @@ pub enum WatchEvent {
     GitignoreChanged(PathBuf),
 }
 
-/// Internal event from debouncer callback.
-#[derive(Debug, Clone)]
-#[allow(clippy::enum_variant_names)]
-enum InternalEvent {
-    /// Regular filesystem change
-    FsChange { changed_path: PathBuf },
-    /// Git-related change (needs additional debounce)
-    GitChange { repo_root: PathBuf },
-    /// .gitignore changed
-    GitignoreChange { repo_root: PathBuf },
+/// Where a repository keeps its git state.
+///
+/// A repository's own `.git` is usually a directory, but in a linked
+/// worktree or a submodule it is a file (`gitdir: <path>`) pointing at the
+/// real git directory elsewhere: `<main>/.git/worktrees/<name>` or
+/// `<outer>/.git/modules/<name>`. Branches, tags and `packed-refs` live in
+/// the common directory a worktree's `commondir` file names; a submodule's
+/// git directory is its own common directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct GitDirs {
+    /// The repository's own state: `index`, `HEAD`, merge and rebase state.
+    git_dir: PathBuf,
+    /// Refs shared with every worktree of the same repository.
+    common_dir: PathBuf,
+}
+
+impl GitDirs {
+    /// Resolve the git directories of the repository at `repo_root`. Paths
+    /// read from `.git` and `commondir` are canonicalised so they compare
+    /// with the paths the OS reports events for.
+    fn resolve(repo_root: &Path) -> Self {
+        let dot_git = repo_root.join(".git");
+        let git_dir = if dot_git.is_file() {
+            std::fs::read_to_string(&dot_git)
+                .ok()
+                .and_then(|text| {
+                    text.lines()
+                        .find_map(|line| line.strip_prefix("gitdir:"))
+                        .map(|dir| canonical_from(repo_root, dir.trim()))
+                })
+                .unwrap_or(dot_git)
+        } else {
+            dot_git
+        };
+        let common_dir = std::fs::read_to_string(git_dir.join("commondir"))
+            .ok()
+            .map(|dir| canonical_from(&git_dir, dir.trim()))
+            .unwrap_or_else(|| git_dir.clone());
+        Self {
+            git_dir,
+            common_dir,
+        }
+    }
+
+    /// Whether the git state lives outside the repository root, so the
+    /// root's own watches do not cover it.
+    fn is_linked(&self, repo_root: &Path) -> bool {
+        !self.git_dir.starts_with(repo_root) || !self.common_dir.starts_with(repo_root)
+    }
+
+    /// Whether a change at `path` concerns the repository: its own state in
+    /// its git directory, or a ref in the common directory it shares.
+    fn concerns(&self, path: &Path) -> bool {
+        if let Ok(own) = path.strip_prefix(&self.git_dir) {
+            return is_own_git_state(own);
+        }
+        path.strip_prefix(&self.common_dir)
+            .is_ok_and(is_shared_git_state)
+    }
+
+    /// Whether `path` lies in the repository's git directories at all.
+    fn contains(&self, path: &Path) -> bool {
+        path.starts_with(&self.git_dir) || path.starts_with(&self.common_dir)
+    }
+
+    /// The directories to watch for a linked repository's git state, in the
+    /// repository watch mode; nothing when `.git` is a directory inside the
+    /// root, which the root's own watches cover.
+    ///
+    /// A recursive watch takes the common directory whole: one FSEvents
+    /// path, with object writes dropped when they arrive. Per-directory
+    /// watches take the git directory, the common directory for
+    /// `packed-refs`, and every directory under the common `refs/` —
+    /// never `objects/`.
+    fn watch_paths(&self, repo_root: &Path) -> Vec<PathBuf> {
+        if !self.is_linked(repo_root) {
+            return Vec::new();
+        }
+        if RECURSIVE_ROOT_WATCH {
+            let mut paths = vec![self.common_dir.clone()];
+            if !self.git_dir.starts_with(&self.common_dir) {
+                paths.push(self.git_dir.clone());
+            }
+            return paths;
+        }
+        let mut paths = vec![self.git_dir.clone()];
+        if self.common_dir != self.git_dir {
+            paths.push(self.common_dir.clone());
+        }
+        let mut pending = vec![self.common_dir.join("refs")];
+        while let Some(dir) = pending.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            pending.extend(
+                entries
+                    .filter_map(|entry| entry.ok())
+                    .filter(|entry| entry.file_type().is_ok_and(|ft| ft.is_dir()))
+                    .map(|entry| entry.path()),
+            );
+            paths.push(dir);
+        }
+        paths
+    }
+}
+
+/// `path` as written in a git file, relative paths taken from `base`.
+fn canonical_from(base: &Path, path: &str) -> PathBuf {
+    let path = base.join(path);
+    dunce::canonicalize(&path).unwrap_or(path)
+}
+
+/// Whether a change at `relative`, inside a git directory, moves the state a
+/// status or log shows: the index, `HEAD` and its siblings, refs, reflogs.
+/// Objects are not; neither is another worktree's private state under
+/// `worktrees/`. Submodule state under `modules/` is, for the superproject:
+/// its status shows the submodule's checked-out commit.
+fn is_own_git_state(relative: &Path) -> bool {
+    let mut parts = relative.components().map(|c| c.as_os_str());
+    if matches!(
+        parts.next().and_then(OsStr::to_str),
+        Some("objects" | "worktrees")
+    ) {
+        return false;
+    }
+    if let Some(
+        "index" | "HEAD" | "MERGE_HEAD" | "FETCH_HEAD" | "REBASE_HEAD" | "CHERRY_PICK_HEAD"
+        | "ORIG_HEAD" | "COMMIT_EDITMSG" | "packed-refs",
+    ) = relative.file_name().and_then(OsStr::to_str)
+    {
+        return true;
+    }
+    relative
+        .components()
+        .any(|c| c.as_os_str() == "refs" || c.as_os_str() == "logs")
+}
+
+/// Whether a change at `relative`, inside a common directory, moves refs
+/// every worktree sharing it sees: branches, tags, remotes, `packed-refs`.
+fn is_shared_git_state(relative: &Path) -> bool {
+    relative.starts_with("refs") || relative == Path::new("packed-refs")
 }
 
 /// What a walk on a worker thread was started for.
@@ -95,6 +226,8 @@ struct RepoWatch {
     /// The repo's ignore rules, consulted for events that a recursive root
     /// watch delivers from ignored subtrees.
     ignore: Option<Gitignore>,
+    /// Where the repo keeps its git state, resolved on the first acquire.
+    git: GitDirs,
 }
 
 impl RepoWatch {
@@ -288,8 +421,8 @@ pub struct UnifiedWatcher {
     watched_dirs: HashMap<PathBuf, usize>,
     /// The OS watches the repos and dirs above hold, counted per path.
     os_watches: PathWatches,
-    /// Receiver for internal events from debouncer callback
-    internal_rx: Receiver<InternalEvent>,
+    /// Changed paths from the debouncer callback, classified on poll.
+    internal_rx: Receiver<PathBuf>,
     /// Pending git events waiting for the `GIT_DEBOUNCE_MS` debounce
     pending_git: HashMap<PathBuf, Instant>,
     /// Pending gitignore changes waiting for debounce
@@ -308,7 +441,7 @@ impl UnifiedWatcher {
             move |result: notify_debouncer_mini::DebounceEventResult| {
                 if let Ok(events) = result {
                     for event in events {
-                        Self::process_raw_event(&event, &internal_tx);
+                        let _ = internal_tx.send(event.path);
                     }
                 }
             },
@@ -327,38 +460,61 @@ impl UnifiedWatcher {
         })
     }
 
-    /// Process raw event from debouncer, classify and send to internal channel.
-    fn process_raw_event(event: &DebouncedEvent, tx: &Sender<InternalEvent>) {
-        let path = &event.path;
-
-        // Check if this is a .gitignore change
+    /// Sort one changed path into the pending git, `.gitignore` and
+    /// filesystem changes.
+    ///
+    /// Classification needs the watched repos' git directories — a linked
+    /// worktree's or a submodule's live outside its root — so it runs here
+    /// rather than on the debouncer thread.
+    fn classify(&mut self, path: PathBuf) {
         if path.file_name() == Some(OsStr::new(".gitignore")) {
-            // Find repo root by walking up to .git directory
-            if let Some(repo_root) = Self::find_repo_root(path) {
-                let _ = tx.send(InternalEvent::GitignoreChange { repo_root });
+            if let Some(repo_root) = Self::find_repo_root(&path) {
+                self.pending_gitignore.insert(repo_root, Instant::now());
             }
-            // Also emit as regular fs change so FileManager updates
-            let _ = tx.send(InternalEvent::FsChange {
-                changed_path: path.clone(),
-            });
+            // Also a regular change, so the file manager updates.
+        } else if let Some(repos) = self.git_change_owners(&path) {
+            for repo_root in repos {
+                // Fixed window from the first change in a burst — do NOT
+                // reset on every event, or continuous repo churn would keep
+                // pushing the deadline out and the update would never fire.
+                self.pending_git
+                    .entry(repo_root)
+                    .or_insert_with(Instant::now);
+            }
             return;
         }
+        if !self.is_ignored_in_repo(&path) {
+            self.pending_fs.insert(path);
+        }
+    }
 
-        // Check if this is a .git/ event
-        if Self::is_git_path(path) {
-            // Filter to only commit-related files
-            if Self::is_commit_related(path) {
-                if let Some(repo_root) = Self::find_repo_root_from_git_path(path) {
-                    let _ = tx.send(InternalEvent::GitChange { repo_root });
+    /// The repos a change inside git state concerns, or `None` when `path`
+    /// is not git state but a regular file.
+    ///
+    /// A watched repo hears its own git directory and the refs of the
+    /// common directory it shares, so a worktree's index belongs to the
+    /// worktree, and a branch moving belongs to every worktree of the
+    /// repository. A `.git` path no watched repo claims — a nested
+    /// repository walked by an outer one but not watched itself — goes to
+    /// the repository its `.git` belongs to.
+    fn git_change_owners(&self, path: &Path) -> Option<Vec<PathBuf>> {
+        let mut inside = false;
+        let mut owners = Vec::new();
+        for (root, repo) in &self.repos {
+            if repo.git.contains(path) {
+                inside = true;
+                if repo.git.concerns(path) {
+                    owners.push(root.clone());
                 }
             }
-            // Ignore other .git/* events
-        } else {
-            // Regular filesystem change
-            let _ = tx.send(InternalEvent::FsChange {
-                changed_path: path.clone(),
-            });
         }
+        if !inside && !Self::is_git_path(path) {
+            return None;
+        }
+        if owners.is_empty() && !inside {
+            owners.extend(Self::find_repo_root_from_git_path(path));
+        }
+        Some(owners)
     }
 
     /// Find repository root by walking up from a path.
@@ -377,26 +533,16 @@ impl UnifiedWatcher {
         path.components().any(|c| c.as_os_str() == ".git")
     }
 
-    /// Check if git path is commit-related (index, HEAD, refs, merge/rebase state).
-    fn is_commit_related(path: &Path) -> bool {
-        if let Some(
-            "index" | "HEAD" | "MERGE_HEAD" | "FETCH_HEAD" | "REBASE_HEAD" | "CHERRY_PICK_HEAD"
-            | "ORIG_HEAD" | "COMMIT_EDITMSG",
-        ) = path.file_name().and_then(|n| n.to_str())
-        {
-            return true;
-        }
-        // Also check for refs/* and logs/* changes
-        let path_str = path.to_string_lossy();
-        path_str.contains("/refs/") || path_str.contains("/logs/")
-    }
-
-    /// Find repository root from a path inside .git directory.
-    /// Canonicalizes the result to match paths stored by panels (resolves symlinks/mounts).
+    /// The repository whose `.git` directory holds `path`, when the change
+    /// concerns its state ([`is_own_git_state`]). Canonicalizes the result
+    /// to match paths stored by panels (resolves symlinks/mounts).
     fn find_repo_root_from_git_path(path: &Path) -> Option<PathBuf> {
         let mut current = path;
         while let Some(parent) = current.parent() {
             if parent.file_name().and_then(|n| n.to_str()) == Some(".git") {
+                if !is_own_git_state(path.strip_prefix(parent).ok()?) {
+                    return None;
+                }
                 let repo_root = parent.parent()?;
                 return Some(
                     dunce::canonicalize(repo_root).unwrap_or_else(|_| repo_root.to_path_buf()),
@@ -439,7 +585,8 @@ impl UnifiedWatcher {
             repo.refs += 1;
             return Ok(());
         }
-        let walk = spawn_full_walk(&repo_root);
+        let git = GitDirs::resolve(&repo_root);
+        let walk = spawn_full_walk(&repo_root, &git);
         self.repos.insert(
             repo_root,
             RepoWatch {
@@ -448,6 +595,7 @@ impl UnifiedWatcher {
                 queue: Vec::new(),
                 walks: vec![(WalkKind::Full, walk)],
                 ignore: None,
+                git,
             },
         );
         Ok(())
@@ -483,8 +631,8 @@ impl UnifiedWatcher {
         };
         // A full walk still running read the old rules; the new one supersedes it.
         repo.walks.retain(|(kind, _)| *kind != WalkKind::Full);
-        repo.walks
-            .push((WalkKind::Full, spawn_full_walk(repo_root)));
+        let walk = spawn_full_walk(repo_root, &repo.git);
+        repo.walks.push((WalkKind::Full, walk));
     }
 
     /// Check if repository root is being watched, including while its walk
@@ -673,27 +821,8 @@ impl UnifiedWatcher {
     /// Poll for pending events.
     /// Call this periodically (e.g., on tick) to get accumulated events.
     pub fn poll_events(&mut self) -> Vec<WatchEvent> {
-        // Collect all internal events
-        while let Ok(event) = self.internal_rx.try_recv() {
-            match event {
-                InternalEvent::FsChange { changed_path } => {
-                    if !self.is_ignored_in_repo(&changed_path) {
-                        self.pending_fs.insert(changed_path);
-                    }
-                }
-                InternalEvent::GitChange { repo_root } => {
-                    // Fixed window from the first change in a burst — do NOT
-                    // reset on every event, or continuous repo churn would keep
-                    // pushing the deadline out and the update would never fire.
-                    self.pending_git
-                        .entry(repo_root)
-                        .or_insert_with(Instant::now);
-                }
-                InternalEvent::GitignoreChange { repo_root } => {
-                    // Update timestamp for gitignore debounce
-                    self.pending_gitignore.insert(repo_root, Instant::now());
-                }
-            }
+        while let Ok(path) = self.internal_rx.try_recv() {
+            self.classify(path);
         }
 
         let mut events = Vec::new();
@@ -816,16 +945,19 @@ fn ignored_by(ignore: &Gitignore, path: &Path) -> bool {
         .is_ignore()
 }
 
-/// Start the full walk of `repo_root` on a worker thread.
-fn spawn_full_walk(repo_root: &Path) -> Receiver<RepoWalk> {
+/// Start the full walk of `repo_root` on a worker thread: its directories
+/// and, for a linked worktree or a submodule, its git directories.
+fn spawn_full_walk(repo_root: &Path, git: &GitDirs) -> Receiver<RepoWalk> {
     let (tx, rx) = channel();
     let repo = repo_root.to_path_buf();
+    let git = git.clone();
     std::thread::spawn(move || {
-        let paths = if RECURSIVE_ROOT_WATCH {
+        let mut paths = if RECURSIVE_ROOT_WATCH {
             vec![repo.clone()]
         } else {
             collect_repo_watch_paths(&repo)
         };
+        paths.extend(git.watch_paths(&repo));
         let ignore = RECURSIVE_ROOT_WATCH
             .then(|| repo_gitignore(&repo))
             .flatten();
@@ -954,25 +1086,31 @@ mod tests {
     }
 
     #[test]
-    fn test_is_commit_related() {
-        assert!(UnifiedWatcher::is_commit_related(Path::new(
-            "/project/.git/index"
-        )));
-        assert!(UnifiedWatcher::is_commit_related(Path::new(
-            "/project/.git/HEAD"
-        )));
-        assert!(UnifiedWatcher::is_commit_related(Path::new(
-            "/project/.git/refs/heads/main"
-        )));
-        assert!(UnifiedWatcher::is_commit_related(Path::new(
-            "/project/.git/logs/HEAD"
-        )));
-        assert!(!UnifiedWatcher::is_commit_related(Path::new(
-            "/project/.git/objects/ab/cdef"
-        )));
-        assert!(!UnifiedWatcher::is_commit_related(Path::new(
-            "/project/.git/config"
-        )));
+    fn own_git_state_is_what_a_status_or_log_shows() {
+        for own in [
+            "index",
+            "HEAD",
+            "refs/heads/main",
+            "logs/HEAD",
+            "packed-refs",
+            "modules/sub/HEAD",
+            "modules/sub/index",
+        ] {
+            assert!(is_own_git_state(Path::new(own)), "{own}");
+        }
+        for other in [
+            "objects/ab/cdef",
+            "config",
+            "worktrees/wt1/index",
+            "worktrees/wt1/HEAD",
+            "index.lock",
+        ] {
+            assert!(!is_own_git_state(Path::new(other)), "{other}");
+        }
+        assert!(is_shared_git_state(Path::new("refs/heads/main")));
+        assert!(is_shared_git_state(Path::new("packed-refs")));
+        assert!(!is_shared_git_state(Path::new("index")));
+        assert!(!is_shared_git_state(Path::new("logs/HEAD")));
     }
 
     #[test]
@@ -1453,5 +1591,204 @@ mod tests {
         assert!(!watched.contains(&root.join("plain.txt")));
         // Reference count is untouched by the additive install.
         assert_eq!(w.repos[&root].refs, 1, "refcount must be preserved");
+    }
+
+    /// Run `git` in `dir`, isolated from the user's and system config.
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .args([
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "protocol.file.allow=always",
+            ])
+            .args(args)
+            .output()
+            .expect("git runs");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    /// A repository with one commit on `main`, at `parent/name`.
+    fn git_repo(parent: &Path, name: &str) -> PathBuf {
+        let root = parent.join(name);
+        std::fs::create_dir(&root).unwrap();
+        git(&root, &["init", "-q", "-b", "main"]);
+        std::fs::write(root.join("a.txt"), b"a").unwrap();
+        git(&root, &["add", "a.txt"]);
+        git(&root, &["commit", "-q", "-m", "init"]);
+        root
+    }
+
+    /// Stage a new file in `repo`.
+    fn stage(repo: &Path, file: &str) {
+        std::fs::write(repo.join(file), file).unwrap();
+        git(repo, &["add", file]);
+    }
+
+    /// The repos git events arrive for: polled until every repo in `expect`
+    /// has one, then a while longer for any that should not arrive.
+    fn git_events(w: &mut UnifiedWatcher, expect: &[&Path]) -> HashSet<PathBuf> {
+        let mut seen = HashSet::new();
+        let mut settle = None;
+        for _ in 0..200 {
+            w.poll_pending();
+            for event in w.poll_events() {
+                if let WatchEvent::GitCommit(root) = event {
+                    seen.insert(root);
+                }
+            }
+            if settle.is_none() && expect.iter().all(|r| seen.contains(*r)) {
+                settle = Some(Instant::now());
+            }
+            if settle.is_some_and(|t| t.elapsed() > Duration::from_millis(800)) {
+                return seen;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        panic!("git events for {expect:?} never arrived, got {seen:?}");
+    }
+
+    /// Let events from the setup pass before the changes a test checks.
+    fn drain(w: &mut UnifiedWatcher) {
+        std::thread::sleep(Duration::from_millis(700));
+        w.poll_pending();
+        w.poll_events();
+    }
+
+    #[test]
+    fn a_linked_worktree_resolves_its_git_and_common_dirs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let main = git_repo(&base, "main");
+        git(&main, &["worktree", "add", "-q", "-b", "wt1", "../wt"]);
+        let wt = base.join("wt");
+
+        let dirs = GitDirs::resolve(&wt);
+        assert_eq!(dirs.git_dir, main.join(".git/worktrees/wt"));
+        assert_eq!(dirs.common_dir, main.join(".git"));
+        assert!(dirs.is_linked(&wt));
+        assert!(dirs.concerns(&main.join(".git/worktrees/wt/index")));
+        assert!(dirs.concerns(&main.join(".git/refs/heads/main")));
+        assert!(!dirs.concerns(&main.join(".git/index")));
+        assert!(!dirs.concerns(&main.join(".git/objects/ab/cd")));
+
+        let own = GitDirs::resolve(&main);
+        assert!(!own.is_linked(&main));
+        assert!(own.watch_paths(&main).is_empty());
+        assert!(!own.concerns(&main.join(".git/worktrees/wt/index")));
+        assert!(own.concerns(&main.join(".git/index")));
+    }
+
+    /// Staging in a worktree is the worktree's change, not the main
+    /// repo's; a commit moves a shared branch and concerns both; releasing
+    /// the main repo keeps the worktree's watches and events.
+    #[test]
+    fn worktree_git_changes_are_attributed_to_the_worktree() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let main = git_repo(&base, "main");
+        git(&main, &["worktree", "add", "-q", "-b", "wt1", "../wt"]);
+        let wt = base.join("wt");
+
+        // The worktree alone: its git directory is watched.
+        let mut w = UnifiedWatcher::new().unwrap();
+        w.watch_repository(wt.clone()).unwrap();
+        wait_until_watched(&mut w, &wt);
+        let watched = &w.repos[&wt].watched;
+        let common = main.join(".git");
+        if RECURSIVE_ROOT_WATCH {
+            assert!(watched.contains(&common), "{watched:?}");
+        } else {
+            for dir in [
+                common.join("worktrees/wt"),
+                common.clone(),
+                common.join("refs/heads"),
+            ] {
+                assert!(watched.contains(&dir), "{} unwatched", dir.display());
+            }
+        }
+        assert!(
+            !watched
+                .iter()
+                .any(|p| p.starts_with(common.join("objects"))),
+            "{watched:?}"
+        );
+        drain(&mut w);
+        stage(&wt, "b.txt");
+        assert!(git_events(&mut w, &[&wt]).contains(&wt));
+
+        w.watch_repository(main.clone()).unwrap();
+        wait_until_watched(&mut w, &main);
+        drain(&mut w);
+        stage(&wt, "c.txt");
+        let seen = git_events(&mut w, &[&wt]);
+        assert!(!seen.contains(&main), "{seen:?}");
+
+        stage(&main, "m.txt");
+        let seen = git_events(&mut w, &[&main]);
+        assert!(!seen.contains(&wt), "{seen:?}");
+
+        git(&wt, &["commit", "-q", "-m", "wt"]);
+        git_events(&mut w, &[&wt, &main]);
+
+        w.unwatch_repository(&main);
+        assert_repo_watches_held(&w);
+        stage(&wt, "d.txt");
+        assert!(git_events(&mut w, &[&wt]).contains(&wt));
+
+        w.unwatch_repository(&wt);
+        assert!(w.os_watches.paths.is_empty(), "{:?}", w.os_watches.paths);
+    }
+
+    /// A submodule's index is the submodule's change, heard whether or not
+    /// the superproject is watched; the superproject's own is not the
+    /// submodule's.
+    #[test]
+    fn submodule_git_changes_are_attributed_to_the_submodule() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = dunce::canonicalize(tmp.path()).unwrap();
+        let lib = git_repo(&base, "lib");
+        let outer = git_repo(&base, "outer");
+        git(
+            &outer,
+            &["submodule", "add", "-q", lib.to_str().unwrap(), "sub"],
+        );
+        git(&outer, &["commit", "-q", "-m", "sub"]);
+        let sub = outer.join("sub");
+        let dirs = GitDirs::resolve(&sub);
+        assert_eq!(dirs.git_dir, outer.join(".git/modules/sub"));
+        assert_eq!(dirs.common_dir, dirs.git_dir);
+
+        let mut w = UnifiedWatcher::new().unwrap();
+        w.watch_repository(sub.clone()).unwrap();
+        wait_until_watched(&mut w, &sub);
+        drain(&mut w);
+        stage(&sub, "b.txt");
+        assert!(git_events(&mut w, &[&sub]).contains(&sub));
+
+        w.watch_repository(outer.clone()).unwrap();
+        wait_until_watched(&mut w, &outer);
+        drain(&mut w);
+        stage(&sub, "c.txt");
+        git_events(&mut w, &[&sub]);
+        stage(&outer, "o.txt");
+        let seen = git_events(&mut w, &[&outer]);
+        assert!(!seen.contains(&sub), "{seen:?}");
+
+        w.unwatch_repository(&outer);
+        assert_repo_watches_held(&w);
+        stage(&sub, "d.txt");
+        assert!(git_events(&mut w, &[&sub]).contains(&sub));
     }
 }
