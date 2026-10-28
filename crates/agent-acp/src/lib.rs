@@ -3672,7 +3672,7 @@ fn write_text_file(cwd: &Path, params: &Value) -> Result<Value, String> {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    std::fs::write(&path, content)
+    termide_agent_core::write_atomic(&path, content.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     Ok(json!({}))
 }
@@ -3684,6 +3684,27 @@ mod tests {
     use termide_agent_core::{
         permission_channel, PermissionAnswer, PermissionEnvelope, PermissionRules,
     };
+
+    /// `fs/write_text_file` replaces a file whole, through a symlink to its
+    /// target, keeping the target's permissions.
+    #[cfg(unix)]
+    #[test]
+    fn write_text_file_is_atomic_and_follows_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("tool.sh");
+        std::fs::write(&real, "old").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::os::unix::fs::symlink("tool.sh", dir.path().join("link.sh")).unwrap();
+        write_text_file(dir.path(), &json!({ "path": "link.sh", "content": "new" })).unwrap();
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
+        assert!(std::fs::symlink_metadata(dir.path().join("link.sh"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
 
     /// Only meaningful when the test itself runs with a controlling
     /// terminal; without one both answers are `NO_TTY`.

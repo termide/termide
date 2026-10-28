@@ -134,7 +134,7 @@ fn edit(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
     } else {
         updated
     });
-    std::fs::write(&path, output)
+    termide_agent_core::write_atomic(&path, output.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 
     let strategy = matches[0].strategy.label();
@@ -335,6 +335,30 @@ mod tests {
         let path = dir.join("f.rs");
         std::fs::write(&path, content).unwrap();
         path
+    }
+
+    /// An edit replaces the file whole through a symlink and keeps the
+    /// target's permissions (an executable script stays executable).
+    #[cfg(unix)]
+    #[test]
+    fn edits_atomically_through_a_symlink_keeping_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let real = file(dir.path(), "echo old\n");
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::os::unix::fs::symlink("f.rs", dir.path().join("link.rs")).unwrap();
+        let result = run(
+            dir.path(),
+            json!({ "path": "link.rs", "old_string": "old", "new_string": "new" }),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "echo new\n");
+        assert!(std::fs::symlink_metadata(dir.path().join("link.rs"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o755);
     }
 
     #[test]

@@ -22,6 +22,7 @@ pub mod acp;
 pub mod agent;
 pub mod approvals;
 pub mod ask;
+pub mod atomic_write;
 pub mod cancel;
 pub mod checkpoints;
 pub mod classifier;
@@ -62,6 +63,7 @@ pub use ask::{
     question_channel, Question, QuestionAnswer, QuestionEnvelope, QuestionOption, QuestionReply,
     UserAsker,
 };
+pub use atomic_write::write_atomic;
 pub use cancel::{CancelToken, PauseGate};
 pub use checkpoints::{Checkpoint, CheckpointHooks, CheckpointStore, SavedFile, Undone};
 pub use classifier::{
