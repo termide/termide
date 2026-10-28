@@ -450,6 +450,7 @@ rust-analyzer 以 `cargo.targetDir = true` 启动：它的 `cargo check` 以及�
 - `⠋ main.rs (starting)` — 服务器正在启动
 - `⠋ main.rs (indexing)` — 服务器正在索引项目
 - `main.rs` — 服务器就绪
+- `main.rs (crashed)` — 服务器已退出或发送了无法解析的消息；在重启 termide 之前，其请求均会失败
 
 ### 支持的语言
 
