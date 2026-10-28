@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{Action, Cursor, History};
+use crate::edit_log::{EditLog, EditRevision, SyntaxEdit};
 use crate::line_marks::{shift_marks, LineEdit};
 use crate::LineEnding;
 
@@ -58,6 +59,8 @@ pub struct TextBuffer {
     line_marks: BTreeSet<usize>,
     /// Incremented whenever `line_marks` changes.
     line_marks_version: u64,
+    /// Recent edits in byte/point terms, for incremental syntax parsing.
+    edit_log: EditLog,
 }
 
 impl TextBuffer {
@@ -75,6 +78,7 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            edit_log: EditLog::new(),
         }
     }
 
@@ -92,6 +96,7 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            edit_log: EditLog::new(),
         }
     }
 
@@ -110,6 +115,7 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            edit_log: EditLog::new(),
         }
     }
 
@@ -144,6 +150,7 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            edit_log: EditLog::new(),
         })
     }
 
@@ -311,6 +318,7 @@ impl TextBuffer {
         if !self.line_marks.is_empty() {
             self.shift_line_marks(chars.clone(), text);
         }
+        self.edit_log.record(&self.rope, chars.clone(), text);
         self.record_lsp_change(chars, text);
     }
 
@@ -421,6 +429,31 @@ impl TextBuffer {
     /// Get all text
     pub fn text(&self) -> String {
         self.rope.to_string()
+    }
+
+    /// The text itself, for readers that walk it in chunks (a parser) rather
+    /// than copy it.
+    pub fn rope(&self) -> &Rope {
+        &self.rope
+    }
+
+    /// Where the text stands in its edit history; see
+    /// [`TextBuffer::syntax_edits_since`].
+    pub fn edit_revision(&self) -> EditRevision {
+        self.edit_log.revision()
+    }
+
+    /// The edits that turned the text at `since` into the current text,
+    /// oldest first, in the coordinates of the text before each.
+    ///
+    /// `None` when they are no longer all known — `since` belongs to another
+    /// buffer (a reload replaces the buffer) or lies further back than the
+    /// log keeps — and the consumer has to start over from the whole text.
+    pub fn syntax_edits_since(
+        &self,
+        since: EditRevision,
+    ) -> Option<impl Iterator<Item = &SyntaxEdit>> {
+        self.edit_log.since(since)
     }
 
     /// Total length of the buffer in bytes (O(1) via the rope).
@@ -609,6 +642,7 @@ impl TextBuffer {
     /// Append text to the end of buffer (for log viewer, no history tracking)
     pub fn append(&mut self, text: &str) {
         let len = self.rope.len_chars();
+        self.edit_log.record(&self.rope, len..len, text);
         self.rope.insert(len, text);
         self.edit_version += 1;
         // Don't mark as modified - this is for internal use (log viewer)
@@ -729,6 +763,69 @@ mod tests {
         assert_eq!(buffer.text(), "one two three");
         buffer.redo().unwrap();
         assert_eq!(buffer.text(), ">> one 2 three");
+    }
+
+    /// Every mutation path logs one edit per change, and each edit maps the
+    /// text before it onto the text after: same prefix, same suffix, lengths
+    /// adding up.
+    #[test]
+    fn syntax_edits_describe_every_mutation() {
+        let mut buf = TextBuffer::from_text("fn main() {\n    let ц = 1;\n}\n");
+        let steps: [fn(&mut TextBuffer); 9] = [
+            |b| {
+                b.insert(&Cursor::at(1, 8), "дё").unwrap();
+            },
+            |b| {
+                b.insert(&Cursor::at(0, 0), "// x\n\n").unwrap();
+            },
+            |b| {
+                b.delete_char(&Cursor::at(2, 0)).unwrap();
+            },
+            |b| {
+                b.backspace(&Cursor::at(3, 0)).unwrap();
+            },
+            |b| {
+                b.delete_range(&Cursor::at(0, 2), &Cursor::at(2, 4))
+                    .unwrap();
+            },
+            |b| {
+                b.undo().unwrap();
+            },
+            |b| {
+                b.undo().unwrap();
+            },
+            |b| {
+                b.redo().unwrap();
+            },
+            |b| b.append("tail\n"),
+        ];
+        for step in steps {
+            let before = buf.text();
+            let since = buf.edit_revision();
+            step(&mut buf);
+            let after = buf.text();
+            let edits: Vec<SyntaxEdit> = buf.syntax_edits_since(since).unwrap().copied().collect();
+            assert_eq!(edits.len(), 1, "{before:?} -> {after:?}");
+            let e = edits[0];
+            assert_eq!(before[..e.start_byte], after[..e.start_byte]);
+            assert_eq!(before[e.old_end_byte..], after[e.new_end_byte..]);
+            let line_of = |text: &str, byte: usize| Rope::from_str(text).byte_to_line(byte);
+            assert_eq!(e.start_position.row, line_of(&before, e.start_byte));
+            assert_eq!(e.old_end_position.row, line_of(&before, e.old_end_byte));
+            assert_eq!(e.new_end_position.row, line_of(&after, e.new_end_byte));
+            let column =
+                |text: &str, byte: usize| byte - text[..byte].rfind('\n').map_or(0, |n| n + 1);
+            assert_eq!(e.old_end_position.column, column(&before, e.old_end_byte));
+            assert_eq!(e.new_end_position.column, column(&after, e.new_end_byte));
+        }
+    }
+
+    #[test]
+    fn a_new_buffer_is_a_new_document() {
+        let a = TextBuffer::from_text("x");
+        let b = TextBuffer::from_text("x");
+        assert!(b.syntax_edits_since(a.edit_revision()).is_none());
+        assert!(a.clone().syntax_edits_since(a.edit_revision()).is_none());
     }
 
     #[test]

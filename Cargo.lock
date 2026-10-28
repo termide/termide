@@ -5483,6 +5483,7 @@ version = "0.46.0"
 dependencies = [
  "log",
  "ratatui",
+ "ropey",
  "tree-sitter",
  "tree-sitter-bash",
  "tree-sitter-c",

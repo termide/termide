@@ -469,6 +469,89 @@ mod render_highlight_tests {
         );
     }
 
+    /// Every cell's symbol and colour, rendered unfocused (no cursor line).
+    fn rendered(editor: &mut Editor) -> Vec<(String, Color)> {
+        let area = Rect::new(0, 0, 60, 12);
+        let mut buf = Buffer::empty(area);
+        editor.render_content(
+            area,
+            &mut buf,
+            &Theme::default(),
+            &Config::default(),
+            false,
+            None,
+        );
+        buf.content()
+            .iter()
+            .map(|cell| (cell.symbol().to_string(), cell.fg))
+            .collect()
+    }
+
+    /// The screen of an editor that opened `like`'s text fresh, with the
+    /// same cursor (its line is drawn differently).
+    fn assert_renders_as_fresh(like: &mut Editor) {
+        let mut fresh = Editor::from_text(&like.buffer.text(), "a.rs".to_string());
+        fresh.render_cache.highlight.set_syntax("rust");
+        fresh.cursor = like.cursor;
+        let (got, want) = (rendered(like), rendered(&mut fresh));
+        if let Some(i) = (0..got.len()).find(|&i| got[i] != want[i]) {
+            panic!(
+                "cell {i} (row {}): {:?} vs fresh {:?}; text {:?}",
+                i / 60,
+                got[i],
+                want[i],
+                like.buffer.text()
+            );
+        }
+    }
+
+    /// Typing, line breaks, backspace, undo and redo reach the highlighter as
+    /// edits of the kept syntax tree; after each, the screen must look as if
+    /// the text had been opened fresh.
+    #[test]
+    fn edits_highlight_as_a_fresh_parse_would() {
+        let src = "fn main() {\n    let s = \"ё\";\n    let n = 1;\n}\n";
+        let mut editor = Editor::from_text(src, "a.rs".to_string());
+        editor.render_cache.highlight.set_syntax("rust");
+        rendered(&mut editor);
+
+        editor.cursor = termide_buffer::Cursor::at(1, 4);
+        for ch in "/* note".chars() {
+            editor.insert_char(ch).unwrap();
+            assert_renders_as_fresh(&mut editor);
+        }
+        editor.insert_newline().unwrap();
+        assert_renders_as_fresh(&mut editor);
+        editor.backspace().unwrap();
+        assert_renders_as_fresh(&mut editor);
+        for _ in 0..3 {
+            editor.handle_undo_redo(|b| b.undo()).unwrap();
+            assert_renders_as_fresh(&mut editor);
+        }
+        editor.handle_undo_redo(|b| b.redo()).unwrap();
+        assert_renders_as_fresh(&mut editor);
+    }
+
+    /// A reload replaces the buffer; the kept tree belongs to the old text and
+    /// must not be reused for the new one.
+    #[test]
+    fn a_reload_from_disk_highlights_the_new_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.rs");
+        std::fs::write(&path, "fn a() {}\nfn b() {}\n").unwrap();
+        let mut editor =
+            Editor::open_file_with_config(path.clone(), crate::config::EditorConfig::default())
+                .unwrap();
+        editor.render_cache.highlight.set_syntax("rust");
+        rendered(&mut editor);
+
+        let changed = "/* fn a() {}\nfn b() {}\n";
+        std::fs::write(&path, changed).unwrap();
+        editor.reload_from_disk().unwrap();
+        assert_eq!(editor.buffer.text(), changed);
+        assert_renders_as_fresh(&mut editor);
+    }
+
     /// Same as above but mirrors a light-theme session (the reported repro used
     /// `github-light`): set the highlight cache's theme exactly as
     /// `prepare_render` does before rendering.
