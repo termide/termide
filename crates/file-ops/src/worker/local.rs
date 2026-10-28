@@ -117,6 +117,16 @@ fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Whether a failed `rename` means source and destination are on different
+/// filesystems, so a move has to fall back to copy + delete. std reports
+/// EXDEV (Unix) and ERROR_NOT_SAME_DEVICE (Windows) as `CrossesDevices`.
+/// Off Unix, `Other` is kept as well: errors std does not map (some
+/// network redirectors) land there, and the fallback is safe for them.
+fn is_cross_device(e: &std::io::Error) -> bool {
+    e.kind() == std::io::ErrorKind::CrossesDevices
+        || (cfg!(not(unix)) && e.kind() == std::io::ErrorKind::Other)
+}
+
 /// Access and modification times of `metadata` (from lstat).
 fn source_times(metadata: &fs::Metadata) -> (filetime::FileTime, filetime::FileTime) {
     (
@@ -579,27 +589,10 @@ impl OperationWorker for LocalCopyWorker {
                         // Already moved — no need to track for delete phase
                         continue;
                     }
-                    #[cfg(unix)]
-                    Err(e) if e.raw_os_error() == Some(18 /* EXDEV */) => {
+                    Err(e) if is_cross_device(&e) => {
                         // Cross-device move — fall through to copy+delete. This
                         // source really will be walked, so account for it now:
                         // drop the placeholder count of 1 and scan it for real.
-                        total_files = total_files.saturating_sub(1);
-                        match self.scan_source(
-                            source,
-                            control,
-                            progress_tx,
-                            &mut total_files,
-                            &mut total_bytes,
-                        ) {
-                            Ok(()) => {}
-                            Err(OperationError::Cancelled) => return OperationResult::Cancelled,
-                            Err(e) => return OperationResult::Failed(e.to_string()),
-                        }
-                    }
-                    #[cfg(not(unix))]
-                    Err(e) if e.kind() == std::io::ErrorKind::Other => {
-                        // Cross-device move on non-Unix — same fallback.
                         total_files = total_files.saturating_sub(1);
                         match self.scan_source(
                             source,
@@ -1218,6 +1211,18 @@ mod tests {
             let mode = fs::metadata(copy.join("sub")).unwrap().permissions().mode();
             assert_eq!(mode & 0o777, 0o700);
         }
+    }
+
+    #[test]
+    fn cross_device_rename_errors_are_recognised() {
+        use std::io::{Error, ErrorKind};
+        assert!(is_cross_device(&Error::from(ErrorKind::CrossesDevices)));
+        assert!(!is_cross_device(&Error::from(ErrorKind::PermissionDenied)));
+        assert!(!is_cross_device(&Error::from(ErrorKind::NotFound)));
+        #[cfg(unix)]
+        assert!(is_cross_device(&Error::from_raw_os_error(18)));
+        #[cfg(windows)]
+        assert!(is_cross_device(&Error::from_raw_os_error(17))); // ERROR_NOT_SAME_DEVICE
     }
 
     #[test]
