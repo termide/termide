@@ -1416,10 +1416,11 @@ directory, writing `docs/.zshrc` is an edit outside the project, and a rule
 for `.env` also covers a link to it.
 
 An edit or a write under a `.git` directory, or to a worktree's `.git` file,
-asks in every mode, `all` included, and whatever the `allow` rules say: git's
-config and hooks name programs that even a look-only `git status` runs. A
-`deny` rule still refuses it, plan mode refuses it, and the answer holds for
-that one call.
+asks in every mode but `all`, whatever the `allow` rules say: git's config
+and hooks name programs that even a look-only `git status` runs. A `deny`
+rule still refuses it, plan mode refuses it, and the answer holds for that
+one call. `all` lets it through like everything else: that mode runs any
+shell command unasked, so a prompt there would guard nothing.
 
 ¹ In `plan` an MCP tool counts the configured `allow` rules too, and one its
 server marks read-only (`readOnlyHint`) runs without asking.

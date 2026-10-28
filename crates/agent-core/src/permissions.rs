@@ -844,6 +844,12 @@ impl PermissionHooks {
         self.mode.clone()
     }
 
+    /// Whether `call` edits under `.git` in a mode that asks about it: every
+    /// mode but `all`.
+    fn guards_git_dir(&self, call: &ToolCall, subject: &str) -> bool {
+        self.mode.get() != Mode::All && writes_git_dir(call, subject)
+    }
+
     /// The verdict before any prompt: the rules that count in the mode
     /// (the strictest wins), then the mode's own answer and the built-in
     /// safe defaults.
@@ -855,9 +861,11 @@ impl PermissionHooks {
             return self.judge_command(&subject, ctx).decision;
         }
         // What git keeps under `.git` — its config, its hooks — names programs
-        // that a look-only `git status` then runs, so no mode, `allow` rule or
-        // answer for the session lets an edit there through unasked.
-        if writes_git_dir(call, &subject) {
+        // that a look-only `git status` then runs, so no `allow` rule or
+        // answer for the session lets an edit there through unasked. `all`
+        // runs any shell command unasked anyway, so a prompt there guards
+        // nothing the user has not chosen to give away.
+        if self.guards_git_dir(call, &subject) {
             return match self.rule_for(call, &subject, ctx) {
                 Some(Decision::Deny) => Decision::Deny,
                 _ if mode == Mode::Plan => Decision::Deny,
@@ -1132,7 +1140,7 @@ impl PermissionHooks {
                     (
                         Vec::new(),
                         self.rule_for(call, &subject, ctx) == Some(Decision::Ask)
-                            || writes_git_dir(call, &subject),
+                            || self.guards_git_dir(call, &subject),
                     )
                 };
                 if let Some(judged) = self.review(call, ctx, forced, &parts) {
@@ -1147,7 +1155,7 @@ impl PermissionHooks {
                 let bundle = parts.len() > 1;
                 // An edit under `.git` asks every time, so no answer outlasts it.
                 let destructive = parts.iter().any(|p| destructive_command(&p.text))
-                    || writes_git_dir(call, &subject);
+                    || self.guards_git_dir(call, &subject);
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
@@ -4212,15 +4220,9 @@ mod tests {
     /// allow; a `deny` still refuses, plan mode still refuses, and no answer
     /// outlasts the call.
     #[test]
-    fn writing_under_git_asks_in_every_mode() {
+    fn writing_under_git_asks_in_every_mode_but_all() {
         let edit = |path: &str| call("edit", json!({ "path": path }));
-        for mode in [
-            Mode::Ask,
-            Mode::Edit,
-            Mode::Configured,
-            Mode::Auto,
-            Mode::All,
-        ] {
+        for mode in [Mode::Ask, Mode::Edit, Mode::Configured, Mode::Auto] {
             let mut rules = PermissionRules {
                 mode,
                 ..PermissionRules::default()
@@ -4252,7 +4254,7 @@ mod tests {
                 hooks.decide(&call("read", json!({ "path": ".git/config" })), &ctx()),
                 Decision::Deny
             );
-            if matches!(mode, Mode::Edit | Mode::Auto | Mode::All) {
+            if matches!(mode, Mode::Edit | Mode::Auto) {
                 assert_eq!(hooks.decide(&edit(".gitignore"), &ctx()), Decision::Allow);
                 assert_eq!(
                     hooks.decide(&edit("src/.github/x"), &ctx()),
@@ -4262,6 +4264,18 @@ mod tests {
         }
         let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
         assert_eq!(plan.decide(&edit(".git/config"), &ctx()), Decision::Deny);
+        // `all` never asks, and runs any shell command anyway; its rules
+        // still count.
+        let mut all = rules("mode = \"all\"");
+        all.add("edit", ".git/hooks/**", Decision::Ask);
+        let (all, _) = hooks(all, vec![]);
+        for path in [".git/config", "/elsewhere/repo/.git/config", "sub/.git"] {
+            assert_eq!(all.decide(&edit(path), &ctx()), Decision::Allow, "{path}");
+        }
+        assert_eq!(
+            all.decide(&edit(".git/hooks/pre-commit"), &ctx()),
+            Decision::Ask
+        );
         let mut denied = rules("mode = \"all\"");
         denied.add("edit", ".git/**", Decision::Deny);
         let (denied, _) = hooks(denied, vec![]);
