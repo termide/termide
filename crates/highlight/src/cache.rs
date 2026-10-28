@@ -11,7 +11,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use tree_sitter::InputEdit;
 use tree_sitter_highlight::{HighlightEvent, Highlighter};
 
-use crate::document::{DocumentHighlight, DocumentRevision, DocumentSource, LineSegments};
+use crate::document::{DocumentHighlight, DocumentRevision, DocumentSource};
 use crate::keyword::{keyword_line_segments, KeywordSyntax};
 use crate::languages::{injection_language_alias, HIGHLIGHT_NAMES};
 use crate::TreeSitterHighlighter;
@@ -22,10 +22,9 @@ const MAX_CACHE_SIZE: usize = 1000;
 /// Upper bound (in bytes) for whole-document syntax highlighting.
 ///
 /// Whole-document highlighting is the only way to resolve cross-line context
-/// (PHP's HTML/PHP mode switches, multi-line strings and comments). Most
-/// grammars follow edits incrementally, but opening a file still parses it
-/// whole, and languages with injections re-parse it on every edit. Past this
-/// size callers fall back to the per-line path.
+/// (PHP's HTML/PHP mode switches, multi-line strings and comments). Edits are
+/// followed incrementally, but opening a file still parses it whole. Past
+/// this size callers fall back to the per-line path.
 pub const WHOLE_DOCUMENT_BYTE_LIMIT: usize = 1024 * 1024;
 
 /// Trait for line-based syntax highlighting.
@@ -209,13 +208,11 @@ impl HighlightCache {
     /// The document path keeps that context, so each line is coloured
     /// according to the real parse state at that point.
     ///
-    /// Most grammars are followed incrementally: the syntax tree is kept, the
-    /// edits since the last sync are applied to it and the text re-parsed
-    /// reusing what they left intact; only lines that were edited or whose
-    /// syntax changed are highlighted again, and only once they are visible.
-    /// Grammars with injections fall back to a full parse and highlight of
-    /// the whole text whenever it changes (see
-    /// `TreeSitterHighlighter::incremental_highlights`).
+    /// The syntax tree is kept between syncs: the edits since the last one
+    /// are applied to it and the text re-parsed reusing what they left
+    /// intact. Embedded languages keep a tree per injected range the same
+    /// way. Only visible lines are highlighted, and only those that were
+    /// edited or whose syntax may have changed.
     ///
     /// No-op when no tree-sitter syntax is set; when the parse fails the
     /// per-line path serves the lines. Callers must gate on buffer size.
@@ -223,25 +220,26 @@ impl HighlightCache {
         let Some(language) = self.language.as_deref() else {
             return;
         };
-        let default_style = Style::default().fg(self.default_fg);
-        if let Some(highlights) = self.syntax_highlighter.incremental_highlights(language) {
-            self.document.sync_tree(doc, &highlights);
-            let styles = &self.highlight_styles;
-            let style = |highlight: usize| styles.get(highlight).copied().unwrap_or(default_style);
-            self.document.fill(
-                doc.rope(),
-                visible_lines,
-                &highlights,
-                &style,
-                default_style,
-            );
+        let highlighter = self.syntax_highlighter;
+        let Some(highlights) = highlighter.incremental_highlights(language) else {
             return;
-        }
-        let revision = doc.revision();
-        if self.document.revision() != Some(revision) {
-            let lines = self.highlight_whole_text(&doc.rope().to_string());
-            self.document.set_whole(revision, lines);
-        }
+        };
+        let default_style = Style::default().fg(self.default_fg);
+        self.document.sync_tree(doc, &highlights);
+        let styles = &self.highlight_styles;
+        let style = |highlight: usize| styles.get(highlight).copied().unwrap_or(default_style);
+        // Embedded languages resolve to their own queries under the alias
+        // the host's injection names.
+        let resolve =
+            |name: &str| highlighter.incremental_highlights(injection_language_alias(name));
+        self.document.fill(
+            doc.rope(),
+            visible_lines,
+            &highlights,
+            &resolve,
+            &style,
+            default_style,
+        );
     }
 
     /// Highlight `text` as a whole document, every line at once. For text
@@ -252,9 +250,11 @@ impl HighlightCache {
     }
 
     /// Highlight the whole of `text` through `tree_sitter_highlight`, which
-    /// also colours injected languages. `None` when no syntax is set or the
-    /// grammar/parse fails.
-    fn highlight_whole_text(&self, text: &str) -> Option<Vec<LineSegments>> {
+    /// also colours injected languages: the reference the incremental path
+    /// is tested against. `None` when no syntax is set or the grammar/parse
+    /// fails.
+    #[cfg(test)]
+    fn highlight_whole_text(&self, text: &str) -> Option<Vec<crate::document::LineSegments>> {
         let language = self.language.as_ref()?;
         let config = self.syntax_highlighter.get_config(language)?;
 
@@ -273,8 +273,8 @@ impl HighlightCache {
             })
             .ok()?;
 
-        let mut doc: Vec<LineSegments> = Vec::new();
-        let mut current_line: LineSegments = Vec::new();
+        let mut doc: Vec<crate::document::LineSegments> = Vec::new();
+        let mut current_line: crate::document::LineSegments = Vec::new();
         // Highlights nest; when an inner one ends the enclosing one resumes.
         let mut styles: Vec<Style> = Vec::new();
 
@@ -697,10 +697,9 @@ mod tests {
     }
 
     #[test]
-    fn a_theme_change_rehighlights_the_fallback_document() {
-        // PHP takes the whole-text fallback, which keeps no tree: clearing its
-        // lines must make the next sync redo the pass rather than leave them
-        // empty.
+    fn a_theme_change_rehighlights_a_document_with_injections() {
+        // Clearing the lines keeps the trees, host and embedded: the next
+        // sync must highlight the lines again rather than leave them empty.
         let mut cache = HighlightCache::new(global_highlighter(), false, Color::White);
         cache.set_syntax("php");
         let doc = WholeText::new("<?php\n$a = 1;\n");
