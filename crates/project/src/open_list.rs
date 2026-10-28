@@ -131,9 +131,8 @@ fn load_from(path: &Path) -> SavedOpenProjects {
     }
 }
 
-/// Write through a temporary file and a rename, so a crash midway leaves
-/// the previous list rather than a truncated one. The temporary name carries
-/// the process id: two instances may write at once.
+/// Write atomically, so a crash midway leaves the previous list rather than
+/// a truncated one.
 fn save_to(path: &Path, projects: &SavedOpenProjects) -> Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)
@@ -144,12 +143,8 @@ fn save_to(path: &Path, projects: &SavedOpenProjects) -> Result<()> {
         current: projects.current.clone(),
     };
     let contents = toml::to_string_pretty(&file).context("Failed to serialize open projects")?;
-    let tmp = path.with_extension(format!("toml.{}.tmp", std::process::id()));
-    fs::write(&tmp, contents).with_context(|| format!("Failed to write {}", tmp.display()))?;
-    fs::rename(&tmp, path).with_context(|| {
-        let _ = fs::remove_file(&tmp);
-        format!("Failed to replace {}", path.display())
-    })
+    crate::atomic::write_atomic(path, contents.as_bytes())
+        .with_context(|| format!("Failed to write {}", path.display()))
 }
 
 #[cfg(test)]

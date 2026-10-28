@@ -66,10 +66,19 @@ pub fn cleanup_old_logs(project_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Save unsaved buffer content to a temporary file
+/// Save unsaved buffer content to its backup file in the project directory,
+/// replacing the previous backup atomically.
 pub fn save_unsaved_buffer(project_dir: &Path, filename: &str, content: &str) -> Result<()> {
+    // The layout is saved after its buffers, so on a project's first save
+    // the directory may not be there yet.
+    fs::create_dir_all(project_dir).with_context(|| {
+        format!(
+            "Failed to create project directory: {}",
+            project_dir.display()
+        )
+    })?;
     let buffer_path = project_dir.join(filename);
-    fs::write(&buffer_path, content).with_context(|| {
+    crate::atomic::write_atomic(&buffer_path, content.as_bytes()).with_context(|| {
         format!(
             "Failed to write unsaved buffer file: {}",
             buffer_path.display()
@@ -799,6 +808,26 @@ panels = []
     // =========================================================================
     // Log filename generation
     // =========================================================================
+
+    /// A project's first layout save writes its buffers before the layout
+    /// creates the directory; the backup must not be lost to that order.
+    #[test]
+    fn an_unsaved_buffer_is_saved_into_a_missing_project_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project_dir = tmp.path().join("projects/home/u/new");
+        save_unsaved_buffer(&project_dir, "unsaved-1.txt", "draft").unwrap();
+        assert_eq!(
+            load_unsaved_buffer(&project_dir, "unsaved-1.txt").unwrap(),
+            "draft"
+        );
+        save_unsaved_buffer(&project_dir, "unsaved-1.txt", "second draft").unwrap();
+        assert_eq!(
+            load_unsaved_buffer(&project_dir, "unsaved-1.txt").unwrap(),
+            "second draft"
+        );
+        let names: Vec<_> = fs::read_dir(&project_dir).unwrap().collect();
+        assert_eq!(names.len(), 1, "no temporary file is left behind");
+    }
 
     #[test]
     fn test_generate_log_filename_format() {
