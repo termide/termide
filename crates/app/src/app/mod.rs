@@ -954,7 +954,7 @@ impl App {
                     // Update terminal dimensions in state
                     self.state.update_terminal_size(width, height);
 
-                    // Пропорционально перераспределить ширины групп при изменении размера терминала
+                    // Redistribute group widths proportionally to the new terminal width
                     self.layout_manager
                         .redistribute_widths_proportionally(width);
                     self.state.needs_redraw = true;

@@ -143,7 +143,7 @@ impl Modal for CommandConfigModal {
                 self.last_group_dropdown_area = None;
             }
 
-            // 2. Display name field (пункт меню)
+            // 2. Display name field (the menu item)
             self.last_display_name_text_area = Some(Self::render_labeled_input_field(
                 buf,
                 chunks[chunk_idx],

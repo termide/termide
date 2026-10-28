@@ -709,7 +709,7 @@ fn render_panel_group(
         let is_focused = is_active_group && is_focused_panel;
 
         // Calculate global panel index for rendering
-        // (не используется сейчас, но может понадобиться для совместимости)
+        // (currently unused, kept for compatibility)
         let global_panel_index = group_idx * 100 + panel_idx;
 
         let is_last = panel_idx + 1 == group_size;
