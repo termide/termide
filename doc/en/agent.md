@@ -484,13 +484,13 @@ with `▸`, an unfolded one with `▾`, right after the step's action
 (`@ Thinking ▸`, `$ Running ▸`, `< Reading ▸ src/main.rs`) or the system
 prompt's `#` (`# ▸`).
 
-A ```` ```mermaid ```` block in an answer is drawn as the diagram itself. A
-fresh answer shows its diagrams whole; once the answer has scrolled wholly
-above the view, each of its diagrams folds to one row,
-`┊ ▸ mermaid … N more lines`, and the view moves with it, so what is on screen
-stays where it was. Unfold them as any block — `Enter`, `→` or a second click
-on the answer; an answer folded or unfolded by hand stays that way. With
-`fold_blocks = "never"` diagrams never fold.
+A ```` ```mermaid ```` block in an answer is drawn as the diagram itself, at
+most half the panel's height: a taller one shows as one row from the start,
+`┊ ▸ mermaid … N more lines`. Unfold it as any block — `Enter`, `→` or a
+second click on the answer — and every diagram of the answer shows whole;
+fold the answer by hand and each is that row. Scrolling folds nothing: what is
+out of sight is not drawn anyway, and is as you left it when you come back.
+With `fold_blocks = "never"` diagrams have no limit and never fold.
 
 Pictures show the same way: one `read` returned, under its headline even
 while the call is folded, and one you pasted, inside your message. A picture
@@ -501,9 +501,15 @@ cut by the panel's edge shows its placeholder, `PNG 1280×800`, where terminal
 graphics would leave debris. With Sixel or iTerm2, which send a picture
 again wherever it moves, a picture that is moving — scrolled, or pushed up by
 what the agent writes — is an empty frame of its size until it has stood
-still for 150 ms; with Kitty it moves as text does. Once its block has scrolled wholly above the view
-it folds to `▸ PNG 1280×800` with the block, the view keeping its place; unfold
-the block to see it again. Folding a block by hand folds its pictures with it.
+still for 150 ms; with Kitty it moves as text does. Folding its block by hand
+folds it to `▸ PNG 1280×800`; unfold the block to see it again.
+
+A page or document the agent writes is not shown in the transcript: a `write`
+of an HTML, Markdown or Mermaid file (`.html`, `.htm`, `.md`, `.markdown`,
+`.mmd`) adds one row under its headline, `↗ HTML report.html`. A click on it,
+or `o` on the block, opens the file in the viewer it opens in from Open… — the
+HTML, Markdown or Mermaid panel; `Alt`+click opens it outside, in the system's
+default application.
 
 While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph

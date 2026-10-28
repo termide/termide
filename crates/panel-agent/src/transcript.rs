@@ -11,7 +11,7 @@ use termide_agent_core::{
 use termide_core::ThemeColors;
 use termide_panel_image::inline::{fit_cells, picture_key, picture_size};
 use termide_panel_markdown::render_markdown_with;
-use termide_richtext::{Builder, DiagramCard, RowCopy};
+use termide_richtext::{Builder, DiagramFold, RowCopy};
 
 /// Lines of tool output shown when a call is expanded.
 const EXPANDED_OUTPUT_LINES: usize = 60;
@@ -130,6 +130,14 @@ fn has_mermaid_fence(text: &str) -> bool {
 /// The card a folded diagram shows in place of its `rows`.
 fn diagram_card(rows: usize) -> String {
     format!("mermaid {}", termide_i18n::t().agent_more_lines(rows))
+}
+
+/// Fold to a card every diagram of more than `taller_than` rows.
+fn fold_diagrams(taller_than: usize) -> Option<DiagramFold> {
+    Some(DiagramFold {
+        card: diagram_card,
+        taller_than,
+    })
 }
 
 /// Whether `item` is an annotation — a notice or a run's closing line — rather
@@ -359,6 +367,9 @@ struct Cached {
     is_light: bool,
     /// Whether the item folds at this width (see [`render_item`]).
     foldable: bool,
+    /// Whether a diagram shows as a card only for being too tall: the item
+    /// is unfolded, and unfolding it by hand shows the diagram whole.
+    capped: bool,
     lines: Vec<Line<'static>>,
     /// The links the item marks up, on its own lines.
     links: Vec<RowLink>,
@@ -399,8 +410,10 @@ pub(crate) struct PictureSpot {
 struct ItemView {
     collapsed: bool,
     artifacts_folded: bool,
+    pinned: bool,
     fold: FoldMode,
     pictures: Option<PictureLayout>,
+    artifact_rows: Option<u16>,
 }
 
 /// The pictures `item` carries, as `(media type, base64 data)`.
@@ -463,17 +476,19 @@ pub struct Transcript {
     /// of a long message). Parallel to `items`. The assistant's answer always
     /// shows; collapsing only folds its thinking away.
     collapsed: Vec<bool>,
-    /// Whether each item's fold was set by hand, parallel to `items`: an
-    /// answer's diagrams fold by themselves once scrolled out of sight
-    /// ([`Transcript::fold_artifacts_above`]) only while this is unset.
+    /// Whether each item's fold was set by hand, parallel to `items`: until
+    /// it is, a diagram too tall for the panel shows as a card
+    /// ([`Transcript::set_artifact_rows`]).
     pinned: Vec<bool>,
     /// Whether each item's diagrams and pictures are folded to cards,
     /// parallel to `items`. A fresh block shows them whatever its own fold;
-    /// they fold once the block scrolls wholly out of sight, or with the
-    /// block when it is folded by hand.
+    /// they fold with the block when it is folded by hand.
     artifacts_folded: Vec<bool>,
     /// How pictures lay out; `None` shows each as a card.
     picture_layout: Option<PictureLayout>,
+    /// The most rows a diagram takes before it shows as a card instead,
+    /// unless its block was unfolded by hand; `None` sets no limit.
+    artifact_rows: Option<u16>,
     /// Whether an item laid out so far carries a picture.
     any_pictures: bool,
     cache: Vec<Option<Cached>>,
@@ -886,31 +901,27 @@ impl Transcript {
         if !self.foldable(index) {
             return false;
         }
-        let Some(slot) = self.collapsed.get_mut(index) else {
+        if index >= self.collapsed.len() {
             return false;
-        };
-        *slot = !*slot;
+        }
+        // An answer whose diagram is a card for its height unfolds it whole
+        // rather than folding.
+        if !self.capped(index) {
+            self.collapsed[index] = !self.collapsed[index];
+        }
         self.pin(index);
         self.invalidate(index);
         true
     }
 
-    /// Mark item `index`'s fold as set by hand, so nothing refolds it: its
-    /// diagrams and pictures follow the fold it was given.
+    /// Mark item `index`'s fold as set by hand: its diagrams and pictures
+    /// follow the fold it was given, whatever their height.
     fn pin(&mut self, index: usize) {
         if let Some(slot) = self.pinned.get_mut(index) {
             *slot = true;
         }
         if let Some(slot) = self.artifacts_folded.get_mut(index) {
             *slot = self.collapsed[index];
-        }
-    }
-
-    /// Whether item `index` shows diagrams or pictures that fold to cards.
-    fn has_artifacts(&self, index: usize) -> bool {
-        match &self.items[index] {
-            Item::Assistant { .. } => self.foldable(index),
-            item => !item_pictures(item).is_empty(),
         }
     }
 
@@ -933,6 +944,29 @@ impl Transcript {
         }
     }
 
+    /// Set the most rows a diagram takes before it shows as a card, laying
+    /// out again the answers that may draw one.
+    pub fn set_artifact_rows(&mut self, rows: Option<u16>) {
+        if self.artifact_rows == rows {
+            return;
+        }
+        self.artifact_rows = rows;
+        for index in 0..self.items.len() {
+            if matches!(&self.items[index], Item::Assistant { text, .. } if has_mermaid_fence(text))
+            {
+                self.invalidate(index);
+            }
+        }
+    }
+
+    /// Whether item `index`, unfolded and never folded by hand, shows a
+    /// diagram as a card only for its height (see [`Cached::capped`]).
+    fn capped(&self, index: usize) -> bool {
+        !self.pinned[index]
+            && !self.collapsed[index]
+            && matches!(self.cache.get(index), Some(Some(cached)) if cached.capped)
+    }
+
     /// The pictures on the flattened lines, as last laid out.
     pub(crate) fn pictures(&self) -> &[PictureSpot] {
         &self.flat_pictures
@@ -944,37 +978,16 @@ impl Transcript {
         item_pictures(item).get(ordinal).map(|(_, data)| *data)
     }
 
-    /// Fold the diagrams and pictures of every block wholly above flattened
-    /// line `line` (the top of the view) that shows them and was not folded
-    /// or unfolded by hand; the block folds with them. Returns whether any
-    /// folded; the caller lays out again and moves its view up by the rows
-    /// that went, so what is on screen stays put.
-    pub fn fold_artifacts_above(&mut self, line: usize) -> bool {
-        if self.fold == FoldMode::Never {
-            return false;
-        }
-        // Items are laid out in order, so every item before the one on
-        // `line` lies wholly above it.
-        let Some(limit) = self.item_at_line(line) else {
-            return false;
-        };
-        let mut folded = false;
-        for index in 0..limit {
-            if !self.artifacts_folded[index] && !self.pinned[index] && self.has_artifacts(index) {
-                self.artifacts_folded[index] = true;
-                self.collapsed[index] = true;
-                self.invalidate(index);
-                folded = true;
-            }
-        }
-        folded
-    }
-
     /// Show (`expanded` true) or hide the detail of item `index`; false when
     /// it does not fold or already is that way.
     pub fn set_expanded(&mut self, index: usize, expanded: bool) -> bool {
         if !self.foldable(index) {
             return false;
+        }
+        if expanded && self.capped(index) {
+            self.pin(index);
+            self.invalidate(index);
+            return true;
         }
         match self.collapsed.get_mut(index) {
             Some(slot) if *slot == expanded => {
@@ -993,7 +1006,10 @@ impl Transcript {
             if is_annotation(&self.items[index]) {
                 continue;
             }
-            if self.collapsed[index] == value || self.artifacts_folded[index] == value {
+            if self.collapsed[index] == value
+                || self.artifacts_folded[index] == value
+                || (value && self.capped(index))
+            {
                 self.collapsed[index] = !value;
                 self.pin(index);
                 self.invalidate(index);
@@ -1096,8 +1112,10 @@ impl Transcript {
                 let view = ItemView {
                     collapsed: self.collapsed[index],
                     artifacts_folded: self.artifacts_folded[index],
+                    pinned: self.pinned[index],
                     fold: self.fold,
                     pictures: self.picture_layout,
+                    artifact_rows: self.artifact_rows,
                 };
                 let cached = render_item(&self.items[index], view, width, colors, is_light);
                 self.any_pictures |= !item_pictures(&self.items[index]).is_empty();
@@ -1160,6 +1178,16 @@ impl Transcript {
                 self.items.get(index + 1),
                 Some(Item::Thinking { .. } | Item::Tool { .. } | Item::Notice { .. })
             )
+    }
+
+    /// The file an artifact card on flattened line `line` links to, as its
+    /// call gave the path.
+    #[must_use]
+    pub(crate) fn card_at(&self, line: usize) -> Option<&str> {
+        self.flat_links
+            .iter()
+            .find(|(_, link)| link.line == line && link.id == CARD_LINK)
+            .map(|(_, link)| link.href.as_str())
     }
 
     /// The marked-up link under display column `col` of flattened line
@@ -1613,6 +1641,79 @@ fn headline_href(call: &ToolCall) -> Option<String> {
     };
     let href = call.arguments.get(key)?.as_str()?.trim();
     (!href.is_empty()).then(|| href.to_string())
+}
+
+/// The [`RowLink::id`] of an artifact card's link: a plain click on the
+/// card follows it, where any other link takes Ctrl.
+pub(crate) const CARD_LINK: usize = usize::MAX;
+
+/// What kind of artifact the file a call wrote is, by its extension: one
+/// termide renders in a viewer of its own — `HTML`, `Markdown` or
+/// `Mermaid`. A failed write made none.
+fn artifact_kind(call: &ToolCall, result: Option<&ToolResultMessage>) -> Option<&'static str> {
+    if call.name != "write" || result.is_none_or(|result| result.is_error) {
+        return None;
+    }
+    let path = call.arguments.get("path")?.as_str()?;
+    let ext = std::path::Path::new(path.trim())
+        .extension()?
+        .to_str()?
+        .to_ascii_lowercase();
+    match ext.as_str() {
+        "html" | "htm" => Some("HTML"),
+        "md" | "markdown" => Some("Markdown"),
+        "mmd" | "mermaid" => Some("Mermaid"),
+        _ => None,
+    }
+}
+
+/// The file item `item` made that opens in a viewer of its own (see
+/// [`artifact_kind`]), as the call gave its path.
+pub(crate) fn artifact_path(item: &Item) -> Option<String> {
+    match item {
+        Item::Tool { call, result, .. } => {
+            artifact_kind(call, result.as_ref())?;
+            headline_href(call)
+        }
+        _ => None,
+    }
+}
+
+/// The one-row card under the headline of a call that wrote an artifact,
+/// `↗ HTML report.html`, linked to the file; pushed onto `lines`.
+fn push_artifact_card(
+    call: &ToolCall,
+    result: Option<&ToolResultMessage>,
+    width: u16,
+    colors: &ThemeColors,
+    lines: &mut Vec<Line<'static>>,
+    marks: &mut Marks,
+) {
+    let (Some(kind), Some(href)) = (artifact_kind(call, result), headline_href(call)) else {
+        return;
+    };
+    let name = std::path::Path::new(&href)
+        .file_name()
+        .map_or_else(|| href.clone(), |name| name.to_string_lossy().into_owned());
+    // The scrollbar gutter stays free.
+    let label = truncate_spans(
+        vec![Span::styled(
+            format!("↗ {kind} {name}"),
+            Style::default().fg(colors.info),
+        )],
+        usize::from(width).saturating_sub(3),
+    );
+    let end = 2 + label.iter().map(|s| width_of(&s.content)).sum::<usize>();
+    marks.links.push(RowLink {
+        line: lines.len(),
+        start: 2,
+        end,
+        href,
+        id: CARD_LINK,
+    });
+    let mut spans = vec![Span::raw("  ")];
+    spans.extend(label);
+    lines.push(Line::from(spans));
 }
 
 /// The links of a tool headline: its subject's rows, when the subject is a
@@ -2115,7 +2216,7 @@ fn render_item(
             width.saturating_sub(2),
             colors,
             is_light,
-            Some(diagram_card),
+            fold_diagrams(0),
         )
         .diagrams
             > 0;
@@ -2126,7 +2227,22 @@ fn render_item(
     } else {
         view.collapsed
     };
-    let mut marks = Marks::default();
+    // Folded, an answer shows every diagram as a card; unfolded, one too
+    // tall for the panel — until the answer is unfolded by hand.
+    let diagrams = if !matches!(item, Item::Assistant { .. }) {
+        None
+    } else if collapsed && foldable {
+        fold_diagrams(0)
+    } else if view.pinned || !foldable {
+        None
+    } else {
+        view.artifact_rows
+            .and_then(|rows| fold_diagrams(usize::from(rows)))
+    };
+    let mut marks = Marks {
+        diagrams,
+        ..Marks::default()
+    };
     let mut lines = render_body(
         item,
         collapsed && foldable,
@@ -2136,9 +2252,11 @@ fn render_item(
         is_light,
         &mut marks,
     );
+    let capped = foldable && !collapsed && marks.folded_diagrams > 0;
     let Marks {
         mut links,
         copy: copy_marks,
+        ..
     } = marks;
     let mut copy = vec![RowCopy::default(); lines.len()];
     for (line, row) in copy_marks {
@@ -2177,6 +2295,7 @@ fn render_item(
         width,
         is_light,
         foldable,
+        capped,
         lines,
         links,
         copy,
@@ -2230,6 +2349,10 @@ fn picture_rows(
 struct Marks {
     links: Vec<RowLink>,
     copy: Vec<(usize, RowCopy)>,
+    /// Which diagrams of an answer fold to a card; set by the caller.
+    diagrams: Option<DiagramFold>,
+    /// How many diagrams did.
+    folded_diagrams: usize,
 }
 
 /// The lines of `item` itself, without the gap [`render_item`] puts above it;
@@ -2470,14 +2593,15 @@ fn render_body(
             if !answer.is_empty() {
                 // Reserve the marker's width and indent wrapped lines under it,
                 // so the accent `›` never pushes the first line over the edge.
-                // Folded, each diagram in it is a one-line card.
+                // A diagram `marks` says folds is a one-line card.
                 let body = render_markdown_with(
                     answer,
                     width.saturating_sub(2),
                     colors,
                     is_light,
-                    collapsed.then_some(diagram_card as DiagramCard),
+                    marks.diagrams,
                 );
+                marks.folded_diagrams = body.folded_diagrams;
                 // Past the `› ` mark the answer's links sit two columns in.
                 // Copied, the mark and the indent under it are decoration.
                 marks
@@ -2657,7 +2781,7 @@ fn render_body(
                 // A shell call's command clips to its first line; any other
                 // call's subject wraps, read in full without unfolding.
                 let meta = if finished { stats } else { clock };
-                return match shell_command(call) {
+                let mut lines = match shell_command(call) {
                     Some(command) => {
                         let mut head = shell_prefix(call, state);
                         head.extend(marker);
@@ -2677,6 +2801,8 @@ fn render_body(
                         lines
                     }
                 };
+                push_artifact_card(call, result.as_ref(), width, colors, &mut lines, marks);
+                return lines;
             }
             let mut lines = match shell_command(call) {
                 Some(command) => command_lines(call, &command, marker, width, state, colors),
@@ -2692,6 +2818,7 @@ fn render_body(
                     lines
                 }
             };
+            push_artifact_card(call, result.as_ref(), width, colors, &mut lines, marks);
             // An edit's result is a unified diff, painted like the git diff
             // panel paints one.
             let kinds = (call.name == "edit").then(|| diff_kinds(&all));

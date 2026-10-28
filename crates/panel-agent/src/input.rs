@@ -643,6 +643,12 @@ impl AgentPanel {
                         return vec![PanelEvent::OpenAgentSession(path)];
                     }
                 }
+                // A file it wrote that has a viewer of its own opens there.
+                if let Some(target) = transcript::artifact_path(item)
+                    .and_then(|href| LinkTarget::from_href(&href, &self.cwd))
+                {
+                    return vec![PanelEvent::OpenLink(target)];
+                }
                 if let Some(path) = result.as_ref().and_then(full_log_path) {
                     if path.exists() {
                         return vec![PanelEvent::ViewFile(path)];
@@ -1635,6 +1641,21 @@ impl AgentPanel {
                 // Ctrl+click follows a link inside, Ctrl+Alt+click opens it
                 // outside, as in the terminal panel; the app opens it the
                 // same way from every panel.
+                // A plain click on an artifact card opens the file it names,
+                // Alt+click outside.
+                if !event.modifiers.contains(KeyModifiers::CONTROL) && self.pending.is_none() {
+                    if let Some(target) = self
+                        .transcript
+                        .card_at(press.line)
+                        .and_then(|href| LinkTarget::from_href(href, &self.cwd))
+                    {
+                        return vec![if event.modifiers.contains(KeyModifiers::ALT) {
+                            PanelEvent::OpenLinkExternal(target)
+                        } else {
+                            PanelEvent::OpenLink(target)
+                        }];
+                    }
+                }
                 if event.modifiers.contains(KeyModifiers::CONTROL) {
                     if let Some((target, _)) = self.link_under(press) {
                         self.hovered_link = None;
