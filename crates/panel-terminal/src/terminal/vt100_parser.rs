@@ -72,6 +72,19 @@ impl VtPerformer {
     }
 }
 
+/// The repeat count of an edit or scroll sequence: its first parameter,
+/// where an omitted parameter (which vte reports as 0) and an explicit 0
+/// both mean 1.
+fn count_param(params: &Params) -> usize {
+    params
+        .iter()
+        .next()
+        .and_then(|p| p.first())
+        .copied()
+        .unwrap_or(0)
+        .max(1) as usize
+}
+
 impl Perform for VtPerformer {
     fn print(&mut self, ch: char) {
         // Filter control characters that shouldn't be displayed
@@ -325,12 +338,7 @@ impl Perform for VtPerformer {
                 }
                 'P' => {
                     // DCH - Delete Character
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let (row, col) = screen.cursor;
                     let style = screen.current_style;
                     let cols = screen.active_buffer().get(row).map_or(0, Vec::len);
@@ -349,12 +357,7 @@ impl Perform for VtPerformer {
                 }
                 'X' => {
                     // ECH - Erase Character
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let (row, col) = screen.cursor;
                     let style = screen.current_style;
                     screen.blank_cells(row, col, col.saturating_add(n), style);
@@ -363,12 +366,7 @@ impl Perform for VtPerformer {
                 }
                 '@' => {
                     // ICH - Insert Character (shift characters right)
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let (row, col) = screen.cursor;
                     let style = screen.current_style;
                     let cols = screen.active_buffer().get(row).map_or(0, Vec::len);
@@ -388,12 +386,7 @@ impl Perform for VtPerformer {
                 }
                 'L' => {
                     // IL - Insert Lines (insert blank lines within scroll region)
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let row = screen.cursor.0;
                     let cols = screen.cols;
                     let bottom = screen.scroll_bottom;
@@ -441,12 +434,7 @@ impl Perform for VtPerformer {
                 }
                 'M' => {
                     // DL - Delete Lines (delete lines within scroll region)
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let row = screen.cursor.0;
                     let cols = screen.cols;
                     let bottom = screen.scroll_bottom;
@@ -496,12 +484,7 @@ impl Perform for VtPerformer {
                 }
                 'S' => {
                     // SU - Scroll Up (scroll within region)
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let cols = screen.cols;
                     let top = screen.scroll_top;
                     let bottom = screen.scroll_bottom;
@@ -552,12 +535,7 @@ impl Perform for VtPerformer {
                 }
                 'T' => {
                     // SD - Scroll Down (scroll within region)
-                    let n = params
-                        .iter()
-                        .next()
-                        .and_then(|p| p.first())
-                        .copied()
-                        .unwrap_or(1) as usize;
+                    let n = count_param(params);
                     let cols = screen.cols;
                     let rows = screen.rows;
                     let top = screen.scroll_top;
@@ -854,6 +832,30 @@ mod tests {
         screen.write().unwrap().saved_cursor = Some((99, 999));
         feed(&mut performer, b"\x1b[u\x1b[@");
         assert_eq!(screen.read().unwrap().cursor, (23, 79));
+    }
+
+    /// terminfo's dch1/il1/dl1 for xterm-256color are the parameterless
+    /// `CSI P`, `CSI L` and `CSI M`; vte reports the omitted parameter as 0.
+    #[test]
+    fn edit_and_scroll_sequences_without_a_count_act_once() {
+        let (mut performer, _capture, screen) = performer();
+        feed(&mut performer, b"abcd\x1b[1G\x1b[P");
+        assert_eq!(row_text(&screen, 0), "bcd");
+        feed(&mut performer, b"\x1b[0@");
+        assert_eq!(row_text(&screen, 0), " bcd");
+        feed(&mut performer, b"\x1b[2G\x1b[X");
+        assert_eq!(row_text(&screen, 0), "  cd");
+
+        feed(&mut performer, b"\x1b[H\x1b[2J1\r\n2\r\n3\x1b[1;1H\x1b[L");
+        assert_eq!(row_text(&screen, 0), "");
+        assert_eq!(row_text(&screen, 1), "1");
+        feed(&mut performer, b"\x1b[M");
+        assert_eq!(row_text(&screen, 0), "1");
+        feed(&mut performer, b"\x1b[S");
+        assert_eq!(row_text(&screen, 0), "2");
+        feed(&mut performer, b"\x1b[T");
+        assert_eq!(row_text(&screen, 0), "");
+        assert_eq!(row_text(&screen, 1), "2");
     }
 
     #[test]
