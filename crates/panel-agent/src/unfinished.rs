@@ -297,6 +297,11 @@ impl AgentPanel {
     /// made is asked again. Nothing runs by itself either way.
     pub(crate) fn restore_unfinished(&mut self) {
         self.restored = None;
+        // A goal the judge ended as the last thing the session did ends the
+        // restored transcript with the same notice.
+        if let Some((outcome, reason)) = self.session.as_ref().and_then(Session::goal_ending) {
+            self.notice_goal_ending(outcome, &reason);
+        }
         self.adopt_logged_autorun();
         self.adopt_logged_retry();
         // The answers held for the next request wait for it still.

@@ -2116,9 +2116,17 @@ goal whose agent only talks, three work turns in a row without a tool call,
 pauses, still set: `/continue` carries on, `/goal stop` ends it. So does one
 whose agent has stopped on you — a question, an approval, a process it will not
 touch — at the judge's first `WAITING`, rather than being sent back to restate
-the wait every turn, a full model call each. A failed check
+the wait every turn, a full model call each. The verdict word must stand
+alone on the first line of the answer (markup round it and a `:` or `—` with
+the reason after it are fine); an answer that opens otherwise — one that
+echoes the instructions, such as "`DONE` if the goal is fully achieved", or
+lists several verdicts — holds no verdict and counts as a failed check, so a
+weak judge cannot end a goal by accident. A failed check
 is tried again after 10 s and 20 s, then the goal pauses the same way and
-`/continue` checks again. A goal can be set while the agent works: it is taken
+`/continue` checks again. Every answer of the judge goes into the session log
+(a `goal_verdict` entry with the verdict, its reason, or why the check failed,
+and the answer as it came), and a session whose goal the judge ended shows
+the same "goal reached" or "cannot be reached" notice when reopened. A goal can be set while the agent works: it is taken
 at once, nothing is queued, and once the run ends its first turn, headed by the
 `/goal` as typed, goes in place of the judge. The goal stays in the state strip
 while it goes on (`◎ Heading for the goal …` with how long it has run, and the

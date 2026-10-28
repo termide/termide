@@ -627,12 +627,20 @@ impl AgentPanel {
                     }
                 }
             }
-            AgentEvent::GoalJudged { outcome, reason } => {
+            // The judge's answer goes into the log whatever came of it, so a
+            // goal that ended, went on or paused can be told apart afterwards.
+            AgentEvent::GoalJudged {
+                outcome,
+                reason,
+                reply,
+            } => {
                 self.end_judging();
+                self.log_goal_verdict(Ok((outcome, &reason)), &reply);
                 self.on_goal_verdict(outcome, &reason);
             }
-            AgentEvent::GoalJudgeFailed { error } => {
+            AgentEvent::GoalJudgeFailed { error, reply } => {
                 self.end_judging();
+                self.log_goal_verdict(Err(&error), &reply);
                 self.on_goal_judge_failed(&error);
             }
             AgentEvent::Handoff { brief } => match brief {
