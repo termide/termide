@@ -226,7 +226,9 @@ later, or is reloaded, reaches them in the next session.
 All three keep their own conversation loop: they compact their context themselves
 (when the agent reports it, as Claude Code does, its compaction shows and is
 logged as the built-in one, its summary in place of the history before it, so
-`recall` finds what it took out), a run cannot pause between steps, and there is no prefill or generation
+`recall` finds what it took out; an older adapter that reports it as a
+"Compact conversation" step shows it as a compaction too, with no summary, so
+the log keeps the history whole), a run cannot pause between steps, and there is no prefill or generation
 timing (token totals show when the agent reports them, as Claude Code does).
 The **Permissions** chip works for all three, `auto` with termide's
 [reviewer](#auto-mode), by default on the agent's own subscription. The settings modal says the same under a
@@ -237,7 +239,9 @@ The rest of the panel works with them as with the built-in loop:
 - A message typed while the agent works joins the turn it is running, as a
   steering message joins the built-in loop's, when the agent takes one
   (Claude Code's and Codex's adapters do); otherwise it waits in the state
-  strip and goes as the next request.
+  strip and goes as the next request. While the agent compacts its context
+  the message waits for the compaction to end, since joining the turn then
+  would abort it.
 - The **Model** chip shows the model by the name the agent gives it, with a
   spinner while the agent is still starting. It lists and switches the
   agent's models, the

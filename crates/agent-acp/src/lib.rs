@@ -685,8 +685,10 @@ impl Backend for AcpRuntime {
             self.shared.finish_unsolicited(StopReason::Stop, None);
             return;
         }
+        // Held while the agent compacts, see [`Shared::compacting`].
         if self.shared.steering.load(Ordering::Acquire)
             && self.shared.turn_running.load(Ordering::Acquire)
+            && !self.shared.compacting()
         {
             self.shared.steer_now(message);
         }
@@ -1789,6 +1791,9 @@ impl Shared {
             class
         });
         let usage = result.as_ref().map(usage_of).unwrap_or_default();
+        // A compaction the turn ended in the middle of: an adapter reporting
+        // it as a made-up call never ends it then.
+        self.end_compaction("cancelled", None, None);
         self.close_unfinished_calls();
         self.close_message_with(stop, error, failure, usage);
         self.flush_steered();
@@ -2630,7 +2635,7 @@ impl Shared {
     }
 
     /// One `session/update` into the events the panel understands.
-    fn on_update(&self, update: &Value) {
+    fn on_update(self: &Arc<Self>, update: &Value) {
         let kind = update["sessionUpdate"].as_str().unwrap_or("");
         if self.replaying.load(Ordering::Acquire)
             && matches!(
@@ -2645,6 +2650,9 @@ impl Shared {
                     | "compaction_summary_chunk"
             )
         {
+            return;
+        }
+        if matches!(kind, "tool_call" | "tool_call_update") && self.on_compaction_call(update) {
             return;
         }
         if kind == "tool_call" {
@@ -2894,44 +2902,105 @@ impl Shared {
     /// A `compaction_update`: the compaction it names starts, takes the
     /// summary it carries, and ends on a final status. A finished one
     /// replaces the history with its summary, as the built-in loop's does.
-    fn on_compaction_update(&self, update: &Value) {
+    fn on_compaction_update(self: &Arc<Self>, update: &Value) {
         let Some(id) = update["compactionId"].as_str() else {
             return;
         };
         if !self.open_compaction(id) {
             return;
         }
-        let mut guard = self
-            .compaction
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner);
-        let Some(open) = guard.as_mut() else {
-            return;
-        };
         // A summary given replaces what came in chunks; `null` or `[]`
         // clears it, and its absence keeps it.
         if let Some(summary) = update.get("summary") {
-            open.summary = blocks_text(summary);
+            if let Some(open) = self
+                .compaction
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_mut()
+            {
+                open.summary = blocks_text(summary);
+            }
         }
         let status = update["status"].as_str().unwrap_or("");
         if !matches!(status, "completed" | "failed" | "cancelled") {
             // `in_progress`, or a status this client does not know.
             return;
         }
-        let Some(open) = guard.take() else {
+        let error = update["error"].as_str().filter(|error| !error.is_empty());
+        self.end_compaction(status, error, None);
+    }
+
+    /// The made-up "Compact conversation" call an adapter that does not know
+    /// the compaction capability reports its compaction as: it starts the
+    /// compaction and its end ends it, with no summary, so the log keeps the
+    /// history whole. `false` for any other call.
+    fn on_compaction_call(self: &Arc<Self>, update: &Value) -> bool {
+        let Some(id) = update["toolCallId"].as_str() else {
+            return false;
+        };
+        let known = self
+            .compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .is_some_and(|open| open.id == id)
+            || self
+                .compaction_ended
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .as_deref()
+                == Some(id);
+        let fresh = update["sessionUpdate"] == "tool_call" && is_compaction_call(update);
+        if !(known || fresh) {
+            return false;
+        }
+        if !self.open_compaction(id) || !is_finished(update) {
+            return true;
+        }
+        let status = update["status"].as_str().unwrap_or("");
+        // Its error comes as the call's result, after a fixed prefix.
+        let text = content_text(&update["content"]);
+        let error = text.trim();
+        let error = error
+            .strip_prefix("Compaction failed:")
+            .unwrap_or(error)
+            .trim();
+        let tokens_before = update["rawOutput"]["preTokens"].as_u64();
+        self.end_compaction(status, Some(error).filter(|e| !e.is_empty()), tokens_before);
+        true
+    }
+
+    /// End the open compaction with `status` (`completed`, `failed` or
+    /// `cancelled`) and hand the turn the messages held while it ran.
+    /// `tokens_before` is the agent's own count of the context it began
+    /// with, when it gives one.
+    fn end_compaction(
+        self: &Arc<Self>,
+        status: &str,
+        error: Option<&str>,
+        tokens_before: Option<u64>,
+    ) {
+        let Some(open) = self
+            .compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        else {
             return;
         };
-        drop(guard);
         *self
             .compaction_ended
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(open.id.clone());
+        let tokens_before = tokens_before
+            .filter(|tokens| *tokens > 0)
+            .unwrap_or(open.tokens_before);
         let summary = open.summary.trim().to_string();
         let event = if status == "completed" {
             AgentEvent::Compacted {
                 // Claude Code keeps nothing of the history verbatim.
                 kept: 0,
-                tokens_before: open.tokens_before,
+                tokens_before,
                 // Corrected by the `usage_update` that follows.
                 tokens_after: (summary.chars().count() / 4) as u64,
                 call: CompactionCall {
@@ -2947,17 +3016,39 @@ impl Shared {
             }
         } else {
             AgentEvent::CompactionFailed {
-                error: update["error"]
-                    .as_str()
-                    .filter(|error| !error.is_empty())
-                    .unwrap_or(status)
-                    .to_string(),
-                tokens_before: open.tokens_before,
+                error: error.unwrap_or(status).to_string(),
+                tokens_before,
                 call: None,
                 reply: String::new(),
             }
         };
         let _ = self.events.send(event);
+        self.steer_held();
+    }
+
+    /// Whether the agent is compacting its context: a message steered into
+    /// the turn now would abort the compaction (Claude Code delivers a steer
+    /// by interrupting the model call running), so it waits for the end.
+    fn compacting(&self) -> bool {
+        self.compaction
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
+    /// Hand the running turn the messages that waited for its compaction.
+    fn steer_held(self: &Arc<Self>) {
+        if !self.steering.load(Ordering::Acquire) || !self.turn_running.load(Ordering::Acquire) {
+            return;
+        }
+        let held = self
+            .queue
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        for message in held {
+            self.steer_now(message);
+        }
     }
 
     /// Show a call that starts, and hold it for the log.
@@ -3387,6 +3478,17 @@ fn has_arguments(update: &Value) -> bool {
     update["rawInput"]
         .as_object()
         .is_some_and(|input| !input.is_empty())
+}
+
+/// Whether a `tool_call` is the "Compact conversation" call an adapter
+/// without the compaction capability stands in for its compaction: Claude
+/// Code's names its tool `compact`; failing that, its title and kind with
+/// no arguments.
+fn is_compaction_call(update: &Value) -> bool {
+    update["_meta"]["claudeCode"]["toolName"] == "compact"
+        || (update["title"] == "Compact conversation"
+            && update["kind"] == "think"
+            && !has_arguments(update))
 }
 
 /// Whether a tool call update reports the call done.
@@ -4189,6 +4291,130 @@ mod tests {
             })
             .collect();
         assert_eq!(failed, ["cancelled", "aborted"]);
+    }
+
+    #[test]
+    fn an_adapters_made_up_compact_call_reaches_the_panel_as_a_compaction() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, _seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        runtime.drain();
+        shared.on_update(
+            &json!({ "sessionUpdate": "usage_update", "used": 150_000, "size": 200_000 }),
+        );
+        // As an adapter without the compaction capability reports it: a
+        // call of kind think, its start, a heartbeat and its end.
+        let meta = json!({ "claudeCode": { "toolName": "compact" } });
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "c1", "title": "Compact conversation",
+            "kind": "think", "status": "in_progress", "_meta": meta,
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "in_progress",
+            "_meta": meta,
+        }));
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": "completed",
+            "rawOutput": { "trigger": "automatic", "preTokens": 160_000, "postTokens": 9_000 },
+            "_meta": meta,
+        }));
+        // The same call failing, reported only at its end.
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "c2", "title": "Compact conversation",
+            "kind": "think", "status": "failed",
+            "content": [{ "type": "content", "content": { "type": "text", "text": "Compaction failed: aborted" } }],
+            "_meta": meta,
+        }));
+        let events = runtime.drain();
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                AgentEvent::CompactionStart {
+                    prompt_tokens: 150_000,
+                    ..
+                }
+            )),
+            "{events:?}"
+        );
+        // No summary: the panel logs no compaction in place of the history.
+        let ended: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::Compacted {
+                    summary,
+                    tokens_before,
+                    ..
+                } => Some((summary.as_str(), *tokens_before)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ended, [("", 160_000)], "{events:?}");
+        assert!(events.iter().any(|e| matches!(
+            e,
+            AgentEvent::CompactionFailed { error, .. } if error == "aborted"
+        )));
+        assert!(
+            !events.iter().any(|e| matches!(
+                e,
+                AgentEvent::ToolExecutionStart { .. } | AgentEvent::ToolExecutionEnd { .. }
+            )),
+            "{events:?}"
+        );
+        // A call that merely thinks is still a call.
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "t1", "title": "Plan", "kind": "think",
+            "status": "in_progress", "rawInput": { "thought": "x" },
+        }));
+        assert!(runtime
+            .drain()
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+    }
+
+    #[test]
+    fn a_message_typed_while_the_agent_compacts_joins_the_turn_after_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = recording_agent(
+            dir.path().to_path_buf(),
+            AcpFlavor::ClaudeCode,
+            None,
+            ModeHandle::new(Mode::default()),
+        );
+        let shared = &runtime.shared;
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shared.session_id().is_err() {
+            assert!(Instant::now() < deadline, "no session");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        // A turn of an agent that steers is running.
+        shared.steering.store(true, Ordering::Release);
+        shared.turn_running.store(true, Ordering::Release);
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "in_progress",
+        }));
+        let message = UserMessage::text("more");
+        runtime.steer(message.clone());
+        // Steered now, it would abort the compaction: it waits.
+        assert_eq!(*shared.queue.lock().unwrap(), [message]);
+        assert!(shared.steering_out.lock().unwrap().is_empty());
+        shared.on_update(&json!({
+            "sessionUpdate": "compaction_update", "compactionId": "c1", "status": "failed",
+            "error": "aborted",
+        }));
+        let steering = loop {
+            let steering = seen_where(&seen, |m| m["method"] == "_session/steering");
+            if !steering.is_empty() {
+                break steering;
+            }
+            assert!(Instant::now() < deadline, "the message never went");
+            std::thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(steering[0]["params"]["prompt"][0]["text"], "more");
     }
 
     #[test]

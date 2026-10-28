@@ -1259,6 +1259,7 @@ agent_notice_cannot_undo_fmt = "पूर्ववत नहीं कर सक
 agent_notice_cannot_write_prompt_fmt = "सिस्टम प्रॉम्प्ट नहीं लिख सकते: {error}"
 agent_notice_retry_fmt = "पुनः प्रयास {attempt}/{max}, {delay_ms} ms में: {error}"
 agent_notice_compacted_fmt = "{tokens} टोकन संक्षिप्त किए, अंतिम {kept} संदेश रखे"
+agent_notice_compacted_summary_fmt = "{tokens} टोकन एक सारांश में संक्षिप्त किए"
 agent_notice_fitted_fmt = "सारांश के बिना संदर्भ छोटा किया: {before} → {after} टोकन"
 agent_notice_handoff_written_fmt = "हैंडऑफ़ {path} में लिखा गया"
 agent_notice_no_command_fmt = "{name} नाम का कोई कमांड नहीं; उपलब्ध: {available}"

@@ -551,10 +551,14 @@ impl AgentPanel {
                 // the next turn finishes.
                 self.context_tokens = tokens_after;
                 self.end_compaction();
-                self.notice(
-                    termide_i18n::t().agent_notice_compacted_fmt(tokens_before, kept),
-                    NoticeKind::Info,
-                );
+                // Nothing kept verbatim, as with an external agent: the
+                // summary is all that stands for the history.
+                let notice = if kept == 0 {
+                    termide_i18n::t().agent_notice_compacted_summary_fmt(tokens_before)
+                } else {
+                    termide_i18n::t().agent_notice_compacted_fmt(tokens_before, kept)
+                };
+                self.notice(notice, NoticeKind::Info);
                 // An external agent may compact without saying how: the log
                 // then keeps the history whole rather than an empty summary.
                 if let Some(session) = self.session.as_mut().filter(|_| !summary.is_empty()) {

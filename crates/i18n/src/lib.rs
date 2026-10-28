@@ -1077,6 +1077,7 @@ pub trait Translation: Send + Sync {
         error: &str,
     ) -> String;
     fn agent_notice_compacted_fmt(&self, tokens: u64, kept: usize) -> String;
+    fn agent_notice_compacted_summary_fmt(&self, tokens: u64) -> String;
     fn agent_notice_fitted_fmt(&self, before: u64, after: u64) -> String;
     fn agent_notice_handoff_written_fmt(&self, path: &str) -> String;
     fn agent_notice_no_command_fmt(&self, name: &str, available: &str) -> String;
