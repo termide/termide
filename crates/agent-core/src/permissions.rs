@@ -1799,15 +1799,23 @@ pub fn is_read_only_command(part: &str) -> bool {
         // `env <command>` runs that command.
         "env" => args.is_empty(),
         "date" => !args.iter().any(|a| *a == "-s" || a.starts_with("--set")),
-        "sort" => !has_short_flag(args, 'o') && !args.iter().any(|a| a.starts_with("--output")),
+        // `--compress-program` runs a program on the temporary files.
+        "sort" => {
+            !has_short_flag(args, 'o')
+                && !has_long_option(args, "output")
+                && !has_long_option(args, "compress-program")
+        }
         // `-o` writes the listing to a file, `-R` writes one per directory.
         "tree" => !has_short_flag(args, 'o') && !has_short_flag(args, 'R'),
         // A second operand is the file `uniq` writes to.
         "uniq" => args.iter().filter(|a| !a.starts_with('-')).count() <= 1,
-        // `--pre` runs a program on every file searched.
-        "rg" => !args
-            .iter()
-            .any(|a| *a == "--pre" || a.starts_with("--pre=")),
+        // `--pre` runs a program on every file searched (`--pre-glob` picks
+        // the files), `--hostname-bin` one to name the host for hyperlinks.
+        // ripgrep takes no abbreviated long options.
+        "rg" => !args.iter().any(|a| {
+            let name = a.split_once('=').map_or(*a, |(name, _)| name);
+            matches!(name, "--pre" | "--pre-glob" | "--hostname-bin")
+        }),
         // `-C` compiles a magic file next to the source.
         "file" => !args.iter().any(|a| *a == "-C" || *a == "--compile"),
         "find" => !["-delete", "-exec", "-ok", "-fprint", "-fls"]
@@ -2185,6 +2193,17 @@ fn destructive_command(part: &str) -> bool {
     }
 }
 
+/// Whether a long option `--name`, or an abbreviation of it, is among
+/// `args`, alone or with `=value`: GNU tools and git take any unambiguous
+/// prefix of a long option's name (`--out=x` for `--output=x`).
+fn has_long_option(args: &[&str], name: &str) -> bool {
+    args.iter().any(|a| {
+        a.strip_prefix("--")
+            .map(|a| a.split_once('=').map_or(a, |(key, _)| key))
+            .is_some_and(|key| !key.is_empty() && name.starts_with(key))
+    })
+}
+
 /// Whether a short-option word such as `-ro` carries `flag`.
 fn has_short_flag(args: &[&str], flag: char) -> bool {
     args.iter()
@@ -2350,7 +2369,7 @@ fn is_read_only_git(mut args: &[&str]) -> bool {
         "status" | "blame" | "rev-parse" | "ls-files" | "ls-tree" | "cat-file" | "describe"
         | "merge-base" | "for-each-ref" | "show-ref" | "name-rev" | "count-objects" => true,
         // `-O` opens the matches in a pager program of its choosing.
-        "grep" => !has_short_flag(rest, 'O') && !rest.iter().any(|a| a.starts_with("--open-files")),
+        "grep" => !has_short_flag(rest, 'O') && !has_long_option(rest, "open-files-in-pager"),
         "stash" => matches!(rest.first(), Some(&("list" | "show"))),
         "worktree" => matches!(rest.first(), Some(&"list")),
         // `expire` and `delete` rewrite the log; a ref name shows it, but is
@@ -2392,7 +2411,7 @@ fn is_read_only_git(mut args: &[&str]) -> bool {
             reads && !rest.iter().any(|a| WRITE.contains(a))
         }
         "diff" | "log" | "show" | "rev-list" | "shortlog" | "cherry" | "range-diff" => {
-            !rest.iter().any(|a| a.starts_with("--output"))
+            !has_long_option(rest, "output")
         }
         // Without `--list`, a bare name creates a tag; `-d`, `-a`, `-s`,
         // `-f` and the rest are left out.
@@ -2941,6 +2960,8 @@ mod tests {
             "uniq -c words.txt",
             "rg TODO src",
             "rg --pretty TODO",
+            "rg --pretty --hyperlink-format=default TODO",
+            "git log --oneline --one",
             "file README.md",
             "find . -name '*.rs' -print",
             "git status",
@@ -2971,10 +2992,25 @@ mod tests {
             "uniq in.txt out.txt",
             "rg --pre ./run.sh TODO",
             "rg --pre=./run.sh TODO",
+            "rg --pre-glob '*.pdf' TODO",
+            "rg --hostname-bin=./name.sh --hyperlink-format=default TODO",
+            "rg --hostname-bin ./name.sh TODO",
+            "sort --compress-program=./run.sh big.txt",
+            "sort --compress-prog ./run.sh big.txt",
+            "sort --out=out.txt in.txt",
+            "git diff --out=patch.diff",
+            "git grep --open=vim foo",
             "file -C -m magic",
             "find . -fprint list.txt",
             "find . -fls list.txt",
             "find . -execdir rm {} +",
+            "find . -okdir rm {} ;",
+            "find . -fprintf list.txt %p",
+            "find . -fprint0 list.txt",
+            "find . -delete",
+            "git -c core.pager=./run.sh log",
+            "git --exec-path=./bin status",
+            "git --output=x diff",
             "git diff --output=patch.diff",
             "git log --output=log.txt",
             "git branch feature",

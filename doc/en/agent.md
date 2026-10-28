@@ -1427,8 +1427,9 @@ issues, pull/merge requests, CI runs, releases, repositories and labels
 can retry jobs, and so does a bare `tea comments`, which posts), `sed` only while it prints (no `-i` or `-f`, and a script of
 addresses with `p`, `l`, `=`, `q` or `d`, such as `sed -n '40,80p'`; a
 substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or `-fls`, and
-`sort -o`, `uniq` with an output file, `tree -o`/`-R`, `rg --pre` and
-`git diff --output` ask. Loading a skill never asks.
+`sort -o` and `sort --compress-program`, `uniq` with an output file,
+`tree -o`/`-R`, `rg --pre`, `--pre-glob` and `--hostname-bin`, and
+`git diff --output` ask, abbreviated long options (`--out=`) included. Loading a skill never asks.
 
 ### Plan mode
 
