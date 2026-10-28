@@ -580,7 +580,9 @@ command substitution is never auto-allowed. A built-in read-only command list
 skips the prompt in every mode, the way Claude Code's read-only Bash set and
 Codex's `is_safe_command` do; redirections disqualify. That holds only while
 it reads inside the project: a path argument, input redirection or working
-directory that resolves outside it (symlinks followed), an unseen variable
+directory that resolves outside it (symlinks followed; globs expanded
+against the file system as the shell would, `expand_glob`, capped at
+`MAX_GLOB_MATCHES`), an unseen variable
 (a `for` variable over in-project literals or globs is seen, `loop_bindings`;
 a loop whose body changes directory leaves it unknown in the body and after,
 `moving_loops`), a tree walk that follows symlinks (`follows_symlinks`),
