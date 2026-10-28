@@ -52,6 +52,8 @@ struct TerminalSearchState {
     current_match: Option<usize>,
 }
 
+type SharedChild = Arc<Mutex<Box<dyn Child + Send + Sync>>>;
+
 /// Full-featured terminal with PTY
 pub struct Terminal {
     /// Scrollbar drawn by the last render, for mouse thumb dragging.
@@ -60,8 +62,8 @@ pub struct Terminal {
     pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
     /// Queue of bytes for the program; a writer thread drains it.
     input: pty_input::PtyInput,
-    /// Shell process
-    child: Box<dyn Child + Send>,
+    /// Shell process; the reader thread reaps it when it exits.
+    child: SharedChild,
     /// Shell process PID
     shell_pid: Option<u32>,
     /// Virtual terminal screen (RwLock allows concurrent reads during render)
@@ -172,6 +174,18 @@ fn device_name(_master: &(dyn MasterPty + Send)) -> Option<std::path::PathBuf> {
     None
 }
 
+/// Wait briefly for a child whose terminal just closed to exit, and collect
+/// its status. One that keeps running without its terminal is left to
+/// [`Terminal::kill_processes`].
+fn reap_exited(child: &Mutex<Box<dyn Child + Send + Sync>>) {
+    for _ in 0..50 {
+        match child.lock().map(|mut c| c.try_wait()) {
+            Ok(Ok(None)) => thread::sleep(std::time::Duration::from_millis(20)),
+            _ => return,
+        }
+    }
+}
+
 fn build_terminal_hotkey_table(config: &Config) -> HotkeyTable {
     let mut t = HotkeyTable::new();
     let kb = &config.terminal.keybindings;
@@ -219,6 +233,7 @@ impl Terminal {
     fn spawn_reader(
         mut reader: Box<dyn std::io::Read + Send>,
         replies: pty_input::ReplySink,
+        child: SharedChild,
         screen: &Arc<RwLock<TerminalScreen>>,
         is_alive: &Arc<Mutex<bool>>,
         has_new_data: &Arc<AtomicBool>,
@@ -248,6 +263,10 @@ impl Terminal {
             if let Ok(mut alive) = is_alive_clone.lock() {
                 *alive = false;
             }
+            // The program closed the terminal, as it does when it exits:
+            // collect its status so it does not linger as a zombie for as
+            // long as the panel stays open.
+            reap_exited(&child);
         });
     }
 
@@ -256,7 +275,7 @@ impl Terminal {
     fn build(
         pty: Arc<Mutex<Box<dyn MasterPty + Send>>>,
         input: pty_input::PtyInput,
-        child: Box<dyn portable_pty::Child + Send + Sync>,
+        child: SharedChild,
         shell_pid: Option<u32>,
         screen: Arc<RwLock<TerminalScreen>>,
         size: PtySize,
@@ -378,8 +397,8 @@ impl Terminal {
             cmd.env(key, value);
         }
 
-        let child = pair.slave.spawn_command(cmd)?;
-        let shell_pid = child.process_id();
+        let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
+        let shell_pid = child.lock().ok().and_then(|c| c.process_id());
         let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
@@ -390,7 +409,14 @@ impl Terminal {
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
 
-        Self::spawn_reader(reader, input.replies(), &screen, &is_alive, &has_new_data);
+        Self::spawn_reader(
+            reader,
+            input.replies(),
+            Arc::clone(&child),
+            &screen,
+            &is_alive,
+            &has_new_data,
+        );
 
         let username = std::env::var("USER")
             .or_else(|_| std::env::var("USERNAME"))
@@ -441,8 +467,8 @@ impl Terminal {
         cmd.cwd(&working_dir);
         Self::set_env(&mut cmd, &working_dir);
 
-        let child = pair.slave.spawn_command(cmd)?;
-        let shell_pid = child.process_id();
+        let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
+        let shell_pid = child.lock().ok().and_then(|c| c.process_id());
         let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
@@ -453,7 +479,14 @@ impl Terminal {
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
 
-        Self::spawn_reader(reader, input.replies(), &screen, &is_alive, &has_new_data);
+        Self::spawn_reader(
+            reader,
+            input.replies(),
+            Arc::clone(&child),
+            &screen,
+            &is_alive,
+            &has_new_data,
+        );
 
         let mut term = Self::build(
             pty,
@@ -536,8 +569,8 @@ impl Terminal {
             cmd.env(key, value);
         }
         let device = device_name(pair.master.as_ref());
-        let child = pair.slave.spawn_command(cmd)?;
-        let pid = child.process_id();
+        let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
+        let pid = child.lock().ok().and_then(|c| c.process_id());
         let screen = Arc::new(RwLock::new(TerminalScreen::new(
             rows as usize,
             cols as usize,
@@ -547,7 +580,14 @@ impl Terminal {
         let pty = Arc::new(Mutex::new(pair.master));
         let is_alive = Arc::new(Mutex::new(true));
         let has_new_data = Arc::new(AtomicBool::new(false));
-        Self::spawn_reader(reader, input.replies(), &screen, &is_alive, &has_new_data);
+        Self::spawn_reader(
+            reader,
+            input.replies(),
+            Arc::clone(&child),
+            &screen,
+            &is_alive,
+            &has_new_data,
+        );
         let mut term = Self::build(pty, input, child, pid, screen, size, is_alive, has_new_data);
         term.title = TitleSource::Command(title);
         term.initial_cwd = working_dir;
@@ -1606,13 +1646,18 @@ impl Panel for Terminal {
     }
 
     fn kill_processes(&mut self) {
+        // A child already reaped is never signalled: its pid may belong to
+        // an unrelated process by now.
+        if self.has_exited() {
+            return;
+        }
         if let Some(pid) = self.shell_pid {
             #[cfg(unix)]
             {
                 let pid = Pid::from_raw(pid as i32);
                 let _ = signal::killpg(pid, Signal::SIGTERM);
                 std::thread::sleep(std::time::Duration::from_millis(100));
-                if self.is_alive() {
+                if self.is_alive() || !self.has_exited() {
                     let _ = signal::killpg(pid, Signal::SIGKILL);
                 }
             }
@@ -1625,17 +1670,26 @@ impl Panel for Terminal {
                     .output();
             }
 
-            let _ = self.child.wait();
+            let _ = self.child.lock().map(|mut c| c.wait());
         }
+    }
+}
+
+impl Terminal {
+    /// Whether the child has exited and been reaped (reaping it if so).
+    fn has_exited(&self) -> bool {
+        self.child
+            .lock()
+            .map(|mut c| matches!(c.try_wait(), Ok(Some(_))))
+            .unwrap_or(false)
     }
 }
 
 impl Drop for Terminal {
     fn drop(&mut self) {
-        // Properly terminate processes when dropping terminal
-        if self.is_alive() {
-            self.kill_processes();
-        }
+        // Ends a child still running and always collects its status, also
+        // for one that closed its terminal but has not exited.
+        self.kill_processes();
     }
 }
 
@@ -1670,6 +1724,25 @@ mod device_tests {
             "closing waited for the program: {:?}",
             start.elapsed()
         );
+    }
+
+    /// A program that exits on its own is reaped while the panel is still
+    /// open, instead of lingering as a zombie until the panel is dropped.
+    #[test]
+    fn a_program_that_exits_is_reaped() {
+        let argv = ["/bin/sh".to_string(), "-c".into(), "exit 0".into()];
+        let Ok(term) = Terminal::new_with_program(10, 40, &argv, None, &[]) else {
+            return; // No PTY available.
+        };
+        let pid = Pid::from_raw(term.child_pid().unwrap() as i32);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        // `kill(pid, 0)` still succeeds for a zombie; ESRCH means reaped.
+        while signal::kill(pid, None).is_ok() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
+        assert!(!term.is_alive());
+        drop(term);
     }
 
     /// What another process writes to the device shows in the panel, and the
