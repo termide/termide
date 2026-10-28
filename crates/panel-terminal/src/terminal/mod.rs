@@ -908,6 +908,28 @@ impl TerminalScreen {
             }
         }
 
+        // Growing brings lines back from the scrollback, as many as were
+        // added, so the content stays anchored to the bottom as a shrink
+        // left it; only past the scrollback do blank rows go below. Only
+        // while the main screen shows: the alternate one has no scrollback.
+        if !self.use_alt_screen && rows > self.lines.len() {
+            let pulled = (rows - self.lines.len()).min(self.scrollback.len());
+            for _ in 0..pulled {
+                let line = self.scrollback.pop_back().unwrap_or_default();
+                let wrapped = self.scrollback_wrapped.pop_back().unwrap_or(false);
+                self.lines.push_front(line);
+                self.lines_wrapped.push_front(wrapped);
+            }
+            self.cursor.0 += pulled;
+            if let Some(saved) = self.saved_cursor.as_mut() {
+                saved.0 += pulled;
+            }
+            // Pulled lines keep their absolute index (see
+            // `visual_to_absolute`), so a view scrolled back keeps its top
+            // line by scrolling `pulled` lines less; the tail stays the tail.
+            self.scroll_offset = self.scroll_offset.saturating_sub(pulled);
+        }
+
         for (lines, wrapped) in [
             (&mut self.lines, &mut self.lines_wrapped),
             (&mut self.alt_lines, &mut self.alt_lines_wrapped),
@@ -1147,6 +1169,101 @@ mod tests {
         screen.save_cursor();
         screen.switch_to_alt_screen();
         screen.resize(4, 20);
+        assert_eq!(screen.saved_cursor, Some((3, 5)));
+        screen.switch_to_main_screen();
+        screen.restore_cursor();
+        assert_eq!(row_text(&screen, 3), "line7");
+    }
+
+    fn history_text(screen: &TerminalScreen) -> Vec<String> {
+        screen
+            .scrollback
+            .iter()
+            .map(|l| l.iter().map(|c| c.ch).collect::<String>().trim_end().into())
+            .collect()
+    }
+
+    #[test]
+    fn growing_brings_lines_back_from_the_scrollback() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        screen.resize(3, 20);
+        assert_eq!(
+            history_text(&screen),
+            ["line0", "line1", "line2", "line3", "line4"]
+        );
+
+        screen.resize(6, 20);
+        assert_eq!(screen.cursor, (5, 5));
+        assert_eq!(row_text(&screen, 0), "line2");
+        assert_eq!(row_text(&screen, 5), "line7");
+        assert_eq!(history_text(&screen), ["line0", "line1"]);
+        assert_eq!(screen.scrollback_wrapped.len(), 2);
+
+        // Past the scrollback, blank rows go below the cursor.
+        screen.resize(10, 20);
+        assert_eq!(screen.cursor, (7, 5));
+        assert_eq!(row_text(&screen, 0), "line0");
+        assert_eq!(row_text(&screen, 7), "line7");
+        assert_eq!(row_text(&screen, 9), "");
+        assert!(screen.scrollback.is_empty());
+        assert_eq!(screen.lines.len(), 10);
+        assert_eq!(screen.lines_wrapped.len(), 10);
+    }
+
+    #[test]
+    fn growing_keeps_the_saved_cursor_and_wrapped_flags_with_their_lines() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        screen.lines_wrapped[3] = true;
+        screen.resize(4, 20);
+        screen.cursor = (1, 2);
+        screen.save_cursor();
+        screen.cursor = (3, 5);
+
+        screen.resize(7, 20);
+        assert_eq!(screen.cursor, (6, 5));
+        assert_eq!(screen.saved_cursor, Some((4, 2)));
+        assert_eq!(row_text(&screen, 4), "line5");
+        assert_eq!(row_text(&screen, 2), "line3");
+        assert!(screen.lines_wrapped[2], "line3 came back wrapped");
+        assert!(!screen.lines_wrapped[0]);
+        screen.restore_cursor();
+        assert_eq!(screen.cursor, (4, 2));
+    }
+
+    #[test]
+    fn growing_keeps_a_scrolled_back_view_in_place() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        screen.resize(3, 20);
+        screen.set_scroll_offset(4);
+        let top = screen.visual_to_absolute(0);
+        assert_eq!(screen.get_line_by_absolute(top).unwrap()[4].ch, '1');
+
+        screen.resize(5, 20);
+        assert_eq!(screen.scroll_offset, 2);
+        assert_eq!(screen.visual_to_absolute(0), top);
+        assert_eq!(screen.get_line_by_absolute(top).unwrap()[4].ch, '1');
+
+        // Following the tail stays following the tail.
+        screen.set_scroll_offset(0);
+        screen.resize(6, 20);
+        assert_eq!(screen.scroll_offset, 0);
+    }
+
+    #[test]
+    fn growing_in_the_alt_screen_leaves_the_scrollback_alone() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        screen.resize(4, 20);
+        screen.save_cursor();
+        screen.switch_to_alt_screen();
+        screen.cursor = (3, 0);
+
+        screen.resize(8, 20);
+        assert_eq!(screen.scrollback.len(), 4);
+        assert_eq!(screen.cursor, (3, 0));
         assert_eq!(screen.saved_cursor, Some((3, 5)));
         screen.switch_to_main_screen();
         screen.restore_cursor();
