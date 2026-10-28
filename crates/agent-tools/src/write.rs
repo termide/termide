@@ -62,7 +62,7 @@ fn write(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> 
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    std::fs::write(&path, content)
+    termide_agent_core::write_atomic(&path, content.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     let verb = if existed { "Overwrote" } else { "Created" };
     Ok((
@@ -106,6 +106,34 @@ mod tests {
         );
         assert!(second.plain_text().starts_with("Overwrote"));
         assert_eq!(second.details.unwrap()["created"], false);
+    }
+
+    /// The file is replaced whole or not at all, through a symlink to its
+    /// target, keeping the target's permissions.
+    #[cfg(unix)]
+    #[test]
+    fn overwrites_atomically_through_a_symlink_keeping_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("run.sh");
+        std::fs::write(&real, "old").unwrap();
+        std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o750)).unwrap();
+        std::os::unix::fs::symlink("run.sh", dir.path().join("link.sh")).unwrap();
+
+        let result = run(dir.path(), json!({ "path": "link.sh", "content": "new" }));
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert_eq!(std::fs::read_to_string(&real).unwrap(), "new");
+        assert!(std::fs::symlink_metadata(dir.path().join("link.sh"))
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let mode = std::fs::metadata(&real).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o750);
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "{names:?}");
     }
 
     #[test]

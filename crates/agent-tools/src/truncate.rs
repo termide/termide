@@ -17,23 +17,8 @@ pub fn head_tail(text: &str, max_bytes: usize) -> Option<HeadTail<'_>> {
         return None;
     }
     let head_budget = max_bytes * 6 / 10;
-    let tail_budget = max_bytes - head_budget;
-
-    let mut head_end = 0;
-    for (index, _) in text.match_indices('\n') {
-        if index + 1 > head_budget {
-            break;
-        }
-        head_end = index + 1;
-    }
-
-    let mut tail_start = text.len();
-    for (index, _) in text.rmatch_indices('\n') {
-        if text.len() - (index + 1) > tail_budget {
-            break;
-        }
-        tail_start = index + 1;
-    }
+    let head_end = head_end(text, head_budget);
+    let tail_start = tail_start(text, max_bytes - head_budget);
     if tail_start <= head_end {
         return None;
     }
@@ -44,6 +29,54 @@ pub fn head_tail(text: &str, max_bytes: usize) -> Option<HeadTail<'_>> {
         tail: &text[tail_start..],
         omitted_lines,
     })
+}
+
+/// [`head_tail`] for output whose middle is already gone: the head comes
+/// from `head`, the tail from `tail`, with the same budgets and line cuts.
+/// `omitted_lines` counts only the lines cut from these two texts.
+#[must_use]
+pub fn head_tail_split<'a>(head: &'a str, tail: &'a str, max_bytes: usize) -> HeadTail<'a> {
+    let head_budget = max_bytes * 6 / 10;
+    let head_end = if head.len() <= head_budget {
+        head.len()
+    } else {
+        head_end(head, head_budget)
+    };
+    let tail_start = if tail.len() <= max_bytes - head_budget {
+        0
+    } else {
+        tail_start(tail, max_bytes - head_budget)
+    };
+    HeadTail {
+        head: &head[..head_end],
+        tail: &tail[tail_start..],
+        omitted_lines: head[head_end..].matches('\n').count()
+            + tail[..tail_start].matches('\n').count(),
+    }
+}
+
+/// End of the longest run of whole lines at the start of `text` within `budget`.
+fn head_end(text: &str, budget: usize) -> usize {
+    let mut end = 0;
+    for (index, _) in text.match_indices('\n') {
+        if index + 1 > budget {
+            break;
+        }
+        end = index + 1;
+    }
+    end
+}
+
+/// Start of the longest run of whole lines at the end of `text` within `budget`.
+fn tail_start(text: &str, budget: usize) -> usize {
+    let mut start = text.len();
+    for (index, _) in text.rmatch_indices('\n') {
+        if text.len() - (index + 1) > budget {
+            break;
+        }
+        start = index + 1;
+    }
+    start
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -72,5 +105,21 @@ mod tests {
         assert!(cut.tail.starts_with("line "));
         assert!(cut.head.len() + cut.tail.len() <= 200);
         assert!(cut.omitted_lines > 50);
+    }
+
+    #[test]
+    fn split_head_and_tail_are_cut_separately() {
+        let head: String = (1..=50).map(|n| format!("h{n}\n")).collect();
+        let tail: String = (1..=50).map(|n| format!("t{n}\n")).collect();
+        let cut = head_tail_split(&head, &tail, 100);
+        assert!(cut.head.starts_with("h1\n") && cut.head.len() <= 60);
+        assert!(cut.tail.ends_with("t50\n") && cut.tail.len() <= 40);
+        assert_eq!(
+            cut.omitted_lines,
+            100 - cut.head.lines().count() - cut.tail.lines().count()
+        );
+        // Short parts are kept whole.
+        let cut = head_tail_split("a\n", "b\n", 100);
+        assert_eq!((cut.head, cut.tail, cut.omitted_lines), ("a\n", "b\n", 0));
     }
 }

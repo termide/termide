@@ -12148,7 +12148,8 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
     let Some(PanelEvent::ShowChecklist { groups, .. }) = events.first() else {
         panic!("the toolset list opens: {events:?}");
     };
-    // The held server's heading: a checkbox, unticked, and nothing else.
+    // The held server's heading: a checkbox, unticked, what ticking it
+    // approves beside it, and no buttons.
     let ext = groups.iter().find(|g| g.name == "MCP: ext").unwrap();
     assert_eq!(
         ext.switch,
@@ -12157,7 +12158,7 @@ fn a_held_server_ticked_in_the_toolset_list_is_approved_and_comes_on() {
             checked: false,
         })
     );
-    assert!(ext.note.is_empty(), "{}", ext.note);
+    assert_eq!(ext.note, "npx ext-server");
     assert!(ext.buttons.is_empty(), "{:?}", ext.buttons);
 
     // Left unticked, nothing is approved.

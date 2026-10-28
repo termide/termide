@@ -1357,8 +1357,9 @@ agent's requests are served in the client: `session/request_permission`
 through the same `ChannelPrompter` as the built-in prompt (answers mapped
 onto the offered `allow_once`/`allow_always`/`reject_once` options),
 `fs/read_text_file` and `fs/write_text_file` from the working directory (a
-write surfaces as a `write` tool call for the editor reload), terminals not
-advertised. Switching between engines rebuilds the runtime on the same
+write surfaces as a `write` tool call for the editor reload; a range read
+streams the file and a whole-file read is refused past 16 MiB; a write
+replaces the file atomically), terminals not advertised. Switching between engines rebuilds the runtime on the same
 session log.
 
 Settings: ACP's session config options are the client-facing knobs, changeable

@@ -12,8 +12,9 @@ use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 
 use crate::args::{optional_u64, required_str};
-use crate::clean::clean_output;
-use crate::truncate::{head_tail, SHELL_MAX_BYTES};
+use crate::capture::{Capture, Captured, LiveView};
+use crate::clean::{clean_output, Cleaned};
+use crate::truncate::{head_tail, head_tail_split, SHELL_MAX_BYTES};
 
 /// How often the accumulated output is pushed to the UI while running.
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
@@ -24,11 +25,21 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 const DRAIN_QUIET: Duration = Duration::from_millis(500);
 /// And how long the output is read at most once the command is over.
 const DRAIN_MAX: Duration = Duration::from_secs(5);
+/// Output kept in memory from each end of a command's output; the middle of
+/// a longer one is only counted, and goes to the log file on disk.
+const CAPTURE_SIDE_BYTES: usize = 1024 * 1024;
+/// Cap on the log of one command's output, so a command printing without
+/// end until its timeout cannot fill the disk.
+const MAX_LOG_BYTES: u64 = 256 * 1024 * 1024;
 
 pub struct BashTool {
     pub default_timeout: Duration,
     pub max_timeout: Duration,
     pub max_output_bytes: usize,
+    /// Bytes kept in memory from each end of the raw output.
+    pub capture_bytes: usize,
+    /// Cap on the full-output log file.
+    pub max_log_bytes: u64,
     /// Where full logs of truncated output go; the system temp dir if `None`.
     pub log_dir: Option<PathBuf>,
     /// Clean and compact output for the model (strip escapes, collapse noise)
@@ -46,6 +57,8 @@ impl Default for BashTool {
             default_timeout: Duration::from_secs(120),
             max_timeout: Duration::from_secs(600),
             max_output_bytes: SHELL_MAX_BYTES,
+            capture_bytes: CAPTURE_SIDE_BYTES,
+            max_log_bytes: MAX_LOG_BYTES,
             log_dir: None,
             clean: true,
             shim_path: None,
@@ -99,7 +112,7 @@ impl Tool for BashTool {
             Err(message) => return ToolResultMessage::error(call, message),
         };
 
-        let run = match self.run(command, ctx, timeout, on_update, cancel) {
+        let run = match self.run(command, &call.id, ctx, timeout, on_update, cancel) {
             Ok(run) => run,
             Err(message) => return ToolResultMessage::error(call, message),
         };
@@ -108,7 +121,7 @@ impl Tool for BashTool {
 }
 
 struct Run {
-    output: Vec<u8>,
+    output: Captured,
     exit_code: Option<i32>,
     timed_out: bool,
     cancelled: bool,
@@ -125,6 +138,7 @@ impl BashTool {
     fn run(
         &self,
         command: &str,
+        call_id: &str,
         ctx: &ToolContext,
         timeout: Duration,
         on_update: &mut dyn FnMut(ToolUpdate),
@@ -132,7 +146,11 @@ impl BashTool {
     ) -> Result<Run, String> {
         let mut child = spawn(command, ctx, self.shim_path.as_deref())?;
         let started = Instant::now();
-        let output = Arc::new(Mutex::new(Vec::new()));
+        let output = Arc::new(Mutex::new(Capture::new(
+            self.capture_bytes,
+            self.log_path(call_id),
+            self.max_log_bytes,
+        )));
         let stdout: Option<Box<dyn Read + Send>> = child
             .stdout
             .take()
@@ -153,7 +171,7 @@ impl BashTool {
         let mut timed_out = false;
         let mut cancelled = false;
         let mut last_update = Instant::now();
-        let mut last_len = 0;
+        let mut view = LiveView::default();
         let exit_code = loop {
             match child.try_wait() {
                 Ok(Some(status)) => break status.code(),
@@ -174,19 +192,23 @@ impl BashTool {
                 break child.wait().ok().and_then(|status| status.code());
             }
             if last_update.elapsed() >= UPDATE_INTERVAL {
-                let snapshot = lock(&output);
-                if snapshot.len() != last_len {
-                    last_len = snapshot.len();
-                    on_update(ToolUpdate::Output(
-                        String::from_utf8_lossy(&snapshot).into_owned(),
-                    ));
+                let changed = {
+                    let capture = lock(&output);
+                    let changed = capture.total() != view.consumed;
+                    if changed {
+                        capture.update_view(&mut view);
+                    }
+                    changed
+                };
+                if changed {
+                    on_update(ToolUpdate::Output(view.text.clone()));
                 }
                 last_update = Instant::now();
             }
             std::thread::sleep(POLL_INTERVAL);
         };
         let detached = drain(readers, &output);
-        let output = std::mem::take(&mut *lock_mut(&output));
+        let output = std::mem::replace(&mut *lock(&output), Capture::new(1, None, 0)).finish();
         Ok(Run {
             output,
             exit_code,
@@ -199,37 +221,52 @@ impl BashTool {
     }
 
     fn render(&self, call: &ToolCall, run: Run) -> ToolResultMessage {
-        let raw = String::from_utf8_lossy(&run.output).into_owned();
-        // The model reads cleaned output; the user's live view and the full
-        // log on disk stay raw. `command` selects the command-aware rules.
-        let cleaned = if self.clean {
-            clean_output(&raw, &run.command)
-        } else {
-            crate::clean::Cleaned {
-                original_bytes: raw.len(),
-                cleaned_bytes: raw.len(),
-                text: raw.clone(),
-            }
-        };
-        let text = cleaned.text;
+        let output = &run.output;
         let mut full_output_path = None;
-        let mut body = match head_tail(&text, self.max_output_bytes) {
-            None => text.clone(),
-            Some(cut) => {
-                // Save the raw output, not the cleaned text: the log is the
-                // full record for the user.
-                let path = self.save_log(call, &raw);
-                let marker = match &path {
-                    Some(path) => format!(
-                        "\n[... {} lines omitted; full output saved to {} ...]\n",
-                        cut.omitted_lines,
-                        path.display()
-                    ),
-                    None => format!("\n[... {} lines omitted ...]\n", cut.omitted_lines),
-                };
-                full_output_path = path;
-                format!("{}{marker}{}", cut.head, cut.tail)
-            }
+        let (cleaned, mut body) = if output.dropped == 0 {
+            let raw = String::from_utf8_lossy(&output.head).into_owned();
+            let cleaned = self.clean(&raw, &run.command);
+            let body = match head_tail(&cleaned.text, self.max_output_bytes) {
+                None => cleaned.text.clone(),
+                Some(cut) => {
+                    // Save the raw output, not the cleaned text: the log is
+                    // the full record for the user.
+                    let path = self.save_log(call, &raw);
+                    let marker = omission_marker(cut.omitted_lines, path.as_deref(), 0);
+                    full_output_path = path;
+                    format!("{}{marker}{}", cut.head, cut.tail)
+                }
+            };
+            (cleaned, body)
+        } else {
+            // The middle was never kept: clean the two ends on their own
+            // whole lines and count the dropped lines as omitted.
+            let head = &output.head[..output
+                .head
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(output.head.len(), |i| i + 1)];
+            let tail = &output.tail[output
+                .tail
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(0, |i| i + 1)..];
+            let head = self.clean(&String::from_utf8_lossy(head), &run.command);
+            let tail = self.clean(&String::from_utf8_lossy(tail), &run.command);
+            let cut = head_tail_split(&head.text, &tail.text, self.max_output_bytes);
+            let omitted = cut.omitted_lines + output.dropped_lines as usize;
+            let skipped = output.log.as_ref().map_or(0, |log| log.skipped);
+            let path = output.log.as_ref().map(|log| log.path.clone());
+            let marker = omission_marker(omitted, path.as_deref(), skipped);
+            let body = format!("{}{marker}{}", cut.head, cut.tail);
+            full_output_path = path;
+            // The cleaning stats cover what was cleaned, not what was cut.
+            let cleaned = Cleaned {
+                original_bytes: head.original_bytes + tail.original_bytes,
+                cleaned_bytes: head.cleaned_bytes + tail.cleaned_bytes,
+                text: String::new(),
+            };
+            (cleaned, body)
         };
         if body.trim().is_empty() {
             body = "(no output)".to_string();
@@ -279,6 +316,7 @@ impl BashTool {
             "full_output_path": full_output_path,
             "raw_bytes": cleaned.original_bytes,
             "cleaned_bytes": cleaned.cleaned_bytes,
+            "dropped_bytes": run.output.dropped,
         });
         let result = if is_error {
             ToolResultMessage::error(call, body)
@@ -288,21 +326,39 @@ impl BashTool {
         result.with_details(details)
     }
 
-    fn save_log(&self, call: &ToolCall, text: &str) -> Option<PathBuf> {
+    /// The model reads cleaned output; the user's live view and the full log
+    /// on disk stay raw. `command` selects the command-aware rules.
+    fn clean(&self, raw: &str, command: &str) -> Cleaned {
+        if self.clean {
+            clean_output(raw, command)
+        } else {
+            Cleaned {
+                original_bytes: raw.len(),
+                cleaned_bytes: raw.len(),
+                text: raw.to_string(),
+            }
+        }
+    }
+
+    /// Where the full output of call `call_id` is saved when it is cut.
+    fn log_path(&self, call_id: &str) -> Option<PathBuf> {
         let dir = self.log_dir.clone().unwrap_or_else(std::env::temp_dir);
         if std::fs::create_dir_all(&dir).is_err() {
             return None;
         }
-        let safe_id: String = call
-            .id
+        let safe_id: String = call_id
             .chars()
             .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
             .take(32)
             .collect();
-        let path = dir.join(format!(
+        Some(dir.join(format!(
             "termide-agent-bash-{}-{safe_id}.log",
             termide_agent_core::now_millis()
-        ));
+        )))
+    }
+
+    fn save_log(&self, call: &ToolCall, text: &str) -> Option<PathBuf> {
+        let path = self.log_path(&call.id)?;
         match std::fs::write(&path, text) {
             Ok(()) => Some(path),
             Err(error) => {
@@ -313,6 +369,22 @@ impl BashTool {
                 None
             }
         }
+    }
+}
+
+/// The line standing for the omitted middle of the output. `skipped` bytes
+/// at the end of the output did not fit the log.
+fn omission_marker(omitted_lines: usize, log: Option<&Path>, skipped: u64) -> String {
+    match log {
+        Some(path) if skipped > 0 => format!(
+            "\n[... {omitted_lines} lines omitted; output saved to {} except its last {skipped} bytes ...]\n",
+            path.display()
+        ),
+        Some(path) => format!(
+            "\n[... {omitted_lines} lines omitted; full output saved to {} ...]\n",
+            path.display()
+        ),
+        None => format!("\n[... {omitted_lines} lines omitted ...]\n"),
     }
 }
 
@@ -371,12 +443,12 @@ fn kill_group(child: &mut Child) {
 /// one open, until the output has been quiet for [`DRAIN_QUIET`] (at most
 /// [`DRAIN_MAX`]). Readers still blocked then are left to end with the pipe;
 /// `true` when any was.
-fn drain(readers: Vec<std::thread::JoinHandle<()>>, output: &Mutex<Vec<u8>>) -> bool {
+fn drain(readers: Vec<std::thread::JoinHandle<()>>, output: &Mutex<Capture>) -> bool {
     let started = Instant::now();
-    let mut last_len = lock_mut(output).len();
+    let mut last_len = lock(output).total();
     let mut last_growth = started;
     while readers.iter().any(|reader| !reader.is_finished()) {
-        let len = lock_mut(output).len();
+        let len = lock(output).total();
         if len != last_len {
             last_len = len;
             last_growth = Instant::now();
@@ -397,21 +469,17 @@ fn drain(readers: Vec<std::thread::JoinHandle<()>>, output: &Mutex<Vec<u8>>) -> 
     detached
 }
 
-fn pump(mut stream: impl Read, sink: &Mutex<Vec<u8>>) {
+fn pump(mut stream: impl Read, sink: &Mutex<Capture>) {
     let mut buffer = [0u8; 8192];
     loop {
         match stream.read(&mut buffer) {
             Ok(0) | Err(_) => break,
-            Ok(n) => lock_mut(sink).extend_from_slice(&buffer[..n]),
+            Ok(n) => lock(sink).push(&buffer[..n]),
         }
     }
 }
 
-fn lock(output: &Mutex<Vec<u8>>) -> Vec<u8> {
-    lock_mut(output).clone()
-}
-
-fn lock_mut(output: &Mutex<Vec<u8>>) -> std::sync::MutexGuard<'_, Vec<u8>> {
+fn lock(output: &Mutex<Capture>) -> std::sync::MutexGuard<'_, Capture> {
     output
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -647,6 +715,76 @@ mod tests {
         assert_eq!(details["truncated"], true);
         let saved = std::fs::read_to_string(details["full_output_path"].as_str().unwrap()).unwrap();
         assert_eq!(saved.lines().count(), 5000);
+    }
+
+    /// A command printing far more than is kept inline holds only both ends
+    /// in memory; the log on disk still has every byte, and the model sees
+    /// the usual head, omission marker and tail.
+    #[test]
+    fn endless_output_is_bounded_in_memory_and_spooled_to_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = BashTool {
+            max_output_bytes: 2048,
+            capture_bytes: 16 * 1024,
+            ..tool(dir.path())
+        };
+        let (result, updates) = run_with(
+            &tool,
+            dir.path(),
+            json!({ "command": "seq 1 200000" }),
+            &CancelToken::new(),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        let text = result.plain_text();
+        assert!(text.starts_with("1\n2\n"), "{text}");
+        assert!(
+            text.contains("lines omitted; full output saved to"),
+            "{text}"
+        );
+        assert!(text.contains("\n200000\n"), "{text}");
+        // Head and tail lines plus the omitted count add up to the output.
+        let shown = text.lines().filter(|l| l.parse::<u32>().is_ok()).count();
+        let omitted: usize = text
+            .split("[... ")
+            .nth(1)
+            .and_then(|rest| rest.split(' ').next())
+            .and_then(|n| n.parse().ok())
+            .unwrap();
+        assert!(
+            (shown + omitted).abs_diff(200_000) <= 2,
+            "{shown} + {omitted}"
+        );
+        let details = result.details.unwrap();
+        assert_eq!(details["truncated"], true);
+        assert!(details["dropped_bytes"].as_u64().unwrap() > 1_000_000);
+        let saved = std::fs::read_to_string(details["full_output_path"].as_str().unwrap()).unwrap();
+        assert_eq!(saved.lines().count(), 200_000);
+        // No live update carries more than both ends and a marker.
+        assert!(updates.iter().all(|u| u.len() < 2 * 16 * 1024 + 100));
+    }
+
+    /// Past its cap the log stops, and the marker says it is not whole.
+    #[test]
+    fn the_output_log_is_capped() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = BashTool {
+            max_output_bytes: 2048,
+            capture_bytes: 4096,
+            max_log_bytes: 64 * 1024,
+            ..tool(dir.path())
+        };
+        let (result, _) = run_with(
+            &tool,
+            dir.path(),
+            json!({ "command": "seq 1 100000" }),
+            &CancelToken::new(),
+        );
+        let text = result.plain_text();
+        assert!(text.contains("except its last"), "{text}");
+        let details = result.details.unwrap();
+        let path = details["full_output_path"].as_str().unwrap();
+        let size = std::fs::metadata(path).unwrap().len();
+        assert!(size < 64 * 1024 + 200, "{size}");
     }
 
     #[test]

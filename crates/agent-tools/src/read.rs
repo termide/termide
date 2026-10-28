@@ -1,10 +1,12 @@
 //! `read`: a file as numbered lines, paged with `offset` and `limit`, or an
 //! image file as the picture itself, for a multimodal model to look at.
 
+use std::fs::File;
+use std::io::{Read as _, Seek, SeekFrom};
 use std::path::PathBuf;
 
 use serde_json::{json, Value};
-use termide_agent_core::ToolText;
+use termide_agent_core::{read_line_window, ToolText, WindowSpec};
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
 use termide_clipboard::{picture_from_path, picture_kind, Picture};
 
@@ -47,9 +49,9 @@ impl Tool for ReadTool {
         call: &ToolCall,
         ctx: &ToolContext,
         _on_update: &mut dyn FnMut(ToolUpdate),
-        _cancel: &CancelToken,
+        cancel: &CancelToken,
     ) -> ToolResultMessage {
-        match read(call, ctx) {
+        match read(call, ctx, cancel) {
             Ok(Read::Text(text, details)) => {
                 ToolResultMessage::text(call, text).with_details(details)
             }
@@ -79,7 +81,7 @@ enum Read {
     Picture(PathBuf, Picture),
 }
 
-fn read(call: &ToolCall, ctx: &ToolContext) -> Result<Read, String> {
+fn read(call: &ToolCall, ctx: &ToolContext, cancel: &CancelToken) -> Result<Read, String> {
     let raw_path = required_str(call, "path")?;
     let path = resolve_path(ctx, raw_path)?;
     // A file named as a picture that does not decode as one is read on as
@@ -89,10 +91,14 @@ fn read(call: &ToolCall, ctx: &ToolContext) -> Result<Read, String> {
             return Ok(Read::Picture(path, picture));
         }
     }
-    read_text(call, path).map(|(text, details)| Read::Text(text, details))
+    read_text(call, path, cancel).map(|(text, details)| Read::Text(text, details))
 }
 
-fn read_text(call: &ToolCall, path: PathBuf) -> Result<(String, Value), String> {
+fn read_text(
+    call: &ToolCall,
+    path: PathBuf,
+    cancel: &CancelToken,
+) -> Result<(String, Value), String> {
     let offset = optional_u64(call, "offset")?.unwrap_or(1).max(1) as usize;
     let limit = optional_u64(call, "limit")?
         .map(|value| value.max(1) as usize)
@@ -100,32 +106,52 @@ fn read_text(call: &ToolCall, path: PathBuf) -> Result<(String, Value), String> 
         .min(READ_MAX_LINES);
 
     ensure_not_special(&path)?;
-    let bytes = std::fs::read(&path).map_err(|error| {
-        if path.is_dir() {
-            format!(
-                "{} is a directory; use `bash` with `ls` to list it",
-                path.display()
-            )
-        } else {
-            format!("cannot read {}: {error}", path.display())
-        }
-    })?;
-    if bytes.iter().take(8192).any(|&byte| byte == 0) {
+    if path.is_dir() {
+        return Err(format!(
+            "{} is a directory; use `bash` with `ls` to list it",
+            path.display()
+        ));
+    }
+    let cannot_read = |error: std::io::Error| format!("cannot read {}: {error}", path.display());
+    let mut file = File::open(&path).map_err(cannot_read)?;
+    // Only the start is sniffed for binary content, and only the requested
+    // window is kept: a multi-gigabyte log is read in one bounded pass.
+    let mut start = Vec::with_capacity(8192);
+    (&mut file)
+        .take(8192)
+        .read_to_end(&mut start)
+        .map_err(cannot_read)?;
+    if start.contains(&0) {
         return Err(format!(
             "{} looks like a binary file; `read` only handles text",
             path.display()
         ));
     }
-    let content = String::from_utf8_lossy(&bytes);
-    if content.is_empty() {
+    if start.is_empty() {
         return Ok((
             "[empty file]".to_string(),
             json!({ "path": path, "total_lines": 0 }),
         ));
     }
-
-    let lines: Vec<&str> = content.lines().collect();
-    let total = lines.len();
+    file.seek(SeekFrom::Start(0)).map_err(cannot_read)?;
+    let window = read_line_window(
+        file,
+        WindowSpec {
+            first: offset - 1,
+            max_lines: limit,
+            // The exact budget is applied when rendering, where a cut line
+            // takes half of it; the window only has to hold enough for that.
+            max_bytes: 2 * READ_MAX_BYTES,
+            // One byte over the budget marks a line that cannot be shown whole.
+            max_line_bytes: READ_MAX_BYTES + 1,
+            count_total: true,
+        },
+        &|| cancel.is_cancelled(),
+    )
+    .map_err(cannot_read)?;
+    let Some(total) = window.total_lines else {
+        return Err("read cancelled".to_string());
+    };
     if offset > total {
         return Err(format!(
             "offset {offset} is past the end of {} ({total} lines)",
@@ -135,16 +161,17 @@ fn read_text(call: &ToolCall, path: PathBuf) -> Result<(String, Value), String> 
 
     let mut out = String::new();
     let mut shown_end = offset - 1;
-    for (index, line) in lines.iter().enumerate().skip(offset - 1).take(limit) {
-        let number = index + 1;
-        let mut rendered = format!("{number:>6}\t{line}\n");
-        if rendered.len() > READ_MAX_BYTES {
-            let cut = line
+    for (index, line) in window.lines.iter().enumerate() {
+        let number = offset + index;
+        let text = &line.text;
+        let mut rendered = format!("{number:>6}\t{text}\n");
+        if line.cut || rendered.len() > READ_MAX_BYTES {
+            let cut = text
                 .char_indices()
                 .map(|(i, _)| i)
                 .find(|&i| i > READ_MAX_BYTES / 2)
-                .unwrap_or(line.len());
-            rendered = format!("{number:>6}\t{}… [line truncated]\n", &line[..cut]);
+                .unwrap_or(text.len());
+            rendered = format!("{number:>6}\t{}… [line truncated]\n", &text[..cut]);
         }
         if !out.is_empty() && out.len() + rendered.len() > READ_MAX_BYTES {
             break;
@@ -271,6 +298,40 @@ mod tests {
         assert!(!result.is_error);
         assert_eq!(result.images().count(), 0);
         assert_eq!(result.plain_text(), "     1\tnot a picture\n");
+    }
+
+    /// A file far larger than one page is paged from a single bounded pass:
+    /// the window comes from the middle, the total from the whole, and a
+    /// line longer than the page is cut.
+    #[test]
+    fn a_large_file_is_paged_without_loading_it_whole() {
+        use std::io::Write as _;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("big.log");
+        let mut file = std::io::BufWriter::new(std::fs::File::create(&path).unwrap());
+        for n in 1..=200_000 {
+            writeln!(file, "line {n}").unwrap();
+        }
+        writeln!(file, "{}", "y".repeat(3 * READ_MAX_BYTES)).unwrap();
+        writeln!(file, "last").unwrap();
+        drop(file);
+
+        let page = run(
+            dir.path(),
+            json!({ "path": "big.log", "offset": 150_000, "limit": 2 }),
+        );
+        assert!(page
+            .plain_text()
+            .starts_with("150000\tline 150000\n150001\tline 150001\n"));
+        assert!(page
+            .plain_text()
+            .ends_with("[Showing lines 150000-150001 of 200002. Use offset=150002 to continue.]"));
+
+        let long = run(dir.path(), json!({ "path": "big.log", "offset": 200_001 }));
+        let text = long.plain_text();
+        assert!(text.contains("… [line truncated]"), "{}", &text[..100]);
+        assert!(text.len() < READ_MAX_BYTES);
+        assert!(text.contains("200002\tlast\n"));
     }
 
     #[test]

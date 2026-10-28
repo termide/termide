@@ -337,7 +337,8 @@ in one column: `[↻]` connects it again (`r` on the heading), and on a server
 that signs in with OAuth `[⇥]` signs in or `[⇤]` signs out (`l`) to its left.
 A button does what it says and leaves the list open, brought up to date. A
 server the project brings that waits for approval (see below) has a checkbox
-of its own on its heading, unticked, and no buttons (`[ ] MCP: ext`): ticked,
+of its own on its heading, unticked, what it would run beside it, and no
+buttons (`[ ] MCP: ext  npx ext-server`): ticked,
 it is approved at once, the list staying open: the server connects and its
 tools come under the heading, on, even if the session had switched them off.
 A server that connects while the list is open appears in it there and then — its heading loses its remark and its tools come under it — so you do
@@ -1010,7 +1011,9 @@ something. How many delegated tasks think at once is the
 - **write** creates a file or replaces its whole content.
 - **bash** runs a shell command in the project directory, streaming its output.
   Long output keeps its beginning and end, and the complete log is written to
-  a file the agent can read.
+  a file the agent can read. Only the two ends stay in memory, so a command
+  that prints without end until its timeout cannot exhaust it; the log stops
+  at 256 MiB.
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
@@ -2439,7 +2442,11 @@ A server that comes from anywhere but the configuration level — a project's
 `mcp.toml`, any `.mcp.json` — starts a program or sends your keys to an
 address the repository chose, so it waits for you: the session says what it
 would run (`mcp ext: from the project, runs npx ext-server — /trust ext to
-start it`) and it is listed but not started. `/trust` lists everything a
+start it`) and it is listed but not started. What it says is everything the
+approval covers: after the command or URL come the `env`, `headers`, OAuth
+client and `cwd` it sets, values as written — `[headers
+Authorization="Bearer $ANTHROPIC_API_KEY"]` tells you which of your
+environment variables the server would receive. `/trust` lists everything a
 project brings that waits so, `/trust <name>` (or a tick on its heading in
 the toolset list) approves it and connects it. The approval is for the launch as
 it is now — command, arguments, environment, working directory, or URL,

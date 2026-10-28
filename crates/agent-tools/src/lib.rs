@@ -12,6 +12,7 @@
 
 mod args;
 mod bash;
+mod capture;
 mod clean;
 mod debug;
 mod edit;

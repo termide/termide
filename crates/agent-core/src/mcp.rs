@@ -116,18 +116,44 @@ impl McpServerConfig {
         .to_string()
     }
 
-    /// What the server runs or reaches, for a person to read: the command
-    /// line, or the URL.
+    /// What the server runs or reaches, for a person to read when approving
+    /// it: the command line or the URL, then every other part of
+    /// [`Self::launch_spec`] that is set — `env`, `headers`, the OAuth client
+    /// and `cwd` — with values as written, so a `$NAME` that would carry a
+    /// key out of termide's environment is in plain sight. Values are quoted
+    /// with escapes, so a newline in one cannot pass for the end of the line.
     #[must_use]
     pub fn launch_line(&self) -> String {
-        match (&self.command, &self.url) {
+        let mut line = match (&self.command, &self.url) {
             (Some(command), _) => std::iter::once(command.as_str())
                 .chain(self.args.iter().map(String::as_str))
                 .collect::<Vec<_>>()
                 .join(" "),
             (None, Some(url)) => url.clone(),
             (None, None) => String::new(),
+        };
+        let pairs = |map: &BTreeMap<String, String>| {
+            map.iter()
+                .map(|(key, value)| format!("{key}={value:?}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        if !self.env.is_empty() {
+            line.push_str(&format!(" [env {}]", pairs(&self.env)));
         }
+        if !self.headers.is_empty() {
+            line.push_str(&format!(" [headers {}]", pairs(&self.headers)));
+        }
+        if let Some(id) = &self.oauth.client_id {
+            line.push_str(&format!(" [oauth.client_id={id:?}]"));
+        }
+        if let Some(secret) = &self.oauth.client_secret {
+            line.push_str(&format!(" [oauth.client_secret={secret:?}]"));
+        }
+        if let Some(cwd) = &self.cwd {
+            line.push_str(&format!(" [cwd {:?}]", cwd.display().to_string()));
+        }
+        line
     }
 }
 
@@ -560,6 +586,46 @@ mod tests {
         assert_eq!(expand_env("x$MISSING-y", lookup), "x-y");
         assert_eq!(expand_env("cost $$5 $", lookup), "cost $5 $");
         assert_eq!(expand_env("${unterminated", lookup), "${unterminated");
+    }
+
+    /// What a project server is approved for is what the user is shown: a
+    /// header that would send a key from termide's environment appears with
+    /// its `$NAME`, and changing it changes what the approval is bound to.
+    #[test]
+    fn the_launch_line_shows_what_the_approval_covers() {
+        let server = McpServerConfig {
+            url: Some("https://mcp.example.com/mcp".into()),
+            headers: [(
+                "Authorization".to_string(),
+                "Bearer $ANTHROPIC_API_KEY".to_string(),
+            )]
+            .into(),
+            ..McpServerConfig::default()
+        };
+        assert_eq!(
+            server.launch_line(),
+            r#"https://mcp.example.com/mcp [headers Authorization="Bearer $ANTHROPIC_API_KEY"]"#
+        );
+        let changed = McpServerConfig {
+            headers: [("Authorization".to_string(), "Bearer $OTHER".to_string())].into(),
+            ..server.clone()
+        };
+        assert_ne!(changed.launch_spec(), server.launch_spec());
+
+        let stdio = McpServerConfig {
+            command: Some("npx".into()),
+            args: vec!["srv".into()],
+            env: [("TOKEN".to_string(), "$GITHUB_TOKEN\nfake".to_string())].into(),
+            oauth: McpOAuth {
+                client_secret: Some("$SECRET".into()),
+                ..McpOAuth::default()
+            },
+            ..McpServerConfig::default()
+        };
+        assert_eq!(
+            stdio.launch_line(),
+            r#"npx srv [env TOKEN="$GITHUB_TOKEN\nfake"] [oauth.client_secret="$SECRET"]"#
+        );
     }
 
     #[test]
