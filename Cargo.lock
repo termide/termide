@@ -5164,6 +5164,7 @@ version = "0.46.0"
 dependencies = [
  "chrono",
  "dunce",
+ "glob",
  "log",
  "serde",
  "serde_json",

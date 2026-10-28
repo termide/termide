@@ -10,6 +10,7 @@ description = "Provider-agnostic coding agent core: messages, tools, agent loop 
 [dependencies]
 chrono.workspace = true
 dunce.workspace = true
+glob.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true

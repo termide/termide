@@ -16,7 +16,7 @@
 //! applies to the whole. Command substitution (`$(...)`, backticks) is never
 //! auto-allowed by an `allow` rule.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -1479,8 +1479,8 @@ struct ParsedShell {
     /// Every `for`, `select`, `while` and `until` loop of the line, each
     /// with the variable a `for NAME in WORDS` header binds and its words,
     /// their quotes taken off; `None` for the rest, and for a header whose
-    /// words expand.
-    loops: Vec<Option<(String, Vec<String>)>>,
+    /// words expand other than as paths.
+    loops: Vec<Option<(String, Vec<ShellWord>)>>,
     /// The loops open where the reading has got to.
     open_loops: Vec<usize>,
 }
@@ -1709,8 +1709,9 @@ pub struct ShellPart {
     /// The variables of the `for NAME in WORDS` loops it runs in, innermost
     /// last, with the words each takes in turn — only where nothing else
     /// on the line can give that variable another value or move the loop
-    /// to another directory between its turns.
-    pub loop_values: Vec<(String, Vec<String>)>,
+    /// to another directory between its turns. A word that is a pattern
+    /// takes, as in the shell, the paths it matches.
+    pub loop_values: Vec<(String, Vec<ShellWord>)>,
 }
 
 /// Split `command` into its parts, following `cd`, `pushd` and `popd` from
@@ -1798,7 +1799,7 @@ fn moving_loops(parsed: &ParsedShell) -> Vec<bool> {
 /// `${NAME}`, so no assignment, `read`, `${NAME:=…}` or function changes
 /// it. A line that touches `IFS` binds nothing, its words splitting
 /// differently.
-fn loop_bindings(command: &str, parsed: &ParsedShell) -> Vec<Option<(String, Vec<String>)>> {
+fn loop_bindings(command: &str, parsed: &ParsedShell) -> Vec<Option<(String, Vec<ShellWord>)>> {
     parsed
         .loops
         .iter()
@@ -1857,34 +1858,44 @@ const FILE_READERS: [&str; 20] = [
 /// Whether a look-only `part` reads beyond `project`, so that it asks where
 /// the `read` tool would: a path argument or an input redirection that leads
 /// outside it (absolute, `~`, a `..` or a symlink stepping out, a glob that
-/// could match `..`), a file reader run in a directory outside it or in one
-/// that cannot be told, a variable whose value cannot be seen, or the whole
-/// environment dumped (`env`, `printenv`), secrets and all.
+/// could match `..` or matches such a path — or more paths than
+/// [`MAX_GLOB_MATCHES`], or one taken for an option), a file reader run in
+/// a directory outside it or in one that cannot be told, a variable whose
+/// value cannot be seen, or the whole environment dumped (`env`,
+/// `printenv`), secrets and all.
 fn reads_outside(part: &ShellPart, project: &Path) -> bool {
     let text = without_harmless_redirections(&part.text);
     let head = text.split_whitespace().next().unwrap_or("");
     let reader = FILE_READERS.contains(&head);
     let project = real_path(project);
     let dir = part.dir.as_deref();
+    let reads_files = reader || text.contains('<');
+    // The globs take the paths they match, as the shell expands them, each
+    // pattern once however many turns the loops take.
+    let mut globs = GlobExpansion::new(dir);
     // A loop variable counts when each word it takes is one the command
     // could name itself: a path inside the project, no option, nothing the
     // shell would split. The command is then judged with every value in.
-    let loop_values: Vec<(&str, &[String])> = part
-        .loop_values
-        .iter()
-        .filter(|(_, values)| {
-            values.iter().all(|value| {
-                !value.is_empty()
-                    && !value.starts_with('-')
-                    && !value.contains(char::is_whitespace)
-                    && !path_outside(value, dir, &project)
-            })
-        })
-        .map(|(name, values)| (name.as_str(), values.as_slice()))
-        .collect();
+    let mut loop_values: Vec<(&str, Vec<String>)> = Vec::new();
+    for (name, words) in &part.loop_values {
+        let values: Option<Vec<String>> = words.iter().try_fold(Vec::new(), |mut all, word| {
+            all.extend(globs.expand(word)?);
+            Some(all)
+        });
+        let Some(values) = values else { continue };
+        let usable = values.iter().all(|value| {
+            !value.is_empty()
+                && !value.starts_with('-')
+                && !value.contains(char::is_whitespace)
+                && !path_outside(value, dir, &project)
+        });
+        if usable {
+            loop_values.push((name.as_str(), values));
+        }
+    }
     let turns: usize = loop_values.iter().map(|(_, v)| v.len()).product();
     if turns > MAX_LOOP_TURNS {
-        return reader || text.contains('<');
+        return reads_files;
     }
     (0..turns).any(|turn| {
         let mut rest = turn;
@@ -1896,12 +1907,83 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
                 (*name, value)
             })
             .collect();
-        match shell_words_with(&text, &values) {
-            Some(words) => words_read_outside(head, reader, &words, dir, &project),
-            // A variable expands to a path no one can see beforehand.
-            None => reader || text.contains('<'),
+        // A variable expands to a path no one can see beforehand.
+        let Some(words) = globbing_words(&text, &values) else {
+            return reads_files;
+        };
+        let mut expanded = Vec::with_capacity(words.len());
+        for (index, word) in words.iter().enumerate() {
+            if index == 0 || !reads_files {
+                expanded.push(word.text.clone());
+                continue;
+            }
+            match globs.expand(word) {
+                Some(paths) => expanded.extend(paths),
+                None => return true,
+            }
         }
+        words_read_outside(head, reader, &expanded, dir, &project)
     })
+}
+
+/// The glob expansions of the words of one look-only command run in `dir`,
+/// remembered by pattern and sharing one [`MAX_GLOB_MATCHES`] budget.
+struct GlobExpansion<'d> {
+    dir: Option<&'d Path>,
+    budget: usize,
+    seen: HashMap<String, Option<Vec<String>>>,
+}
+
+impl<'d> GlobExpansion<'d> {
+    fn new(dir: Option<&'d Path>) -> Self {
+        Self {
+            dir,
+            budget: MAX_GLOB_MATCHES,
+            seen: HashMap::new(),
+        }
+    }
+
+    /// The words `word` becomes (see [`expand_glob`]); `None` when the
+    /// command should ask instead: the matches pass the budget, or one
+    /// starts with `-` and would be taken for an option. An input
+    /// redirection (`<*`, `0<src/*`) expands its target.
+    fn expand(&mut self, word: &ShellWord) -> Option<Vec<String>> {
+        let Some(pattern) = &word.glob else {
+            return Some(vec![word.text.clone()]);
+        };
+        if let Some(cached) = self.seen.get(pattern) {
+            return cached.clone();
+        }
+        let digits = word.text.len()
+            - word
+                .text
+                .trim_start_matches(|c: char| c.is_ascii_digit())
+                .len();
+        let redirect = word.text[digits..].starts_with('<')
+            && !word.text[digits..].starts_with("<<")
+            && !word.text[digits..].starts_with("<&");
+        // The prefix holds no glob character, so it is spelled alike in the
+        // text and the pattern.
+        let prefix = if redirect { digits + 1 } else { 0 };
+        let target = ShellWord {
+            text: word.text[prefix..].to_string(),
+            glob: pattern.get(prefix..).map(str::to_string),
+        };
+        let expanded = expand_glob(&target, self.dir, &mut self.budget).and_then(|paths| {
+            let literal = paths.len() == 1 && paths[0] == target.text;
+            if !literal && paths.iter().any(|p| p.starts_with('-')) {
+                return None;
+            }
+            Some(
+                paths
+                    .into_iter()
+                    .map(|path| format!("{}{path}", &word.text[..prefix]))
+                    .collect(),
+            )
+        });
+        self.seen.insert(pattern.clone(), expanded.clone());
+        expanded
+    }
 }
 
 /// The most turns of the loops around a command [`reads_outside`] judges it
@@ -2183,13 +2265,15 @@ fn track_loops(parsed: &mut ParsedShell, part: &str) {
             // The reserved words before the header are plain words, so the
             // header's words start where they end.
             let binding = (head == "for")
-                .then(|| shell_words(part))
+                .then(|| globbing_words(part, &[]))
                 .flatten()
                 .and_then(|words| match words.get(leading + 1..)? {
                     [name, keyword, values @ ..]
-                        if keyword == "in" && is_shell_name(name) && !values.is_empty() =>
+                        if keyword.text == "in"
+                            && is_shell_name(&name.text)
+                            && !values.is_empty() =>
                     {
-                        Some((name.clone(), values.to_vec()))
+                        Some((name.text.clone(), values.to_vec()))
                     }
                     _ => None,
                 });
@@ -2335,45 +2419,186 @@ fn shell_words(part: &str) -> Option<Vec<String>> {
 /// `${NAME}` alike, to the value given (the last one for a name given
 /// twice); any other expansion still gives `None`.
 fn shell_words_with(part: &str, values: &[(&str, &str)]) -> Option<Vec<String>> {
+    Some(
+        globbing_words(part, values)?
+            .into_iter()
+            .map(|word| word.text)
+            .collect(),
+    )
+}
+
+/// A word of a simple command: its text with the quotes taken off and,
+/// when an unquoted `*`, `?` or `[` makes the shell expand it into the
+/// paths it matches, the pattern it is matched as — every quoted character
+/// escaped, a run of `*` taken for one (no `globstar`), `[^…]` for `[!…]`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellWord {
+    pub text: String,
+    pub glob: Option<String>,
+}
+
+impl ShellWord {
+    /// A word the shell takes as written.
+    #[must_use]
+    pub fn literal(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            glob: None,
+        }
+    }
+}
+
+/// A [`ShellWord`] being read.
+#[derive(Default)]
+struct WordBuilder {
+    text: String,
+    pattern: String,
+    globbed: bool,
+    /// The last character, when it was unquoted.
+    last_unquoted: Option<char>,
+}
+
+impl WordBuilder {
+    fn quoted(&mut self, c: char) {
+        self.text.push(c);
+        self.pattern
+            .push_str(&glob::Pattern::escape(c.encode_utf8(&mut [0; 4])));
+        self.last_unquoted = None;
+    }
+
+    fn unquoted(&mut self, c: char) {
+        self.text.push(c);
+        match c {
+            '*' if self.last_unquoted == Some('*') => {}
+            '^' if self.last_unquoted == Some('[') => self.pattern.push('!'),
+            c => self.pattern.push(c),
+        }
+        self.globbed |= matches!(c, '*' | '?' | '[');
+        self.last_unquoted = Some(c);
+    }
+
+    fn finish(self) -> ShellWord {
+        ShellWord {
+            text: self.text,
+            glob: self.globbed.then_some(self.pattern),
+        }
+    }
+}
+
+/// [`shell_words_with`] keeping, for each word, the pattern it expands as.
+/// A variable's value counts as unquoted where the `$` is, as the shell
+/// expands it.
+fn globbing_words(part: &str, values: &[(&str, &str)]) -> Option<Vec<ShellWord>> {
     let mut words = Vec::new();
-    let mut word: Option<String> = None;
+    let mut word: Option<WordBuilder> = None;
     let mut chars = part.chars().peekable();
     while let Some(c) = chars.next() {
         match c {
-            c if c.is_whitespace() => words.extend(word.take()),
+            c if c.is_whitespace() => words.extend(word.take().map(WordBuilder::finish)),
             '\'' => {
-                let current = word.get_or_insert_with(String::new);
+                let current = word.get_or_insert_with(WordBuilder::default);
                 loop {
                     match chars.next()? {
                         '\'' => break,
-                        c => current.push(c),
+                        c => current.quoted(c),
                     }
                 }
             }
             '"' => {
-                let current = word.get_or_insert_with(String::new);
+                let current = word.get_or_insert_with(WordBuilder::default);
                 loop {
                     match chars.next()? {
                         '"' => break,
                         '$' if starts_expansion(chars.peek().copied(), true) => {
-                            current.push_str(expand_variable(&mut chars, values)?);
+                            expand_variable(&mut chars, values)?
+                                .chars()
+                                .for_each(|c| current.quoted(c));
                         }
                         '`' => return None,
-                        '\\' => current.push(chars.next()?),
-                        c => current.push(c),
+                        '\\' => current.quoted(chars.next()?),
+                        c => current.quoted(c),
                     }
                 }
             }
-            '$' if starts_expansion(chars.peek().copied(), false) => word
-                .get_or_insert_with(String::new)
-                .push_str(expand_variable(&mut chars, values)?),
+            '$' if starts_expansion(chars.peek().copied(), false) => {
+                let current = word.get_or_insert_with(WordBuilder::default);
+                expand_variable(&mut chars, values)?
+                    .chars()
+                    .for_each(|c| current.unquoted(c));
+            }
             '`' => return None,
-            '\\' => word.get_or_insert_with(String::new).push(chars.next()?),
-            c => word.get_or_insert_with(String::new).push(c),
+            '\\' => word
+                .get_or_insert_with(WordBuilder::default)
+                .quoted(chars.next()?),
+            c => word.get_or_insert_with(WordBuilder::default).unquoted(c),
         }
     }
-    words.extend(word);
+    words.extend(word.map(WordBuilder::finish));
     Some(words)
+}
+
+/// The most paths the globs of a look-only command may match before it
+/// asks instead of judging each.
+const MAX_GLOB_MATCHES: usize = 1024;
+
+/// The words the shell turns `word` into in `dir`: the paths its pattern
+/// matches, sorted and spelled as the shell spells them (relative to `dir`
+/// for a relative pattern), or the word itself when it has no pattern or
+/// nothing matches, as `bash` leaves it by default. A dotfile matches only
+/// a pattern that names its leading `.`. A pattern left as it is: a
+/// relative one when `dir` is unknown, one with a component like `.*`
+/// (which some shells let match `..`), `~user/…` — [`path_outside`] asks
+/// about each. `None` once the matches would pass `budget`, which they
+/// take from.
+fn expand_glob(word: &ShellWord, dir: Option<&Path>, budget: &mut usize) -> Option<Vec<String>> {
+    let literal = || Some(vec![word.text.clone()]);
+    let Some(pattern) = &word.glob else {
+        return literal();
+    };
+    let dotted = word
+        .text
+        .split('/')
+        .any(|c| c.starts_with('.') && c.contains(['*', '?', '[']));
+    if dotted {
+        return literal();
+    }
+    let escaped = |path: &Path| path.to_str().map(glob::Pattern::escape);
+    let (full, strip) = if Path::new(pattern).is_absolute() {
+        (pattern.clone(), None)
+    } else if let Some(rest) = pattern.strip_prefix("~/") {
+        match home() {
+            Some(home) => (format!("{}/{rest}", escaped(&home)?), None),
+            None => return literal(),
+        }
+    } else if pattern.starts_with('~') {
+        return literal();
+    } else {
+        match dir {
+            Some(dir) => (format!("{}/{pattern}", escaped(dir)?), Some(dir)),
+            None => return literal(),
+        }
+    };
+    let options = glob::MatchOptions {
+        case_sensitive: true,
+        require_literal_separator: true,
+        require_literal_leading_dot: true,
+    };
+    let Ok(paths) = glob::glob_with(&full, options) else {
+        return literal(); // an unclosed `[` is a plain character
+    };
+    let mut matches = Vec::new();
+    for path in paths.flatten() {
+        *budget = budget.checked_sub(1)?;
+        let shown = strip
+            .and_then(|dir| path.strip_prefix(dir).ok())
+            .unwrap_or(&path);
+        matches.push(shown.to_str()?.to_string());
+    }
+    if matches.is_empty() {
+        return literal();
+    }
+    matches.sort();
+    Some(matches)
 }
 
 /// The value in `values` of the variable `chars` names just after a `$`,
@@ -4089,7 +4314,7 @@ mod tests {
             );
         }
 
-        let values = |command: &str| -> Vec<Vec<(String, Vec<String>)>> {
+        let values = |command: &str| -> Vec<Vec<(String, Vec<ShellWord>)>> {
             shell_parts(command, Path::new("/proj"))
                 .into_iter()
                 .map(|p| p.loop_values)
@@ -4098,7 +4323,7 @@ mod tests {
         let bound = |name: &str, words: &[&str]| {
             (
                 name.to_string(),
-                words.iter().map(|w| w.to_string()).collect(),
+                words.iter().map(|w| ShellWord::literal(*w)).collect(),
             )
         };
         assert_eq!(
@@ -4140,6 +4365,116 @@ mod tests {
             );
         }
         assert_eq!(hooks.decide(&bash("cat notes"), &ctx), Decision::Allow);
+    }
+
+    /// A glob in a look-only command reads what it matches, as the shell
+    /// expands it: a symlink out of the project among the matches asks.
+    #[cfg(unix)]
+    #[test]
+    fn a_glob_matching_a_symlink_out_of_the_project_asks() {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().unwrap();
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::write(outside.path().join("secret"), "x").unwrap();
+        std::fs::write(root.join("notes"), "x").unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "x").unwrap();
+        symlink(outside.path(), root.join("docs")).unwrap();
+        symlink(outside.path().join("secret"), root.join("src/lnk")).unwrap();
+        // A dotfile matches only a pattern naming its dot.
+        std::fs::create_dir_all(root.join("hid")).unwrap();
+        std::fs::write(root.join("hid/plain"), "x").unwrap();
+        symlink(outside.path().join("secret"), root.join("hid/.out")).unwrap();
+        // A match that would be taken for an option.
+        std::fs::create_dir_all(root.join("opt")).unwrap();
+        std::fs::write(root.join("opt/-n"), "x").unwrap();
+        // More matches than are judged one by one.
+        std::fs::create_dir_all(root.join("many")).unwrap();
+        for i in 0..=MAX_GLOB_MATCHES {
+            std::fs::write(root.join(format!("many/{i}")), "").unwrap();
+        }
+        let ctx = ToolContext::new(root.to_path_buf());
+        let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+        let absolute = format!("cat {}/d*/secret", root.display());
+        let unknown_dir = format!("cd $X && cat {}/src/*", root.display());
+        for command in [
+            "cat *",
+            "cat d*",
+            "head */secret",
+            "cat ?ocs/secret",
+            "cat [d]ocs/secret",
+            "cat [^n]ocs/secret",
+            "cat **/secret",
+            "cat src/*",
+            "cat src/l?k",
+            "cat \"src\"/*",
+            "cd src && cat *",
+            "wc -l <src/l*",
+            "wc -l < src/l*",
+            "for f in *; do cat $f; done",
+            "for f in src/*; do cat $f; done",
+            "for f in s; do cat ${f}rc/*; done",
+            "cat hid/.*",
+            "cd opt && cat *",
+            "cat many/*",
+            "for f in many/*; do cat $f; done",
+            &absolute,
+            &unknown_dir,
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx),
+                Decision::Ask,
+                "{command}"
+            );
+        }
+        for command in [
+            "cat no*",
+            "cat src/*.rs",
+            "cat hid/*",
+            "cat opt/*",
+            "cat '*'",
+            "cat \"d*\"",
+            "cat d\\*",
+            "cat *.zzz",
+            "ls n?tes",
+            "grep -n x src/[a]*",
+            "for f in src/*.rs; do cat $f; done",
+            "wc -l <n*",
+            "ls many",
+            "echo many/*",
+            "for f in many/*; do echo $f; done",
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx),
+                Decision::Allow,
+                "{command}"
+            );
+        }
+
+        let words = |part: &str| globbing_words(part, &[]).unwrap();
+        assert_eq!(
+            words("cat 'a*'b* \"[x]\"? c***d [^z]")[1..],
+            [
+                ShellWord {
+                    text: "a*b*".into(),
+                    glob: Some("a[*]b*".into())
+                },
+                ShellWord {
+                    text: "[x]?".into(),
+                    glob: Some("[[]x[]]?".into())
+                },
+                ShellWord {
+                    text: "c***d".into(),
+                    glob: Some("c*d".into())
+                },
+                ShellWord {
+                    text: "[^z]".into(),
+                    glob: Some("[!z]".into())
+                },
+            ]
+        );
+        assert_eq!(words("cat \\*")[1], ShellWord::literal("*"));
     }
 
     /// A loop that changes directory reads its second turn somewhere else,

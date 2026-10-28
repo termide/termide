@@ -1452,7 +1452,14 @@ there does: a path argument or an input redirection (`< file`) that leads out
 — absolute, under `~`, through `..` or a symlink, or a glob such as `.*` that
 can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
 `ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
-the project (`cd /etc && cat passwd` included). A loop (`for`, `while`,
+the project (`cd /etc && cat passwd` included). A glob is judged by what it
+matches in the directory the command runs in, as the shell expands it (`*`,
+`?`, `[…]`; a dotfile only for a pattern that starts with `.`; a pattern that
+matches nothing stays the word as written): `cat *` or `head */config` with a
+link out of the project among the matches asks, and so does a glob that
+matches more than 1024 paths, one whose match starts with `-` and would be
+taken for an option, or a relative one in a directory that cannot be told.
+A loop (`for`, `while`,
 `until`, `select`) that changes directory (`cd`, `pushd`, `popd`) runs its
 later turns somewhere else, so in its body and after it the directory counts
 as unknown and a relative path asks:
