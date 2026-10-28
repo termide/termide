@@ -230,11 +230,7 @@ impl Terminal {
         thread::spawn(move || {
             let mut parser = terminal::VtParser::new();
             let mut buf = [0u8; 16384];
-            let mut performer = terminal::VtPerformer {
-                writer,
-                screen: Arc::clone(&screen_clone),
-                pending_ops: Vec::with_capacity(8192),
-            };
+            let mut performer = terminal::VtPerformer::new(writer, Arc::clone(&screen_clone));
 
             loop {
                 match reader.read(&mut buf) {

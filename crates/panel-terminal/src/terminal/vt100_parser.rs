@@ -7,12 +7,17 @@
 
 use std::io::Write;
 use std::sync::{Arc, Mutex, RwLock};
+use std::time::{Duration, Instant};
 use vte::{Params, Parser, Perform};
 
 use super::{
     csi_handlers::{handle_cursor_movement, handle_private_sequence, handle_sgr},
     Cell, KeyboardProtocolMode, TerminalScreen,
 };
+
+/// Bells closer together than this ring once: a program printing BEL in
+/// a loop (`yes $'\a'`) must not flood the host terminal or the screen lock.
+pub const BELL_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Batched screen operation to reduce mutex contention.
 ///
@@ -39,9 +44,51 @@ pub struct VtPerformer {
     pub screen: Arc<RwLock<TerminalScreen>>,
     /// Buffer for batching screen operations
     pub pending_ops: Vec<ScreenOp>,
+    /// Mirror of `TerminalScreen::sync_output`, which only this performer
+    /// changes: lets CR/LF/BS/TAB decide without taking a lock.
+    sync_output: bool,
+    /// When a bell was last passed on, for `BELL_INTERVAL`.
+    last_bell: Option<Instant>,
+}
+
+impl ScreenOp {
+    fn apply(self, screen: &mut TerminalScreen) {
+        match self {
+            ScreenOp::PutChar(ch) => screen.put_char(ch),
+            ScreenOp::Newline => screen.newline(),
+            ScreenOp::CarriageReturn => screen.carriage_return(),
+            ScreenOp::Backspace => screen.backspace(),
+            ScreenOp::Tab => screen.tab(),
+        }
+    }
+}
+
+/// Apply batched operations to a screen already locked by the caller.
+fn apply_ops(ops: &mut Vec<ScreenOp>, screen: &mut TerminalScreen) {
+    if ops.is_empty() {
+        return;
+    }
+    for op in ops.drain(..) {
+        op.apply(screen);
+    }
+    screen.dirty = true;
 }
 
 impl VtPerformer {
+    pub fn new(
+        writer: Arc<Mutex<Box<dyn Write + Send>>>,
+        screen: Arc<RwLock<TerminalScreen>>,
+    ) -> Self {
+        let sync_output = screen.read().map(|s| s.sync_output).unwrap_or(false);
+        Self {
+            writer,
+            screen,
+            pending_ops: Vec::with_capacity(8192),
+            sync_output,
+            last_bell: None,
+        }
+    }
+
     /// Apply all pending operations with a single write lock.
     ///
     /// This significantly reduces lock contention when processing
@@ -51,16 +98,7 @@ impl VtPerformer {
             return;
         }
         if let Ok(mut screen) = self.screen.write() {
-            for op in self.pending_ops.drain(..) {
-                match op {
-                    ScreenOp::PutChar(ch) => screen.put_char(ch),
-                    ScreenOp::Newline => screen.newline(),
-                    ScreenOp::CarriageReturn => screen.carriage_return(),
-                    ScreenOp::Backspace => screen.backspace(),
-                    ScreenOp::Tab => screen.tab(),
-                }
-            }
-            screen.dirty = true;
+            apply_ops(&mut self.pending_ops, &mut screen);
         }
     }
 
@@ -163,42 +201,38 @@ impl Perform for VtPerformer {
     fn execute(&mut self, byte: u8) {
         match byte {
             b'\n' | b'\r' | b'\x08' | b'\t' => {
-                // Check if we're in sync_output mode
-                // If not, apply immediately to prevent race condition with render
-                let sync_output = self.screen.read().map(|s| s.sync_output).unwrap_or(false);
-
-                if sync_output {
+                let op = match byte {
+                    b'\n' => ScreenOp::Newline,
+                    b'\r' => ScreenOp::CarriageReturn,
+                    b'\x08' => ScreenOp::Backspace,
+                    _ => ScreenOp::Tab,
+                };
+                if self.sync_output {
                     // During sync output, batch operations for efficiency
-                    match byte {
-                        b'\n' => self.pending_ops.push(ScreenOp::Newline),
-                        b'\r' => self.pending_ops.push(ScreenOp::CarriageReturn),
-                        b'\x08' => self.pending_ops.push(ScreenOp::Backspace),
-                        b'\t' => self.pending_ops.push(ScreenOp::Tab),
-                        _ => {}
-                    }
-                } else {
-                    // Outside sync output, apply immediately to keep cursor position accurate
-                    // First flush any pending ops
-                    self.flush();
-                    // Then apply this operation
-                    // NOTE: Don't set dirty=true here! CR/LF/BS/TAB are cursor movement,
-                    // not content changes. Setting dirty here causes render to show
-                    // intermediate states between sync blocks (duplicate prompts bug).
-                    if let Ok(mut screen) = self.screen.write() {
-                        match byte {
-                            b'\n' => screen.newline(),
-                            b'\r' => screen.carriage_return(),
-                            b'\x08' => screen.backspace(),
-                            b'\t' => screen.tab(),
-                            _ => {}
-                        }
-                        // dirty is NOT set - cursor position change without content change
-                    }
+                    self.pending_ops.push(op);
+                } else if let Ok(mut screen) = self.screen.write() {
+                    // Outside sync output, apply immediately (after what is
+                    // pending) to keep the cursor position accurate, under
+                    // one lock.
+                    // NOTE: the op itself does not set dirty: CR/LF/BS/TAB are
+                    // cursor movement, not content changes. Setting dirty here
+                    // causes render to show intermediate states between sync
+                    // blocks (duplicate prompts bug).
+                    apply_ops(&mut self.pending_ops, &mut screen);
+                    op.apply(&mut screen);
                 }
             }
             b'\x07' => {
                 // Bell character - forward to parent terminal, and note it
                 // so the panel asks for attention until it is shown focused.
+                let now = Instant::now();
+                if self
+                    .last_bell
+                    .is_some_and(|last| now.saturating_duration_since(last) < BELL_INTERVAL)
+                {
+                    return;
+                }
+                self.last_bell = Some(now);
                 print!("\x07");
                 let _ = std::io::stdout().flush();
                 if let Ok(mut screen) = self.screen.write() {
@@ -214,18 +248,7 @@ impl Perform for VtPerformer {
         // This eliminates double lock acquisition that occurred on every CSI sequence
         if let Ok(mut screen) = self.screen.write() {
             // Inline flush: apply pending operations with the same lock
-            if !self.pending_ops.is_empty() {
-                for op in self.pending_ops.drain(..) {
-                    match op {
-                        ScreenOp::PutChar(ch) => screen.put_char(ch),
-                        ScreenOp::Newline => screen.newline(),
-                        ScreenOp::CarriageReturn => screen.carriage_return(),
-                        ScreenOp::Backspace => screen.backspace(),
-                        ScreenOp::Tab => screen.tab(),
-                    }
-                }
-                screen.dirty = true;
-            }
+            apply_ops(&mut self.pending_ops, &mut screen);
 
             // Handle private sequences (start with '?')
             if !intermediates.is_empty() && intermediates[0] == b'?' {
@@ -240,6 +263,7 @@ impl Perform for VtPerformer {
                     return;
                 }
                 handle_private_sequence(&mut screen, params, c);
+                self.sync_output = screen.sync_output;
                 return;
             }
 
@@ -726,7 +750,10 @@ impl Perform for VtPerformer {
                 b'7' => screen.save_cursor(),
                 b'8' => screen.restore_cursor(),
                 // RIS - full reset
-                b'c' => screen.reset(),
+                b'c' => {
+                    screen.reset();
+                    self.sync_output = false;
+                }
                 b'D' => {
                     // IND - Index: move down, scroll at bottom margin
                     if screen.cursor.0 >= screen.scroll_bottom {
@@ -777,13 +804,12 @@ mod tests {
     fn performer() -> PerformerHarness {
         let capture = Arc::new(Mutex::new(Vec::new()));
         let screen = Arc::new(RwLock::new(TerminalScreen::new(24, 80)));
-        let performer = VtPerformer {
-            writer: Arc::new(Mutex::new(
+        let performer = VtPerformer::new(
+            Arc::new(Mutex::new(
                 Box::new(SharedCapture(Arc::clone(&capture))) as Box<dyn Write + Send>
             )),
-            screen: Arc::clone(&screen),
-            pending_ops: Vec::new(),
-        };
+            Arc::clone(&screen),
+        );
         (performer, capture, screen)
     }
 
@@ -831,6 +857,45 @@ mod tests {
         assert!(!screen.read().unwrap().bell);
         feed(&mut performer, b"\x07");
         assert!(screen.read().unwrap().bell);
+    }
+
+    #[test]
+    fn bells_in_quick_succession_ring_once() {
+        let (mut performer, _capture, screen) = performer();
+        feed(&mut performer, b"\x07");
+        assert!(screen.read().unwrap().bell);
+        screen.write().unwrap().bell = false;
+
+        feed(&mut performer, b"\x07\r\n\x07");
+        assert!(
+            !screen.read().unwrap().bell,
+            "a bell within the interval rang"
+        );
+
+        performer.last_bell = Instant::now().checked_sub(BELL_INTERVAL);
+        feed(&mut performer, b"\x07");
+        assert!(screen.read().unwrap().bell);
+    }
+
+    #[test]
+    fn line_controls_are_batched_only_inside_a_synchronized_update() {
+        let (mut performer, _capture, screen) = performer();
+        feed(&mut performer, b"ab\r\n");
+        assert!(performer.pending_ops.is_empty());
+        assert_eq!(screen.read().unwrap().cursor, (1, 0));
+
+        feed(&mut performer, b"\x1b[?2026hcd\r\n");
+        assert_eq!(screen.read().unwrap().cursor, (1, 0), "applied mid-update");
+        feed(&mut performer, b"\x1b[?2026l");
+        assert_eq!(screen.read().unwrap().cursor, (2, 0));
+        assert_eq!(row_text(&screen, 1), "cd");
+
+        feed(&mut performer, b"\x1b[?2026h\x1bc\r\n");
+        assert_eq!(
+            screen.read().unwrap().cursor,
+            (1, 0),
+            "reset left batching on"
+        );
     }
 
     #[test]
