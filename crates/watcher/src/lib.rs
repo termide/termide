@@ -568,9 +568,11 @@ impl UnifiedWatcher {
     /// `stat` per changed path and a walk per new directory — a `git clone` or
     /// an unpacked archive inside the repo is thousands of each — so it runs
     /// on a worker thread, and the result is installed by
-    /// [`Self::poll_pending`] in chunks like the initial walk. Respects
-    /// `.gitignore` (via [`collect_repo_watch_paths`]) and is additive: it
-    /// extends the repo's watch set without touching its reference count.
+    /// [`Self::poll_pending`] in chunks like the initial walk. Applies the
+    /// rules of the initial walk (via [`collect_new_dir_watch_paths`]), so a
+    /// `target/` a build creates at the root stays unwatched, and is
+    /// additive: it extends the repo's watch set without touching its
+    /// reference count.
     ///
     /// Every watched repo containing the path extends its own set, not just
     /// the innermost: an outer repo's walk descends into a nested one, so
@@ -592,6 +594,14 @@ impl UnifiedWatcher {
                 {
                     continue;
                 }
+                // Below a directory the repo does not watch — one its rules
+                // exclude — nothing is the repo's to watch.
+                let parent_held = path.parent().is_some_and(|parent| {
+                    repo.watched.contains(parent) || repo.queue.iter().any(|p| p == parent)
+                });
+                if !parent_held {
+                    continue;
+                }
                 candidates
                     .entry(root.clone())
                     .or_default()
@@ -610,12 +620,9 @@ impl UnifiedWatcher {
                 tops.push(path);
             }
             let (tx, rx) = channel();
+            let repo_root = root.clone();
             std::thread::spawn(move || {
-                let paths = tops
-                    .iter()
-                    .filter(|path| path.is_dir())
-                    .flat_map(|path| collect_repo_watch_paths(path))
-                    .collect();
+                let paths = collect_new_dir_watch_paths(&repo_root, tops);
                 let _ = tx.send(RepoWalk {
                     paths,
                     ignore: None,
@@ -833,20 +840,56 @@ fn spawn_full_walk(repo_root: &Path) -> Receiver<RepoWalk> {
 /// The walk is the slow part — on repos that track `$HOME` it can take
 /// seconds — so the public API hides this behind a worker thread.
 fn collect_repo_watch_paths(repo_root: &Path) -> Vec<PathBuf> {
-    let git_objects_dir = repo_root.join(".git/objects");
-    WalkBuilder::new(repo_root)
+    watchable_dirs(repo_walker(repo_root).build(), repo_root).collect()
+}
+
+/// Walk the directories that appeared at `tops` inside `repo_root` by the
+/// rules of the full walk.
+///
+/// Each is listed from its parent: a walker never applies the ignore rules
+/// to the path it starts at, so a walk started at an ignored directory — a
+/// `target/` that cargo creates at the root — would watch all of it.
+fn collect_new_dir_watch_paths(repo_root: &Path, tops: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut by_parent: HashMap<PathBuf, HashSet<PathBuf>> = HashMap::new();
+    for top in tops {
+        if let Some(parent) = top.parent() {
+            by_parent
+                .entry(parent.to_path_buf())
+                .or_default()
+                .insert(top);
+        }
+    }
+    let mut paths = Vec::new();
+    for (parent, tops) in by_parent {
+        let walk = repo_walker(&parent)
+            .filter_entry(move |entry| entry.depth() != 1 || tops.contains(entry.path()))
+            .build();
+        paths.extend(watchable_dirs(walk, repo_root).filter(|path| path != &parent));
+    }
+    paths
+}
+
+/// The walker of a repo's watch set, for the full walk and for directories
+/// created later alike, so both see the same rules.
+fn repo_walker(start: &Path) -> WalkBuilder {
+    let mut builder = WalkBuilder::new(start);
+    builder
         .hidden(false) // we still need the `.git/` directory
         .git_ignore(true)
         .git_global(true)
-        .git_exclude(true)
-        .build()
-        .filter_map(|e| e.ok())
+        .git_exclude(true);
+    builder
+}
+
+/// The directories of `walk` that get a watch.
+fn watchable_dirs(walk: ignore::Walk, repo_root: &Path) -> impl Iterator<Item = PathBuf> {
+    let git_objects_dir = repo_root.join(".git/objects");
+    walk.filter_map(|e| e.ok())
         .filter(|e| e.file_type().is_some_and(|ft| ft.is_dir()))
         .map(|e| e.into_path())
         // Skip `.git/objects/<hash-prefix>/` — hundreds of subdirs that
         // emit no commit-relevant events.
-        .filter(|path| !(path.starts_with(&git_objects_dir) && path != &git_objects_dir))
-        .collect()
+        .filter(move |path| !(path.starts_with(&git_objects_dir) && path != &git_objects_dir))
 }
 
 #[cfg(test)]
@@ -1243,6 +1286,53 @@ mod tests {
         });
         w.unwatch_repository(&inner);
         assert!(w.os_watches.paths.contains_key(&created));
+    }
+
+    /// A directory created later is watched by the rules of the initial
+    /// walk: a `target/` cargo creates at the root stays unwatched, and so
+    /// does everything below it.
+    #[test]
+    #[cfg(not(target_os = "macos"))]
+    fn ignored_directories_created_after_registration_stay_unwatched() {
+        use std::fs;
+        let (_tmp, root) = temp_repo(Some("target/\n/build\n"));
+        fs::write(root.join("src/.gitignore"), "gen/\n").unwrap();
+        let mut w = UnifiedWatcher::new().unwrap();
+        w.watch_repository(root.clone()).unwrap();
+        wait_until_watched(&mut w, &root);
+
+        for dir in ["target/debug/deps", "build/out", "src/gen/x", "newdir/sub"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+        }
+        w.watch_new_repo_dirs(&[
+            root.join("target"),
+            // An event from below an ignored directory, as a watch that
+            // outlived a rules change can still deliver.
+            root.join("target/debug/deps"),
+            root.join("build"),
+            root.join("src/gen"),
+            root.join("newdir"),
+        ]);
+        drive_until(&mut w, "the new directories are walked", |w| {
+            w.repos[&root].walks.is_empty() && w.repos[&root].queue.is_empty()
+        });
+
+        let watched = &w.repos[&root].watched;
+        assert!(watched.contains(&root.join("newdir/sub")), "{watched:?}");
+        for ignored in [
+            "target",
+            "target/debug",
+            "target/debug/deps",
+            "build",
+            "build/out",
+            "src/gen",
+            "src/gen/x",
+        ] {
+            assert!(
+                !watched.contains(&root.join(ignored)),
+                "{ignored} is ignored but watched"
+            );
+        }
     }
 
     #[test]
