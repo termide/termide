@@ -698,8 +698,19 @@ impl Terminal {
         self.send_command(&self.shell_kind.cd_command(path))
     }
 
-    /// Send a command to the terminal and execute it (adds Enter)
+    /// Type `command` into the shell and press Enter.
+    ///
+    /// A line holding a control character is refused: typed, the line
+    /// editor would take it for a key (Ctrl+U erasing the line, CR running
+    /// what follows), so a file name could run a command of its own.
+    /// Quoting escapes such characters for the shells that can
+    /// ([`shell_utils::ShellKind::quote`]); for the others this refusal is
+    /// what keeps the name from being typed.
     pub fn send_command(&mut self, command: &str) -> Result<()> {
+        if command.contains(|c: char| c.is_ascii_control()) {
+            log::warn!("Not typing a command with control characters: {command:?}");
+            anyhow::bail!("the command holds control characters and is not typed into the shell");
+        }
         let mut line = Vec::with_capacity(command.len() + 1);
         line.extend_from_slice(command.as_bytes());
         line.push(b'\r');
@@ -1724,6 +1735,26 @@ mod device_tests {
             "closing waited for the program: {:?}",
             start.elapsed()
         );
+    }
+
+    /// A command line holding a control character is never typed, so a
+    /// name the quoting of the shell could not escape cannot press keys.
+    #[test]
+    fn a_command_with_control_characters_is_not_typed() {
+        let Ok((mut term, device)) = Terminal::new_for_device(10, 40, "app") else {
+            return; // No PTY available.
+        };
+        let tty = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&device)
+            .unwrap();
+        assert!(term.send_command("cd 'x\u{15}touch /tmp/pwned\r'").is_err());
+        term.send_command("echo ok").unwrap();
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(tty), &mut line).unwrap();
+        assert_eq!(line.trim_end(), "echo ok");
+        term.kill_processes();
     }
 
     /// A program that exits on its own is reaped while the panel is still

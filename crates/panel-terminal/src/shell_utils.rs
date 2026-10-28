@@ -352,9 +352,13 @@ fn shell_name(shell_path: &str) -> String {
 /// Command syntax family of a shell, as far as typing a command into it goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ShellKind {
-    /// sh, bash (Git Bash included), zsh and anything unrecognised.
+    /// sh, dash and anything unrecognised: no way to write a control
+    /// character other than as the raw byte, which the line editor would
+    /// take for a key, so a line holding one is not typed at all.
     #[default]
     Posix,
+    /// bash (Git Bash included), zsh and ksh: POSIX, plus `$'…'` escapes.
+    Bash,
     /// fish: POSIX-like, but its single quotes take escapes.
     Fish,
     /// cmd.exe.
@@ -369,6 +373,7 @@ impl ShellKind {
             "cmd" => Self::Cmd,
             "pwsh" | "powershell" => Self::PowerShell,
             "fish" => Self::Fish,
+            "bash" | "zsh" | "ksh" | "ksh93" | "mksh" => Self::Bash,
             _ => Self::Posix,
         }
     }
@@ -379,7 +384,7 @@ impl ShellKind {
     pub fn cd_command(self, path: &std::path::Path) -> String {
         let path = self.quote(&path.to_string_lossy());
         match self {
-            Self::Posix | Self::Fish => format!("cd {path}"),
+            Self::Posix | Self::Bash | Self::Fish => format!("cd {path}"),
             Self::Cmd => format!("cd /d {path}"),
             Self::PowerShell => format!("Set-Location -LiteralPath {path}"),
         }
@@ -389,6 +394,7 @@ impl ShellKind {
     pub fn quoting(self) -> termide_config::Quoting {
         match self {
             Self::Posix => termide_config::Quoting::Posix,
+            Self::Bash => termide_config::Quoting::Bash,
             Self::Fish => termide_config::Quoting::Fish,
             Self::Cmd => termide_config::Quoting::Cmd,
             Self::PowerShell => termide_config::Quoting::PowerShell,
@@ -417,7 +423,9 @@ mod tests {
             ShellKind::from_shell_path("powershell"),
             ShellKind::PowerShell
         );
-        assert_eq!(ShellKind::from_shell_path("/bin/zsh"), ShellKind::Posix);
+        assert_eq!(ShellKind::from_shell_path("/bin/zsh"), ShellKind::Bash);
+        assert_eq!(ShellKind::from_shell_path("bash.exe"), ShellKind::Bash);
+        assert_eq!(ShellKind::from_shell_path("/bin/sh"), ShellKind::Posix);
         assert_eq!(
             ShellKind::from_shell_path("/opt/homebrew/bin/fish"),
             ShellKind::Fish
@@ -432,11 +440,28 @@ mod tests {
     fn cd_command_quotes_for_each_shell() {
         let path = Path::new(r"D:\it's here");
         assert_eq!(ShellKind::Posix.cd_command(path), r"cd 'D:\it'\''s here'");
+        assert_eq!(ShellKind::Bash.cd_command(path), r"cd 'D:\it'\''s here'");
         assert_eq!(ShellKind::Cmd.cd_command(path), r#"cd /d "D:\it's here""#);
         assert_eq!(
             ShellKind::PowerShell.cd_command(path),
             r"Set-Location -LiteralPath 'D:\it''s here'"
         );
+    }
+
+    /// A directory named to type keys into the shell (Ctrl+U to clear the
+    /// line, a command, CR to run it) stays a name for shells that can
+    /// escape control characters, and keeps the raw bytes for the others —
+    /// which `Terminal::send_command` then refuses to type.
+    #[test]
+    fn cd_command_never_types_control_characters_where_they_can_be_escaped() {
+        let path = Path::new("/tmp/x\u{15}touch /tmp/pwned\r");
+        let bash = ShellKind::Bash.cd_command(path);
+        assert_eq!(bash, r"cd '/tmp/x'$'\025''touch /tmp/pwned'$'\015'");
+        let fish = ShellKind::Fish.cd_command(path);
+        assert_eq!(fish, r"cd '/tmp/x'\x15'touch /tmp/pwned'\x0d");
+        for kind in [ShellKind::Posix, ShellKind::Cmd, ShellKind::PowerShell] {
+            assert!(kind.cd_command(path).contains('\u{15}'), "{kind:?}");
+        }
     }
 
     #[test]
