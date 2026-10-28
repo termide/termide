@@ -33,8 +33,7 @@ use std::io::{Read, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use std::thread;
-use terminal::{Cell, CellStyle, KeyboardProtocolMode, MouseTrackingMode, TerminalScreen};
-use vte::Parser;
+use terminal::{KeyboardProtocolMode, MouseTrackingMode, TerminalScreen};
 
 use termide_config::{Config, TerminalKeybindings};
 use termide_core::{
@@ -129,6 +128,9 @@ pub struct Terminal {
     /// Last working directory reported to the app, so a `cd` inside the shell
     /// is announced once instead of on every tick.
     last_reported_cwd: Option<std::path::PathBuf>,
+    /// Start of the synchronized update whose timeout has already asked for
+    /// a redraw, so a stalled update is redrawn once, not on every tick.
+    sync_timeout_redrawn: Option<std::time::Instant>,
     /// Syntax the shell expects when the app types a command into it.
     shell_kind: shell_utils::ShellKind,
 }
@@ -226,13 +228,9 @@ impl Terminal {
         let is_alive_clone = Arc::clone(is_alive);
         let has_new_data_clone = Arc::clone(has_new_data);
         thread::spawn(move || {
-            let mut parser = Parser::new();
+            let mut parser = terminal::VtParser::new();
             let mut buf = [0u8; 16384];
-            let mut performer = terminal::VtPerformer {
-                writer,
-                screen: Arc::clone(&screen_clone),
-                pending_ops: Vec::with_capacity(8192),
-            };
+            let mut performer = terminal::VtPerformer::new(writer, Arc::clone(&screen_clone));
 
             loop {
                 match reader.read(&mut buf) {
@@ -303,6 +301,7 @@ impl Terminal {
             )),
             cached_cwd: std::sync::Mutex::new(None),
             last_reported_cwd: None,
+            sync_timeout_redrawn: None,
             shell_kind: shell_utils::ShellKind::default(),
         }
     }
@@ -585,6 +584,9 @@ impl Terminal {
 
     /// Resize terminal
     pub fn resize(&mut self, rows: u16, cols: u16) -> Result<()> {
+        // The screen never goes below 1×1; tell the program the same size.
+        let rows = rows.max(1);
+        let cols = cols.max(1);
         self.size = PtySize {
             rows,
             cols,
@@ -596,66 +598,8 @@ impl Terminal {
             pty.resize(self.size)?;
         }
 
-        // Update virtual screen size - in-place resize without cloning
         if let Ok(mut screen) = self.screen.write() {
-            let new_rows = rows as usize;
-            let new_cols = cols as usize;
-
-            // If size changed, resize in-place
-            if screen.rows != new_rows || screen.cols != new_cols {
-                let empty_cell = Cell::blank(CellStyle::default());
-
-                // Adjust row count
-                while screen.lines.len() > new_rows {
-                    screen.lines.pop_back();
-                }
-                while screen.lines.len() < new_rows {
-                    screen.lines.push_back(vec![empty_cell; new_cols]);
-                }
-                while screen.lines_wrapped.len() > new_rows {
-                    screen.lines_wrapped.pop_back();
-                }
-                while screen.lines_wrapped.len() < new_rows {
-                    screen.lines_wrapped.push_back(false);
-                }
-
-                // Adjust column count for each existing row
-                for row in screen.lines.iter_mut() {
-                    row.resize(new_cols, empty_cell);
-                }
-
-                // Adjust row count for alternate buffer
-                while screen.alt_lines.len() > new_rows {
-                    screen.alt_lines.pop_back();
-                }
-                while screen.alt_lines.len() < new_rows {
-                    screen.alt_lines.push_back(vec![empty_cell; new_cols]);
-                }
-                while screen.alt_lines_wrapped.len() > new_rows {
-                    screen.alt_lines_wrapped.pop_back();
-                }
-                while screen.alt_lines_wrapped.len() < new_rows {
-                    screen.alt_lines_wrapped.push_back(false);
-                }
-
-                // Adjust column count for each existing row in alternate buffer
-                for row in screen.alt_lines.iter_mut() {
-                    row.resize(new_cols, empty_cell);
-                }
-
-                screen.rows = new_rows;
-                screen.cols = new_cols;
-
-                // Reset scroll region to match new dimensions
-                screen.reset_scroll_region();
-
-                // Limit cursor position to new dimensions
-                screen.cursor.0 = screen.cursor.0.min(new_rows.saturating_sub(1));
-                screen.cursor.1 = screen.cursor.1.min(new_cols.saturating_sub(1));
-
-                // Mark dirty to force re-render
-                screen.dirty = true;
-            }
+            screen.resize(rows as usize, cols as usize);
         }
 
         // Invalidate render cache on resize
@@ -791,6 +735,14 @@ impl Terminal {
         // inner shell/application running in our PTY
         let mut writer = self.writer.lock().unwrap_or_else(|e| e.into_inner());
         clipboard::paste_atomic(&mut *writer, text, true)
+    }
+
+    /// Start of the synchronized update in progress, once it has run past
+    /// `SYNC_OUTPUT_TIMEOUT` and no longer holds back rendering.
+    fn sync_output_expired(&self) -> Option<std::time::Instant> {
+        let screen = self.read_screen();
+        let since = screen.sync_output_since?;
+        (screen.sync_output && !screen.sync_output_held()).then_some(since)
     }
 
     /// Check if PTY has new data that needs rendering
@@ -1431,6 +1383,16 @@ impl Panel for Terminal {
             events.push(PanelEvent::WorkingDirectoryChanged);
         }
 
+        // A synchronized update that outlived its time limit stops holding
+        // back rendering; nothing else would redraw a panel whose program
+        // died mid-frame.
+        if let Some(since) = self.sync_output_expired() {
+            if self.sync_timeout_redrawn != Some(since) {
+                self.sync_timeout_redrawn = Some(since);
+                events.push(PanelEvent::NeedsRedraw);
+            }
+        }
+
         // Handle auto-scroll during selection drag
         if !self.selection_drag_active {
             return events;
@@ -1744,6 +1706,46 @@ mod device_tests {
         let mut line = String::new();
         std::io::BufRead::read_line(&mut std::io::BufReader::new(tty), &mut line).unwrap();
         assert_eq!(line.trim_end(), "typed");
+        term.kill_processes();
+    }
+
+    /// A synchronized update that never ends (the program died mid-frame)
+    /// holds the previous frame only until its time limit, then the panel
+    /// asks for one redraw and shows what the program wrote.
+    #[test]
+    fn a_stalled_synchronized_update_is_shown_after_its_timeout() {
+        let Ok((mut term, _device)) = Terminal::new_for_device(5, 20, "app") else {
+            return; // No PTY available.
+        };
+        let theme = termide_theme::Theme::default();
+        let asks_redraw = |term: &mut Terminal| {
+            term.tick()
+                .iter()
+                .any(|e| matches!(e, PanelEvent::NeedsRedraw))
+        };
+        let first_row = |term: &mut Terminal| -> String {
+            let (lines, _, _) = term.get_display_lines(false, &theme);
+            lines[0].spans.iter().map(|s| s.content.as_ref()).collect()
+        };
+        assert!(!first_row(&mut term).contains("frame"));
+
+        {
+            let mut screen = term.screen.write().unwrap();
+            screen.sync_output = true;
+            screen.sync_output_since = Some(std::time::Instant::now());
+            for ch in "frame".chars() {
+                screen.put_char(ch);
+            }
+            screen.dirty = true;
+        }
+        assert!(!first_row(&mut term).contains("frame"), "frame shown early");
+        assert!(!asks_redraw(&mut term));
+
+        term.screen.write().unwrap().sync_output_since =
+            std::time::Instant::now().checked_sub(terminal::SYNC_OUTPUT_TIMEOUT);
+        assert!(asks_redraw(&mut term));
+        assert!(!asks_redraw(&mut term), "redraw asked twice");
+        assert!(first_row(&mut term).contains("frame"));
         term.kill_processes();
     }
 }

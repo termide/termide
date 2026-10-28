@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::sync::LazyLock;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-pub use vt100_parser::VtPerformer;
+pub use vt100_parser::{VtParser, VtPerformer};
 
 /// Static lookup table for 256-color palette.
 ///
@@ -210,6 +210,12 @@ pub fn ansi_256_to_color(code: u16) -> Color {
         .unwrap_or(Color::Reset)
 }
 
+/// How long a synchronized update (`CSI ? 2026 h`) may hold back rendering.
+/// A program killed mid-frame, or a file containing the sequence sent to
+/// the terminal with `cat`, would otherwise freeze the panel for good;
+/// other terminals cap it the same way.
+pub const SYNC_OUTPUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
 /// Terminal screen state
 #[derive(Clone)]
 pub struct TerminalScreen {
@@ -223,6 +229,8 @@ pub struct TerminalScreen {
     pub cursor: (usize, usize),
     /// Saved cursor position
     pub saved_cursor: Option<(usize, usize)>,
+    /// Style saved together with the cursor (DECSC)
+    pub saved_style: CellStyle,
     /// Cursor visibility
     pub cursor_visible: bool,
     /// Screen dimensions
@@ -272,6 +280,9 @@ pub struct TerminalScreen {
     /// Synchronized output mode (CSI ? 2026 h/l)
     /// When enabled, rendering is deferred until mode is disabled
     pub sync_output: bool,
+    /// When the current synchronized update began; it is honoured for at
+    /// most `SYNC_OUTPUT_TIMEOUT` from then.
+    pub sync_output_since: Option<std::time::Instant>,
     /// Flag set when sync_output transitions from true to false
     /// Signals that cached content must be invalidated
     pub sync_output_ended: bool,
@@ -300,6 +311,7 @@ impl TerminalScreen {
             use_alt_screen: false,
             cursor: (0, 0),
             saved_cursor: None,
+            saved_style: CellStyle::default(),
             cursor_visible: true,
             rows,
             cols,
@@ -324,11 +336,25 @@ impl TerminalScreen {
             scroll_top: 0,
             scroll_bottom: rows.saturating_sub(1),
             sync_output: false,
+            sync_output_since: None,
             sync_output_ended: false,
             force_cache_invalidation: false,
             reported_cwd: None,
             bell: false,
         }
+    }
+
+    /// A synchronized update is in progress and still within its time
+    /// limit: rendering should keep showing the previous frame.
+    pub fn sync_output_held(&self) -> bool {
+        self.sync_output_held_at(std::time::Instant::now())
+    }
+
+    pub fn sync_output_held_at(&self, now: std::time::Instant) -> bool {
+        self.sync_output
+            && self
+                .sync_output_since
+                .is_none_or(|since| now.saturating_duration_since(since) < SYNC_OUTPUT_TIMEOUT)
     }
 
     /// Get mutable reference to active buffer
@@ -651,33 +677,8 @@ impl TerminalScreen {
                 let Some(top_line) = self.lines.front().cloned() else {
                     return;
                 };
-                self.scrollback.push_back(top_line);
-
-                // Save wrapped flag to scrollback
                 let top_wrapped = self.lines_wrapped.front().copied().unwrap_or(false);
-                self.scrollback_wrapped.push_back(top_wrapped);
-
-                // Limit scrollback size - O(1) with VecDeque
-                if self.scrollback.len() > self.max_scrollback {
-                    self.scrollback.pop_front();
-                }
-                if self.scrollback_wrapped.len() > self.max_scrollback {
-                    self.scrollback_wrapped.pop_front();
-                }
-
-                // Preserve the user's scrollback view when they're scrolled
-                // away from the live tail. The renderer derives the visible
-                // window from `scrollback.len() + visible_rows - scroll_offset`;
-                // pushing a line into scrollback shifts that window forward by
-                // one (or, when capped at `max_scrollback`, the absolute index
-                // of every kept line drops by one), so the same scroll_offset
-                // would point at later content on the next render. Bumping
-                // scroll_offset by one keeps the on-screen content stable.
-                // At the tail (`scroll_offset == 0`) we leave it alone so the
-                // natural follow-tail behaviour stays intact.
-                if self.scroll_offset > 0 {
-                    self.scroll_offset = (self.scroll_offset + 1).min(self.scrollback.len());
-                }
+                self.push_scrollback(top_line, top_wrapped);
             }
 
             let buffer = self.active_buffer_mut();
@@ -700,6 +701,34 @@ impl TerminalScreen {
                 wrapped.remove(top);
                 wrapped.insert(bottom, false);
             }
+        }
+    }
+
+    /// Append a line that left the top of the main screen to the scrollback.
+    fn push_scrollback(&mut self, line: Vec<Cell>, wrapped: bool) {
+        self.scrollback.push_back(line);
+        self.scrollback_wrapped.push_back(wrapped);
+
+        // Limit scrollback size - O(1) with VecDeque
+        if self.scrollback.len() > self.max_scrollback {
+            self.scrollback.pop_front();
+        }
+        if self.scrollback_wrapped.len() > self.max_scrollback {
+            self.scrollback_wrapped.pop_front();
+        }
+
+        // Preserve the user's scrollback view when they're scrolled
+        // away from the live tail. The renderer derives the visible
+        // window from `scrollback.len() + visible_rows - scroll_offset`;
+        // pushing a line into scrollback shifts that window forward by
+        // one (or, when capped at `max_scrollback`, the absolute index
+        // of every kept line drops by one), so the same scroll_offset
+        // would point at later content on the next render. Bumping
+        // scroll_offset by one keeps the on-screen content stable.
+        // At the tail (`scroll_offset == 0`) we leave it alone so the
+        // natural follow-tail behaviour stays intact.
+        if self.scroll_offset > 0 {
+            self.scroll_offset = (self.scroll_offset + 1).min(self.scrollback.len());
         }
     }
 
@@ -808,17 +837,97 @@ impl TerminalScreen {
         self.cursor.1 = next_tab.min(self.cols.saturating_sub(1));
     }
 
-    /// Save cursor position
+    /// Save the cursor position and the current style (DECSC, `CSI s`).
     pub fn save_cursor(&mut self) {
         self.saved_cursor = Some(self.cursor);
+        self.saved_style = self.current_style;
     }
 
-    /// Restore cursor position
+    /// Restore what `save_cursor` saved (DECRC, `CSI u`). The position is
+    /// clamped to the grid: the screen may have shrunk since it was saved.
     pub fn restore_cursor(&mut self) {
-        if let Some(saved) = self.saved_cursor {
-            self.cursor = saved;
-            self.wrap_pending = false;
+        if let Some((row, col)) = self.saved_cursor {
+            self.move_cursor(row, col);
+            self.current_style = self.saved_style;
         }
+    }
+
+    /// Full reset (RIS, `ESC c`): a fresh screen of the same size. The
+    /// scrollback, the reported working directory and a pending bell are
+    /// the user's, not the program's, and survive.
+    pub fn reset(&mut self) {
+        let mut fresh = TerminalScreen::new(self.rows, self.cols);
+        fresh.scrollback = std::mem::take(&mut self.scrollback);
+        fresh.scrollback_wrapped = std::mem::take(&mut self.scrollback_wrapped);
+        fresh.max_scrollback = self.max_scrollback;
+        fresh.reported_cwd = self.reported_cwd.take();
+        fresh.bell = self.bell;
+        fresh.sync_output_ended = self.sync_output;
+        fresh.force_cache_invalidation = true;
+        *self = fresh;
+    }
+
+    /// Resize the grid in place, never below 1×1.
+    ///
+    /// Every position kept across the resize (cursor, saved cursor, scroll
+    /// region) is brought back inside the new grid, so later edits at those
+    /// positions cannot index past a row.
+    pub fn resize(&mut self, rows: usize, cols: usize) {
+        let rows = rows.max(1);
+        let cols = cols.max(1);
+        if self.rows == rows && self.cols == cols {
+            return;
+        }
+        let empty_cell = Cell::blank(CellStyle::default());
+
+        // Shrinking drops the main screen's lines below its cursor first;
+        // if the cursor line would still fall off, the top lines move into
+        // the scrollback instead, so the prompt stays in view. In the
+        // alternate screen the main cursor is the one saved on entering it.
+        let main_cursor_row = if self.use_alt_screen {
+            self.saved_cursor.map(|(row, _)| row)
+        } else {
+            Some(self.cursor.0)
+        };
+        if let Some(cursor_row) = main_cursor_row {
+            let scroll = (cursor_row + 1).saturating_sub(rows);
+            for _ in 0..scroll.min(self.lines.len()) {
+                let line = self.lines.pop_front().unwrap_or_default();
+                let wrapped = self.lines_wrapped.pop_front().unwrap_or(false);
+                self.push_scrollback(line, wrapped);
+            }
+            if self.use_alt_screen {
+                if let Some(saved) = self.saved_cursor.as_mut() {
+                    saved.0 -= scroll;
+                }
+            } else {
+                self.cursor.0 -= scroll;
+                if let Some(saved) = self.saved_cursor.as_mut() {
+                    saved.0 = saved.0.saturating_sub(scroll);
+                }
+            }
+        }
+
+        for (lines, wrapped) in [
+            (&mut self.lines, &mut self.lines_wrapped),
+            (&mut self.alt_lines, &mut self.alt_lines_wrapped),
+        ] {
+            lines.resize(rows, vec![empty_cell; cols]);
+            wrapped.resize(rows, false);
+            for line in lines.iter_mut() {
+                line.resize(cols, empty_cell);
+            }
+        }
+
+        self.rows = rows;
+        self.cols = cols;
+        self.reset_scroll_region();
+        self.cursor.0 = self.cursor.0.min(rows - 1);
+        self.cursor.1 = self.cursor.1.min(cols - 1);
+        if let Some((row, col)) = self.saved_cursor {
+            self.saved_cursor = Some((row.min(rows - 1), col.min(cols - 1)));
+        }
+        self.dirty = true;
     }
 
     /// Convert visual row (0-based on screen) to absolute buffer index
@@ -977,6 +1086,71 @@ mod tests {
         screen.scroll_up();
         assert_eq!(screen.scrollback.len(), 8);
         assert_eq!(screen.scroll_offset, 8);
+    }
+
+    fn row_text(screen: &TerminalScreen, row: usize) -> String {
+        let mut s = String::new();
+        for cell in &screen.lines[row] {
+            cell.push_text(&mut s);
+        }
+        s.trim_end().to_string()
+    }
+
+    /// Write `count` numbered lines and leave the cursor on the last one.
+    fn write_lines(screen: &mut TerminalScreen, count: usize) {
+        for i in 0..count {
+            if i > 0 {
+                screen.carriage_return();
+                screen.newline();
+            }
+            for ch in format!("line{i}").chars() {
+                screen.put_char(ch);
+            }
+        }
+    }
+
+    #[test]
+    fn shrinking_keeps_the_cursor_line_and_moves_the_top_to_scrollback() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        assert_eq!(screen.cursor, (7, 5));
+
+        // Two blank lines below the cursor go first, then five top lines
+        // move into the scrollback.
+        screen.resize(3, 20);
+        assert_eq!(screen.cursor, (2, 5));
+        assert_eq!(row_text(&screen, 2), "line7");
+        assert_eq!(row_text(&screen, 0), "line5");
+        let history: Vec<String> = screen
+            .scrollback
+            .iter()
+            .map(|l| l.iter().map(|c| c.ch).collect::<String>().trim_end().into())
+            .collect();
+        assert_eq!(history, ["line0", "line1", "line2", "line3", "line4"]);
+        assert_eq!(screen.scrollback_wrapped.len(), 5);
+    }
+
+    #[test]
+    fn shrinking_with_the_cursor_near_the_top_drops_blank_bottom_lines() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 2);
+        screen.resize(4, 20);
+        assert!(screen.scrollback.is_empty());
+        assert_eq!(screen.cursor, (1, 5));
+        assert_eq!(row_text(&screen, 0), "line0");
+    }
+
+    #[test]
+    fn shrinking_in_the_alt_screen_keeps_the_main_prompt() {
+        let mut screen = TerminalScreen::new(10, 20);
+        write_lines(&mut screen, 8);
+        screen.save_cursor();
+        screen.switch_to_alt_screen();
+        screen.resize(4, 20);
+        assert_eq!(screen.saved_cursor, Some((3, 5)));
+        screen.switch_to_main_screen();
+        screen.restore_cursor();
+        assert_eq!(row_text(&screen, 3), "line7");
     }
 
     #[test]
