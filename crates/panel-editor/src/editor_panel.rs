@@ -378,7 +378,7 @@ impl Panel for Editor {
                 CLEAR_BREAKPOINTS_ACTION.into(),
             ),
         ];
-        if self.lsp.enabled && self.file_path().is_some() {
+        if (self.lsp.enabled || self.lsp.server_start_failed) && self.file_path().is_some() {
             items.push((
                 t.lsp_restart_server().to_string(),
                 RESTART_LANGUAGE_SERVER_ACTION.into(),

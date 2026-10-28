@@ -177,8 +177,9 @@ impl Editor {
         let status_text_changed = self.lsp.server_status_text != new_status_text;
         self.lsp.server_status_text = new_status_text;
 
-        // A crashed server will not become ready: stop the spinner.
-        if self.lsp.server_loading && status == Some(ServerStatus::Crashed) {
+        // A crashed server will not become ready, nor will one whose start
+        // failed again (it reports no status): stop the spinner.
+        if self.lsp.server_loading && matches!(status, Some(ServerStatus::Crashed) | None) {
             self.lsp.server_loading = false;
             return true;
         }
@@ -239,6 +240,95 @@ mod tests {
             events.as_slice(),
             [PanelEvent::RestartLanguageServer { file: f }] if *f == file
         ));
+    }
+
+    /// When the file's server cannot start, the menu still offers its
+    /// restart; once the server is installed, the restart starts it and the
+    /// editor opens its document in it, with the text it holds now.
+    #[test]
+    fn a_server_that_failed_to_start_attaches_the_editor_once_restarted() {
+        use std::os::unix::fs::PermissionsExt;
+        use termide_core::Panel;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let binary = dir.path().join("server");
+        let mut config = LspConfig::default();
+        config.servers.insert(
+            "rust".into(),
+            LspServerConfig {
+                command: binary.to_string_lossy().into_owned(),
+                args: Vec::new(),
+                root_markers: Vec::new(),
+            },
+        );
+        let mut manager = LspManager::new(config);
+        let mut editor = Editor::open_file_with_config(file, EditorConfig::default()).unwrap();
+        editor.init_lsp(&mut manager);
+        assert!(!editor.lsp.enabled);
+        assert!(!editor.is_lsp_loading());
+        assert!(Panel::context_menu_items(&editor)
+            .iter()
+            .any(|(_, action)| action == crate::RESTART_LANGUAGE_SERVER_ACTION));
+        editor.insert_text("// edited\n").unwrap();
+
+        // A failed retry stops the spinner it started.
+        assert!(manager.restart_server("rust", editor.file_path().unwrap()));
+        editor.update_lsp_loading_status(&manager);
+        assert!(editor.is_lsp_loading());
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while editor.is_lsp_loading() {
+            assert!(Instant::now() < deadline, "the spinner never stopped");
+            manager.poll_restarts();
+            editor.update_lsp_loading_status(&manager);
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(!editor.resync_lsp(&manager));
+
+        let reply = r#"{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}"#;
+        // Written aside and renamed in, so no thread forking meanwhile
+        // holds it open for writing (`ETXTBSY`).
+        let staged = dir.path().join("server.new");
+        std::fs::write(
+            &staged,
+            format!(
+                "#!/bin/sh\nprintf 'Content-Length: {}\\r\\n\\r\\n%s' '{reply}'; cat > received\n",
+                reply.len()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&staged, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::rename(staged, &binary).unwrap();
+        assert!(manager.restart_server("rust", editor.file_path().unwrap()));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !editor.resync_lsp(&manager) {
+            assert!(Instant::now() < deadline, "never started");
+            manager.poll_restarts();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(editor.lsp.enabled);
+        assert!(!editor.lsp.server_start_failed);
+        assert!(!editor.resync_lsp(&manager), "sent once");
+
+        let received = dir.path().join("received");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let opened = loop {
+            let received = std::fs::read_to_string(&received).unwrap_or_default();
+            if let Some(message) = received
+                .split("Content-Length:")
+                .find(|m| m.contains(r#""method":"textDocument/didOpen""#))
+            {
+                break message.to_string();
+            }
+            assert!(Instant::now() < deadline, "no didOpen in {received:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        };
+        assert!(
+            opened.contains(r#""text":"// edited\nfn main() {}\n""#),
+            "{opened}"
+        );
+        assert!(opened.contains(r#""version":1"#), "{opened}");
     }
 
     /// A server that dies shows as crashed in the title and stops the
