@@ -5452,6 +5452,7 @@ name = "termide-file-ops"
 version = "0.46.0"
 dependencies = [
  "dunce",
+ "filetime",
  "log",
  "tempfile",
  "termide-i18n",

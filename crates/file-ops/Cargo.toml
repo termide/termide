@@ -9,6 +9,7 @@ description = "Unified file operations system for termide with queue, progress, 
 
 [dependencies]
 dunce.workspace = true
+filetime = "0.2"
 thiserror = "2.0"
 log = "0.4"
 termide-vfs = { path = "../vfs" }

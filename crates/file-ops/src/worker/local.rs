@@ -117,6 +117,33 @@ fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Access and modification times of `metadata` (from lstat).
+fn source_times(metadata: &fs::Metadata) -> (filetime::FileTime, filetime::FileTime) {
+    (
+        filetime::FileTime::from_last_access_time(metadata),
+        filetime::FileTime::from_last_modification_time(metadata),
+    )
+}
+
+/// Best-effort: give the copied directory `dest` the permission bits and
+/// times of `source`, so a copy or a cross-device move keeps them.
+fn copy_dir_attributes(source: &Path, dest: &Path) {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(m) => m,
+        Err(e) => {
+            log::warn!("failed to read attributes of {source:?}: {e}");
+            return;
+        }
+    };
+    if let Err(e) = fs::set_permissions(dest, metadata.permissions()) {
+        log::warn!("failed to preserve permissions on {dest:?}: {e}");
+    }
+    let (atime, mtime) = source_times(&metadata);
+    if let Err(e) = filetime::set_file_times(dest, atime, mtime) {
+        log::warn!("failed to preserve times on {dest:?}: {e}");
+    }
+}
+
 /// Worker for local file/directory copy operations.
 pub struct LocalCopyWorker {
     /// Source paths.
@@ -210,6 +237,10 @@ impl LocalCopyWorker {
                 make_sibling(dest, |path| std::os::unix::fs::symlink(&link_target, path))?
                     .persist(dest)
                     .map_err(|e| e.error)?;
+                let (atime, mtime) = source_times(&metadata);
+                if let Err(e) = filetime::set_symlink_file_times(dest, atime, mtime) {
+                    log::debug!("failed to preserve times on link {dest:?}: {e}");
+                }
             }
             #[cfg(not(unix))]
             {
@@ -294,6 +325,13 @@ impl LocalCopyWorker {
                 }
             }
 
+            let (atime, mtime) = source_times(&metadata);
+            if let Err(e) =
+                filetime::set_file_handle_times(dest_file.as_file(), Some(atime), Some(mtime))
+            {
+                log::warn!("failed to preserve times on {dest:?}: {e}");
+            }
+
             // The copy is complete: replace the destination in one step.
             dest_file.persist(dest).map_err(|e| e.error)?;
         }
@@ -363,6 +401,10 @@ impl LocalCopyWorker {
                 )?;
             }
         }
+
+        // Only now: copying the contents changes the directory's times, and
+        // a read-only mode would have refused them.
+        copy_dir_attributes(source, dest);
 
         Ok(())
     }
@@ -1127,6 +1169,55 @@ mod tests {
             Path::new("target.txt")
         );
         assert_eq!(fs::read_dir(&dest_dir).unwrap().count(), 1);
+    }
+
+    /// Copies keep modification and access times on files, directories and
+    /// links, and the permission bits of directories.
+    #[test]
+    fn copy_preserves_times_and_directory_permissions() {
+        use filetime::{set_file_times, FileTime};
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("proj");
+        tree(&source);
+        let old = FileTime::from_unix_time(1_600_000_000, 0);
+        let older = FileTime::from_unix_time(1_500_000_000, 0);
+        set_file_times(source.join("a.txt"), older, old).unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("a.txt", source.join("link")).unwrap();
+            filetime::set_symlink_file_times(source.join("link"), older, old).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(source.join("sub"), fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        set_file_times(source.join("sub"), older, old).unwrap();
+        set_file_times(&source, older, old).unwrap();
+        let dest_parent = tmp.path().join("dest");
+        fs::create_dir(&dest_parent).unwrap();
+
+        let (result, _) = run(LocalCopyWorker::new(
+            vec![source],
+            dest_parent.clone(),
+            false,
+        ));
+        assert_success(&result);
+
+        let copy = dest_parent.join("proj");
+        for rel in ["a.txt", "sub", ""] {
+            let meta = fs::metadata(copy.join(rel)).unwrap();
+            assert_eq!(FileTime::from_last_modification_time(&meta), old, "{rel}");
+        }
+        // A file carries the access time it had before the copy read it.
+        // (Directory access times move while the walk lists them.)
+        let file = fs::metadata(copy.join("a.txt")).unwrap();
+        assert_eq!(FileTime::from_last_access_time(&file), older);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let link = fs::symlink_metadata(copy.join("link")).unwrap();
+            assert_eq!(FileTime::from_last_modification_time(&link), old);
+            let mode = fs::metadata(copy.join("sub")).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o700);
+        }
     }
 
     #[test]
