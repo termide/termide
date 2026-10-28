@@ -418,6 +418,14 @@ impl VfsProvider for SftpProvider {
         self.dispatch_op(move |reply| SftpCommand::Stat { path: p, reply })
     }
 
+    fn symlink_metadata(&self, path: &VfsPath) -> VfsOperation<VfsMetadata> {
+        let p = match Self::to_remote_path(path) {
+            Ok(p) => p,
+            Err(e) => return VfsOperation::ready(Err(e)),
+        };
+        self.dispatch_op(move |reply| SftpCommand::Lstat { path: p, reply })
+    }
+
     fn read_file(&self, path: &VfsPath) -> VfsOperation<Vec<u8>> {
         let p = match Self::to_remote_path(path) {
             Ok(p) => p,

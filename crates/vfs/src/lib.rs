@@ -567,6 +567,19 @@ impl VfsManager {
         )
     }
 
+    /// Get metadata for a path without following a final symlink.
+    pub fn symlink_metadata(&self, path: &VfsPath) -> VfsOperation<VfsMetadata> {
+        if path.is_local() {
+            return self.local.symlink_metadata(path);
+        }
+
+        self.dispatch_remote(
+            path,
+            |p| p.symlink_metadata(path),
+            || VfsOperation::error(VfsError::NotConnected),
+        )
+    }
+
     /// Delete a file or directory.
     pub fn delete(&self, path: &VfsPath) -> VfsOperation<()> {
         if path.is_local() {

@@ -39,6 +39,11 @@ pub(super) enum SftpCommand {
         path: PathBuf,
         reply: Reply<VfsMetadata>,
     },
+    /// Like `Stat`, but a symlink reports itself instead of its target.
+    Lstat {
+        path: PathBuf,
+        reply: Reply<VfsMetadata>,
+    },
     Exists {
         path: PathBuf,
         reply: Reply<bool>,
@@ -197,6 +202,9 @@ pub(super) async fn sftp_actor(
             }
             SftpCommand::Stat { path, reply } => {
                 let _ = reply.send(actor_stat(sftp!(), &path).await);
+            }
+            SftpCommand::Lstat { path, reply } => {
+                let _ = reply.send(actor_lstat(sftp!(), &path).await);
             }
             SftpCommand::Exists { path, reply } => {
                 let _ = reply.send(Ok(sftp!().metadata(path_to_string(&path)).await.is_ok()));
@@ -412,6 +420,14 @@ async fn actor_stat(sftp: &SftpSession, path: &Path) -> VfsResult<VfsMetadata> {
     Ok(attrs_to_metadata(&attrs))
 }
 
+async fn actor_lstat(sftp: &SftpSession, path: &Path) -> VfsResult<VfsMetadata> {
+    let attrs = sftp
+        .symlink_metadata(path_to_string(path))
+        .await
+        .map_err(map_sftp_err)?;
+    Ok(attrs_to_metadata(&attrs))
+}
+
 /// Create directory and all parents, ignoring "already exists" errors.
 async fn actor_mkdir_recursive(sftp: &SftpSession, path: &Path) -> VfsResult<()> {
     let mut current = PathBuf::new();
@@ -481,11 +497,13 @@ async fn actor_delete_recursive(
             path.display()
         )));
     }
+    // lstat, not stat: a symlink to a directory is removed as a link.
+    // Following it would delete the contents of the link's target.
     let attrs = sftp
-        .metadata(path_to_string(path))
+        .symlink_metadata(path_to_string(path))
         .await
         .map_err(map_sftp_err)?;
-    if matches!(attrs.file_type(), SftpFileType::Dir) {
+    if delete_descends(attrs.file_type()) {
         let entries = sftp
             .read_dir(path_to_string(path))
             .await
@@ -507,6 +525,12 @@ async fn actor_delete_recursive(
             .map_err(map_sftp_err)?;
     }
     Ok(())
+}
+
+/// Whether a recursive delete descends into an entry of this type. Only
+/// real directories do; a symlink is unlinked like a file.
+fn delete_descends(file_type: SftpFileType) -> bool {
+    matches!(file_type, SftpFileType::Dir)
 }
 
 /// SFTP has no native copy — stream read + write through chunks.
@@ -533,4 +557,25 @@ async fn actor_copy_file(sftp: &SftpSession, from: &Path, to: &Path) -> VfsResul
     dst.flush().await.map_err(map_sftp_err)?;
     dst.shutdown().await.map_err(map_sftp_err)?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn delete_never_descends_through_a_symlink() {
+        assert!(delete_descends(SftpFileType::Dir));
+        assert!(!delete_descends(SftpFileType::Symlink));
+        assert!(!delete_descends(SftpFileType::File));
+    }
+
+    #[test]
+    fn lstat_attributes_keep_the_symlink_type() {
+        let attrs = FileAttributes {
+            permissions: Some(0o120777),
+            ..Default::default()
+        };
+        assert!(attrs_to_metadata(&attrs).file_type.is_symlink());
+    }
 }

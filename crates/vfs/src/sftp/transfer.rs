@@ -99,7 +99,17 @@ pub(super) fn count_local_files_sync(
     let mut bytes = 0u64;
     for entry in std::fs::read_dir(path).map_err(VfsError::Io)? {
         let entry = entry.map_err(VfsError::Io)?;
-        let (c, b) = count_local_files_sync(&entry.path(), cancel)?;
+        // Mirror `worker_upload_dir`: descend only real directories and
+        // count only regular files. Following symlinks here overcounts
+        // and loops forever on a cycle such as `link -> ..`.
+        let ft = entry.file_type().map_err(VfsError::Io)?;
+        let (c, b) = if ft.is_dir() {
+            count_local_files_sync(&entry.path(), cancel)?
+        } else if ft.is_file() {
+            (1, entry.metadata().map(|m| m.len()).unwrap_or(0))
+        } else {
+            (0, 0)
+        };
         count += c;
         bytes += b;
     }
@@ -400,4 +410,23 @@ pub(super) fn worker_upload_dir(
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn local_upload_count_skips_symlinks_and_survives_cycles() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("a"), b"12").unwrap();
+        std::fs::write(root.join("sub/b"), b"345").unwrap();
+        std::os::unix::fs::symlink("..", root.join("sub/loop")).unwrap();
+        std::os::unix::fs::symlink("a", root.join("alias")).unwrap();
+
+        let cancel = Arc::new(AtomicBool::new(false));
+        assert_eq!(count_local_files_sync(&root, &cancel).unwrap(), (2, 5));
+    }
 }
