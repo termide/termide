@@ -116,7 +116,12 @@ fn write_in_place(target: &Path, contents: &[u8]) -> io::Result<()> {
         .truncate(true)
         .open(target)?;
     file.write_all(contents)?;
-    file.sync_all()
+    // fsync of a pipe or a device fails with EINVAL on Linux; only a
+    // regular file has data to make durable.
+    if file.metadata()?.is_file() {
+        file.sync_all()?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
