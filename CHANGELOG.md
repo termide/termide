@@ -5,6 +5,13 @@ All notable changes to Termide will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.47.1] - 2026-10-29
+
+[0.47.1]: https://github.com/termide/termide/releases/tag/0.47.1
+
+### Security
+- **A crafted zip archive can no longer write outside its destination.** The zip library termide unpacks archives with read an entry's local and central headers inconsistently, so a crafted `.zip` could pass the checks and overwrite files outside the folder it was unpacked into (zip 9.0.0–9.0.4). It is now on a fixed version.
+
 ## [0.47.0] - 2026-10-29
 
 [0.47.0]: https://github.com/termide/termide/releases/tag/0.47.0
