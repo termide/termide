@@ -61,6 +61,9 @@ pub struct ProjectItem {
     /// Whether a panel of this project, open in the background, waits for
     /// the user
     pub attention: bool,
+    /// Not loaded yet, and another instance has opened it since it was
+    /// reopened here: it cannot be entered (drawn crossed out).
+    pub taken: bool,
 }
 
 impl ProjectItem {
@@ -379,7 +382,14 @@ impl Modal for ProjectsModal {
                     Line::from(vec![
                         Span::styled(format!(" {mark}"), style),
                         Span::styled(time, time_style),
-                        Span::styled(rest, style),
+                        Span::styled(
+                            rest,
+                            if item.taken {
+                                style.add_modifier(Modifier::CROSSED_OUT)
+                            } else {
+                                style
+                            },
+                        ),
                         Span::styled(" ".repeat(pad), style),
                     ])
                 }
@@ -530,6 +540,7 @@ mod tests {
             is_current,
             is_open,
             attention: false,
+            taken: false,
         }
     }
 

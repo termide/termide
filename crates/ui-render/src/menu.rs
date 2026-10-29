@@ -436,6 +436,11 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
         } else {
             Style::default().fg(params.theme.disabled)
         };
+        let style = if project.taken {
+            style.add_modifier(Modifier::CROSSED_OUT)
+        } else {
+            style
+        };
         spans.push(Span::styled(button.label.clone(), style));
         column = column.max(button.x as usize) + button.label.width();
     }
@@ -578,6 +583,7 @@ mod tests {
             name: name.to_string(),
             current,
             attention,
+            taken: false,
             selected: false,
         }
     }
@@ -673,5 +679,29 @@ mod tests {
             assert_eq!(buffer[(x, 0)].style().fg, Some(theme.disabled));
         }
         assert_ne!(buffer[(first.x, 0)].style().fg, Some(theme.disabled));
+    }
+
+    #[test]
+    fn a_taken_project_is_crossed_out_and_the_others_are_not() {
+        use ratatui::{backend::TestBackend, Terminal};
+        let theme = Theme::default();
+        let mut taken = project("zarab", false, false);
+        taken.taken = true;
+        let projects = [project("nvn", true, false), taken];
+        let params = params(&theme, &projects);
+        let mut terminal = Terminal::new(TestBackend::new(160, 1)).unwrap();
+        terminal
+            .draw(|frame| render_menu(frame, frame.area(), &params))
+            .unwrap();
+        let buffer = terminal.backend().buffer().clone();
+        let bar = menu_bar_layout(160, &params);
+        let crossed = |x: u16| {
+            buffer[(x, 0)]
+                .style()
+                .add_modifier
+                .contains(Modifier::CROSSED_OUT)
+        };
+        assert!(bar.projects.buttons[1].range().all(crossed));
+        assert!(!bar.projects.buttons[0].range().any(crossed));
     }
 }

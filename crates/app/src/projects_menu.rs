@@ -26,6 +26,9 @@ pub struct ListedProject {
     pub open: bool,
     /// A panel of this project, open in the background, waits for the user.
     pub attention: bool,
+    /// Not loaded yet, and another instance has opened it since it was
+    /// reopened here: it cannot be entered (drawn crossed out).
+    pub taken: bool,
     /// When a project not open was last worked on. An open project's layout
     /// is saved all the time, so its time would always read "now": `None`.
     pub modified: Option<SystemTime>,
@@ -44,6 +47,7 @@ pub fn listed_projects(
             root: view.root.clone(),
             open: true,
             attention: view.attention,
+            taken: view.taken,
             modified: None,
         })
         .collect();
@@ -54,6 +58,7 @@ pub fn listed_projects(
             root: root.clone(),
             open: false,
             attention: false,
+            taken: false,
             modified: Some(*modified),
         })
         .collect();
@@ -189,7 +194,8 @@ fn project_items(
             let mut item = DropdownItem::new(label, String::new())
                 .with_prefix(format!("{} ", project_mark(project, current)), time)
                 .cut_at_start()
-                .with_shortcut(shortcut);
+                .with_shortcut(shortcut)
+                .crossed_out(project.taken);
             if project.root == current {
                 item = item.with_project();
             }
@@ -286,6 +292,7 @@ impl AppState {
                     name: label,
                     current: view.root == self.project_root,
                     attention: view.attention,
+                    taken: view.taken,
                     selected: selected == Some(index),
                 }
             })
@@ -329,6 +336,7 @@ mod tests {
         OpenProjectView {
             root: PathBuf::from(root),
             attention,
+            taken: false,
         }
     }
 
@@ -344,6 +352,26 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    /// A project another instance took before it loaded is crossed out in
+    /// the menu bar and in the Projects menu, and only that one.
+    #[test]
+    fn a_taken_project_is_marked_in_the_bar_and_the_menu() {
+        let mut state = test_state();
+        state.project_root = PathBuf::from("/w/a");
+        let mut taken = open("/w/b", false);
+        taken.taken = true;
+        state.open_projects = vec![open("/w/a", false), taken];
+        let taken: Vec<_> = state.project_buttons().iter().map(|b| b.taken).collect();
+        assert_eq!(taken, [false, true]);
+        let menu = state.projects_menu();
+        let crossed: Vec<_> = menu.items[PROJECTS_SUBMENU_ITEM_COUNT..]
+            .iter()
+            .filter(|item| !item.is_separator)
+            .map(|item| item.crossed_out)
+            .collect();
+        assert_eq!(crossed, [false, true]);
     }
 
     #[test]

@@ -396,8 +396,13 @@ impl App {
         if new_project_root == self.project_root {
             return Ok(());
         }
-        if !self.open_projects.is_open(&new_project_root) && !self.claim_project(&new_project_root)
-        {
+        // A project reopened from the last run is taken only now, as it
+        // loads: until then another instance may have opened it.
+        let loads = !self.open_projects.is_open(&new_project_root)
+            || self.open_projects.is_pending(&new_project_root);
+        if loads && !self.claim_project(&new_project_root) {
+            // Marks it in the menus as taken.
+            self.sync_open_projects();
             return Ok(());
         }
         let entered = self.enter_project(new_project_root)?;

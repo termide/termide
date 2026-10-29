@@ -37,6 +37,7 @@ impl App {
                 is_current: project.root == self.project_root,
                 is_open: project.open,
                 attention: project.attention,
+                taken: project.taken,
                 project_path: project.root,
             })
             .collect();

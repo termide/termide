@@ -14,6 +14,9 @@ pub struct OpenProjectView {
     /// A panel of this parked project waits for the user (a question to
     /// answer, finished work, a bell). Never set for the current project.
     pub attention: bool,
+    /// Not loaded yet, and another instance has opened it since it was
+    /// reopened here: it cannot be entered (drawn crossed out).
+    pub taken: bool,
 }
 
 /// Where an open project's panels are.

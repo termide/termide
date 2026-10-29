@@ -22,6 +22,9 @@ pub struct ProjectButton {
     pub current: bool,
     /// A panel of this project, open in the background, waits for the user.
     pub attention: bool,
+    /// Not loaded yet and opened by another instance since: drawn crossed
+    /// out.
+    pub taken: bool,
     /// Selected in the open menu or held by the mouse: the user acts on it,
     /// so it never drops out while another can.
     pub selected: bool,
@@ -202,6 +205,7 @@ mod tests {
             name: name.to_string(),
             current: false,
             attention: false,
+            taken: false,
             selected: false,
         }
     }

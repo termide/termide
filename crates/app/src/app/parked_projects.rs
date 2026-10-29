@@ -269,6 +269,9 @@ impl App {
                 .roots()
                 .map(|root| OpenProjectView {
                     root: root.to_path_buf(),
+                    taken: self.open_projects.is_pending(root)
+                        && !self.project_claims.contains_key(root)
+                        && termide_project::project_owner(root).is_some(),
                     attention: self.open_projects.parked().any(|(parked_root, parked)| {
                         parked_root == root && parked.needs_attention()
                     }),
@@ -366,8 +369,10 @@ impl App {
         let mut opened = 0;
         for root in roots {
             // Taken meanwhile by another instance: left to it, quietly, as
-            // the menu would not have offered it.
-            if let Err(owner) = self.try_claim_project(&root) {
+            // the menu would not have offered it. One free now is not taken
+            // until it loads, so that a project only listed here does not
+            // keep another instance from opening it.
+            if let Some(owner) = termide_project::project_owner(&root) {
                 log::info!("Not reopening {:?}: open in {:?}", root, owner);
                 continue;
             }
@@ -411,6 +416,11 @@ impl App {
             let recency = [&root, &home].map(|root| self.open_projects.last_used(root));
             if let Err(e) = self.switch_to_project(root.clone()) {
                 log::warn!("Could not load {} in the background: {e}", root.display());
+                continue;
+            }
+            if self.project_root != root {
+                // Another instance opened it meanwhile; its agent is that
+                // instance's to resume.
                 continue;
             }
             if let Err(e) = self.switch_to_project(home.clone()) {
@@ -682,9 +692,17 @@ impl App {
     /// The open project to switch to when the current one closes: the one
     /// left last.
     fn successor_project(&self) -> Option<PathBuf> {
+        // Skipping one still to load that another instance has opened
+        // since: it cannot be entered.
         self.open_projects
             .by_recent_use()
-            .get(1)
+            .into_iter()
+            .skip(1)
+            .find(|root| {
+                !self.open_projects.is_pending(root)
+                    || self.project_claims.contains_key(*root)
+                    || termide_project::project_owner(root).is_none()
+            })
             .map(|root| root.to_path_buf())
     }
 
@@ -749,6 +767,10 @@ impl App {
                 return self.return_to_projects(from);
             };
             self.switch_to_project(successor)?;
+            if self.project_root == root {
+                // The successor could not be entered; the status line says why.
+                return Ok(());
+            }
         }
         if let Some(mut parked) = self.open_projects.close(root) {
             // Its agent panels go with it, and the tasks they handed over

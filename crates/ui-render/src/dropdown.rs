@@ -34,6 +34,9 @@ pub struct DropdownItem {
     /// whose last names say most. A dropdown holding such rows may also grow
     /// wider than the others, see [`dropdown_width`].
     pub cut_start: bool,
+    /// The label is drawn crossed out: the row names something that cannot
+    /// be used now.
+    pub crossed_out: bool,
 }
 
 impl DropdownItem {
@@ -48,6 +51,7 @@ impl DropdownItem {
             lead: String::new(),
             muted: String::new(),
             cut_start: false,
+            crossed_out: false,
         }
     }
 
@@ -70,6 +74,7 @@ impl DropdownItem {
             lead: String::new(),
             muted: String::new(),
             cut_start: false,
+            crossed_out: false,
         }
     }
 
@@ -95,6 +100,12 @@ impl DropdownItem {
     /// Cut a label too long from its start (a path).
     pub fn cut_at_start(mut self) -> Self {
         self.cut_start = true;
+        self
+    }
+
+    /// Draw the label crossed out when `crossed_out`.
+    pub fn crossed_out(mut self, crossed_out: bool) -> Self {
+        self.crossed_out = crossed_out;
         self
     }
 
@@ -417,13 +428,18 @@ impl<'a> Dropdown<'a> {
                 termide_ui::path_utils::truncate_right(&item.label, room)
             };
             let label_width = str_display_width(&label) as u16;
+            let label_style = if item.crossed_out {
+                base_style.add_modifier(Modifier::CROSSED_OUT)
+            } else {
+                base_style
+            };
             cursor_x += render_text_cells(
                 buf,
                 cursor_x,
                 row_y,
                 &label,
                 inner.width.saturating_sub(cursor_x - inner.x),
-                base_style,
+                label_style,
             );
 
             // Suffix " ▶ "/" ► " or "   " — always 3 columns wide, right-aligned
@@ -1111,7 +1127,7 @@ pub fn get_bookmarks_group_items(
 #[cfg(test)]
 mod overflow_tests {
     use super::{Dropdown, DropdownItem};
-    use ratatui::{buffer::Buffer, layout::Rect};
+    use ratatui::{buffer::Buffer, layout::Rect, style::Modifier};
     use termide_theme::Theme;
 
     // Regression for #25: a menu dropdown with more items than the terminal is
@@ -1140,6 +1156,30 @@ mod overflow_tests {
         let row: String = (0..width).map(|x| buf[(x, 1)].symbol()).collect();
         // border, space, label ... ellipsis, 3-column suffix, border
         assert!(row.ends_with("…   │"), "{row:?}");
+    }
+
+    // A crossed-out row crosses out its label alone, not its mark.
+    #[test]
+    fn a_crossed_out_row_crosses_out_its_label_only() {
+        let theme = Theme::get_by_name("default");
+        let items = vec![
+            DropdownItem::new("taken", "id")
+                .with_prefix("○ ", "")
+                .crossed_out(true),
+            DropdownItem::new("free", "id"),
+        ];
+        let mut buf = Buffer::empty(Rect::new(0, 0, 40, 5));
+        let dropdown = Dropdown::new(&items, 1, 0, 0, theme);
+        let width = dropdown.width();
+        dropdown.render(&mut buf);
+        let crossed = |x: u16, y: u16| buf[(x, y)].modifier.contains(Modifier::CROSSED_OUT);
+        let row: String = (0..width).map(|x| buf[(x, 1)].symbol()).collect();
+        let label = (0..width)
+            .find(|&x| (0..5).map(|i| buf[(x + i, 1)].symbol()).collect::<String>() == "taken")
+            .unwrap();
+        assert!((label..label + 5).all(|x| crossed(x, 1)), "{row:?}");
+        assert!(!(0..label).any(|x| crossed(x, 1)), "the mark is not");
+        assert!(!(0..width).any(|x| crossed(x, 2)), "nor another row");
     }
 
     // A path row grows past the usual cap, keeps its lead and dimmed time,
