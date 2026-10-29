@@ -1121,6 +1121,8 @@ agent_strip_left_unfinished = "незавершена"
 
 [formats]
 projects_delete_fmt = "Раскладка {path}"
+projects_open_elsewhere_fmt = "{path} открыт в другом termide (pid {pid})"
+projects_open_in_instance_fmt = "{path} открыт в отсоединённом экземпляре '{id}': termide --attach {id}"
 app_quit_background_fmt = "Открыты в фоне: {projects}"
 projects_reopen_fmt = "Открыть проекты прошлого запуска ({count})"
 replace_done_fmt = "Заменено {count} вхождений в {files} файлах."

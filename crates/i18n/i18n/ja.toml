@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "パネルを閉じた時点で未了の委�
 agent_strip_left_unfinished = "未完了"
 [formats]
 projects_delete_fmt = "{path} のレイアウト"
+projects_open_elsewhere_fmt = "{path} は別の termide で開かれています (pid {pid})"
+projects_open_in_instance_fmt = "{path} はデタッチされたインスタンス '{id}' で開かれています: termide --attach {id}"
 app_quit_background_fmt = "バックグラウンドで開いています: {projects}"
 projects_reopen_fmt = "前回の起動のプロジェクトを再度開く（{count}）"
 batch_result_errors_fmt = "エラー: {count}"

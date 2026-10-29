@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "O painel fechou com tarefas delegadas inacab
 agent_strip_left_unfinished = "inacabada"
 [formats]
 projects_delete_fmt = "Layout de {path}"
+projects_open_elsewhere_fmt = "{path} está aberto em outro termide (pid {pid})"
+projects_open_in_instance_fmt = "{path} está aberto na instância desanexada '{id}': termide --attach {id}"
 app_quit_background_fmt = "Abertos em segundo plano: {projects}"
 projects_reopen_fmt = "Reabrir os projetos da última execução ({count})"
 language_changed = "Idioma alterado para {name}"

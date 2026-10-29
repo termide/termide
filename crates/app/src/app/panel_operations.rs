@@ -396,6 +396,10 @@ impl App {
         if new_project_root == self.project_root {
             return Ok(());
         }
+        if !self.open_projects.is_open(&new_project_root) && !self.claim_project(&new_project_root)
+        {
+            return Ok(());
+        }
         let entered = self.enter_project(new_project_root)?;
         match entered.restored {
             Some(parked) => self.restore_parked_project(parked),
@@ -468,6 +472,10 @@ impl App {
         }
         if self.open_projects.is_open(&new_project_root) {
             return self.switch_to_project(new_project_root);
+        }
+        // Resetting it under another instance would lose that one's work.
+        if !self.claim_project(&new_project_root) {
+            return Ok(());
         }
 
         // 1. Clear any existing layout of the target directory
@@ -546,6 +554,11 @@ impl App {
         // Another open project lives there: two would share one root.
         if self.open_projects.is_open(&new_project_root) {
             self.show_error_modal(i18n::t().projects_already_open().to_string());
+            return Ok(());
+        }
+        // Nor may it land on a project another instance has open; the old
+        // root is let go once the move is done.
+        if !self.claim_project(&new_project_root) {
             return Ok(());
         }
 

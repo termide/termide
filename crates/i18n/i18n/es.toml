@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "El panel se cerró con tareas delegadas sin 
 agent_strip_left_unfinished = "sin terminar"
 [formats]
 projects_delete_fmt = "Disposición de {path}"
+projects_open_elsewhere_fmt = "{path} está abierto en otro termide (pid {pid})"
+projects_open_in_instance_fmt = "{path} está abierto en la instancia separada '{id}': termide --attach {id}"
 app_quit_background_fmt = "Abiertos en segundo plano: {projects}"
 projects_reopen_fmt = "Reabrir los proyectos de la última ejecución ({count})"
 language_changed = "Idioma cambiado a {name}"

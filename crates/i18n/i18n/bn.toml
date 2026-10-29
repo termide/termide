@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "প্যানেল অসম্পূর�
 agent_strip_left_unfinished = "অসম্পূর্ণ"
 [formats]
 projects_delete_fmt = "{path}-এর লেআউট"
+projects_open_elsewhere_fmt = "{path} অন্য একটি termide-এ খোলা আছে (pid {pid})"
+projects_open_in_instance_fmt = "{path} বিচ্ছিন্ন ইনস্ট্যান্স '{id}'-এ খোলা আছে: termide --attach {id}"
 app_quit_background_fmt = "পটভূমিতে খোলা: {projects}"
 projects_reopen_fmt = "আগের চালুর প্রকল্পগুলি আবার খুলুন ({count})"
 batch_result_errors_fmt = "ত্রুটি: {count}"

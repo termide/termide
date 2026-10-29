@@ -68,6 +68,10 @@ ssh server
 termide --attach my-project
 ```
 
+在 `~/src/my-project` 中直接运行 `termide` 效果相同：同一时间一个项目只在一个
+Termide 中打开，因此为可分离实例持有的项目启动时，会接入那个实例而不是再启动
+一个。没有可用于接入的终端时，它会打印 `--attach` 命令。
+
 不分离直接关闭 SSH 连接是安全的。实例会察觉客户端已离开并继续运行；下一次
 `--attach` 会重新接上它。
 

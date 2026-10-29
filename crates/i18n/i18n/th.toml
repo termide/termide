@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "แผงปิดลงท้งงาน�
 agent_strip_left_unfinished = "ยังไม่เสร็จ"
 [formats]
 projects_delete_fmt = "เลย์เอาต์ของ {path}"
+projects_open_elsewhere_fmt = "{path} เปิดอยู่ใน termide อื่น (pid {pid})"
+projects_open_in_instance_fmt = "{path} เปิดอยู่ในอินสแตนซ์ที่แยกออก '{id}': termide --attach {id}"
 app_quit_background_fmt = "เปิดอยู่เบื้องหลัง: {projects}"
 projects_reopen_fmt = "เปิดโปรเจกต์จากการเรียกใช้ครั้งก่อนอีกครั้ง ({count})"
 language_changed = "เปลี่ยนภาษาเป็น {name}"

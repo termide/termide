@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "Panel ditutup dengan tugas delegasi yang bel
 agent_strip_left_unfinished = "belum selesai"
 [formats]
 projects_delete_fmt = "Tata letak {path}"
+projects_open_elsewhere_fmt = "{path} terbuka di termide lain (pid {pid})"
+projects_open_in_instance_fmt = "{path} terbuka di instans terlepas '{id}': termide --attach {id}"
 app_quit_background_fmt = "Terbuka di latar belakang: {projects}"
 projects_reopen_fmt = "Buka kembali proyek dari jalankan terakhir ({count})"
 batch_result_errors_fmt = "kesalahan: {count}"

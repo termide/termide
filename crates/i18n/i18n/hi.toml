@@ -1088,6 +1088,8 @@ agent_unfinished_delegates_title = "पैनल अधूरी सौंपी
 agent_strip_left_unfinished = "अधूरी"
 [formats]
 projects_delete_fmt = "{path} का लेआउट"
+projects_open_elsewhere_fmt = "{path} दूसरे termide में खुला है (pid {pid})"
+projects_open_in_instance_fmt = "{path} अलग किए गए इंस्टेंस '{id}' में खुला है: termide --attach {id}"
 app_quit_background_fmt = "पृष्ठभूमि में खुले: {projects}"
 projects_reopen_fmt = "पिछले रन के प्रोजेक्ट फिर से खोलें ({count})"
 language_changed = "भाषा {name} में बदली गई"

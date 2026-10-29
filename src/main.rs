@@ -287,6 +287,36 @@ fn attach_terminal_present() -> bool {
     std::io::stdin().is_terminal() && std::io::stdout().is_terminal()
 }
 
+/// A launch for `root`, which `owner` has open: attach to the owner when it
+/// is a detached instance and `may_attach` lets this terminal do so, else
+/// say where the project is. Returns the exit code.
+fn project_taken(root: &std::path::Path, owner: &termide_project::Owner, may_attach: bool) -> i32 {
+    let path = root.display();
+    #[cfg(unix)]
+    if let Some(id) = &owner.instance {
+        if may_attach && attach_terminal_present() {
+            println!("{path} is open in detached instance '{id}'; attaching to it.");
+            return match termide_detach::client::attach(Some(id.clone()), false) {
+                Ok(code) => code,
+                Err(e) => {
+                    eprintln!("termide: {e:#}");
+                    1
+                }
+            };
+        }
+        eprintln!("termide: {path} is open in detached instance '{id}'; attach with: termide --attach {id}");
+        return 1;
+    }
+    #[cfg(not(unix))]
+    let _ = may_attach;
+    let pid = match owner.pid {
+        0 => "?".to_string(),
+        pid => pid.to_string(),
+    };
+    eprintln!("termide: {path} is already open in another termide (pid {pid}); switch to it there");
+    1
+}
+
 /// Handle `--list-instances`, `--kill`, `--attach` and `--detached`.
 ///
 /// Returns `Some(exit_code)` when one of them ran and the process should stop,
@@ -335,6 +365,13 @@ fn handle_detached_instance_cli(cli: &Cli) -> Result<Option<i32>> {
             return Ok(Some(1));
         }
         let project_root = std::env::current_dir()?;
+        // A project is open in one instance at a time: a new one for a project
+        // a detached instance has is that instance.
+        if cli.files.is_empty() {
+            if let Some(owner) = termide_project::project_owner(&project_root) {
+                return Ok(Some(project_taken(&project_root, &owner, !cli.no_attach)));
+            }
+        }
         let id = termide_detach::spawn_detached(&project_root, &hosted_args(cli))?;
         if cli.no_attach {
             println!("Detached instance '{id}' started.");
@@ -513,8 +550,40 @@ fn main() -> Result<()> {
     let hosted = termide_detach::is_hosted();
     #[cfg(not(unix))]
     let hosted = false;
+    // A project is open in one instance at a time. The project started in
+    // is claimed here, before the UI, so that a launch for a project open
+    // elsewhere ends on an untouched terminal — or attaches to the detached
+    // instance that has it. A launch that hands over to a host of its own
+    // only looks: the host claims it, and must find it free. `$EDITOR`
+    // launches and the headless runs take no project.
     #[cfg(unix)]
-    if config.general.always_detachable && cli.files.is_empty() && !hosted {
+    let spawns_host = config.general.always_detachable && !hosted;
+    #[cfg(not(unix))]
+    let spawns_host = false;
+    let mut start_claim = None;
+    if cli.files.is_empty() && cli.prompt.is_none() && cli.recall.is_none() {
+        let taken = if spawns_host {
+            termide_project::project_owner(&project_root)
+        } else {
+            #[cfg(unix)]
+            let instance = termide_detach::hosted_instance_id();
+            #[cfg(not(unix))]
+            let instance: Option<String> = None;
+            match termide_project::claim_project(&project_root, instance.as_deref()) {
+                Ok(claim) => {
+                    start_claim = claim;
+                    None
+                }
+                Err(owner) => Some(owner),
+            }
+        };
+        if let Some(owner) = taken {
+            std::process::exit(project_taken(&project_root, &owner, !hosted));
+        }
+    }
+
+    #[cfg(unix)]
+    if spawns_host && cli.files.is_empty() {
         let id = termide_detach::spawn_detached(&project_root, &hosted_args(&cli))?;
         let code = termide_detach::client::attach(Some(id), false)?;
         std::process::exit(code);
@@ -687,6 +756,7 @@ fn main() -> Result<()> {
     // layout (restoring or overwriting it when editing e.g. a commit message
     // would be surprising and could clobber the real layout).
     if cli.files.is_empty() {
+        app.hold_start_project(start_claim);
         app.load_layout_or_default();
         if cli.restore {
             app.restore_projects_on_start();

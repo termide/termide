@@ -76,6 +76,11 @@ ssh server
 termide --attach my-project
 ```
 
+Plain `termide` in `~/src/my-project` does the same: a project is open in
+one Termide at a time, so a launch for a project a detached instance has
+attaches to that instance instead of starting a second one. Without a terminal
+to attach from, it prints the `--attach` line instead.
+
 Closing the SSH connection without detaching is safe. The instance notices the
 client is gone and carries on; the next `--attach` picks it up.
 

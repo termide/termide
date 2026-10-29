@@ -1508,6 +1508,8 @@ pub trait Translation: Send + Sync {
     fn projects_change_root(&self) -> &str;
     fn projects_delete_title(&self) -> &str;
     fn projects_delete_fmt(&self, path: &str) -> String;
+    fn projects_open_elsewhere_fmt(&self, path: &str, pid: &str) -> String;
+    fn projects_open_in_instance_fmt(&self, path: &str, id: &str) -> String;
     fn app_quit_background_fmt(&self, projects: &str) -> String;
     fn project_created(&self) -> &str;
     fn project_moved(&self) -> &str;

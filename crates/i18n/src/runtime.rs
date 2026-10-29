@@ -2675,6 +2675,20 @@ impl Translation for RuntimeTranslation {
         self.format("projects_delete_fmt", &[("path", path)])
     }
 
+    fn projects_open_elsewhere_fmt(&self, path: &str, pid: &str) -> String {
+        self.format(
+            "projects_open_elsewhere_fmt",
+            &[("path", path), ("pid", pid)],
+        )
+    }
+
+    fn projects_open_in_instance_fmt(&self, path: &str, id: &str) -> String {
+        self.format(
+            "projects_open_in_instance_fmt",
+            &[("path", path), ("id", id)],
+        )
+    }
+
     fn app_quit_background_fmt(&self, projects: &str) -> String {
         self.format("app_quit_background_fmt", &[("projects", projects)])
     }

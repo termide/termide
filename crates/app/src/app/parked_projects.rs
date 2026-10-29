@@ -119,6 +119,26 @@ fn display_root(root: &Path) -> String {
     termide_core::util::shorten_home_path(&root.display().to_string())
 }
 
+/// The detached instance this process runs in, recorded with the projects it
+/// holds so that a launch elsewhere can attach to it.
+fn hosted_instance() -> Option<String> {
+    #[cfg(unix)]
+    return termide_detach::hosted_instance_id();
+    #[cfg(not(unix))]
+    None
+}
+
+/// Why the project at `root` does not open here: `owner` has it open.
+fn open_elsewhere_message(root: &Path, owner: &termide_project::Owner) -> String {
+    let t = i18n::t();
+    let path = display_root(root);
+    match &owner.instance {
+        Some(id) => t.projects_open_in_instance_fmt(&path, id),
+        None if owner.pid == 0 => t.projects_open_elsewhere_fmt(&path, "?"),
+        None => t.projects_open_elsewhere_fmt(&path, &owner.pid.to_string()),
+    }
+}
+
 /// What entering a project hands back to finish the switch with.
 pub(super) struct EnteredProject {
     /// What the project kept when it was open already (`None` when it opens
@@ -239,6 +259,9 @@ impl App {
     /// Bring `state.open_projects`, which the menus draw, in step with the
     /// open projects, and save the set for reopening when it changed.
     pub(super) fn sync_open_projects(&mut self) {
+        // A project closed or moved away is let go for another instance.
+        let open = &self.open_projects;
+        self.project_claims.retain(|root, _| open.is_open(root));
         self.save_open_projects();
         self.plugins.mark_dirty();
         let views: Vec<OpenProjectView> =
@@ -254,6 +277,37 @@ impl App {
         if views != self.state.open_projects {
             self.state.open_projects = views;
             self.state.needs_redraw = true;
+        }
+    }
+
+    /// Hold the project started in, claimed before the UI came up.
+    pub fn hold_start_project(&mut self, claim: Option<termide_project::ProjectClaim>) {
+        if let Some(claim) = claim {
+            self.project_claims.insert(self.project_root.clone(), claim);
+        }
+    }
+
+    /// Take the project at `root` for this instance before it opens.
+    /// `Err` names the instance that has it open.
+    fn try_claim_project(&mut self, root: &Path) -> Result<(), termide_project::Owner> {
+        if self.project_claims.contains_key(root) {
+            return Ok(());
+        }
+        if let Some(claim) = termide_project::claim_project(root, hosted_instance().as_deref())? {
+            self.project_claims.insert(root.to_path_buf(), claim);
+        }
+        Ok(())
+    }
+
+    /// [`Self::try_claim_project`], saying on the status line why a project
+    /// another instance has open does not open here.
+    pub(super) fn claim_project(&mut self, root: &Path) -> bool {
+        match self.try_claim_project(root) {
+            Ok(()) => true,
+            Err(owner) => {
+                self.state.set_error(open_elsewhere_message(root, &owner));
+                false
+            }
         }
     }
 
@@ -291,7 +345,12 @@ impl App {
         let mut roots: Vec<PathBuf> = Vec::new();
         for root in termide_project::load_open_projects().roots {
             let root = project_root_of(root);
-            if root.is_dir() && !self.open_projects.is_open(&root) && !roots.contains(&root) {
+            // One another instance has open is its to reopen, not ours.
+            if root.is_dir()
+                && !self.open_projects.is_open(&root)
+                && !roots.contains(&root)
+                && termide_project::project_owner(&root).is_none()
+            {
                 roots.push(root);
             }
         }
@@ -304,6 +363,12 @@ impl App {
         let roots = std::mem::take(&mut self.state.reopenable_projects);
         let mut opened = 0;
         for root in roots {
+            // Taken meanwhile by another instance: left to it, quietly, as
+            // the menu would not have offered it.
+            if let Err(owner) = self.try_claim_project(&root) {
+                log::info!("Not reopening {:?}: open in {:?}", root, owner);
+                continue;
+            }
             if self.open_projects.open_pending(root) {
                 opened += 1;
             }

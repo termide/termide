@@ -113,6 +113,10 @@ pub struct App {
     /// is open: a launch for a single directory must not replace the list of
     /// the run before.
     saved_open_projects: Option<termide_project::SavedOpenProjects>,
+    /// The open projects this instance holds against a second one, by root.
+    /// Taken before a project opens and let go once it is closed; a project
+    /// opened unguarded (see [`termide_project::claim_project`]) has none.
+    project_claims: std::collections::HashMap<std::path::PathBuf, termide_project::ProjectClaim>,
     /// Reopen the projects of the last run as soon as the loop starts
     /// (`termide --restore`), as the Projects menu item does.
     restore_projects: bool,
@@ -233,6 +237,7 @@ impl App {
             keyboard_caps: termide_keyboard::KeyboardCaps::default(),
             persist_layout: true,
             saved_open_projects: None,
+            project_claims: Default::default(),
             project_drag: None,
             restore_projects: false,
             last_focus_sig: None,
@@ -339,6 +344,7 @@ impl App {
             keyboard_caps: caps,
             persist_layout: true,
             saved_open_projects: None,
+            project_claims: Default::default(),
             project_drag: None,
             restore_projects: false,
             last_focus_sig: None,

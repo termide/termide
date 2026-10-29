@@ -1121,6 +1121,8 @@ agent_strip_left_unfinished = "left unfinished"
 
 [formats]
 projects_delete_fmt = "Layout of {path}"
+projects_open_elsewhere_fmt = "{path} is open in another termide (pid {pid})"
+projects_open_in_instance_fmt = "{path} is open in detached instance '{id}': termide --attach {id}"
 app_quit_background_fmt = "Open in the background: {projects}"
 projects_reopen_fmt = "Reopen projects of the last run ({count})"
 replace_done_fmt = "Replaced {count} occurrence(s) across {files} file(s)."
