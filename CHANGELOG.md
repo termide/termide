@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Search and replace in the editor with combining characters.** Replacing a literal match of `नमस्ते` or `👍🏽` ate text after it, and a case-insensitive `i` matched inside `İ`; matches are now measured in graphemes and mapped back to the line.
 - **SFTP without a user in the URL** listed the home directory as the local user over a new connection; it now keeps the login's own.
 - **Clicks and drags on the dividers between panel groups** missed where the dividers are drawn when the groups were squeezed.
-- **The Tools menu shows the agent's shortcut.**
+- **The Windows menu shows the agent's shortcut.**
 
 ## [0.46.0] - 2026-10-26
 
