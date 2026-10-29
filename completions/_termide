@@ -26,7 +26,8 @@ _termide_instances() {
 _arguments \
   '--log-level[Minimum log level]:level:(trace debug info warn error)' \
   '--no-lsp[Disable LSP support]' \
-  '(-r --restore)'{-r,--restore}'[Reopen the projects of the last run where that run was]' \
+  '(-r --restore --no-restore)'{-r,--restore}'[Reopen the projects of the last run where that run was]' \
+  '(-r --restore)--no-restore[Start with this directory'"'"'s project alone this time]' \
   '--config[Path to config file]:path:_files' \
   '--diagnostics[Run pre-flight diagnostics and exit]' \
   '(-d --detached)'{-d,--detached}'[Start a detached instance and attach to it]' \

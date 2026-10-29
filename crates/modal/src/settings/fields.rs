@@ -114,6 +114,10 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_general_always_detachable(),
                 field_type: FieldType::Bool,
             },
+            FieldDescriptor {
+                label: t.settings_general_restore_projects(),
+                field_type: FieldType::Bool,
+            },
         ],
         SettingsTab::Editor => vec![
             FieldDescriptor {
@@ -275,6 +279,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             7 => bool_str(config.general.bell_on_operation_complete),
             8 => config.general.resource_monitor_interval.to_string(),
             9 => bool_str(config.general.always_detachable),
+            10 => bool_str(config.general.restore_projects),
             _ => String::new(),
         },
         SettingsTab::Editor => match index {
@@ -432,6 +437,7 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
                     !config.general.bell_on_operation_complete
             }
             9 => config.general.always_detachable = !config.general.always_detachable,
+            10 => config.general.restore_projects = !config.general.restore_projects,
             _ => {}
         },
         SettingsTab::Editor => match index {
@@ -926,7 +932,7 @@ mod field_index_tests {
         let mut config = Config::default();
 
         let fields = fields_for_tab(SettingsTab::General);
-        assert_eq!(fields.len(), index + 1, "always_detachable must be last");
+        assert!(matches!(fields[index + 1].field_type, FieldType::Bool));
         assert!(matches!(fields[index].field_type, FieldType::Bool));
 
         assert!(!config.general.always_detachable);
@@ -953,6 +959,29 @@ mod field_index_tests {
         assert_eq!(
             config.general.bell_on_operation_complete,
             Config::default().general.bell_on_operation_complete
+        );
+    }
+
+    /// The same end-to-end pin for the field after it.
+    #[test]
+    fn restore_projects_reads_and_writes_the_same_field() {
+        let index = 10;
+        let mut config = Config::default();
+
+        let fields = fields_for_tab(SettingsTab::General);
+        assert_eq!(fields.len(), index + 1, "restore_projects must be last");
+        assert!(matches!(fields[index].field_type, FieldType::Bool));
+
+        assert!(config.general.restore_projects, "on by default");
+        toggle_field(&mut config, SettingsTab::General, index);
+        assert!(!config.general.restore_projects);
+        assert_eq!(
+            get_field_value(&config, SettingsTab::General, index),
+            bool_str(false)
+        );
+        assert!(
+            !config.general.always_detachable,
+            "toggling index {index} must not flip always_detachable"
         );
     }
 

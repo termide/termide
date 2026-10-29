@@ -117,9 +117,12 @@ pub struct App {
     /// Taken before a project opens and let go once it is closed; a project
     /// opened unguarded (see [`termide_project::claim_project`]) has none.
     project_claims: std::collections::HashMap<std::path::PathBuf, termide_project::ProjectClaim>,
-    /// Reopen the projects of the last run as soon as the loop starts
-    /// (`termide --restore`), as the Projects menu item does.
-    restore_projects: bool,
+    /// Reopen the projects of the last run as soon as the loop starts, as
+    /// the Projects menu item does: `Some(true)` for `termide --restore`,
+    /// which also resumes agents' unfinished work, `Some(false)` for
+    /// `general.restore_projects`, which leaves it until its project is
+    /// entered.
+    restore_projects: Option<bool>,
     /// Terminal capabilities this process was started with. Kept so that a
     /// reattach can re-enter exactly the modes startup entered.
     keyboard_caps: termide_keyboard::KeyboardCaps,
@@ -239,7 +242,7 @@ impl App {
             saved_open_projects: None,
             project_claims: Default::default(),
             project_drag: None,
-            restore_projects: false,
+            restore_projects: None,
             last_focus_sig: None,
             settings_model_fetch: None,
             settings_save: None,
@@ -346,7 +349,7 @@ impl App {
             saved_open_projects: None,
             project_claims: Default::default(),
             project_drag: None,
-            restore_projects: false,
+            restore_projects: None,
             last_focus_sig: None,
             settings_model_fetch: None,
             settings_save: None,
@@ -463,10 +466,14 @@ impl App {
     }
 
     /// Reopen the projects of the last run in the background once the
-    /// application starts (`termide --restore`). Without a saved set the
-    /// launch is an ordinary one.
-    pub fn restore_projects_on_start(&mut self) {
-        self.restore_projects = true;
+    /// application starts. Without a saved set the launch is an ordinary one.
+    ///
+    /// `resume_agent_work` loads at once the projects whose agents left work
+    /// unfinished, so a failed request is tried again and a goal asks to go
+    /// on, as `termide --restore` and the menu item do. A restore the user
+    /// did not ask for this launch leaves that to the user entering them.
+    pub fn restore_projects_on_start(&mut self, resume_agent_work: bool) {
+        self.restore_projects = Some(resume_agent_work);
     }
 
     /// Open a file path in a new editor panel, creating the file (and parent
@@ -948,12 +955,11 @@ impl App {
         let size = terminal.size()?;
         self.state.update_terminal_size(size.width, size.height);
         self.load_reopenable_projects();
-        if self.restore_projects {
-            self.restore_projects = false;
+        if let Some(resume_agent_work) = self.restore_projects.take() {
             if self.state.reopenable_projects.is_empty() {
                 log::info!("No projects of the last run to restore");
             } else {
-                self.reopen_previous_projects();
+                self.reopen_previous_projects(resume_agent_work);
             }
         }
         self.sync_open_projects();

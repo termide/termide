@@ -101,7 +101,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 ### Workspace
 
 - **Git** - Status, log with a coloured commit graph, diff, staging, stash, blame, branches and their worktrees
-- **Projects** - Panel layouts restored per project; projects you switch away from keep running in the background, as buttons in the menu bar; `termide --restore` reopens the last run's set
+- **Projects** - Panel layouts restored per project; projects you switch away from keep running in the background, as buttons in the menu bar; the last run's set reopens at launch around the directory you start in
 - **Multi-panel layout** - Stacked panel groups with adjustable heights, a fullscreen toggle (`Alt+F11`) and auto-stacking in narrow terminals
 - **Custom commands** - Global or per-project commands with hotkeys, parameter forms and terminal, background or report modes
 - **Plugins** - Programs in the global plugins directory, run beside each open project over JSON-RPC: they hear files opened and saved, add commands, status bar items and agent tools; each project switches them within the mode you set
@@ -400,6 +400,7 @@ Options:
   --log-level <LEVEL>  Set log level (trace, debug, info, warn, error)
   --no-lsp             Disable LSP language servers
   -r, --restore        Reopen the last run's projects, in the project it was in
+  --no-restore         Start with this directory's project alone this time
   --config <PATH>      Use this file in place of the global config.toml
   --diagnostics        Run pre-flight diagnostics and exit (no UI)
   -d, --detached       Start a detached instance that survives the terminal
@@ -501,6 +502,7 @@ project_retention_days = 30
 bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # keep the instance alive across terminal closes (Unix)
+restore_projects = true  # reopen the last run's projects at launch
 resource_monitor_interval = 1000
 
 [editor]

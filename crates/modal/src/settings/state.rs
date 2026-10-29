@@ -524,7 +524,8 @@ impl SettingsModal {
                 Field(8), // resource_monitor_interval
                 Spacer,
                 Header(t.settings_header_instance()),
-                Field(9), // always_detachable
+                Field(9),  // always_detachable
+                Field(10), // restore_projects
             ],
             SettingsTab::Editor => vec![
                 Header(t.settings_header_typing()),

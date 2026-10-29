@@ -901,6 +901,7 @@ impl Translation for RuntimeTranslation {
         detach_not_detached_instance,
         detach_failed,
         settings_general_always_detachable,
+        settings_general_restore_projects,
         help_desc_detach_instance,
         directory_picker_create,
         directory_picker_move,

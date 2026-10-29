@@ -660,6 +660,15 @@ pub struct GeneralSettings {
     #[serde(default)]
     pub always_detachable: bool,
 
+    /// Reopen the projects of the last run at launch, in the background,
+    /// around the project started in — what `termide --restore` and the
+    /// Projects menu item do, except that the launch stays in its own
+    /// directory and agents' unfinished work waits until its project is
+    /// entered. `--no-restore` skips it once. Not done for `$EDITOR`
+    /// launches, which take no project.
+    #[serde(default = "default_true")]
+    pub restore_projects: bool,
+
     /// Global keyboard shortcuts
     #[serde(default)]
     pub keybindings: GlobalKeybindings,
@@ -1250,6 +1259,7 @@ impl From<LegacyConfig> for Config {
                 resource_monitor_interval: legacy.resource_monitor_interval,
                 report_all_keys: default_true(),
                 always_detachable: false,
+                restore_projects: default_true(),
                 keybindings: GlobalKeybindings::default(),
             },
             editor: EditorSettings {
@@ -1306,6 +1316,7 @@ impl Default for GeneralSettings {
             resource_monitor_interval: default_resource_monitor_interval(),
             report_all_keys: default_true(),
             always_detachable: false,
+            restore_projects: default_true(),
             keybindings: GlobalKeybindings::default(),
         }
     }

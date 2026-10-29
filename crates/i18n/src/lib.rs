@@ -1524,6 +1524,7 @@ pub trait Translation: Send + Sync {
     fn detach_not_detached_instance(&self) -> &str;
     fn detach_failed(&self) -> &str;
     fn settings_general_always_detachable(&self) -> &str;
+    fn settings_general_restore_projects(&self) -> &str;
     fn help_desc_detach_instance(&self) -> &str;
 
     // Directory picker

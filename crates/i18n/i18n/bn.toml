@@ -359,6 +359,7 @@ detach_instance = "ইনস্ট্যান্স বিচ্ছিন্ন
 detach_not_detached_instance = "বিচ্ছিন্নযোগ্য ইনস্ট্যান্সে চলছে না"
 detach_failed = "ইনস্ট্যান্স ডেমনের সঙ্গে যোগাযোগ করা যায়নি"
 settings_general_always_detachable = "সর্বদা বিচ্ছিন্নযোগ্য (Unix)"
+settings_general_restore_projects = "শেষ রানের প্রকল্পগুলি আবার খুলুন"
 help_desc_detach_instance = "ইনস্ট্যান্স বিচ্ছিন্ন করুন (চলতে থাকবে)"
 directory_picker_create = "তৈরি করুন"
 directory_picker_move = "সরান"

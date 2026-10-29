@@ -101,7 +101,7 @@
 ### 工作区
 
 - **Git** - 状态、带彩色提交图的日志、差异、暂存、stash、blame、分支及其工作树
-- **项目** - 按项目恢复面板布局；切换离开的项目在后台继续运行，并以按钮形式显示在菜单栏中；`termide --restore` 重新打开上次运行的项目
+- **项目** - 按项目恢复面板布局；切换离开的项目在后台继续运行，并以按钮形式显示在菜单栏中；启动时会围绕启动目录重新打开上次运行的项目
 - **多面板布局** - 高度可调的面板组、全屏切换（`Alt+F11`），终端变窄时自动堆叠
 - **自定义命令** - 全局或项目级命令，支持快捷键、参数表单以及终端 / 后台 / 报告模式
 - **插件** - 全局插件目录中的程序，通过 JSON-RPC 在每个打开的项目旁运行：接收文件打开和保存事件，添加命令、状态栏项和智能体工具；项目只能在你设定的模式内开关它们
@@ -396,6 +396,7 @@ termide [OPTIONS] [FILE]...
   --log-level <LEVEL>  设置日志级别（trace、debug、info、warn、error）
   --no-lsp             禁用 LSP 语言服务器
   -r, --restore        在上次运行所在的项目中重新打开上次运行的项目
+  --no-restore         本次只打开当前目录的项目
   --config <PATH>      使用自定义配置文件路径
   --diagnostics        运行启动前诊断并退出（无 UI）
   -d, --detached       启动一个在终端关闭后仍继续运行的可分离实例，并接入它
@@ -491,6 +492,7 @@ project_retention_days = 30
 bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # 实例在终端关闭后继续运行（仅限 Unix）
+restore_projects = true  # 启动时重新打开上次运行的项目
 resource_monitor_interval = 1000
 
 [editor]

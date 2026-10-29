@@ -303,7 +303,7 @@ impl App {
             }
             ProjectsTarget::Reopen => {
                 self.state.close_menu();
-                self.reopen_previous_projects();
+                self.reopen_previous_projects(true);
             }
             ProjectsTarget::Action(PROJECTS_SUBMENU_NEW) => {
                 self.state.close_menu();

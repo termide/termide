@@ -135,6 +135,12 @@ struct Cli {
     #[arg(short, long, conflicts_with_all = ["files", "headless"])]
     restore: bool,
 
+    /// Do not reopen the projects of the last run this time, though
+    /// `general.restore_projects` says to: start with the working
+    /// directory's project alone.
+    #[arg(long, conflicts_with = "restore")]
+    no_restore: bool,
+
     /// File(s) or directories to open. Given a path, termide starts in a
     /// clean view (no project layout is restored or saved). Text opens in the
     /// editor, so it works as $EDITOR for tools like git, crontab and visudo:
@@ -275,6 +281,9 @@ fn hosted_args(cli: &Cli) -> Vec<std::ffi::OsString> {
     }
     if cli.restore {
         args.push("--restore".into());
+    }
+    if cli.no_restore {
+        args.push("--no-restore".into());
     }
     args.extend(cli.files.iter().map(|f| f.clone().into_os_string()));
     args
@@ -708,6 +717,7 @@ fn main() -> Result<()> {
     let width = size.width.max(20);
     let height = size.height.max(5);
 
+    let config_restores_projects = config.general.restore_projects;
     // Create application with pre-loaded config (avoids double config loading)
     let mut app = App::new_with_config(
         config,
@@ -758,8 +768,14 @@ fn main() -> Result<()> {
     if cli.files.is_empty() {
         app.hold_start_project(start_claim);
         app.load_layout_or_default();
+        // `--restore` is asked for this launch, and goes as the menu item
+        // does. The setting restores around the directory started in, and
+        // leaves agents' unfinished work until its project is entered: a
+        // plain `termide` must not set requests going in other projects.
         if cli.restore {
-            app.restore_projects_on_start();
+            app.restore_projects_on_start(true);
+        } else if config_restores_projects && !cli.no_restore {
+            app.restore_projects_on_start(false);
         }
     } else {
         app.set_layout_persistence(false);
@@ -826,6 +842,17 @@ mod cli_tests {
             assert!(cli.detached && cli.restore);
             assert_eq!(super::hosted_args(&cli), vec!["--restore"]);
         }
+    }
+
+    /// `--no-restore` opts out of the setting once, reaches a detached
+    /// instance, and contradicts `--restore`.
+    #[test]
+    fn no_restore_goes_to_the_host_and_conflicts_with_restore() {
+        assert!(Cli::try_parse_from(["termide", "--no-restore", "-r"]).is_err());
+        let cli = Cli::try_parse_from(["termide", "--no-restore"]).unwrap();
+        assert!(cli.no_restore);
+        #[cfg(unix)]
+        assert_eq!(super::hosted_args(&cli), vec!["--no-restore"]);
     }
 
     /// `--no-attach` qualifies `--detached` and never reaches the instance.

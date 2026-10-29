@@ -358,8 +358,10 @@ impl App {
     }
 
     /// Open the projects of the last run in the background. Their layouts
-    /// load the first time each is entered; the current project stays.
-    pub(super) fn reopen_previous_projects(&mut self) {
+    /// load the first time each is entered — those whose agents left work
+    /// unfinished at once, with `resume_agent_work`; the current project
+    /// stays.
+    pub(super) fn reopen_previous_projects(&mut self, resume_agent_work: bool) {
         let roots = std::mem::take(&mut self.state.reopenable_projects);
         let mut opened = 0;
         for root in roots {
@@ -381,7 +383,9 @@ impl App {
             .collect();
         self.open_projects.arrange(&order);
         log::info!("Reopened {} projects of the last run", opened);
-        self.load_projects_holding_agent_work();
+        if resume_agent_work {
+            self.load_projects_holding_agent_work();
+        }
         self.sync_open_projects();
     }
 
