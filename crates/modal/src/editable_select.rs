@@ -759,11 +759,20 @@ mod tests {
 
     /// A directory with `src/bin`, `docs` and `.git` in it.
     fn project() -> Scratch {
+        project_named("termide-path-field")
+    }
+
+    /// Like [`project`], with a name too long for a tree row whatever the
+    /// temp dir: `/tmp` on Linux is short, macOS's is not.
+    fn long_project() -> Scratch {
+        project_named(&format!("termide-path-field-{}", "x".repeat(100)))
+    }
+
+    fn project_named(stem: &str) -> Scratch {
         use std::sync::atomic::{AtomicUsize, Ordering};
         static NEXT: AtomicUsize = AtomicUsize::new(0);
         let n = NEXT.fetch_add(1, Ordering::Relaxed);
-        let dir =
-            std::env::temp_dir().join(format!("termide-path-field-{}-{n}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("{stem}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         for sub in ["src/bin", "docs", ".git"] {
             std::fs::create_dir_all(dir.join(sub)).unwrap();
@@ -1044,7 +1053,7 @@ mod tests {
     #[test]
     fn tab_opens_the_quick_destinations_and_down_writes_them_into_the_field() {
         let a = project();
-        let b = project();
+        let b = long_project();
         let default = format!("{}/", a.path().display());
         let mut modal = EditableSelectModal::new(
             "Copy",
@@ -1057,7 +1066,9 @@ mod tests {
         // A root too long for its row loses its start, not its end.
         let drawn = screen(&mut modal);
         let b_name = b.path().file_name().unwrap().to_string_lossy();
-        assert!(drawn.contains(&format!("{b_name}/│")), "{drawn}");
+        let b_tail = &b_name[b_name.len() - 20..];
+        assert!(drawn.contains("▶ …"), "{drawn}");
+        assert!(drawn.contains(&format!("{b_tail}/│")), "{drawn}");
 
         press(&mut modal, KeyCode::Down);
         assert_eq!(modal.value(), default);
