@@ -42,7 +42,7 @@ nucleo-matcher = "0.3"
 # Snowball stemming (English, Russian) for the agent's `recall` ranking.
 rust-stemmers = "1.2"
 sysinfo = "0.31"
-starship-battery = "0.11"
+starship-battery = "0.12"
 chrono = { version = "0.4", features = ["serde"] }
 portable-pty = "0.8"
 vte = "0.13"

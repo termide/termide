@@ -17,4 +17,4 @@ termide-i18n = { path = "../i18n" }
 tempfile.workspace = true
 
 [dev-dependencies]
-zip = { version = "9.0", default-features = false, features = ["deflate-flate2", "aes-crypto"] }
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2", "aes-crypto"] }

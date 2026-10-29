@@ -35,7 +35,7 @@ pavao = { version = "0.2", optional = true }
 # Archive support — pure-Rust decoders only (no C zstd/xz/bzip2), so
 # musl-static builds keep needing no C toolchain. zip's deflate goes
 # through flate2's default miniz_oxide backend.
-zip = { version = "9.0", default-features = false, features = ["deflate-flate2", "deflate64", "bzip2", "lzma", "xz", "aes-crypto"], optional = true }
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2", "deflate64", "bzip2", "lzma", "xz", "aes-crypto"], optional = true }
 tar = { version = "0.4", default-features = false, optional = true }
 flate2 = { version = "1", optional = true }
 bzip2 = { version = "0.6", optional = true }
