@@ -1111,6 +1111,8 @@ mod tests {
             });
             assert!(went_live, "editors are told to open their documents");
             assert!(!manager.server_start_failed("test", &file));
+            // Live means spawned: the script may not have counted itself yet.
+            poll_until(&mut manager, |_| starts(dir.path()) > 0);
             assert_eq!(starts(dir.path()), 1);
         }
 
