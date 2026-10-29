@@ -102,7 +102,7 @@ Termide 中打开，因此为可分离实例持有的项目启动时，会接入
 | `termide --detached`（`-d`） | 启动可分离实例并接入它 |
 | `termide --detached --no-attach` | 只启动实例并打印其 ID——用于脚本以及没有终端的启动，此时单独的 `--detached` 会被拒绝 |
 | `termide --detached file.rs` | 同上，并照常打开文件 |
-| `termide --detached --restore`（`-r`） | 同上，并在上次运行所在的项目中重新打开上次运行的项目 |
+| `termide --detached --restore`（`-r`） | 同上，但从上次运行所在的项目开始，而不是当前目录 |
 | `termide --attach` | 接入最近的实例 |
 | `termide --attach <ID>` | 接入指定名称的实例 |
 | `termide --attach <ID> --force`（`-f`） | 接入，并从已接入的客户端手中接管实例 |

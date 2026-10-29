@@ -399,7 +399,7 @@ Arguments:
 Options:
   --log-level <LEVEL>  Set log level (trace, debug, info, warn, error)
   --no-lsp             Disable LSP language servers
-  -r, --restore        Reopen the last run's projects, in the project it was in
+  -r, --restore        Start in the last run's project instead of this directory
   --no-restore         Start with this directory's project alone this time
   --config <PATH>      Use this file in place of the global config.toml
   --diagnostics        Run pre-flight diagnostics and exit (no UI)

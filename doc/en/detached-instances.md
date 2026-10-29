@@ -116,7 +116,7 @@ the way it does in a local instance.
 | `termide --detached` (`-d`) | Start a detached instance and attach to it |
 | `termide --detached --no-attach` | Only start it and print its id — for scripts, and for launches with no terminal, where a plain `--detached` is refused |
 | `termide --detached file.rs` | Same, opening files as usual |
-| `termide --detached --restore` (`-r`) | Same, reopening the projects of the last run in the project that run was in |
+| `termide --detached --restore` (`-r`) | Same, starting in the last run's project instead of this directory |
 | `termide --attach` | Attach to the most recent instance |
 | `termide --attach <ID>` | Attach to a named instance |
 | `termide --attach <ID> --force` (`-f`) | Attach, taking over from a client that is already attached |

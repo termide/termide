@@ -128,10 +128,10 @@ struct Cli {
     #[arg(long, value_name = "FORMAT", requires = "headless", value_parser = ["text", "json", "stream-json"], default_value = "text")]
     output: String,
 
-    /// Reopen the projects of the last run, in the project that run was in;
-    /// the others open in the background and load when first entered. From a
-    /// directory of that set, stays in it. Without a saved set, an ordinary
-    /// launch.
+    /// Start in the last run's project instead of this directory, which is
+    /// not added to the set; the other projects of that run open in the
+    /// background, even with `general.restore_projects` off. From a directory
+    /// of that set, stays in it. Without a saved set, an ordinary launch.
     #[arg(short, long, conflicts_with_all = ["files", "headless"])]
     restore: bool,
 
