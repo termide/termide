@@ -6,6 +6,7 @@ mod load;
 mod model;
 mod navigation;
 mod render;
+mod unified;
 
 pub use model::{DiffHunk, DiffLine, FileDiff, FileStatus, LineKind};
 
@@ -78,7 +79,22 @@ pub struct GitDiffPanel {
     refresh_pending: bool,
     /// Whether a refresh is in flight, for the loading marker in `title()`.
     is_loading: bool,
+    /// The diff was handed over rather than loaded from git: it never
+    /// refreshes, and the panel is not saved with the session.
+    given: Option<Given>,
 }
+
+/// What a panel showing a handed-over diff keeps of it.
+struct Given {
+    title: String,
+    /// The id the app gave a plugin's panel.
+    plugin_panel: Option<u64>,
+    /// The plugin's own `[≡]` entries, `(label, action)`.
+    menu: Vec<(String, String)>,
+}
+
+/// Prefix of the context-menu actions a plugin's panel adds.
+const PLUGIN_MENU_PREFIX: &str = "plugin-menu:";
 
 /// Build HotkeyTable for the git diff panel from config.
 fn build_git_diff_hotkey_table(config: &Config) -> HotkeyTable {
@@ -121,7 +137,20 @@ impl GitDiffPanel {
         is_stash: bool,
         stash_message: Option<String>,
     ) -> Self {
-        let mut panel = Self {
+        let mut panel = Self::blank(repo_path, commit_hash, file_filter, is_stash, stash_message);
+        panel.refresh();
+        panel
+    }
+
+    /// The panel with nothing loaded yet.
+    fn blank(
+        repo_path: PathBuf,
+        commit_hash: Option<String>,
+        file_filter: Option<String>,
+        is_stash: bool,
+        stash_message: Option<String>,
+    ) -> Self {
+        Self {
             repo_path,
             commit_hash,
             branch: None,
@@ -146,9 +175,84 @@ impl GitDiffPanel {
             refresh_rx: None,
             refresh_pending: false,
             is_loading: false,
-        };
-        panel.refresh();
+            given: None,
+        }
+    }
+
+    /// A panel showing `diff`, a unified diff of one or more files, under
+    /// `title`. File paths are taken relative to `root` for opening them.
+    pub fn from_unified(root: PathBuf, title: String, diff: &str) -> Self {
+        let mut panel = Self::blank(root, None, None, false, None);
+        panel.given = Some(Given {
+            title,
+            plugin_panel: None,
+            menu: Vec::new(),
+        });
+        panel.set_unified(None, diff);
         panel
+    }
+
+    /// [`Self::from_unified`] for the plugin panel `id`.
+    pub fn for_plugin(id: u64, root: PathBuf, title: String, diff: &str) -> Self {
+        let mut panel = Self::from_unified(root, title, diff);
+        if let Some(given) = panel.given.as_mut() {
+            given.plugin_panel = Some(id);
+        }
+        panel
+    }
+
+    /// Whether the panel loads its diff from git, rather than showing one
+    /// it was handed.
+    pub fn loads_from_git(&self) -> bool {
+        self.given.is_none()
+    }
+
+    /// The id the app gave a plugin's panel; `None` for the others.
+    pub fn plugin_panel_id(&self) -> Option<u64> {
+        self.given.as_ref().and_then(|given| given.plugin_panel)
+    }
+
+    /// Set a plugin panel's own `[≡]` entries, `(label, action)`.
+    pub fn set_plugin_menu(&mut self, menu: Vec<(String, String)>) {
+        if let Some(given) = self.given.as_mut() {
+            given.menu = menu;
+        }
+    }
+
+    /// Show `diff` instead, and `title` when given. The selected file and
+    /// the collapsed ones stay as they were where their paths are still
+    /// there. Does nothing on a panel that loads from git.
+    pub fn set_unified(&mut self, title: Option<String>, diff: &str) {
+        let Some(given) = self.given.as_mut() else {
+            return;
+        };
+        if let Some(title) = title {
+            given.title = title;
+        }
+        let selected = self.diffs.get(self.selected_file).map(|d| d.path.clone());
+        let collapsed: HashSet<String> = self
+            .collapsed
+            .iter()
+            .filter_map(|&i| self.diffs.get(i).map(|d| d.path.clone()))
+            .collect();
+        self.diffs = unified::parse_unified(diff);
+        self.collapsed = (0..self.diffs.len())
+            .filter(|&i| collapsed.contains(&self.diffs[i].path))
+            .collect();
+        self.selected_file = selected
+            .and_then(|path| self.diffs.iter().position(|d| d.path == path))
+            .unwrap_or_else(|| self.selected_file.min(self.diffs.len().saturating_sub(1)));
+        self.calculate_total_lines();
+        self.scroll = self.scroll.min(self.total_lines.saturating_sub(1));
+    }
+
+    /// The plugin is gone: its menu goes, the diff stays, and the title
+    /// ends with `message`.
+    pub fn set_stopped(&mut self, message: String) {
+        if let Some(given) = self.given.as_mut() {
+            given.menu.clear();
+            given.title = format!("{} — {message}", given.title);
+        }
     }
 
     /// Create a new Git Diff panel for working directory changes
@@ -181,6 +285,18 @@ impl Panel for GitDiffPanel {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
+        if self.given.is_some()
+            && matches!(
+                cmd,
+                PanelCommand::Reload
+                    | PanelCommand::MarkStale
+                    | PanelCommand::RefreshIfStale
+                    | PanelCommand::OnGitUpdate { .. }
+                    | PanelCommand::OnFsUpdate { .. }
+            )
+        {
+            return CommandResult::None;
+        }
         match cmd {
             PanelCommand::Reload => {
                 self.is_stale = false;
@@ -247,7 +363,14 @@ impl Panel for GitDiffPanel {
         WidthPreference::PreferWide
     }
 
+    fn icon(&self) -> Option<&str> {
+        self.plugin_panel_id().map(|_| "🧩")
+    }
+
     fn title(&self) -> String {
+        if let Some(given) = &self.given {
+            return given.title.clone();
+        }
         let t = termide_i18n::t();
         let repo_name = git::get_repo_name(&self.repo_path);
         // The branch name arrives with the first refresh result, so until then
@@ -320,7 +443,7 @@ impl Panel for GitDiffPanel {
         if self.hotkeys.matches("edit", &key) {
             return self.open_file();
         }
-        if self.hotkeys.matches("refresh", &key) {
+        if self.hotkeys.matches("refresh", &key) && self.given.is_none() {
             self.refresh();
             return vec![PanelEvent::NeedsRedraw];
         }
@@ -419,10 +542,36 @@ impl Panel for GitDiffPanel {
     }
 
     fn to_state(&self, _project_dir: &Path) -> Option<PanelState> {
+        if self.given.is_some() {
+            return None;
+        }
         Some(PanelState::GitDiff {
             repo_path: self.repo_path.clone(),
             commit_hash: self.commit_hash.clone(),
         })
+    }
+
+    fn context_menu_items(&self) -> Vec<(String, String)> {
+        self.given.as_ref().map_or_else(Vec::new, |given| {
+            given
+                .menu
+                .iter()
+                .map(|(label, action)| (label.clone(), format!("{PLUGIN_MENU_PREFIX}{action}")))
+                .collect()
+        })
+    }
+
+    fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
+        match (
+            self.plugin_panel_id(),
+            action.strip_prefix(PLUGIN_MENU_PREFIX),
+        ) {
+            (Some(panel), Some(action)) => vec![PanelEvent::PluginAction {
+                panel,
+                action: action.to_string(),
+            }],
+            _ => vec![],
+        }
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -593,6 +742,80 @@ mod tests {
         assert!(panel.poll_refresh());
         assert!(!panel.is_loading, "a dead worker must not leave it loading");
         assert!(panel.refresh_rx.is_none());
+    }
+
+    const TWO_FILES: &str = "\
+--- a/a.txt
++++ b/a.txt
+@@ -1 +1 @@
+-x
++y
+--- a/b.txt
++++ b/b.txt
+@@ -1 +1 @@
+-p
++q
+";
+
+    #[test]
+    fn a_given_diff_never_touches_git() {
+        let dir = not_a_repo();
+        let mut panel =
+            GitDiffPanel::for_plugin(7, dir.path().to_path_buf(), "diff a.txt".into(), TWO_FILES);
+
+        assert!(panel.refresh_rx.is_none() && !panel.is_loading);
+        assert_eq!(panel.diffs.len(), 2);
+        assert_eq!(panel.title(), "diff a.txt");
+        assert_eq!(panel.icon(), Some("🧩"));
+        assert!(!panel.loads_from_git());
+        assert!(panel.to_state(dir.path()).is_none());
+        let changed = dir.path().join("a.txt");
+        let result = panel.handle_command(PanelCommand::OnFsUpdate {
+            changed_path: &changed,
+        });
+        assert!(matches!(result, CommandResult::None));
+        assert!(matches!(
+            panel.handle_command(PanelCommand::Reload),
+            CommandResult::None
+        ));
+        assert!(panel.refresh_rx.is_none());
+    }
+
+    #[test]
+    fn a_given_diff_keeps_the_selected_and_collapsed_files_on_update() {
+        let dir = not_a_repo();
+        let mut panel =
+            GitDiffPanel::from_unified(dir.path().to_path_buf(), "diff".into(), TWO_FILES);
+        panel.selected_file = 1;
+        panel.collapsed.insert(1);
+
+        let reordered = format!("--- a/new.txt\n+++ b/new.txt\n{TWO_FILES}");
+        panel.set_unified(Some("diff 3".into()), &reordered);
+
+        assert_eq!(panel.diffs[panel.selected_file].path, "b.txt");
+        assert_eq!(panel.collapsed, HashSet::from([2]));
+        assert_eq!(panel.title(), "diff 3");
+    }
+
+    #[test]
+    fn a_plugin_diff_sends_its_menu_actions_until_the_plugin_stops() {
+        let dir = not_a_repo();
+        let mut panel =
+            GitDiffPanel::for_plugin(7, dir.path().to_path_buf(), "diff".into(), TWO_FILES);
+        panel.set_plugin_menu(vec![("Refresh".into(), "refresh".into())]);
+
+        let items = panel.context_menu_items();
+        assert_eq!(items.len(), 1);
+        let events = panel.handle_status_action(&items[0].1);
+        assert!(matches!(
+            events.as_slice(),
+            [PanelEvent::PluginAction { panel: 7, action }] if action == "refresh"
+        ));
+
+        panel.set_stopped("The plugin p4 stopped.".into());
+        assert!(panel.context_menu_items().is_empty());
+        assert_eq!(panel.title(), "diff — The plugin p4 stopped.");
+        assert_eq!(panel.diffs.len(), 2);
     }
 
     /// A tab-indented diff line keeps its indentation: `set_string` would

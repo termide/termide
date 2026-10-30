@@ -228,7 +228,8 @@ impl App {
         for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
             for (panel_idx, panel) in group.panels().iter().enumerate() {
                 if let Some(diff) = panel.as_any().downcast_ref::<GitDiffPanel>() {
-                    if diff.repo_path() == repo_path
+                    if diff.loads_from_git()
+                        && diff.repo_path() == repo_path
                         && diff.commit_hash() == commit_hash.as_deref()
                         && diff.file_filter() == file_filter_str.as_deref()
                     {
