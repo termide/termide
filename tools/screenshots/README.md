@@ -73,6 +73,14 @@ keys, so `env/config.toml` binds the layout actions the tapes need to free
 opened with `Alt+M`. Viewers are opened from the file manager (`v` views,
 `Enter` opens), since `termide <file>` always starts the text editor.
 The debug tape needs `F5` and `Ctrl+F8` too: it starts debugging from the command palette, sets the breakpoint with `Alt+y` and unstacks the debug panel with `Ctrl+b`, both bound in `env/config.toml`, and debugs a script and a debug command that `env/debug-scene.sh` adds to the project (debugpy comes from Debian's `python3-debugpy`). Mouse clicks are out of VHS's reach.
+The Perforce tapes (`perforce-*.tape`) need the Perforce client and server,
+which Debian does not package: put `p4` and `p4d` in `vendor/p4/` first (see
+`vendor/README.md`); without them `run.sh` leaves those tapes out of a full
+run. `env/p4-scene.sh` then starts a server on loopback and builds a small
+game project in `/tmp/demo/game` with two submitted changes, a pending
+changelist and a teammate, `alex`, who has a file opened and a map locked;
+no git there, so what the file manager and the gutter show comes from
+Perforce alone. The panel's links are reached with the arrow keys.
 The resource modals are reached with `Alt+M` then `Left` past the disk
 indicator and through the calendar, whose weekday the pinned date fixes.
 `# hint:` comments in a tape are key badges laid over its GIF after the

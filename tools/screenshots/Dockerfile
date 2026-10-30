@@ -34,6 +34,24 @@ COPY tools/screenshots/env/ /opt/shots/env/
 COPY tools/screenshots/fixtures/ /opt/shots/fixtures/
 COPY tools/screenshots/mock-llm/ /opt/shots/mock-llm/
 COPY tools/screenshots/tapes/ /opt/shots/tapes/
+# Perforce for its tapes, when vendor/p4 holds it (see vendor/README.md): x86_64
+# builds only, so an arm64 image gets the amd64 loader to run them, and
+# libfaketime for their architecture so the server's dates are the pinned
+# ones too (the native libfaketime cannot load into them).
+COPY tools/screenshots/vendor/ /opt/shots/vendor/
+RUN if [ -x /opt/shots/vendor/p4/p4d ]; then \
+      if [ "$(dpkg --print-architecture)" != amd64 ]; then \
+        dpkg --add-architecture amd64 && apt-get update \
+        && apt-get install -y --no-install-recommends libc6:amd64 libfaketime:amd64 \
+        && rm -rf /var/lib/apt/lists/*; \
+      fi \
+      && install -D -m 755 -t /usr/local/lib/p4 /opt/shots/vendor/p4/p4 /opt/shots/vendor/p4/p4d \
+      && lib=$(dpkg -L libfaketime:amd64 | grep 'libfaketime.so.1$') \
+      && for tool in p4 p4d; do \
+           printf '#!/bin/sh\n[ -n "$LD_PRELOAD" ] && export LD_PRELOAD=%s\nexec /usr/local/lib/p4/%s "$@"\n' "$lib" "$tool" > /usr/local/bin/$tool \
+           && chmod 755 /usr/local/bin/$tool; \
+         done; \
+    fi
 RUN install -d -o demo -g demo /opt/shots/out \
  && install -D -o demo -g demo -m 644 /opt/shots/env/bashrc /home/demo/.bashrc \
  && install -D -o demo -g demo -m 644 /opt/shots/env/gitconfig /home/demo/.gitconfig

@@ -12,6 +12,11 @@ image=termide-screenshots
 mkdir -p "$here/out"
 if [ $# -eq 0 ]; then
     set -- $(cd "$here/tapes" && ls *.tape | grep -v '^_' | sed 's/\.tape$//') themes
+    # The Perforce tapes need vendor/p4 (see vendor/README.md).
+    if [ ! -x "$here/vendor/p4/p4d" ]; then
+        echo "note: no vendor/p4/p4d; leaving out the perforce tapes" >&2
+        set -- $(printf '%s\n' "$@" | grep -v '^perforce-')
+    fi
 fi
 
 # The theme gallery tape is generated from the built-in theme list.

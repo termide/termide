@@ -13,4 +13,5 @@
 !tools/screenshots/fixtures/
 !tools/screenshots/mock-llm/
 !tools/screenshots/tapes/
+!tools/screenshots/vendor/
 **/target
