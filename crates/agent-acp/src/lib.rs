@@ -2410,7 +2410,19 @@ impl Shared {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(&id);
-            return Err(RpcFailure::new(error, FailureKind::AgentDied));
+            let shut_down = self
+                .writer
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .is_none();
+            // An agent that exited before reading fails the write with a
+            // broken pipe: the same end as a closed connection, whose last
+            // stderr line says why.
+            return Err(if shut_down {
+                RpcFailure::new(error, FailureKind::AgentDied)
+            } else {
+                self.connection_closed(method)
+            });
         }
         let deadline = Instant::now() + timeout;
         loop {
@@ -2433,15 +2445,19 @@ impl Shared {
                     })
                 }
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => {
-                    let mut text = format!("{method}: the agent closed the connection");
-                    if let Some(line) = self.stderr.as_ref().and_then(|t| t.last(STDERR_GRACE)) {
-                        text = format!("{text}: {line}");
-                    }
-                    return Err(RpcFailure::new(text, FailureKind::AgentDied));
-                }
+                Err(RecvTimeoutError::Disconnected) => return Err(self.connection_closed(method)),
             }
         }
+    }
+
+    /// The failure of a request the agent hung up on, with the last line it
+    /// printed to stderr.
+    fn connection_closed(&self, method: &str) -> RpcFailure {
+        let mut text = format!("{method}: the agent closed the connection");
+        if let Some(line) = self.stderr.as_ref().and_then(|t| t.last(STDERR_GRACE)) {
+            text = format!("{text}: {line}");
+        }
+        RpcFailure::new(text, FailureKind::AgentDied)
     }
 
     fn notify(&self, method: &str, params: Value) -> Result<(), String> {
