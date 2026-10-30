@@ -42,6 +42,9 @@ pub(crate) struct SaveJob {
     path: PathBuf,
     queue: VecDeque<PluginKey>,
     waiting: Option<(PluginKey, u64, Answer)>,
+    /// Editing turns off once the file is written: a plugin asked for it
+    /// when editing was turned off over unsaved work.
+    then_view: bool,
 }
 
 /// What the plugins were last told of the current project's editors.
@@ -276,6 +279,7 @@ impl App {
                 path,
                 queue,
                 waiting: None,
+                then_view: false,
             });
         }
 
@@ -348,6 +352,9 @@ impl App {
             if let Some(lsp_manager) = &lsp_manager {
                 editor.notify_lsp_change(lsp_manager);
             }
+            if job.then_view {
+                editor.set_editable(false);
+            }
         }
         self.state.lsp_manager = lsp_manager;
         match saved {
@@ -363,6 +370,33 @@ impl App {
         }
         self.state.needs_redraw = true;
         false
+    }
+
+    /// Write the file of `path` as `Ctrl+S` does, through the plugins that
+    /// see it first, and turn editing off once it is written.
+    pub(super) fn save_then_view(&mut self, project: &Path, path: &Path) {
+        if let Some(save) = self
+            .plugins
+            .editors
+            .saves
+            .iter_mut()
+            .find(|save| save.path == path)
+        {
+            save.then_view = true;
+            return;
+        }
+        let queue = self
+            .plugins
+            .host
+            .subscribers(project, events::FILE_WILL_SAVE)
+            .into();
+        self.plugins.editors.saves.push(SaveJob {
+            project: project.to_path_buf(),
+            path: path.to_path_buf(),
+            queue,
+            waiting: None,
+            then_view: true,
+        });
     }
 
     /// Per tick: tell the current project's plugins which file is focused,
@@ -460,6 +494,7 @@ mod tests {
             path: PathBuf::from("/a/x.rs"),
             queue: VecDeque::new(),
             waiting: None,
+            then_view: false,
         });
         watch.follow_project(Path::new("/b"));
         assert_eq!(watch.project.as_deref(), Some(Path::new("/b")));

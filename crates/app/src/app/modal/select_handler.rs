@@ -64,7 +64,7 @@ impl App {
     /// Sets the editor's "uploading" flag (spinner in header), tracks the
     /// operation in the Operations panel, and shows an error modal on failure.
     /// Returns `true` if the upload was queued successfully.
-    fn queue_remote_editor_upload(
+    pub(in crate::app) fn queue_remote_editor_upload(
         &mut self,
         temp_path: std::path::PathBuf,
         remote_path: termide_vfs::VfsPath,

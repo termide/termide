@@ -702,6 +702,30 @@ impl Editor {
         std::mem::take(&mut self.gated_save)
     }
 
+    /// Turn editing on or off, whatever the file's permission: as the
+    /// app's answer about unsaved work does.
+    pub fn set_editable(&mut self, editable: bool) {
+        self.config.read_only = !editable;
+    }
+
+    /// Whether the file lives on a remote file system, saved by an upload.
+    pub fn is_remote(&self) -> bool {
+        self.file_state.is_remote()
+    }
+
+    /// `Ctrl+E` or a click on `Edit:`: switch between viewing and editing.
+    /// Turning it off over unsaved work in a file is left to the app, which
+    /// asks what to do with the work: `true` then.
+    #[must_use]
+    pub(crate) fn toggle_read_only(&mut self) -> bool {
+        let editable = self.config.read_only;
+        if !editable && self.buffer.is_modified() && self.buffer.file_path().is_some() {
+            return true;
+        }
+        self.config.read_only = !editable;
+        false
+    }
+
     /// The local files this editor wrote since the last call, oldest first.
     pub fn take_saved_paths(&mut self) -> Vec<PathBuf> {
         std::mem::take(&mut self.saved_paths)

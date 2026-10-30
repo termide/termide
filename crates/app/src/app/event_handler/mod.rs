@@ -95,6 +95,8 @@ impl App {
                 self.event_swap_active_to_text(path)?;
             }
 
+            PanelEvent::StopEditingUnsaved(path) => self.ask_stop_editing(path),
+
             PanelEvent::ViewMarkdown(path) => {
                 self.event_view_markdown(path)?;
             }

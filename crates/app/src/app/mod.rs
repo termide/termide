@@ -58,6 +58,7 @@ mod plugin_windows;
 mod plugins;
 mod project_layout;
 mod recent_destinations;
+mod stop_editing;
 mod vault;
 mod watcher;
 mod workspace_edit;

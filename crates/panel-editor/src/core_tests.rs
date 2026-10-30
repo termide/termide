@@ -509,6 +509,32 @@ fn a_buffer_with_unsaved_work_keeps_it_and_flags_the_conflict() {
     assert!(editor.buffer().is_modified());
 }
 
+/// Turning editing off over unsaved work in a file is the app's to ask
+/// about: the editor stays editable until it is answered. A saved file, or
+/// a buffer without a file, switches at once.
+#[test]
+fn ctrl_e_over_unsaved_work_asks_first() {
+    let file = NamedTempFile::new().unwrap();
+    let mut editor =
+        Editor::open_file_with_config(file.path().to_path_buf(), EditorConfig::default()).unwrap();
+    assert!(!editor.is_read_only());
+    let _ = editor.insert_char('x');
+    assert!(editor.toggle_read_only(), "the app asks");
+    assert!(!editor.is_read_only());
+
+    editor.set_editable(false);
+    assert!(
+        !editor.toggle_read_only(),
+        "back to editing needs no question"
+    );
+    assert!(!editor.is_read_only());
+
+    let mut scratch = Editor::new();
+    let _ = scratch.insert_char('x');
+    assert!(!scratch.toggle_read_only());
+    assert!(scratch.is_read_only());
+}
+
 /// A TAB (or any control character) in a line must not reach a cell: the
 /// host terminal would move its cursor to the next tab stop and every cell
 /// written after it would land off by the difference (#55). A TAB is drawn

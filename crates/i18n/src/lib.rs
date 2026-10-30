@@ -92,6 +92,9 @@ pub trait Translation: Send + Sync {
     fn editor_close_unsaved_question(&self) -> &str;
     fn editor_save_and_close(&self) -> &str;
     fn editor_close_without_saving(&self) -> &str;
+    fn editor_stop_editing(&self) -> &str;
+    fn editor_save_and_view(&self) -> &str;
+    fn editor_view_without_saving(&self) -> &str;
     fn editor_cancel(&self) -> &str;
     fn editor_close_external(&self) -> &str;
     fn editor_close_external_question(&self) -> &str;

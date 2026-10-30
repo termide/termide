@@ -504,6 +504,11 @@ impl App {
                 PendingAction::CloseEditorWithSave => {
                     self.handle_close_editor_with_save(value)?;
                 }
+                PendingAction::StopEditing { path } => {
+                    if let Some(&choice) = value.downcast_ref::<usize>() {
+                        self.stop_editing(&path, choice);
+                    }
+                }
                 PendingAction::CloseEditorExternal => {
                     self.handle_close_editor_external(value)?;
                 }

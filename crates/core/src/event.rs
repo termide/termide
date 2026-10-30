@@ -620,6 +620,11 @@ pub enum PanelEvent {
     /// Swap the active panel in place for a read-only text editor of `path`
     SwapActiveToText(PathBuf),
 
+    /// Editing was turned off over unsaved work in the editor of `path`
+    /// (text or hex): ask whether to save it or discard it first, or keep
+    /// editing.
+    StopEditingUnsaved(PathBuf),
+
     /// Open a markdown file in the rendered preview panel (read-only)
     ViewMarkdown(PathBuf),
 

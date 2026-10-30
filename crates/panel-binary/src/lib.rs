@@ -194,6 +194,32 @@ impl BinaryPanel {
         self.pending_nibble = None;
     }
 
+    /// Switch between viewing and editing. Over unsaved edits the app asks
+    /// first whether to save or discard them.
+    fn toggle_edit(&mut self) -> Vec<PanelEvent> {
+        if self.editable && self.is_modified() {
+            return vec![PanelEvent::StopEditingUnsaved(self.file_path.clone())];
+        }
+        self.editable = !self.editable;
+        vec![PanelEvent::NeedsRedraw]
+    }
+
+    /// Turn editing on or off, as the app's answer about unsaved edits does.
+    pub fn set_editable(&mut self, editable: bool) {
+        self.editable = editable;
+    }
+
+    /// The file shown.
+    pub fn file_path(&self) -> &Path {
+        &self.file_path
+    }
+
+    /// Drop the unsaved edits.
+    pub fn discard_edits(&mut self) {
+        self.edits.clear();
+        self.pending_nibble = None;
+    }
+
     /// Toggle hex ↔ text. A real text file swaps in place for the editor; a
     /// binary file (which the editor can't open) toggles an in-panel lossy
     /// text view instead.
@@ -452,10 +478,7 @@ impl Panel for BinaryPanel {
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
         match action {
             "toggle" => self.toggle_view(),
-            "toggle_edit" => {
-                self.editable = !self.editable;
-                vec![PanelEvent::NeedsRedraw]
-            }
+            "toggle_edit" => self.toggle_edit(),
             _ => vec![],
         }
     }
@@ -523,8 +546,7 @@ impl Panel for BinaryPanel {
         }
         // Edit/view toggle (Ctrl+E), mirroring the text editor's status chip.
         if self.hotkeys.matches("toggle_view", &key) {
-            self.editable = !self.editable;
-            return vec![PanelEvent::NeedsRedraw];
+            return self.toggle_edit();
         }
         // Ctrl+R: re-read the file from disk (pick up external changes), keeping
         // the cursor. Skipped while there are unsaved edits so they aren't lost.
@@ -694,6 +716,22 @@ mod tests {
         assert!(p.is_editable(), "clicking Edit enables editing");
         p.handle_status_action("toggle_edit");
         assert!(!p.is_editable(), "clicking Edit again returns to view-only");
+    }
+
+    #[test]
+    fn leaving_edit_over_unsaved_edits_asks_the_app_first() {
+        let mut p = panel_with(10, 80, 10);
+        p.set_editable(true);
+        p.edits.insert(1, b'X');
+        assert!(matches!(
+            p.handle_status_action("toggle_edit").as_slice(),
+            [PanelEvent::StopEditingUnsaved(_)]
+        ));
+        assert!(p.is_editable(), "editing goes on until the app's answer");
+        p.discard_edits();
+        assert!(!p.is_modified());
+        p.handle_status_action("toggle_edit");
+        assert!(!p.is_editable());
     }
 
     #[test]

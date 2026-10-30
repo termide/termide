@@ -239,7 +239,9 @@ overwrites the byte under the cursor — two hex nibbles in the hex zone, a
 character in the ASCII zone — without changing the file length. Unsaved edits
 show `*` in the title; `Ctrl+S` saves after a confirmation, first backing the
 original up to `<file>.bak` — or to the first free `<file>.bak.N` when that
-exists, so an earlier backup is never overwritten.
+exists, so an earlier backup is never overwritten. `Ctrl+E` (or the `Edit:`
+chip) switches between editing and viewing; over unsaved edits it first asks
+whether to save them (with the backup), discard them, or keep editing.
 
 `Ctrl+L` (or the `[Hex]`/`[Text]` chip in the status bar) toggles between hex
 and text. For a real text file this swaps the panel in place for a read-only

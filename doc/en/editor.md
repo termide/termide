@@ -162,7 +162,9 @@ right, shared info follows, and the variable-width position sits last:
   edit/view mode carries over: leaving an editable buffer opens an editable
   hex editor, and vice versa.
 - **`Edit: Yes`/`Edit: No`** — toggles read-only, also bound to `Ctrl+E`
-  (`[viewer.keybindings] toggle_view`).
+  (`[viewer.keybindings] toggle_view`). Turning editing off over unsaved
+  changes first asks whether to save them, discard them (the file is read
+  again) or keep editing.
 - **`Highlight: <lang>`** — opens the language picker (below).
 - **`Tab: <n>`** — sets the tab size. A tab character is drawn as blank
   space up to the next multiple of it; with word wrap, tab stops start over

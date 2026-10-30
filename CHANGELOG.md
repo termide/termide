@@ -5,6 +5,11 @@ All notable changes to Termide will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Leaving edit mode asks about unsaved changes.** `Ctrl+E` or a click on `Edit: Yes` in a text editor with unsaved changes switched to viewing and kept them in the buffer, and in the hex editor the edits stayed pending out of sight, so closing the view later could lose them without a word. Both now ask first: save and view, discard the changes and view, or cancel and keep editing.
+
 ## [0.47.1] - 2026-10-29
 
 [0.47.1]: https://github.com/termide/termide/releases/tag/0.47.1

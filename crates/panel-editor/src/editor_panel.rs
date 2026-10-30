@@ -30,6 +30,17 @@ use crate::{
 use super::{build_editor_hotkey_table, Editor};
 
 impl Editor {
+    /// `Ctrl+E` or a click on `Edit:`, as events: the app asks about unsaved
+    /// work before editing turns off over it.
+    fn toggle_edit_events(&mut self) -> Vec<PanelEvent> {
+        if self.toggle_read_only() {
+            if let Some(path) = self.file_path() {
+                return vec![PanelEvent::StopEditingUnsaved(path.to_path_buf())];
+            }
+        }
+        vec![PanelEvent::NeedsRedraw]
+    }
+
     /// Apply a config-defined keyword highlighter when this file's extension
     /// has no tree-sitter grammar (e.g. an in-development language). Tree-sitter
     /// grammars always win; a no-match clears any previous custom syntax.
@@ -421,8 +432,7 @@ impl Panel for Editor {
                     }
                     return vec![ev];
                 }
-                self.config.read_only = !self.config.read_only;
-                vec![PanelEvent::NeedsRedraw]
+                self.toggle_edit_events()
             }
             "to_hex" => {
                 if let Some(path) = self.file_path().map(|p| p.to_path_buf()) {
@@ -845,8 +855,7 @@ impl Editor {
                 }
                 return vec![ev];
             }
-            self.config.read_only = !self.config.read_only;
-            return vec![PanelEvent::NeedsRedraw];
+            return self.toggle_edit_events();
         }
 
         // The inline find/replace bar (before vim / command processing). Tab

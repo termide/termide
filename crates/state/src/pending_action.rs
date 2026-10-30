@@ -108,6 +108,9 @@ pub enum PendingAction {
     ClosePanel,
     /// Close editor with choice: save, don't save, cancel
     CloseEditorWithSave,
+    /// Editing turned off over unsaved work in the editor of `path`, text or
+    /// hex: save it, discard it, or keep editing.
+    StopEditing { path: PathBuf },
     /// A selection a panel raised with `SelectAction::Custom`; the chosen
     /// index is delivered back to the panels as `PanelCommand::SelectionMade`
     /// with this action string.
