@@ -795,19 +795,15 @@ impl Perforce {
         Ok(())
     }
 
-    /// Submit a changelist: the default one with a description asked for,
-    /// a numbered one with its own. Shows what p4 answered.
+    /// Submit a changelist: the default one with a description and the
+    /// files to go asked for, a numbered one with its own. Shows what p4
+    /// answered.
     fn submit(&self, change: &str) -> Result<(), P4Error> {
         let out = if change == "default" {
-            let description = self
-                .termide
-                .ask("Submit", "Description of the change:")
-                .map(|d| d.trim().to_string())
-                .filter(|d| !d.is_empty());
-            let Some(description) = description else {
+            let Some(out) = self.submit_default()? else {
                 return Ok(());
             };
-            self.p4.run(&["submit", "-d", &description], None)?
+            out
         } else {
             if !self
                 .termide
@@ -821,6 +817,69 @@ impl Perforce {
         self.termide
             .message("Submitted", if out.is_empty() { "Done." } else { out });
         Ok(())
+    }
+
+    /// Ask for the default changelist's description and which of its files
+    /// go, then submit them: all of them as they are, a part of them moved
+    /// to a changelist of their own first. What p4 answered, or `None` when
+    /// nothing was submitted.
+    fn submit_default(&self) -> Result<Option<String>, P4Error> {
+        // Asked anew: files may have been opened since the panel was shown.
+        let opened = self.opened_files()?;
+        let files: Vec<&Record> = opened
+            .iter()
+            .filter(|r| r.get("change").is_none_or(|c| c == "default"))
+            .collect();
+        let items: Vec<Value> = files
+            .iter()
+            .map(|r| {
+                json!({
+                    "label": self.p4.relative(Path::new(&r["clientFile"])),
+                    "detail": r.get("action").map_or("", String::as_str),
+                    "checked": true,
+                })
+            })
+            .collect();
+        let answer = self.termide.dialog(
+            "Submit the default changelist",
+            json!({
+                "input": { "label": "Description of the change", "lines": 4 },
+                "list": { "items": items, "pick": "many" },
+                "buttons": ["Submit", "Cancel"],
+            }),
+        );
+        let Some(answer) = answer.filter(|a| a["button"] == 0) else {
+            return Ok(None);
+        };
+        let description = answer["text"].as_str().unwrap_or_default().trim();
+        if description.is_empty() {
+            self.termide
+                .message("Not submitted", "A change needs a description.");
+            return Ok(None);
+        }
+        let picked: Vec<&str> = answer["checked"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(Value::as_u64)
+            .filter_map(|i| files.get(usize::try_from(i).ok()?))
+            .filter_map(|r| r.get("depotFile").map(String::as_str))
+            .collect();
+        if picked.is_empty() {
+            self.termide
+                .message("Not submitted", "No files were picked.");
+            return Ok(None);
+        }
+        if picked.len() == files.len() {
+            return self.p4.run(&["submit", "-d", description], None).map(Some);
+        }
+        let form = self.p4.run(&["change", "-o"], None)?;
+        let created = self
+            .p4
+            .run_with_input(&["change", "-i"], &change_spec(&form, description, &picked))?;
+        let change = created_change(&created)
+            .ok_or_else(|| P4Error(format!("p4 change: {}", created.trim())))?;
+        self.p4.run(&["submit", "-c", &change], None).map(Some)
     }
 
     // ------------------------------------------------------------- tools
@@ -959,6 +1018,53 @@ pub fn describe(record: Option<&Record>) -> String {
 
 /// `word` as one word for a shell: as it is when it holds nothing a shell
 /// reads specially, else in single quotes.
+/// The new changelist form `p4 change -o` gave, with `description` and
+/// only `files` (depot paths) of the default changelist.
+fn change_spec(form: &str, description: &str, files: &[&str]) -> String {
+    let mut out = String::new();
+    // Inside a field being written anew: its old lines are dropped.
+    let mut replaced = false;
+    for line in form.lines() {
+        let starts_field = !line.is_empty() && !line.starts_with([' ', '\t', '#']);
+        if starts_field {
+            replaced = false;
+        }
+        if replaced {
+            continue;
+        }
+        let lines: Vec<&str> = if line.starts_with("Description:") {
+            description.lines().collect()
+        } else if line.starts_with("Files:") {
+            files.to_vec()
+        } else {
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        };
+        out.push_str(line.split_once(':').map_or(line, |(field, _)| field));
+        out.push_str(":\n");
+        for value in lines {
+            out.push('\t');
+            out.push_str(value);
+            out.push('\n');
+        }
+        out.push('\n');
+        replaced = true;
+    }
+    out
+}
+
+/// The number of the changelist `p4 change -i` said it created.
+fn created_change(out: &str) -> Option<String> {
+    let mut words = out.split_whitespace();
+    (words.next()? == "Change")
+        .then(|| words.next())
+        .flatten()
+        .filter(|n| n.chars().all(|c| c.is_ascii_digit()))
+        .filter(|_| words.next() == Some("created"))
+        .map(str::to_string)
+}
+
 fn shell_word(word: &str) -> String {
     let plain = !word.is_empty()
         && word
@@ -974,6 +1080,26 @@ fn shell_word(word: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_part_of_the_default_changelist_gets_a_form_of_its_own() {
+        let form = "# A Perforce Change Specification.\n#  Change: The change number.\n\n\
+                    Change:\tnew\n\nClient:\tws\n\nUser:\tbob\n\nStatus:\tnew\n\n\
+                    Description:\n\t<enter description here>\n\n\
+                    Files:\n\t//depot/a.c\t# edit\n\t//depot/b.c\t# add\n";
+        assert_eq!(
+            change_spec(form, "Fix it\nand more", &["//depot/b.c"]),
+            "# A Perforce Change Specification.\n#  Change: The change number.\n\n\
+             Change:\tnew\n\nClient:\tws\n\nUser:\tbob\n\nStatus:\tnew\n\n\
+             Description:\n\tFix it\n\tand more\n\n\
+             Files:\n\t//depot/b.c\n\n"
+        );
+        assert_eq!(
+            created_change("Change 42 created with 1 open file(s).\n").as_deref(),
+            Some("42")
+        );
+        assert_eq!(created_change("Change 42 updated."), None);
+    }
 
     fn record(fields: &[(&str, &str)]) -> Record {
         fields

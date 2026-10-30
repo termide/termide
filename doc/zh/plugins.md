@@ -224,6 +224,24 @@ termide 会与服务器一起询问文件所属项目的插件，并给出一个
 | `window/input` | `title`、`prompt`、`default`（可选） | 文本，或 `null` |
 | `window/form` | `title`、`fields`：`[{ "name", "label", "type", "options"?, "default"? }]`，`type` 为 `text`、`number`、`bool` 或 `select` | `{ name: value }`（开关为布尔值，数字为数字），或 `null` |
 | `window/message` | `title`、`message` | `null` |
+| `window/dialog` | `title`，以及 `message`、`input`、`list`、`buttons` 中的任意几项（见下） | `{ "button", "text"?, "checked"?, "selected"? }`，或 `null` |
+
+**对话框**由若干部分组成，不需要的部分可以省略：`message` 是文字；`input`
+是 `{ "label"?, "default"?, "lines"? }`，1 到 10 行的输入框；`list` 是
+`{ "items", "pick"? }`，条目为字符串或 `{ "label", "detail"?, "checked"? }`，
+`pick` 为 `none`（只读，默认）、`one`（选一行）或 `many`（勾选多行）；
+`buttons` 最多 6 个按钮文字，省略时为 `["OK"]`。`Tab` 和 `Shift+Tab` 在各部分之间切换。
+在单行输入框和列表中，`Enter` 按下第一个按钮；在多行输入框中则换行。`Space`
+勾选一行；`←`/`→` 选择按钮，`Enter` 按下它；点击一行即勾选，点击按钮即按下。
+回答包含按下按钮的序号，以及对话框中有的部分：输入框的 `text`、勾选列表中
+被勾选的行 `checked`、单选列表中选中的行 `selected`。
+
+```json
+{ "title": "Submit",
+  "input": { "label": "Description", "lines": 4 },
+  "list": { "items": [{ "label": "src/a.c", "detail": "edit", "checked": true }], "pick": "many" },
+  "buttons": ["Submit", "Cancel"] }
+```
 
 每个窗口都由 termide 加上标题 `🧩 <插件> · <title>`，使它绝不会被当成 termide 自己的提问；插件给出的文字会去掉控制字符与不可见字符。没有隐藏输入：要求输入密码的窗口正是钓鱼插件会显示的东西，因此机密应放在插件的 `settings` 或其环境中。窗口会排在屏幕上已有的窗口之后，并且只在其插件所属项目为当前项目时显示；每个插件一次只能有一个窗口，期间再请求会以 busy 被拒绝。插件停止或其项目关闭时，它的窗口会被撤下。
 

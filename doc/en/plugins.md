@@ -341,6 +341,27 @@ request is answered when the user closes the window: with the answer, or
 | `window/input` | `title`, `prompt`, `default` (optional) | the text, or `null` |
 | `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` one of `text`, `number`, `bool`, `select` | `{ name: value }` (switches as booleans, numbers as numbers), or `null` |
 | `window/message` | `title`, `message` | `null` |
+| `window/dialog` | `title`, and any of `message`, `input`, `list`, `buttons` (below) | `{ "button", "text"?, "checked"?, "selected"? }`, or `null` |
+
+A **dialog** is put together from parts, each left out when not needed: a
+`message`; an `input`, `{ "label"?, "default"?, "lines"? }`, a text field of
+1 to 10 lines; a `list`, `{ "items", "pick"? }`, whose items are strings or
+`{ "label", "detail"?, "checked"? }` and whose `pick` is `none` (only to
+read, the default), `one` or `many` (to tick); and `buttons`, up to 6
+labels, `["OK"]` when left out. `Tab` and `Shift+Tab` go from part to part.
+In a one-line field, and in the list, `Enter` presses the first button; in a
+field of several lines it starts a new line. `Space` ticks a row; `←`/`→`
+choose a button and `Enter` presses it; a click on a row ticks it, on a
+button presses it. The answer has the button pressed, by its index, then
+only what the dialog has: the field's `text`, the `checked` rows of a list to
+tick, the `selected` row of a list to pick from.
+
+```json
+{ "title": "Submit",
+  "input": { "label": "Description", "lines": 4 },
+  "list": { "items": [{ "label": "src/a.c", "detail": "edit", "checked": true }], "pick": "many" },
+  "buttons": ["Submit", "Cancel"] }
+```
 
 Every window is headed `🧩 <plugin> · <title>` by termide, so that it never
 passes for termide's own questions; the plugin's words are cleaned of control

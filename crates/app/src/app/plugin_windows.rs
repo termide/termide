@@ -1,5 +1,6 @@
 //! Windows a plugin asks for: a question, a choice, a line of text, a form,
-//! a message. Each is one of termide's own modals, headed `🧩 <plugin>` by
+//! a message, or a dialog put together from a message, a text field, a list
+//! and buttons. Each is one of termide's own modals, headed `🧩 <plugin>` by
 //! termide so that it never passes for termide's own questions; a plugin
 //! picks only the kind and the words. There is no hidden input: a window
 //! asking for a password is what a phishing plugin would show.
@@ -26,6 +27,8 @@ const MAX_FIELDS: usize = 12;
 const MAX_ITEMS: usize = 200;
 /// The longest message, in characters.
 const MAX_MESSAGE: usize = 2000;
+/// The most buttons a dialog has.
+const MAX_BUTTONS: usize = 6;
 
 /// What the window is.
 #[derive(Debug, Clone, PartialEq)]
@@ -35,6 +38,7 @@ enum Kind {
     Input { prompt: String, default: String },
     Form { fields: Vec<CommandParam> },
     Message { message: String },
+    Dialog(termide_modal::dialog::DialogSpec),
 }
 
 /// A window asked for and not answered yet.
@@ -135,7 +139,85 @@ fn parse(method: &str, params: &Value) -> Result<Kind, String> {
             }
             Kind::Form { fields }
         }
+        protocol::WINDOW_DIALOG => Kind::Dialog(parse_dialog(params)?),
         _ => return Err(format!("no window {method}")),
+    })
+}
+
+/// The dialog `params` describe; its title is set when it is queued.
+fn parse_dialog(params: &Value) -> Result<termide_modal::dialog::DialogSpec, String> {
+    use termide_modal::dialog::{DialogInput, DialogItem, DialogPick, DialogSpec};
+    let short = |value: &Value| {
+        protocol::clean_text(value.as_str().unwrap_or_default(), protocol::MAX_TITLE * 2)
+    };
+    let input = match &params["input"] {
+        Value::Null => None,
+        Value::Object(input) => Some(DialogInput {
+            label: short(&input.get("label").cloned().unwrap_or_default()),
+            text: clean_message(
+                input
+                    .get("default")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
+            ),
+            lines: input
+                .get("lines")
+                .and_then(Value::as_u64)
+                .map_or(1, |lines| lines.clamp(1, 10) as u16),
+        }),
+        _ => return Err("`input` must be an object".into()),
+    };
+    let (items, pick) = match &params["list"] {
+        Value::Null => (Vec::new(), DialogPick::None),
+        Value::Object(list) => {
+            let items: Vec<DialogItem> = list
+                .get("items")
+                .and_then(Value::as_array)
+                .ok_or("`list.items` must be a list")?
+                .iter()
+                .take(MAX_ITEMS)
+                .map(|item| match item {
+                    Value::String(label) => DialogItem {
+                        label: protocol::clean_text(label, protocol::MAX_TITLE * 2),
+                        ..DialogItem::default()
+                    },
+                    item => DialogItem {
+                        label: short(&item["label"]),
+                        detail: short(&item["detail"]),
+                        checked: item["checked"].as_bool().unwrap_or(false),
+                    },
+                })
+                .collect();
+            let pick = match list.get("pick").and_then(Value::as_str) {
+                None | Some("none") => DialogPick::None,
+                Some("one") => DialogPick::One,
+                Some("many") => DialogPick::Many,
+                Some(other) => return Err(format!("`list.pick` {other}: none, one or many")),
+            };
+            (items, pick)
+        }
+        _ => return Err("`list` must be an object".into()),
+    };
+    let buttons: Vec<String> = match &params["buttons"] {
+        Value::Null => vec!["OK".to_string()],
+        Value::Array(buttons) => buttons
+            .iter()
+            .take(MAX_BUTTONS)
+            .map(short)
+            .filter(|label| !label.is_empty())
+            .collect(),
+        _ => return Err("`buttons` must be a list of strings".into()),
+    };
+    if buttons.is_empty() {
+        return Err("`buttons` is empty".into());
+    }
+    Ok(DialogSpec {
+        title: String::new(),
+        message: clean_message(params["message"].as_str().unwrap_or_default()),
+        input,
+        items,
+        pick,
+        buttons,
     })
 }
 
@@ -256,6 +338,12 @@ impl App {
                 termide_modal::CommandParamsModal::new(window.key.name.clone(), fields.clone())
                     .with_title(window.title.clone()),
             )),
+            Kind::Dialog(spec) => ActiveModal::Dialog(Box::new(termide_modal::DialogModal::new(
+                termide_modal::dialog::DialogSpec {
+                    title: window.title.clone(),
+                    ..spec.clone()
+                },
+            ))),
         };
         self.state.set_pending_action(
             PendingAction::PluginWindow {
@@ -285,6 +373,9 @@ impl App {
             Kind::Form { fields } => value
                 .downcast_ref::<termide_modal::CommandParamsResult>()
                 .map_or(Value::Null, |result| form_answer(fields, &result.values)),
+            Kind::Dialog(spec) => value
+                .downcast_ref::<termide_modal::dialog::DialogAnswer>()
+                .map_or(Value::Null, |answer| dialog_answer(spec, answer)),
         };
         self.plugins
             .host
@@ -354,6 +445,29 @@ fn form_answer(
     Value::Object(out)
 }
 
+/// A dialog's answer as the plugin gets it: only the parts the dialog has.
+fn dialog_answer(
+    spec: &termide_modal::dialog::DialogSpec,
+    answer: &termide_modal::dialog::DialogAnswer,
+) -> Value {
+    use termide_modal::dialog::DialogPick;
+    let mut out = Map::new();
+    out.insert("button".into(), json!(answer.button));
+    if let Some(text) = &answer.text {
+        out.insert("text".into(), json!(text));
+    }
+    match spec.pick {
+        DialogPick::Many => {
+            out.insert("checked".into(), json!(answer.checked));
+        }
+        DialogPick::One => {
+            out.insert("selected".into(), json!(answer.selected));
+        }
+        DialogPick::None => {}
+    }
+    Value::Object(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -389,6 +503,52 @@ mod tests {
         assert_eq!(fields[0].options, ["a", "b"]);
         assert!(is_window_method("window/form"));
         assert!(!is_window_method("window/notify"));
+    }
+
+    #[test]
+    fn a_dialog_takes_its_parts_and_answers_with_them() {
+        use termide_modal::dialog::{DialogAnswer, DialogPick};
+        let Kind::Dialog(spec) = parse(
+            "window/dialog",
+            &json!({
+                "message": "Submit?\nReally",
+                "input": { "label": "Description", "lines": 40 },
+                "list": { "items": ["a.c", { "label": "b.c", "detail": "add", "checked": true }], "pick": "many" },
+                "buttons": ["Submit", "", "Cancel"],
+            }),
+        )
+        .unwrap() else {
+            panic!("a dialog");
+        };
+        assert_eq!(spec.message, "Submit?\nReally");
+        assert_eq!(spec.input.as_ref().unwrap().lines, 10);
+        assert_eq!(spec.items[1].detail, "add");
+        assert!(!spec.items[0].checked && spec.items[1].checked);
+        assert_eq!(spec.pick, DialogPick::Many);
+        assert_eq!(spec.buttons, ["Submit", "Cancel"]);
+        let answer = DialogAnswer {
+            button: 0,
+            text: Some("fix".into()),
+            checked: vec![1],
+            selected: None,
+        };
+        assert_eq!(
+            dialog_answer(&spec, &answer),
+            json!({ "button": 0, "text": "fix", "checked": [1] })
+        );
+
+        let Kind::Dialog(spec) = parse("window/dialog", &json!({ "message": "Hi" })).unwrap()
+        else {
+            panic!("a dialog");
+        };
+        assert_eq!(spec.buttons, ["OK"]);
+        assert!(spec.input.is_none() && spec.items.is_empty());
+        assert!(parse("window/dialog", &json!({ "buttons": [] })).is_err());
+        assert!(parse(
+            "window/dialog",
+            &json!({ "list": { "items": [], "pick": "all" } })
+        )
+        .is_err());
     }
 
     #[test]

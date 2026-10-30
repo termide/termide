@@ -26,6 +26,9 @@ case "$*" in
 "-ztag fstat -Ro $root/...")
     if [ -f "$root/.opened" ]; then
         printf '... depotFile //depot/a.c\n... clientFile %s/a.c\n... action edit\n... change default\n' "$root"
+        if [ -f "$root/.b-opened" ]; then
+            printf '\n... depotFile //depot/b.c\n... clientFile %s/b.c\n... action add\n... change default\n' "$root"
+        fi
     else
         echo "$root/... - file(s) not opened on this client." >&2
     fi ;;
@@ -43,6 +46,15 @@ case "$*" in
 "revert $root/a.c")
     rm -f "$root/.opened"; chmod u-w "$root/a.c"
     echo "//depot/a.c#3 - was edit, reverted" ;;
+"change -o")
+    printf 'Change:\tnew\n\nClient:\tws\n\nStatus:\tnew\n\nDescription:\n\t<enter description here>\n\n'
+    printf 'Files:\n\t//depot/a.c\t# edit\n\t//depot/b.c\t# add\n' ;;
+"change -i")
+    cat > "$root/.spec"
+    echo "Change 7 created with 1 open file(s)." ;;
+"submit -c 7")
+    rm -f "$root/.b-opened"
+    echo "Change 7 submitted." ;;
 *)
     echo "$* - no such file(s)." >&2 ;;
 esac
@@ -106,6 +118,9 @@ fn shows_the_state_and_opens_for_edit() {
     // What each `window/choose` is answered, in turn.
     let choices: Arc<Mutex<Vec<Value>>> = Arc::default();
     let picks = Arc::clone(&choices);
+    // The dialogs and messages shown.
+    let windows: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let shown = Arc::clone(&windows);
     let slot: Arc<Mutex<Option<Arc<Peer>>>> = Arc::new(Mutex::new(None));
     let (answering, seen, questions, marked) = (
         Arc::clone(&slot),
@@ -153,6 +168,16 @@ fn shows_the_state_and_opens_for_edit() {
                 "panel/open" => {
                     opened_panels.lock().unwrap().push(params);
                     json!({ "panel": 1 })
+                }
+                "panel/update" => Value::Null,
+                "window/dialog" => {
+                    shown.lock().unwrap().push(params);
+                    // The second file only, with a description.
+                    json!({ "button": 0, "text": "Fix it", "checked": [1] })
+                }
+                "window/message" => {
+                    shown.lock().unwrap().push(params);
+                    Value::Null
                 }
                 "window/notify" => panic!("unexpected notice: {params}"),
                 other => panic!("unexpected request {other}"),
@@ -310,6 +335,36 @@ fn shows_the_state_and_opens_for_edit() {
         panel["diff"],
         "--- a/a.c\n+++ b/a.c\n@@ -1 +1 @@\n-int main;\n+int main(void);\n"
     );
+
+    // Submitting the default changelist asks for a description and the
+    // files to go; a part of them moves to a changelist of its own first.
+    std::fs::write(root.join(".b-opened"), "").unwrap();
+    peer.request(
+        "panel/action",
+        json!({ "panel": 1, "action": "submit-default" }),
+        wait,
+        &|| false,
+    )
+    .unwrap();
+    let shown = std::mem::take(&mut *windows.lock().unwrap());
+    let dialog = &shown[0];
+    assert_eq!(dialog["title"], "Submit the default changelist");
+    assert_eq!(dialog["input"]["lines"], 4);
+    assert_eq!(
+        dialog["list"]["items"],
+        json!([
+            { "label": "a.c", "detail": "edit", "checked": true },
+            { "label": "b.c", "detail": "add", "checked": true },
+        ])
+    );
+    let spec = std::fs::read_to_string(root.join(".spec")).unwrap();
+    assert!(
+        spec.contains("Description:\n\tFix it\n") && spec.contains("Files:\n\t//depot/b.c\n\n"),
+        "{spec}"
+    );
+    assert!(!spec.contains("a.c"), "{spec}");
+    assert_eq!(shown[1]["message"], "Change 7 submitted.");
+    assert!(!root.join(".b-opened").exists());
 
     // Turning editing off on the opened file asks what to do with it.
     let stop = |pick: Value, modified: bool| {

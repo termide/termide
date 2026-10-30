@@ -33,6 +33,7 @@ pub mod confirm;
 pub mod conflict;
 pub mod db_filter;
 pub mod db_row_edit;
+pub mod dialog;
 mod dir_tree;
 pub mod directory_picker;
 pub mod directory_switcher;
@@ -63,6 +64,7 @@ pub use confirm::ConfirmModal;
 pub use conflict::{ConflictModal, ConflictResolution};
 pub use db_filter::{DbFilterColumn, DbFilterCondition, DbFilterModal, DbFilterResult};
 pub use db_row_edit::{DbRowEditColumn, DbRowEditModal, DbRowEditResult};
+pub use dialog::DialogModal;
 pub use directory_picker::DirectoryPickerModal;
 pub use directory_switcher::{DirectoryItem, DirectorySwitcherModal};
 pub use editable_select::EditableSelectModal;
@@ -96,6 +98,7 @@ pub enum ActiveModal {
     Select(Box<SelectModal>),
     /// Checkboxes under group headings, applied together
     Checklist(Box<ChecklistModal>),
+    Dialog(Box<DialogModal>),
     /// File conflict resolution modal
     Conflict(Box<ConflictModal>),
     /// Information modal
@@ -151,6 +154,7 @@ macro_rules! dispatch_modal {
             ActiveModal::Input(m) => m.$method($($arg),*),
             ActiveModal::Select(m) => m.$method($($arg),*),
             ActiveModal::Checklist(m) => m.$method($($arg),*),
+            ActiveModal::Dialog(m) => m.$method($($arg),*),
             ActiveModal::Conflict(m) => m.$method($($arg),*),
             ActiveModal::Info(m) => m.$method($($arg),*),
             ActiveModal::InfoAction(m) => m.$method($($arg),*),
@@ -182,6 +186,7 @@ macro_rules! dispatch_modal_erased {
             ActiveModal::Input(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Select(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Checklist(m) => m.$method($($arg),*)?.map(erase_modal_result),
+            ActiveModal::Dialog(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Conflict(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Info(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::InfoAction(m) => m.$method($($arg),*)?.map(erase_modal_result),

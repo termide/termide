@@ -1,7 +1,8 @@
 # Perforce, before a submit: the opened files by changelist, in a tree of
-# folders (Alt+G, git's status key, in a project outside git), the diff of one against the depot,
-# and the default changelist submitted with a description asked for. Space
-# lists a row's actions; Enter runs the first, a group's submit.
+# folders (Alt+G, git's status key, in a project outside git), the diff of
+# one against the depot, and the default changelist submitted from a
+# dialog: a description and the files to go. Space lists a row's actions;
+# Enter runs the first, a group's submit.
 # The `# hint:` lines are the key badges keys.mjs lays over the recording.
 Output out/perforce-opened.gif
 Source tapes/_settings.tape
@@ -69,8 +70,17 @@ Sleep 1s
 # hint: Enter "Submit" for=1.4s
 Enter
 Sleep 1.5s
+# The dialog: a description of several lines, then the files to go.
 Type "Guard Heal against negative amounts"
+Enter
+Type "The same check Damage has."
 Sleep 800ms
+# hint: Tab "files" for=1.2s
+Tab
+Sleep 1.2s
+Screenshot out/perforce-submit.png
+Sleep 500ms
+# hint: Enter "Submit" for=1.2s
 Enter
 Sleep 6s
 Screenshot out/perforce-submitted.png

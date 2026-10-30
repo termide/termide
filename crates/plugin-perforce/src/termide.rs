@@ -102,6 +102,16 @@ impl Termide {
         .and_then(|answer| answer.as_str().map(str::to_string))
     }
 
+    /// Show a dialog of `parts` (`message`, `input`, `list`, `buttons`)
+    /// under `title`: its answer, or `None` when it was dismissed.
+    #[must_use]
+    pub fn dialog(&self, title: &str, mut parts: Value) -> Option<Value> {
+        parts["title"] = json!(title);
+        self.request(protocol::WINDOW_DIALOG, parts)
+            .ok()
+            .filter(|answer| !answer.is_null())
+    }
+
     pub fn message(&self, title: &str, message: &str) {
         let _ = self.request(
             protocol::WINDOW_MESSAGE,

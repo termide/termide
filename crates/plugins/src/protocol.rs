@@ -28,7 +28,9 @@
 //!   (dismissed); `window/choose` `{ "title", "items" }` → an index or
 //!   `null`; `window/input` `{ "title", "prompt", "default"? }` → text or
 //!   `null`; `window/form` `{ "title", "fields" }` → `{ name: value }` or
-//!   `null`; `window/message` `{ "title", "message" }` → `null`. Requests,
+//!   `null`; `window/message` `{ "title", "message" }` → `null`;
+//!   `window/dialog` `{ "title", "message"?, "input"?, "list"?, "buttons"? }`
+//!   → `{ "button", "text"?, "checked"?, "selected"? }` or `null`. Requests,
 //!   answered once the user closes the window; one window per plugin at a
 //!   time, shown while its project is current.
 //! - `editor/active` → `{ "path", "line", "col", "selection", "modified",
@@ -88,6 +90,7 @@ pub const WINDOW_CHOOSE: &str = "window/choose";
 pub const WINDOW_INPUT: &str = "window/input";
 pub const WINDOW_FORM: &str = "window/form";
 pub const WINDOW_MESSAGE: &str = "window/message";
+pub const WINDOW_DIALOG: &str = "window/dialog";
 pub const EDITOR_DIAGNOSTICS: &str = "editor/diagnostics";
 pub const FILES_STATUS: &str = "files/status";
 pub const EDITOR_BASE: &str = "editor/base";

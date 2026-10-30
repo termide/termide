@@ -344,6 +344,27 @@ termide спрашивает плагины проекта файла вмест
 | `window/input` | `title`, `prompt`, `default` (необязательно) | текст или `null` |
 | `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` — `text`, `number`, `bool` или `select` | `{ name: value }` (переключатели — логические значения, числа — числами) или `null` |
 | `window/message` | `title`, `message` | `null` |
+| `window/dialog` | `title` и любые из `message`, `input`, `list`, `buttons` (ниже) | `{ "button", "text"?, "checked"?, "selected"? }` или `null` |
+
+**Диалог** собирается из частей, каждую можно опустить: `message` — текст;
+`input` — `{ "label"?, "default"?, "lines"? }`, поле ввода от 1 до 10 строк;
+`list` — `{ "items", "pick"? }`, где элементы — строки или
+`{ "label", "detail"?, "checked"? }`, а `pick` — `none` (только для чтения,
+по умолчанию), `one` (выбрать одну строку) или `many` (отметить несколько);
+`buttons` — до 6 надписей, по умолчанию `["OK"]`. `Tab` и `Shift+Tab`
+переходят между частями. В однострочном поле и в списке `Enter` нажимает
+первую кнопку, в многострочном поле — начинает новую строку. `Space`
+отмечает строку; `←`/`→` выбирают кнопку, `Enter` нажимает её; щелчок по
+строке отмечает её, по кнопке — нажимает. В ответе — номер нажатой кнопки и
+только то, что есть в диалоге: `text` поля, `checked` — отмеченные строки
+списка с отметками, `selected` — выбранная строка списка с выбором.
+
+```json
+{ "title": "Submit",
+  "input": { "label": "Description", "lines": 4 },
+  "list": { "items": [{ "label": "src/a.c", "detail": "edit", "checked": true }], "pick": "many" },
+  "buttons": ["Submit", "Cancel"] }
+```
 
 Каждое окно termide озаглавливает `🧩 <плагин> · <title>`, чтобы его нельзя
 было принять за вопрос самого termide; текст плагина очищается от

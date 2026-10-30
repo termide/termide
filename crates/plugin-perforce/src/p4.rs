@@ -73,6 +73,25 @@ impl P4 {
     ///
     /// When p4 cannot run, runs out of time, or fails.
     pub fn run(&self, args: &[&str], cwd: Option<&Path>) -> Result<String, P4Error> {
+        self.exec(args, cwd, None)
+    }
+
+    /// Run p4 in the project root with `input` on its standard input, as
+    /// `p4 change -i` reads a spec.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::run`].
+    pub fn run_with_input(&self, args: &[&str], input: &str) -> Result<String, P4Error> {
+        self.exec(args, None, Some(input))
+    }
+
+    fn exec(
+        &self,
+        args: &[&str],
+        cwd: Option<&Path>,
+        input: Option<&str>,
+    ) -> Result<String, P4Error> {
         let cwd = cwd.unwrap_or(&self.project_root);
         let args: Vec<String> = args
             .iter()
@@ -90,7 +109,11 @@ impl P4 {
             .args(&args)
             .current_dir(cwd)
             .env("PWD", cwd)
-            .stdin(Stdio::null())
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
@@ -104,6 +127,11 @@ impl P4 {
                     P4Error(format!("cannot run {}: {e}", self.program.display()))
                 }
             })?;
+        if let (Some(input), Some(mut stdin)) = (input, child.stdin.take()) {
+            // A spec is small: it fits the pipe, and p4 reads all of it
+            // before it writes. Dropping the handle closes the pipe.
+            let _ = std::io::Write::write_all(&mut stdin, input.as_bytes());
+        }
         let stdout = drain(child.stdout.take());
         let stderr = drain(child.stderr.take());
         let deadline = Instant::now() + TIMEOUT;
