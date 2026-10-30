@@ -1154,17 +1154,55 @@ fn side_model(
 }
 
 /// The `auto` mode reviewer: the texts of `system/classify.md`, and the
-/// model `[ai.auto_reviewer]` names, see [`side_model`].
+/// model `[ai.auto_reviewer]` names, see [`side_model`]; with none named, on
+/// a Claude Code or Codex connection the cheapest model its subscription
+/// offers, see [`cheap_reviewer`].
 fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs, session: &str) -> ReviewerSetup {
+    let choice = settings.reviewer_of(session);
+    let model = cheap_reviewer(settings, &choice, session).unwrap_or_else(|| {
+        side_model(
+            settings,
+            &choice,
+            &format!("the reviewer of connection {session}"),
+        )
+    });
     ReviewerSetup {
         prompt: dirs.classify_prompt(),
-        model: side_model(
-            settings,
-            &settings.reviewer_of(session),
-            &format!("the reviewer of connection {session}"),
-        ),
+        model,
         spent: termide_agent_core::SpentMeter::default(),
     }
+}
+
+/// The reviewer of a session on connection `session` when `choice` names no
+/// model and that connection is Claude Code or Codex: the cheapest model of
+/// the subscription, picked from those the agent offers — the session's own
+/// model, often the frontier one, would spend the plan's limits on every
+/// call reviewed. `None` elsewhere: the session's model reviews.
+fn cheap_reviewer(
+    settings: &AiSettings,
+    choice: &termide_config::SideModel,
+    session: &str,
+) -> Option<ModelChoice> {
+    if !choice.connection.trim().is_empty() || !choice.model.trim().is_empty() {
+        return None;
+    }
+    let connection = settings.connections.get(session)?;
+    if !matches!(connection.provider.as_str(), "claude_code" | "codex") {
+        return None;
+    }
+    let config = cli_acp_config(connection)?;
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let spec = ModelSpec {
+        provider: "agent".to_string(),
+        id: String::new(),
+        context_window: 0,
+        max_tokens: None,
+        thinking: ThinkingLevel::Off,
+    };
+    Some(ModelChoice::own(
+        Arc::new(AcpProvider::new(session, config, cwd).cheapest()),
+        spec,
+    ))
 }
 
 /// The `recall` tool of a project: its session logs, the repositories it
@@ -3815,6 +3853,49 @@ mod tests {
         assert!(pick("", "").session_model.is_none());
         // A name that matches nothing: the session's.
         assert!(pick("gone", "").own.is_none());
+    }
+
+    #[test]
+    fn a_subscription_agent_with_no_reviewer_named_reviews_on_its_cheapest_model() {
+        let mut settings = AiSettings::default();
+        for (name, provider) in [
+            ("local", "openai_compatible"),
+            ("claude", "claude_code"),
+            ("codex", "codex"),
+            ("gemini", "gemini_cli"),
+        ] {
+            settings.connections.insert(
+                name.to_string(),
+                termide_config::Connection {
+                    provider: provider.to_string(),
+                    ..termide_config::Connection::default()
+                },
+            );
+        }
+        let cheap = |settings: &AiSettings, session: &str| {
+            cheap_reviewer(settings, &settings.reviewer_of(session), session).map(|choice| {
+                let (provider, model) = choice.own.expect("a model of its own");
+                (provider.name().to_string(), model.id)
+            })
+        };
+        // The agent's subscription, the model picked from what it offers.
+        assert_eq!(
+            cheap(&settings, "claude"),
+            Some(("acp".into(), String::new()))
+        );
+        assert_eq!(
+            cheap(&settings, "codex"),
+            Some(("acp".into(), String::new()))
+        );
+        // An endpoint, or an agent with no cheap class: the session's model.
+        assert_eq!(cheap(&settings, "local"), None);
+        assert_eq!(cheap(&settings, "gemini"), None);
+        // A reviewer named, by the connection or `[ai.auto_reviewer]`, wins.
+        settings.auto_reviewer.model = "sonnet".into();
+        assert_eq!(cheap(&settings, "claude"), None);
+        settings.auto_reviewer.model.clear();
+        settings.connections.get_mut("claude").unwrap().reviewer = "local".into();
+        assert_eq!(cheap(&settings, "claude"), None);
     }
 
     /// Every built-in tool a panel can offer has a shipped text, and every

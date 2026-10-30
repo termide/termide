@@ -25,6 +25,18 @@ pub struct AcpProvider {
     timeout: Duration,
     connect: Connector,
     runtime: Mutex<Option<AcpRuntime>>,
+    /// What a call that names no model runs on: the agent's own, or its
+    /// cheapest offered (see [`AcpProvider::cheapest`]).
+    unnamed: Unnamed,
+}
+
+/// The model a call that names none runs on.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Unnamed {
+    /// The one the agent picks.
+    Own,
+    /// The first offered of the flavor's cheapest class, see [`cheap_hints`].
+    Cheapest,
 }
 
 impl AcpProvider {
@@ -40,7 +52,18 @@ impl AcpProvider {
                 AcpRuntime::start_service(&name, &config, service_setup(cwd.clone()))
             }),
             runtime: Mutex::new(None),
+            unnamed: Unnamed::Own,
         }
+    }
+
+    /// The same, but a call that names no model runs on the agent's cheapest
+    /// class of model it offers (Claude Code's Haiku, Codex's smallest), when
+    /// the flavor has one and the agent offers it; on its own otherwise. For
+    /// side calls such as the `auto` reviewer, which need no frontier model.
+    #[must_use]
+    pub fn cheapest(mut self) -> Self {
+        self.unnamed = Unnamed::Cheapest;
+        self
     }
 
     /// A provider whose connections `connect` makes, in tests.
@@ -51,6 +74,7 @@ impl AcpProvider {
             timeout,
             connect,
             runtime: Mutex::new(None),
+            unnamed: Unnamed::Own,
         }
     }
 
@@ -129,6 +153,7 @@ impl Provider for AcpProvider {
                 request.system_prompt,
                 &user.join("\n\n"),
                 &request.model.id,
+                self.unnamed,
             )
         });
         match answer {
@@ -171,6 +196,7 @@ impl Shared {
         system: &str,
         user: &str,
         model: &str,
+        unnamed: Unnamed,
     ) -> Result<String, String> {
         let mut params = json!({ "cwd": self.cwd, "mcpServers": [] });
         let text = if flavor == AcpFlavor::ClaudeCode {
@@ -198,6 +224,8 @@ impl Shared {
             .to_string();
         if !model.trim().is_empty() {
             self.pick_model(&session_id, &opened, model);
+        } else if unnamed == Unnamed::Cheapest {
+            self.pick_cheapest(&session_id, &opened, flavor);
         }
         if flavor == AcpFlavor::Codex {
             // It asks before anything but reading, and is refused.
@@ -255,6 +283,26 @@ impl Shared {
             );
             return;
         };
+        self.set_model(session_id, config_id.as_deref(), &id);
+    }
+
+    /// Switch session `session_id` to the first model `opened` offers of
+    /// `flavor`'s cheapest class; none such leaves the agent's own.
+    fn pick_cheapest(&self, session_id: &str, opened: &Value, flavor: AcpFlavor) {
+        let (offered, config_id) = offered_models(opened);
+        match cheapest_model(flavor, &offered) {
+            Some(id) => self.set_model(session_id, config_id.as_deref(), &id),
+            None => log::warn!(
+                "acp {}: no cheap model among {:?}; the agent's own answers",
+                self.name,
+                offered.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
+            ),
+        }
+    }
+
+    /// Switch session `session_id` to model `id`, through the config option
+    /// `config_id` when the agent switches models with one.
+    fn set_model(&self, session_id: &str, config_id: Option<&str>, id: &str) {
         let set = match config_id {
             Some(config_id) => self.request(
                 "session/set_config_option",
@@ -299,6 +347,30 @@ fn offered_models(opened: &Value) -> (Vec<BackendModel>, Option<String>) {
             (list, None)
         }
     }
+}
+
+/// What the names of a flavor's cheapest class of model contain, the first
+/// preferred: Claude Code's Haiku; Codex's small tier, `luna` now and `mini`
+/// before it. None for the others.
+fn cheap_hints(flavor: AcpFlavor) -> &'static [&'static str] {
+    match flavor {
+        AcpFlavor::ClaudeCode => &["haiku"],
+        AcpFlavor::Codex => &["luna", "mini"],
+        AcpFlavor::Generic | AcpFlavor::GeminiCli => &[],
+    }
+}
+
+/// The first model of `offered` whose id or name contains one of `flavor`'s
+/// [`cheap_hints`], tried in order. An agent lists its newest models first,
+/// and Codex one entry per reasoning level, so the first match is taken
+/// rather than refused as ambiguous as [`match_model`] does.
+fn cheapest_model(flavor: AcpFlavor, offered: &[BackendModel]) -> Option<String> {
+    cheap_hints(flavor).iter().find_map(|hint| {
+        offered
+            .iter()
+            .find(|m| m.id.to_lowercase().contains(hint) || m.name.to_lowercase().contains(hint))
+            .map(|m| m.id.clone())
+    })
 }
 
 /// The model of `offered` that `wanted` names: by its id, else by its id or
@@ -382,6 +454,62 @@ mod tests {
         // Ambiguous or unknown: the agent's own.
         assert_eq!(match_model("claude", &offered), None);
         assert_eq!(match_model("opus", &offered), None);
+    }
+
+    #[test]
+    fn the_cheapest_model_is_the_first_offered_of_the_flavors_small_class() {
+        let offered = |ids: &[&str]| -> Vec<BackendModel> {
+            ids.iter()
+                .map(|id| BackendModel {
+                    id: (*id).into(),
+                    name: (*id).into(),
+                })
+                .collect()
+        };
+        let claude = offered(&["default", "opus", "claude-haiku-5-5", "sonnet"]);
+        assert_eq!(
+            cheapest_model(AcpFlavor::ClaudeCode, &claude).as_deref(),
+            Some("claude-haiku-5-5")
+        );
+        // One entry per reasoning level, newest first: the first is taken.
+        let codex = offered(&[
+            "gpt-6.1-sol/medium",
+            "gpt-6-luna/low",
+            "gpt-6-luna/high",
+            "gpt-5.6-luna/low",
+        ]);
+        assert_eq!(
+            cheapest_model(AcpFlavor::Codex, &codex).as_deref(),
+            Some("gpt-6-luna/low")
+        );
+        let older = offered(&["gpt-5-codex/low", "gpt-5-codex-mini/low"]);
+        assert_eq!(
+            cheapest_model(AcpFlavor::Codex, &older).as_deref(),
+            Some("gpt-5-codex-mini/low")
+        );
+        // None of the class, or a flavor without one: the agent's own.
+        assert_eq!(cheapest_model(AcpFlavor::ClaudeCode, &codex), None);
+        assert_eq!(cheapest_model(AcpFlavor::GeminiCli, &claude), None);
+    }
+
+    #[test]
+    fn a_call_naming_no_model_runs_on_the_cheapest_when_asked_to() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let for_connect = Arc::clone(&seen);
+        let provider = AcpProvider::with_connector(
+            AcpFlavor::ClaudeCode,
+            Duration::from_secs(5),
+            Box::new(move || Ok(reviewer_agent(&for_connect))),
+        )
+        .cheapest();
+        assert_eq!(ask(&provider, "").plain_text(), "ALLOW r1");
+        let seen = seen.lock().unwrap();
+        let picked: Vec<&Value> = seen
+            .iter()
+            .filter(|m| m["method"] == "session/set_config_option")
+            .collect();
+        assert_eq!(picked.len(), 1);
+        assert_eq!(picked[0]["params"]["value"], "claude-haiku-4-5");
     }
 
     /// An agent that records what it is sent and answers every prompt with

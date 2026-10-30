@@ -1593,7 +1593,10 @@ reviewer; narrow ones such as `"cargo test*"` still pass without it.
 What the reviewer is told is `system/classify.md` in the configuration's
 agent directory: what to allow, what to block, and the shape of the verdict.
 Edit it to tell the reviewer about your infrastructure or your habits. By
-default the session's own model reviews. `[ai.auto_reviewer]` (in the
+default the session's own model reviews; on a Claude Code or Codex
+connection it is the cheapest model the subscription offers instead — the
+first whose name has `haiku` for Claude Code, `luna` or else `mini` for Codex
+— or, when the CLI offers none, the model the agent runs on. `[ai.auto_reviewer]` (in the
 settings modal, **Auto mode reviewer** and **Reviewer model** under
 Permissions) names another connection, another model, or both, a small fast
 model being the usual choice. A review is one more model call before each
@@ -1631,7 +1634,8 @@ Headless runs use it the same way, falling back to a refusal where the panel
 would ask. An external agent's requests, and its calls of termide's tools,
 are reviewed the same way, against your words and the calls it made; with
 no reviewer configured, "the session's model" is the agent's own
-subscription, on the model it runs on.
+subscription, on its cheapest model as above (Gemini CLI: the model it runs
+on).
 
 ## The AI menu
 
