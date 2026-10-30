@@ -702,8 +702,10 @@ impl Perforce {
                     .map(|&index| {
                         let record = &panel.files[index];
                         let action = record.get("action").map_or("?", String::as_str);
+                        let name = self.p4.relative(Path::new(&record["clientFile"]));
                         json!({
-                            "label": self.p4.relative(Path::new(&record["clientFile"])),
+                            "label": name,
+                            "path": name,
                             "detail": action,
                             "status": status_of(action),
                             "actions": [
@@ -726,6 +728,10 @@ impl Perforce {
             "groups": groups,
             "empty": "No files are opened in this project.",
             "refresh": "refresh",
+            "buttons": [
+                { "label": "Refresh", "action": "refresh" },
+                { "label": "Sync the workspace", "action": "sync" },
+            ],
         }))
     }
 
@@ -734,10 +740,9 @@ impl Perforce {
         match panel.id {
             Some(id) => self.termide.update_list(id, list).map_err(P4Error),
             None => {
-                let menu = [("Refresh", "refresh"), ("Sync the workspace", "sync")];
                 let id = self
                     .termide
-                    .open_list("Opened files", list, &menu)
+                    .open_list("Opened files", list)
                     .map_err(P4Error)?;
                 panel.id = Some(id);
                 Ok(())

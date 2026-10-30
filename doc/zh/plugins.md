@@ -233,23 +233,25 @@ termide 会与服务器一起询问文件所属项目的插件，并给出一个
 
 **Markdown** 面板显示插件发送的 Markdown：标题、列表、表格、代码和链接，与 Markdown 查看器相同，带光标、选择、搜索和复制。指向 `plugin:<动作>` 的链接就是按钮：跟随它（在链接上按 `Enter` 或点击）会把动作发回插件，插件再以更新面板作答。
 
-**列表**面板显示按标题分组的行，每行带有插件提供的动作，用法与 git 状态面板相同：方向键在行间移动，`Enter` 或双击运行该行的第一个动作，`Space`（或右键单击）列出全部动作，状态栏把它们显示为带快捷键的按钮。带 `key` 的动作使用对应的 git 状态快捷键，按 `[git_status.keybindings]` 的设置：`view`（`F3`）、`edit`（`F4`）或 `revert`（`Backspace`、`Delete`）；刷新键（`Ctrl+R`）发送列表的 `refresh`。行的 `status` 会像文件管理器显示 git 状态那样为它着色。
+**列表**面板显示按标题分组的行，每行带有插件提供的动作，用法与 git 状态面板相同：方向键在行间移动，`Enter` 或双击运行该行的第一个动作，`Space`（或右键单击）列出全部动作，状态栏把它们显示为带快捷键的按钮。带 `key` 的动作使用对应的 git 状态快捷键，按 `[git_status.keybindings]` 的设置：`view`（`F3`）、`edit`（`F4`）或 `revert`（`Backspace`、`Delete`）；刷新键（`Ctrl+R`）发送列表的 `refresh`。行的 `status` 会像文件管理器显示 git 状态那样为它着色。带 `path` 的行排在同组其他行之后，组成文件夹树，以路径的最后一部分命名，就像 git 状态面板显示改动的文件那样：文件夹取其文件的颜色，`←`/`→`、`Enter` 或双击可折叠和展开它。`buttons` 位于各行下方；`Tab` 在按钮与行之间切换，方向键选择按钮，`Enter` 或单击按下它。
 
 ```json
 { "groups": [{
     "label": "Change 7", "detail": "Guard Heal",
     "actions": [{ "label": "Submit", "action": "submit-7" }],
     "items": [{
-      "label": "Source/Game/Health.cpp", "detail": "edit", "status": "modified",
+      "label": "Source/Game/Health.cpp", "path": "Source/Game/Health.cpp",
+      "detail": "edit", "status": "modified",
       "actions": [
         { "label": "Open", "action": "open-0", "key": "edit" },
         { "label": "Diff", "action": "diff-0", "key": "view" },
         { "label": "Revert", "action": "revert-0", "key": "revert" } ] }] }],
   "empty": "No files are opened.",
-  "refresh": "refresh" }
+  "refresh": "refresh",
+  "buttons": [{ "label": "Sync", "action": "sync" }] }
 ```
 
-`status` 取 `modified`、`added`、`deleted`、`ignored` 之一；`detail`、动作、`empty` 和 `refresh` 都可以省略。每行最多 6 个动作，一个快捷键归第一个指明它的动作。
+`status` 取 `modified`、`added`、`deleted`、`ignored` 之一；`path`、`detail`、动作、`empty`、`refresh` 和 `buttons` 都可以省略。每行最多 6 个动作，每个列表最多 12 个按钮，一个快捷键归第一个指明它的动作。
 
 **diff** 面板显示统一格式的 diff（即 `diff -u` 输出的文本），方式与 git diff 面板显示 git 的改动相同：每个文件一个可折叠其改动的标题，新增和删除的行着色，并显示两侧的行号。文件按 `---`/`+++` 标题（或 `diff --git` 行）区分；路径取自 `+++` 一侧，去掉 git 的 `b/`，并相对于项目，以便 `F4` 打开它。面板不会自行重新加载，由插件来更新。
 
@@ -263,7 +265,7 @@ termide 会与服务器一起询问文件所属项目的插件，并给出一个
 
 `menu` 是面板 `[≡]` 菜单中它自己的条目，`[{ "label", "action" }]`（最多 12 个）：选中的条目会像 `plugin:` 链接一样作为 `panel/action` 发送。表明面板出自谁之手的部分由 termide 决定：图标总是 🧩，标题总是以插件名开头（`deploy: Report`）；插件给出的标题和标签会去掉控制字符与不可见字符并截断长度。
 
-面板在插件所属的项目中打开，该项目必须是当前项目；面板不会随布局保存。更新会尽量让读者停留在原处，列表的选中项留在同一行，diff 的选中文件和折叠的文件保持不变。插件停止时，它的面板保留并说明这一点；重新启动的插件不会再拿回它们。
+面板在插件所属的项目中打开，该项目必须是当前项目；面板不会随布局保存。更新会尽量让读者停留在原处，列表的选中项留在同一行、折叠的文件夹保持折叠，diff 的选中文件和折叠的文件保持不变。插件停止时，它的面板保留并说明这一点；重新启动的插件不会再拿回它们。
 
 ```python
 # 位于下方示例的循环中

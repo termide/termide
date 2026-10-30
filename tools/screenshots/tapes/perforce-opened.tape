@@ -1,5 +1,5 @@
-# Perforce, before a submit: the opened files by changelist (Alt+G, git's
-# status key, in a project outside git), the diff of one against the depot,
+# Perforce, before a submit: the opened files by changelist, in a tree of
+# folders (Alt+G, git's status key, in a project outside git), the diff of one against the depot,
 # and the default changelist submitted with a description asked for. Space
 # lists a row's actions; Enter runs the first, a group's submit.
 # The `# hint:` lines are the key badges keys.mjs lays over the recording.
@@ -35,7 +35,8 @@ Alt+w
 Sleep 600ms
 Alt+j
 Sleep 300ms
-Down
+# Past the folders Source and Game to the file.
+Down 3
 Sleep 600ms
 Show
 Sleep 1.5s
@@ -61,7 +62,8 @@ Alt+z
 Sleep 400ms
 Alt+w
 Sleep 800ms
-Up
+# Back up past the folders to the changelist.
+Up 3
 Show
 Sleep 1s
 # hint: Enter "Submit" for=1.4s

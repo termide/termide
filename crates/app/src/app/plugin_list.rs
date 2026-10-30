@@ -6,7 +6,7 @@ use serde_json::Value;
 use termide_panel_plugin_list::{
     ActionKey, ItemStatus, ListAction, ListGroup, ListItem, PanelList, MAX_ROW_ACTIONS,
 };
-use termide_plugins::protocol::{clean_text, MAX_LABEL};
+use termide_plugins::protocol::{clean_text, MAX_LABEL, MAX_MENU_ITEMS};
 
 /// The longest a row's label or detail may be, in characters.
 const MAX_ROW_TEXT: usize = 200;
@@ -26,6 +26,13 @@ pub(super) fn plugin_list(value: &Value) -> Result<PanelList, String> {
             .filter(|action| !action.is_empty())
             .map(str::to_string),
         groups: Vec::new(),
+        buttons: actions(&value["buttons"], MAX_MENU_ITEMS)
+            .into_iter()
+            .map(|button| ListAction {
+                key: None,
+                ..button
+            })
+            .collect(),
     };
     for group in groups {
         let label = text(&group["label"], MAX_ROW_TEXT);
@@ -48,15 +55,16 @@ pub(super) fn plugin_list(value: &Value) -> Result<PanelList, String> {
             }
             items.push(ListItem {
                 label,
+                path: item["path"].as_str().and_then(path),
                 detail: text(&item["detail"], MAX_ROW_TEXT),
                 status: item["status"].as_str().and_then(ItemStatus::from_name),
-                actions: actions(&item["actions"]),
+                actions: actions(&item["actions"], MAX_ROW_ACTIONS),
             });
         }
         list.groups.push(ListGroup {
             label,
             detail: text(&group["detail"], MAX_ROW_TEXT),
-            actions: actions(&group["actions"]),
+            actions: actions(&group["actions"], MAX_ROW_ACTIONS),
             items,
         });
     }
@@ -69,9 +77,20 @@ fn text(value: &Value, max: usize) -> String {
         .map_or_else(String::new, |text| clean_text(text, max))
 }
 
-/// A row's `actions`, `[{ "label", "action", "key"? }]`: at most
-/// [`MAX_ROW_ACTIONS`], each key taken by the first that names it.
-fn actions(value: &Value) -> Vec<ListAction> {
+/// A row's `path`, each part cleaned as text is; `None` when nothing is
+/// left of it.
+fn path(text: &str) -> Option<String> {
+    let parts: Vec<String> = text
+        .split(['/', '\\'])
+        .map(|part| clean_text(part, MAX_ROW_TEXT))
+        .filter(|part| !part.is_empty() && part != "." && part != "..")
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("/"))
+}
+
+/// A row's `actions`, `[{ "label", "action", "key"? }]`: at most `max`,
+/// each key taken by the first that names it.
+fn actions(value: &Value, max: usize) -> Vec<ListAction> {
     let mut taken = Vec::new();
     value
         .as_array()
@@ -90,7 +109,7 @@ fn actions(value: &Value) -> Vec<ListAction> {
             taken.extend(key);
             Some(ListAction { label, action, key })
         })
-        .take(MAX_ROW_ACTIONS)
+        .take(max)
         .collect()
 }
 
@@ -114,9 +133,13 @@ mod tests {
                         { "label": "", "action": "none" },
                     ]},
                     { "detail": "no label" },
-                    { "label": "b.c", "status": "renamed" },
+                    { "label": "b.c", "status": "renamed", "path": "./src//\u{0007}b.c" },
                 ],
             }, { "items": [] }],
+            "buttons": [
+                { "label": "Sync", "action": "sync", "key": "view" },
+                { "label": "No action" },
+            ],
             "empty": "Nothing",
             "refresh": "refresh",
         }))
@@ -132,6 +155,10 @@ mod tests {
         let keys: Vec<_> = a.actions.iter().map(|action| action.key).collect();
         assert_eq!(keys, [Some(ActionKey::View), None, None], "a key once");
         assert_eq!(group.items[1].status, None);
+        assert_eq!(a.path, None);
+        assert_eq!(group.items[1].path.as_deref(), Some("src/b.c"));
+        let buttons: Vec<_> = list.buttons.iter().map(|b| (&*b.action, b.key)).collect();
+        assert_eq!(buttons, [("sync", None)], "a button takes no key");
         assert_eq!(list.empty, "Nothing");
         assert_eq!(list.refresh.as_deref(), Some("refresh"));
     }

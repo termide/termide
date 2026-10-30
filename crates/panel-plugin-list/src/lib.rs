@@ -8,7 +8,10 @@
 //! row's first action, the info key lists all of them, and the refresh key
 //! sends the list's own refresh action.
 
+mod rows;
+
 use std::any::Any;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -26,7 +29,9 @@ use termide_core::{
     SegmentKind, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
 use termide_ui::path_utils::truncate_right;
-use termide_ui::{IndexClickTracker, ScrollBar};
+use termide_ui::{tree_prefixes, IndexClickTracker, ScrollBar};
+
+use rows::{Dir, Row};
 
 /// What a plugin panel's own `[≡]` entries are routed back under.
 const MENU_PREFIX: &str = "plugin-menu:";
@@ -125,6 +130,9 @@ impl ItemStatus {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ListItem {
     pub label: String,
+    /// A relative path, `/`-separated: the row goes in a directory tree
+    /// under its group, named by the path's last part.
+    pub path: Option<String>,
     /// Shown dimmed after the label.
     pub detail: String,
     pub status: Option<ItemStatus>,
@@ -148,13 +156,16 @@ pub struct PanelList {
     pub empty: String,
     /// Sent on the refresh key.
     pub refresh: Option<String>,
+    /// The panel's buttons, under the rows.
+    pub buttons: Vec<ListAction>,
 }
 
-/// A row on screen: a group's heading, or an item of a group.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Row {
-    Group(usize),
-    Item(usize, usize),
+/// What tells a row apart across updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RowKey {
+    Group(String),
+    Dir(String, String),
+    Item(String, String),
 }
 
 /// A plugin's list panel.
@@ -164,7 +175,19 @@ pub struct PluginListPanel {
     title: String,
     list: PanelList,
     rows: Vec<Row>,
+    /// Each row's tree lines.
+    prefixes: Vec<String>,
+    /// The directories of the groups' trees.
+    dirs: Vec<Dir>,
+    /// The folded directories, as (group label, directory path).
+    collapsed: HashSet<(String, String)>,
     selected: usize,
+    /// The keys work the buttons rather than the rows.
+    on_buttons: bool,
+    /// The chosen button.
+    button: usize,
+    /// Where the last render drew each button.
+    button_areas: Vec<Rect>,
     scroll: usize,
     /// The panel's own entries of its `[≡]` menu: label and action.
     menu: Vec<(String, String)>,
@@ -188,7 +211,13 @@ impl PluginListPanel {
             title,
             list: PanelList::default(),
             rows: Vec::new(),
+            prefixes: Vec::new(),
+            dirs: Vec::new(),
+            collapsed: HashSet::new(),
             selected: 0,
+            on_buttons: false,
+            button: 0,
+            button_areas: Vec::new(),
             scroll: 0,
             menu: Vec::new(),
             hotkeys: HotkeyTable::new(),
@@ -222,21 +251,44 @@ impl PluginListPanel {
         }
         let kept = self.selected_key();
         self.list = list;
-        self.rows = self
-            .list
-            .groups
-            .iter()
-            .enumerate()
-            .flat_map(|(g, group)| {
-                std::iter::once(Row::Group(g))
-                    .chain((0..group.items.len()).map(move |i| Row::Item(g, i)))
-            })
-            .collect();
+        self.button = self.button.min(self.list.buttons.len().saturating_sub(1));
+        self.on_buttons &= !self.list.buttons.is_empty();
+        self.relayout(kept);
+    }
+
+    /// Lay the rows out again, the selection on the row of `kept` when it
+    /// is still there.
+    fn relayout(&mut self, kept: Option<RowKey>) {
+        let layout = rows::layout(&self.list, &self.collapsed);
+        self.rows = layout.rows;
+        self.dirs = layout.dirs;
+        self.prefixes = tree_prefixes(&layout.depths);
         let found = kept
             .and_then(|key| (0..self.rows.len()).find(|&r| self.row_key(r) == Some(key.clone())));
         self.selected =
             found.unwrap_or_else(|| self.selected.min(self.rows.len().saturating_sub(1)));
         self.ensure_visible();
+    }
+
+    /// Fold or unfold the selected directory: `open` says which, `None`
+    /// turns it over. Whether it was one to change.
+    fn fold(&mut self, open: Option<bool>) -> bool {
+        let Some(Row::Dir(d)) = self.rows.get(self.selected).copied() else {
+            return false;
+        };
+        let dir = &self.dirs[d];
+        let open = open.unwrap_or(!dir.expanded);
+        if open == dir.expanded {
+            return false;
+        }
+        let key = (self.list.groups[dir.group].label.clone(), dir.path.clone());
+        if open {
+            self.collapsed.remove(&key);
+        } else {
+            self.collapsed.insert(key);
+        }
+        self.relayout(self.selected_key());
+        true
     }
 
     /// The plugin is gone: `message` says so, and nothing is left to do.
@@ -252,17 +304,21 @@ impl PluginListPanel {
     }
 
     /// What tells a row apart across updates: its group's label and its own.
-    fn row_key(&self, row: usize) -> Option<(String, Option<String>)> {
+    fn row_key(&self, row: usize) -> Option<RowKey> {
         Some(match *self.rows.get(row)? {
-            Row::Group(g) => (self.list.groups[g].label.clone(), None),
-            Row::Item(g, i) => (
+            Row::Group(g) => RowKey::Group(self.list.groups[g].label.clone()),
+            Row::Dir(d) => RowKey::Dir(
+                self.list.groups[self.dirs[d].group].label.clone(),
+                self.dirs[d].path.clone(),
+            ),
+            Row::Item(g, i) => RowKey::Item(
                 self.list.groups[g].label.clone(),
-                Some(self.list.groups[g].items[i].label.clone()),
+                self.list.groups[g].items[i].label.clone(),
             ),
         })
     }
 
-    fn selected_key(&self) -> Option<(String, Option<String>)> {
+    fn selected_key(&self) -> Option<RowKey> {
         self.row_key(self.selected)
     }
 
@@ -271,7 +327,7 @@ impl PluginListPanel {
         match self.rows.get(row) {
             Some(Row::Group(g)) => &self.list.groups[*g].actions,
             Some(Row::Item(g, i)) => &self.list.groups[*g].items[*i].actions,
-            None => &[],
+            Some(Row::Dir(_)) | None => &[],
         }
     }
 
@@ -283,6 +339,7 @@ impl PluginListPanel {
     fn row_text(&self, row: usize) -> Option<String> {
         let (label, detail) = match *self.rows.get(row)? {
             Row::Group(g) => (&self.list.groups[g].label, &self.list.groups[g].detail),
+            Row::Dir(d) => return Some(self.dirs[d].path.clone()),
             Row::Item(g, i) => {
                 let item = &self.list.groups[g].items[i];
                 (&item.label, &item.detail)
@@ -376,6 +433,70 @@ impl PluginListPanel {
             .clamp(self.scroll, (self.scroll + height - 1).min(last));
     }
 
+    /// Draw the buttons at the bottom of `area` under a line, when there
+    /// are any; the area left for the rows.
+    fn render_buttons(&mut self, area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
+        let labels: Vec<String> = self.list.buttons.iter().map(|b| b.label.clone()).collect();
+        self.button_areas = if labels.is_empty() || area.height < 4 {
+            Vec::new()
+        } else {
+            button_areas(&labels, area)
+        };
+        let Some(first) = self.button_areas.first() else {
+            return area;
+        };
+        let theme = &self.theme;
+        let line_y = first.y - 1;
+        let line = Style::default().bg(theme.bg).fg(theme.disabled);
+        for x in area.left()..area.right() {
+            buf[(x, line_y)].set_symbol("─").set_style(line);
+        }
+        for (index, rect) in self.button_areas.iter().enumerate() {
+            let style = if focused && self.on_buttons && index == self.button {
+                Style::default()
+                    .bg(theme.selected_bg)
+                    .fg(theme.selected_fg)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().bg(theme.bg).fg(theme.fg)
+            };
+            let text = format!(
+                "[{}]",
+                truncate_right(&labels[index], rect.width as usize - 2)
+            );
+            buf.set_stringn(rect.x, rect.y, &text, rect.width as usize, style);
+        }
+        Rect {
+            height: line_y - area.top(),
+            ..area
+        }
+    }
+
+    /// `key` on the buttons: `Tab` goes between them and the rows, and
+    /// while on them the arrows choose one and `Enter` presses it. `None`
+    /// when the key is not theirs.
+    fn button_key(&mut self, key: &crossterm::event::KeyEvent) -> Option<Vec<PanelEvent>> {
+        if self.list.buttons.is_empty() {
+            return None;
+        }
+        if matches!(key.code, KeyCode::Tab | KeyCode::BackTab) {
+            self.on_buttons = !self.on_buttons;
+            return Some(vec![]);
+        }
+        if !self.on_buttons {
+            return None;
+        }
+        let last = self.list.buttons.len() - 1;
+        match key.code {
+            KeyCode::Left => self.button = self.button.saturating_sub(1),
+            KeyCode::Right => self.button = (self.button + 1).min(last),
+            KeyCode::Up => self.on_buttons = false,
+            KeyCode::Enter => return Some(self.send(&self.list.buttons[self.button].action)),
+            _ => return None,
+        }
+        Some(vec![])
+    }
+
     fn draw_row(&self, row: usize, y: u16, area: Rect, buf: &mut Buffer, selected: bool) {
         let theme = &self.theme;
         let base = if selected {
@@ -394,18 +515,34 @@ impl PluginListPanel {
             buf[(x, y)].set_char(' ');
         }
         let mut x = area.left() + 1;
-        let (label, detail, label_style) = match self.rows[row] {
+        let lines = base.fg(if selected {
+            theme.selected_fg
+        } else {
+            theme.disabled
+        });
+        x = put(buf, x, y, right, &self.prefixes[row], lines);
+        let (label, detail, label_style): (&str, &String, Style) = match self.rows[row] {
+            Row::Dir(d) => {
+                let dir = &self.dirs[d];
+                const FOLDED: &str = if cfg!(windows) { "►" } else { "▶" };
+                let arrow = if dir.expanded { "▼" } else { FOLDED };
+                let style = match dir.status {
+                    Some(status) if !selected => base.patch(status.style(theme)),
+                    _ => base,
+                };
+                put(buf, x, y, right, &format!("{arrow} /{}", dir.name), style);
+                return;
+            }
             Row::Group(g) => {
                 let group = &self.list.groups[g];
                 (
-                    &group.label,
+                    group.label.as_str(),
                     &group.detail,
                     base.add_modifier(Modifier::BOLD),
                 )
             }
             Row::Item(g, i) => {
                 let item = &self.list.groups[g].items[i];
-                x += 2;
                 let mut style = base;
                 if let Some(status) = item.status {
                     let colour = base.patch(status.style(theme));
@@ -416,7 +553,12 @@ impl PluginListPanel {
                         style = colour;
                     }
                 }
-                (&item.label, &item.detail, style)
+                let name = item
+                    .path
+                    .as_deref()
+                    .and_then(|path| rows::components(path).last().copied())
+                    .unwrap_or(&item.label);
+                (name, &item.detail, style)
             }
         };
         x = put(buf, x, y, right, label, label_style);
@@ -425,6 +567,28 @@ impl PluginListPanel {
             put(buf, x, y, right, detail, dim);
         }
     }
+}
+
+/// Where each of `labels`, drawn `[label]`, goes on the bottom rows of
+/// `area`, wrapping to the next row when one is full.
+fn button_areas(labels: &[String], area: Rect) -> Vec<Rect> {
+    let mut placed: Vec<(u16, u16, u16)> = Vec::new();
+    let (mut x, mut line) = (0u16, 0u16);
+    for label in labels {
+        let width = (label.width() as u16 + 2).min(area.width.saturating_sub(2));
+        if x > 0 && x + width > area.width.saturating_sub(1) {
+            line += 1;
+            x = 0;
+        }
+        placed.push((x, line, width));
+        x += width + 1;
+    }
+    let lines = line + 1;
+    let top = area.bottom().saturating_sub(lines);
+    placed
+        .into_iter()
+        .map(|(x, line, width)| Rect::new(area.left() + 1 + x, top + line, width, 1))
+        .collect()
 }
 
 /// Write `text` from `x` on row `y`, cut short of `right`; where it ends.
@@ -477,7 +641,6 @@ impl Panel for PluginListPanel {
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: &RenderContext) {
-        self.last_height = area.height as usize;
         let theme = self.theme;
         let bg = Style::default().bg(theme.bg).fg(theme.fg);
         for y in area.top()..area.bottom() {
@@ -486,6 +649,8 @@ impl Panel for PluginListPanel {
                 buf[(x, y)].set_char(' ');
             }
         }
+        let area = self.render_buttons(area, buf, ctx.is_focused);
+        self.last_height = area.height as usize;
         if self.rows.is_empty() {
             if area.height > 0 {
                 let dim = bg.fg(theme.accented_fg);
@@ -525,6 +690,9 @@ impl Panel for PluginListPanel {
     }
 
     fn handle_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {
+        if let Some(events) = self.button_key(&chord.canonical) {
+            return events;
+        }
         // No text input here: every key is a shortcut, matched on the
         // layout-normalized form so it works on any keyboard layout.
         let key = chord.canonical;
@@ -567,7 +735,13 @@ impl Panel for PluginListPanel {
             match key.code {
                 KeyCode::PageUp => self.move_by(-page),
                 KeyCode::PageDown => self.move_by(page),
-                KeyCode::Enter => return self.run(0),
+                KeyCode::Left if key.modifiers.is_empty() => {
+                    self.fold(Some(false));
+                }
+                KeyCode::Right if key.modifiers.is_empty() => {
+                    self.fold(Some(true));
+                }
+                KeyCode::Enter if !self.fold(None) => return self.run(0),
                 _ => {}
             }
         }
@@ -575,18 +749,30 @@ impl Panel for PluginListPanel {
     }
 
     fn handle_mouse(&mut self, mouse: MouseEvent, area: Rect) -> Vec<PanelEvent> {
+        let height = self.last_height as u16;
         let row = || {
-            (mouse.row >= area.top() && mouse.row < area.bottom())
+            (mouse.row >= area.top() && mouse.row < area.top() + height)
                 .then(|| self.scroll + (mouse.row - area.top()) as usize)
                 .filter(|&row| row < self.rows.len())
         };
+        if let MouseEventKind::Down(MouseButton::Left) = mouse.kind {
+            let hit = self.button_areas.iter().position(|rect| {
+                rect.contains(ratatui::layout::Position::new(mouse.column, mouse.row))
+            });
+            if let Some(index) = hit {
+                self.on_buttons = true;
+                self.button = index;
+                return self.send(&self.list.buttons[index].action);
+            }
+        }
         match mouse.kind {
             MouseEventKind::ScrollUp => self.wheel(-3),
             MouseEventKind::ScrollDown => self.wheel(3),
             MouseEventKind::Down(MouseButton::Left) => {
                 if let Some(row) = row() {
                     self.selected = row;
-                    if self.clicks.click(row) == 2 {
+                    self.on_buttons = false;
+                    if self.clicks.click(row) == 2 && !self.fold(None) {
                         return self.run(0);
                     }
                 }
@@ -629,6 +815,9 @@ impl Panel for PluginListPanel {
     }
 
     fn status_segments(&self) -> Vec<StatusSegment> {
+        if self.on_buttons {
+            return vec![];
+        }
         let mut segments = vec![StatusSegment::new(" ", SegmentKind::Label)];
         for (index, action) in self.selected_actions().iter().enumerate() {
             if index > 0 {
@@ -689,6 +878,7 @@ mod tests {
     fn item(label: &str) -> ListItem {
         ListItem {
             label: label.into(),
+            path: None,
             detail: "edit".into(),
             status: Some(ItemStatus::Modified),
             actions: vec![
@@ -721,6 +911,7 @@ mod tests {
             ],
             empty: "Nothing".into(),
             refresh: Some("refresh".into()),
+            buttons: vec![action("Sync", "sync", None)],
         }
     }
 
@@ -861,5 +1052,111 @@ mod tests {
             sent(&panel.handle_status_action("plugin-menu:sync")),
             Some("sync")
         );
+    }
+
+    fn tree_panel() -> PluginListPanel {
+        let mut panel = panel();
+        let mut tree = list();
+        tree.groups[0].items = ["src/a.c", "src/b.c"]
+            .iter()
+            .map(|path| ListItem {
+                path: Some((*path).to_string()),
+                ..item(path)
+            })
+            .collect();
+        panel.set_list(None, tree);
+        panel
+    }
+
+    #[test]
+    fn rows_with_paths_fold_under_their_directory() {
+        let mut panel = tree_panel();
+        assert_eq!(
+            panel.rows[..4],
+            [Row::Group(0), Row::Dir(0), Row::Item(0, 0), Row::Item(0, 1)]
+        );
+        assert_eq!(panel.prefixes[1..4], ["└─ ", "   ├─ ", "   └─ "]);
+
+        // Enter on the item runs it; on the directory it folds it.
+        panel.selected = 2;
+        assert_eq!(
+            sent(&press(&mut panel, KeyCode::Enter, KeyModifiers::NONE)),
+            Some("open src/a.c")
+        );
+        press(&mut panel, KeyCode::Up, KeyModifiers::NONE);
+        assert!(press(&mut panel, KeyCode::Enter, KeyModifiers::NONE).is_empty());
+        assert_eq!(panel.rows[..3], [Row::Group(0), Row::Dir(0), Row::Group(1)]);
+        assert_eq!(panel.selected, 1, "the selection stays on the directory");
+
+        // The fold outlives an update; → opens it again.
+        panel.set_list(None, panel.list.clone());
+        assert!(!panel.dirs[0].expanded);
+        press(&mut panel, KeyCode::Right, KeyModifiers::NONE);
+        assert!(panel.dirs[0].expanded);
+        assert_eq!(panel.row_text(1).as_deref(), Some("src"));
+    }
+
+    #[test]
+    fn tab_goes_to_the_buttons_and_enter_presses_one() {
+        let mut panel = panel();
+        press(&mut panel, KeyCode::Tab, KeyModifiers::NONE);
+        assert!(panel.on_buttons);
+        assert!(panel.status_segments().is_empty());
+        assert_eq!(
+            sent(&press(&mut panel, KeyCode::Enter, KeyModifiers::NONE)),
+            Some("sync")
+        );
+        press(&mut panel, KeyCode::Tab, KeyModifiers::NONE);
+        assert_eq!(
+            sent(&press(&mut panel, KeyCode::Enter, KeyModifiers::NONE)),
+            Some("submit default")
+        );
+    }
+
+    #[test]
+    fn buttons_sit_under_a_line_and_answer_a_click() {
+        let mut panel = panel();
+        let area = Rect::new(0, 0, 30, 10);
+        let mut buf = Buffer::empty(area);
+        let colors = ThemeColors::default();
+        let config = termide_core::PanelConfig {
+            tab_size: 4,
+            word_wrap: false,
+            show_line_numbers: false,
+            show_hidden_files: false,
+        };
+        let ctx = RenderContext {
+            theme: &colors,
+            config: &config,
+            is_focused: true,
+            panel_index: 0,
+            terminal_width: 30,
+            terminal_height: 10,
+            border_right_x: None,
+            border_bottom_y: None,
+        };
+        panel.render(area, &mut buf, &ctx);
+        let text = |y: u16| -> String { (0..30).map(|x| buf[(x, y)].symbol()).collect() };
+        assert!(text(8).starts_with("───"), "{:?}", text(8));
+        assert!(text(9).contains("[Sync]"), "{:?}", text(9));
+        assert_eq!(panel.last_height, 8);
+
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 2,
+            row: 9,
+            modifiers: KeyModifiers::NONE,
+        };
+        assert_eq!(sent(&panel.handle_mouse(click, area)), Some("sync"));
+    }
+
+    #[test]
+    fn buttons_wrap_onto_more_lines_when_narrow() {
+        let labels: Vec<String> = ["Refresh", "Sync the workspace", "Submit"]
+            .map(String::from)
+            .to_vec();
+        let areas = button_areas(&labels, Rect::new(0, 0, 24, 10));
+        let lines: Vec<u16> = areas.iter().map(|r| r.y).collect();
+        assert_eq!(lines, [7, 8, 9]);
     }
 }

@@ -282,7 +282,10 @@ fn shows_the_state_and_opens_for_edit() {
     assert_eq!(group["label"], "Default changelist");
     assert_eq!(group["actions"][0]["action"], "submit-default");
     let row = &group["items"][0];
-    assert_eq!(row["label"], "a.c");
+    assert_eq!(
+        (&row["label"], &row["path"]),
+        (&json!("a.c"), &json!("a.c"))
+    );
     assert_eq!(
         (row["detail"].as_str(), row["status"].as_str()),
         (Some("edit"), Some("modified"))
@@ -295,6 +298,7 @@ fn shows_the_state_and_opens_for_edit() {
         .collect();
     assert_eq!(keys, ["edit", "view", "revert"]);
     assert_eq!(panel["list"]["refresh"], "refresh");
+    assert_eq!(panel["list"]["buttons"][1]["action"], "sync");
 
     // The file's changes, as a unified diff named by its place in the
     // project rather than by p4's depot and local paths.

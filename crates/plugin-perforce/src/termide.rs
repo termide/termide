@@ -128,7 +128,7 @@ impl Termide {
     ///
     /// When termide does not open it.
     pub fn open_diff(&self, title: &str, diff: &str) -> Result<u64, String> {
-        self.open_with(title, "diff", json!(diff), &[])
+        self.open_with(title, "diff", json!(diff))
     }
 
     /// Open a panel of a `list` (groups of rows with their actions).
@@ -136,31 +136,13 @@ impl Termide {
     /// # Errors
     ///
     /// When termide does not open it.
-    pub fn open_list(
-        &self,
-        title: &str,
-        list: Value,
-        menu: &[(&str, &str)],
-    ) -> Result<u64, String> {
-        self.open_with(title, "list", list, menu)
+    pub fn open_list(&self, title: &str, list: Value) -> Result<u64, String> {
+        self.open_with(title, "list", list)
     }
 
-    fn open_with(
-        &self,
-        title: &str,
-        kind: &str,
-        content: Value,
-        menu: &[(&str, &str)],
-    ) -> Result<u64, String> {
-        let menu: Vec<Value> = menu
-            .iter()
-            .map(|(label, action)| json!({ "label": label, "action": action }))
-            .collect();
+    fn open_with(&self, title: &str, kind: &str, content: Value) -> Result<u64, String> {
         let mut params = json!({ "title": title });
         params[kind] = content;
-        if !menu.is_empty() {
-            params["menu"] = Value::Array(menu);
-        }
         let answer = self.request(protocol::PANEL_OPEN, params)?;
         answer["panel"]
             .as_u64()

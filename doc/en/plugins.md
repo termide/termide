@@ -368,25 +368,33 @@ a right click) lists all of them, and the status bar shows them as buttons
 with their keys. An action marked with a `key` takes that git status key, as
 `[git_status.keybindings]` sets it: `view` (`F3`), `edit` (`F4`) or `revert`
 (`Backspace`, `Delete`); the refresh key (`Ctrl+R`) sends the list's `refresh`.
-A row's `status` colours it as the file manager colours git's states.
+A row's `status` colours it as the file manager colours git's states. Rows
+with a `path` go after the others of their group in a tree of folders, named
+by the path's last part, as git status shows changed files: a folder takes its
+files' colour, and `←`/`→`, `Enter` or a double click fold and unfold it.
+`buttons` sit under the rows; `Tab` goes to them and back, the arrows choose
+one, and `Enter` or a click presses it.
 
 ```json
 { "groups": [{
     "label": "Change 7", "detail": "Guard Heal",
     "actions": [{ "label": "Submit", "action": "submit-7" }],
     "items": [{
-      "label": "Source/Game/Health.cpp", "detail": "edit", "status": "modified",
+      "label": "Source/Game/Health.cpp", "path": "Source/Game/Health.cpp",
+      "detail": "edit", "status": "modified",
       "actions": [
         { "label": "Open", "action": "open-0", "key": "edit" },
         { "label": "Diff", "action": "diff-0", "key": "view" },
         { "label": "Revert", "action": "revert-0", "key": "revert" } ] }] }],
   "empty": "No files are opened.",
-  "refresh": "refresh" }
+  "refresh": "refresh",
+  "buttons": [{ "label": "Sync", "action": "sync" }] }
 ```
 
-`status` is one of `modified`, `added`, `deleted`, `ignored`; `detail`, the
-actions, `empty` and `refresh` may be left out. A row has at most 6 actions,
-and a key goes to the first action that names it.
+`status` is one of `modified`, `added`, `deleted`, `ignored`; `path`,
+`detail`, the actions, `empty`, `refresh` and `buttons` may be left out. A row
+has at most 6 actions, a list at most 12 buttons, and a key goes to the first
+action that names it.
 
 A **diff** panel shows a unified diff, the text `diff -u` writes, as the git
 diff panel shows git's: a header by file that folds its changes, added and
@@ -412,8 +420,8 @@ characters and cut to length.
 
 A panel opens in the plugin's project, which must be the current one; it is
 not saved with the layout. An update keeps the reader's place as far as the
-new content reaches, a list's selection on the same row, and a diff's selected
-and folded files. When the plugin stops, its panels stay and say so; a plugin
+new content reaches, a list's selection on the same row and its folded
+folders, and a diff's selected and folded files. When the plugin stops, its panels stay and say so; a plugin
 started again does not get them back.
 
 ```python
