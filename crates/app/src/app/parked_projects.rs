@@ -595,10 +595,7 @@ impl App {
     }
 
     /// The plugin panel `id`, in the current project or a parked one.
-    pub(super) fn plugin_panel_mut(
-        &mut self,
-        id: u64,
-    ) -> Option<&mut termide_panel_markdown::MarkdownPanel> {
+    pub(super) fn plugin_panel_mut(&mut self, id: u64) -> Option<PluginPanelMut<'_>> {
         let parked = self
             .open_projects
             .parked_mut()
@@ -606,12 +603,8 @@ impl App {
         self.layout_manager
             .iter_all_panels_mut()
             .chain(parked)
-            .filter_map(|panel| {
-                panel
-                    .as_any_mut()
-                    .downcast_mut::<termide_panel_markdown::MarkdownPanel>()
-            })
-            .find(|panel| panel.plugin_panel_id() == Some(id))
+            .filter_map(|panel| PluginPanelMut::of(panel.as_any_mut()))
+            .find(|panel| panel.id() == id)
     }
 
     /// The ids of every plugin panel open, in any project.
@@ -623,12 +616,7 @@ impl App {
         self.layout_manager
             .iter_all_panels_mut()
             .chain(parked)
-            .filter_map(|panel| {
-                panel
-                    .as_any()
-                    .downcast_ref::<termide_panel_markdown::MarkdownPanel>()
-                    .and_then(termide_panel_markdown::MarkdownPanel::plugin_panel_id)
-            })
+            .filter_map(|panel| plugin_panel_id(panel.as_any()))
             .collect()
     }
 
@@ -859,6 +847,70 @@ impl App {
             }
         }
     }
+}
+
+/// A panel a plugin opened: Markdown, or a list.
+pub(super) enum PluginPanelMut<'a> {
+    Markdown(&'a mut termide_panel_markdown::MarkdownPanel),
+    List(&'a mut termide_panel_plugin_list::PluginListPanel),
+    Diff(&'a mut termide_panel_git_diff::GitDiffPanel),
+}
+
+impl<'a> PluginPanelMut<'a> {
+    fn of(panel: &'a mut dyn std::any::Any) -> Option<Self> {
+        if panel.is::<termide_panel_plugin_list::PluginListPanel>() {
+            return panel.downcast_mut().map(Self::List);
+        }
+        if panel.is::<termide_panel_git_diff::GitDiffPanel>() {
+            return panel
+                .downcast_mut::<termide_panel_git_diff::GitDiffPanel>()
+                .filter(|panel| panel.plugin_panel_id().is_some())
+                .map(Self::Diff);
+        }
+        panel
+            .downcast_mut::<termide_panel_markdown::MarkdownPanel>()
+            .filter(|panel| panel.plugin_panel_id().is_some())
+            .map(Self::Markdown)
+    }
+
+    fn id(&self) -> u64 {
+        match self {
+            Self::Markdown(panel) => panel.plugin_panel_id().unwrap_or(u64::MAX),
+            Self::List(panel) => panel.plugin_panel_id(),
+            Self::Diff(panel) => panel.plugin_panel_id().unwrap_or(u64::MAX),
+        }
+    }
+
+    /// Replace the panel's `[≡]` entries.
+    pub(super) fn set_menu(&mut self, menu: Vec<(String, String)>) {
+        match self {
+            Self::Markdown(panel) => panel.set_plugin_menu(menu),
+            Self::List(panel) => panel.set_plugin_menu(menu),
+            Self::Diff(panel) => panel.set_plugin_menu(menu),
+        }
+    }
+
+    /// The plugin is gone: the panel says so in `message`.
+    pub(super) fn set_stopped(&mut self, message: String) {
+        match self {
+            Self::Markdown(panel) => panel.set_plugin_content(None, format!("*{message}*")),
+            Self::List(panel) => panel.set_stopped(message),
+            Self::Diff(panel) => panel.set_stopped(message),
+        }
+    }
+}
+
+/// The id of `panel` if a plugin opened it.
+pub(super) fn plugin_panel_id(panel: &dyn std::any::Any) -> Option<u64> {
+    if let Some(list) = panel.downcast_ref::<termide_panel_plugin_list::PluginListPanel>() {
+        return Some(list.plugin_panel_id());
+    }
+    if let Some(diff) = panel.downcast_ref::<termide_panel_git_diff::GitDiffPanel>() {
+        return diff.plugin_panel_id();
+    }
+    panel
+        .downcast_ref::<termide_panel_markdown::MarkdownPanel>()
+        .and_then(termide_panel_markdown::MarkdownPanel::plugin_panel_id)
 }
 
 #[cfg(test)]

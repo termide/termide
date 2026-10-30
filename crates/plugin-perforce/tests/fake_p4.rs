@@ -29,11 +29,17 @@ case "$*" in
     else
         echo "$root/... - file(s) not opened on this client." >&2
     fi ;;
+"-ztag changes -s pending -c ws")
+    ;;
 "print -q $root/a.c#3")
     printf 'int main;\n' ;;
 "edit $root/a.c")
     touch "$root/.opened"; chmod u+w "$root/a.c"
     echo "//depot/a.c#3 - opened for edit" ;;
+"diff -du $root/a.c")
+    printf '==== //depot/a.c#3 - %s/a.c ====\n' "$root"
+    printf -- '--- //depot/a.c\t2026/10/01 10:00:00\n+++ %s/a.c\t2026/10/02 10:00:00\n' "$root"
+    printf '@@ -1 +1 @@\n-int main;\n+int main(void);\n' ;;
 "revert $root/a.c")
     rm -f "$root/.opened"; chmod u-w "$root/a.c"
     echo "//depot/a.c#3 - was edit, reverted" ;;
@@ -95,6 +101,8 @@ fn shows_the_state_and_opens_for_edit() {
     let statuses: Arc<Mutex<Vec<String>>> = Arc::default();
     let asked: Arc<Mutex<Vec<String>>> = Arc::default();
     let marks: Arc<Mutex<Vec<(String, Value)>>> = Arc::default();
+    let panels: Arc<Mutex<Vec<Value>>> = Arc::default();
+    let opened_panels = Arc::clone(&panels);
     // What each `window/choose` is answered, in turn.
     let choices: Arc<Mutex<Vec<Value>>> = Arc::default();
     let picks = Arc::clone(&choices);
@@ -141,6 +149,10 @@ fn shows_the_state_and_opens_for_edit() {
                         assert_eq!(first, "Save, then stop editing: keep it opened for edit");
                     }
                     picks.lock().unwrap().remove(0)
+                }
+                "panel/open" => {
+                    opened_panels.lock().unwrap().push(params);
+                    json!({ "panel": 1 })
                 }
                 "window/notify" => panic!("unexpected notice: {params}"),
                 other => panic!("unexpected request {other}"),
@@ -256,6 +268,44 @@ fn shows_the_state_and_opens_for_edit() {
         .request("file/will_edit", json!({ "path": file }), wait, &|| false)
         .unwrap();
     assert_eq!(again, json!({ "handled": false }));
+
+    // The opened files, as a list: a group by changelist with its submit,
+    // a row by file with the keys git status gives the same actions.
+    peer.request("command/execute", json!({ "id": "opened" }), wait, &|| {
+        false
+    })
+    .unwrap();
+    let panel = panels.lock().unwrap().remove(0);
+    assert_eq!(panel["title"], "Opened files");
+    assert!(panel.get("markdown").is_none());
+    let group = &panel["list"]["groups"][0];
+    assert_eq!(group["label"], "Default changelist");
+    assert_eq!(group["actions"][0]["action"], "submit-default");
+    let row = &group["items"][0];
+    assert_eq!(row["label"], "a.c");
+    assert_eq!(
+        (row["detail"].as_str(), row["status"].as_str()),
+        (Some("edit"), Some("modified"))
+    );
+    let keys: Vec<&str> = row["actions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|a| a["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(keys, ["edit", "view", "revert"]);
+    assert_eq!(panel["list"]["refresh"], "refresh");
+
+    // The file's changes, as a unified diff named by its place in the
+    // project rather than by p4's depot and local paths.
+    peer.request("command/execute", json!({ "id": "diff" }), wait, &|| false)
+        .unwrap();
+    let panel = panels.lock().unwrap().remove(0);
+    assert_eq!(panel["title"], "diff a.c");
+    assert_eq!(
+        panel["diff"],
+        "--- a/a.c\n+++ b/a.c\n@@ -1 +1 @@\n-int main;\n+int main(void);\n"
+    );
 
     // Turning editing off on the opened file asks what to do with it.
     let stop = |pick: Value, modified: bool| {

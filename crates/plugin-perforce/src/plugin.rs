@@ -581,26 +581,32 @@ impl Perforce {
             .run(&["diff", "-du", &path.to_string_lossy()], path.parent())
     }
 
-    fn diff_markdown(&self, path: &Path) -> Result<String, P4Error> {
+    /// The file's changes as a unified diff named by its path in the
+    /// project; only the headers when it has none.
+    fn diff_unified(&self, path: &Path) -> Result<String, P4Error> {
         let out = self.diff(path)?;
-        let body: Vec<&str> = out
-            .lines()
-            .filter(|line| !line.starts_with("===="))
-            .collect();
         let name = self.p4.relative(path);
-        if body.iter().all(|line| line.trim().is_empty()) {
-            return Ok(format!("# {name}\n\nNo changes against the depot."));
+        // p4 names the sides by depot and local path; the panel wants the
+        // file's place in the project, and the hunks keep their own lines.
+        let hunks: Vec<&str> = out
+            .lines()
+            .skip_while(|line| !line.starts_with("@@"))
+            .collect();
+        let mut diff = format!("--- a/{name}\n+++ b/{name}\n");
+        for line in hunks {
+            diff.push_str(line);
+            diff.push('\n');
         }
-        Ok(format!("# {name}\n\n```diff\n{}\n```", body.join("\n")))
+        Ok(diff)
     }
 
     fn show_diff(&self, path: &Path) -> Result<(), P4Error> {
-        let markdown = self.diff_markdown(path)?;
+        let diff = self.diff_unified(path)?;
         let file = path
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         self.termide
-            .open_panel(&format!("diff {file}"), &markdown, &[])
+            .open_diff(&format!("diff {file}"), &diff)
             .map_err(P4Error)?;
         Ok(())
     }
@@ -662,21 +668,15 @@ impl Perforce {
             .collect())
     }
 
-    fn panel_markdown(&self, panel: &mut OpenedPanel) -> Result<String, P4Error> {
+    /// The opened files as a list panel shows them: a group by changelist,
+    /// a row by file.
+    fn panel_list(&self, panel: &mut OpenedPanel) -> Result<Value, P4Error> {
         panel.files = self.opened_files()?;
         let descriptions = if panel.files.is_empty() {
             BTreeMap::new()
         } else {
             self.pending_descriptions()?
         };
-        let mut lines = vec![
-            "[Refresh](plugin:refresh) · [Sync](plugin:sync)".to_string(),
-            String::new(),
-        ];
-        if panel.files.is_empty() {
-            lines.push("No files are opened in this project.".to_string());
-            return Ok(lines.join("\n"));
-        }
         let mut groups: BTreeMap<(bool, String), Vec<usize>> = BTreeMap::new();
         for (index, record) in panel.files.iter().enumerate() {
             let change = record
@@ -688,40 +688,56 @@ impl Perforce {
                 .or_default()
                 .push(index);
         }
-        for ((_, change), indices) in &groups {
-            if change == "default" {
-                lines.push("## Default changelist".to_string());
-            } else {
-                match descriptions.get(change).filter(|d| !d.is_empty()) {
-                    Some(desc) => lines.push(format!("## Change {change}: {desc}")),
-                    None => lines.push(format!("## Change {change}")),
-                }
-            }
-            lines.push(String::new());
-            lines.push(format!("[Submit](plugin:submit-{change})"));
-            lines.push(String::new());
-            for &index in indices {
-                let record = &panel.files[index];
-                let name = self.p4.relative(Path::new(&record["clientFile"]));
-                let action = record.get("action").map_or("?", String::as_str);
-                lines.push(format!(
-                    "- `{action}` [{name}](plugin:open-{index}) · [diff](plugin:diff-{index}) · [revert](plugin:revert-{index})"
-                ));
-            }
-            lines.push(String::new());
-        }
-        Ok(lines.join("\n"))
+        let groups: Vec<Value> = groups
+            .iter()
+            .map(|((_, change), indices)| {
+                let label = if change == "default" {
+                    "Default changelist".to_string()
+                } else {
+                    format!("Change {change}")
+                };
+                let detail = descriptions.get(change).map_or("", String::as_str);
+                let items: Vec<Value> = indices
+                    .iter()
+                    .map(|&index| {
+                        let record = &panel.files[index];
+                        let action = record.get("action").map_or("?", String::as_str);
+                        json!({
+                            "label": self.p4.relative(Path::new(&record["clientFile"])),
+                            "detail": action,
+                            "status": status_of(action),
+                            "actions": [
+                                { "label": "Open", "action": format!("open-{index}"), "key": "edit" },
+                                { "label": "Diff", "action": format!("diff-{index}"), "key": "view" },
+                                { "label": "Revert", "action": format!("revert-{index}"), "key": "revert" },
+                            ],
+                        })
+                    })
+                    .collect();
+                json!({
+                    "label": label,
+                    "detail": detail,
+                    "actions": [{ "label": "Submit", "action": format!("submit-{change}") }],
+                    "items": items,
+                })
+            })
+            .collect();
+        Ok(json!({
+            "groups": groups,
+            "empty": "No files are opened in this project.",
+            "refresh": "refresh",
+        }))
     }
 
     fn show_panel(&self, panel: &mut OpenedPanel) -> Result<(), P4Error> {
-        let markdown = self.panel_markdown(panel)?;
+        let list = self.panel_list(panel)?;
         match panel.id {
-            Some(id) => self.termide.update_panel(id, &markdown).map_err(P4Error),
+            Some(id) => self.termide.update_list(id, list).map_err(P4Error),
             None => {
                 let menu = [("Refresh", "refresh"), ("Sync the workspace", "sync")];
                 let id = self
                     .termide
-                    .open_panel("Opened files", &markdown, &menu)
+                    .open_list("Opened files", list, &menu)
                     .map_err(P4Error)?;
                 panel.id = Some(id);
                 Ok(())

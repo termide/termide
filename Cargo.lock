@@ -5330,6 +5330,7 @@ dependencies = [
  "termide-panel-misc",
  "termide-panel-operations",
  "termide-panel-outline",
+ "termide-panel-plugin-list",
  "termide-panel-terminal",
  "termide-plugin-perforce",
  "termide-plugins",
@@ -5972,6 +5973,19 @@ dependencies = [
  "tree-sitter-ruby",
  "tree-sitter-rust",
  "tree-sitter-typescript",
+ "unicode-width",
+]
+
+[[package]]
+name = "termide-panel-plugin-list"
+version = "0.47.1"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "termide-clipboard",
+ "termide-config",
+ "termide-core",
+ "termide-ui",
  "unicode-width",
 ]
 

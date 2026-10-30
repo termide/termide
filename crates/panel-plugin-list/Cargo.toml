@@ -1,0 +1,18 @@
+[package]
+name = "termide-panel-plugin-list"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+crossterm.workspace = true
+ratatui.workspace = true
+unicode-width.workspace = true
+
+# Workspace crates
+termide-clipboard = { path = "../clipboard" }
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-ui = { path = "../ui" }

@@ -133,7 +133,11 @@ Contributions, declared in `initialize` (they can change later):
    handed back as `panel/action`. Markdown was chosen over a model of our own
    because the viewer already lays out headings, lists, tables, code and
    links, with the cursor, selection, search and copy, and every plugin
-   author knows it.
+   author knows it. A status panel, a row per file with actions on it, read
+   as a page of links, so a panel may be a `list` instead: groups of rows,
+   each with its actions, drawn by termide and driven as git status is, its
+   keys (`F3`, `F4`, `Backspace`, `Ctrl+R`) named by the plugin rather than
+   chosen, so a plugin's panel cannot take a key of its own.
    Windows (`window/confirm`, `choose`, `input`, `form`, `message`) are
    termide's own modals: the plugin picks the kind and the words, termide
    heads every one `🧩 <plugin>`, offers no hidden input, queues them one per

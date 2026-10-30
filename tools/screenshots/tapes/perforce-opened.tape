@@ -1,7 +1,7 @@
 # Perforce, before a submit: the opened files by changelist (Alt+G, git's
 # status key, in a project outside git), the diff of one against the depot,
-# and the default changelist submitted with a description asked for. The
-# panel's links are reached with the arrows here; a click does the same.
+# and the default changelist submitted with a description asked for. Space
+# lists a row's actions; Enter runs the first, a group's submit.
 # The `# hint:` lines are the key badges keys.mjs lays over the recording.
 Output out/perforce-opened.gif
 Source tapes/_settings.tape
@@ -40,16 +40,17 @@ Sleep 600ms
 Show
 Sleep 1.5s
 Screenshot out/perforce-opened.png
-# The diff link of Health.cpp.
-Down 5
-Sleep 400ms
-Right 33
-Sleep 600ms
-# hint: Enter "diff" for=1.4s
+Sleep 500ms
+# The row's actions, and its diff against the depot.
+# hint: Space "actions" for=1.4s
+Space
+Sleep 1.2s
+Screenshot out/perforce-actions.png
+Sleep 300ms
+Down
+Sleep 500ms
 Enter
 Sleep 2.5s
-Screenshot out/perforce-after-submit.png
-Sleep 500ms
 # The diff panel alone, to read it whole.
 Alt+z
 Sleep 1.5s
@@ -60,8 +61,7 @@ Alt+z
 Sleep 400ms
 Alt+w
 Sleep 800ms
-Left 33
-Up 2
+Up
 Show
 Sleep 1s
 # hint: Enter "Submit" for=1.4s

@@ -52,15 +52,17 @@
 //!   plugin's version control has it, which the editor marks changed lines
 //!   against while git has no original for the file; `text: null` takes it
 //!   back.
-//! - `panel/open` (request) `{ "title", "markdown" }` opens a panel in the
-//!   plugin's project, which must be the current one; the result is
-//!   `{ "panel" }`, its id.
-//! - `panel/update` (request) `{ "panel", "markdown", "title"? }`.
+//! - `panel/open` (request) `{ "title", "markdown" | "list" | "diff",
+//!   "menu"? }` opens a panel in the plugin's project, which must be the
+//!   current one; the result is `{ "panel" }`, its id. `diff` is a unified
+//!   diff, shown as git's diffs are.
+//! - `panel/update` (request) `{ "panel", "markdown" | "list" | "diff",
+//!   "title"?, "menu"? }`, of the kind the panel was opened with.
 //! - `panel/close` (request) `{ "panel" }`.
 //!
 //! About its panels, termide → plugin (notifications):
-//! - `panel/action` `{ "panel", "action" }`: a `plugin:<action>` link in
-//!   the panel was followed.
+//! - `panel/action` `{ "panel", "action" }`: a `plugin:<action>` link, a
+//!   list row's action or a `[≡]` entry was chosen.
 //! - `panel/closed` `{ "panel" }`: the user closed it.
 
 use serde::Deserialize;

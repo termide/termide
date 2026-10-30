@@ -58,6 +58,7 @@ termide-panel-terminal = { path = "../panel-terminal" }
 termide-panel-image = { path = "../panel-image" }
 termide-panel-binary = { path = "../panel-binary" }
 termide-panel-markdown = { path = "../panel-markdown" }
+termide-panel-plugin-list = { path = "../panel-plugin-list" }
 termide-panel-mermaid = { path = "../panel-mermaid" }
 termide-panel-html = { path = "../panel-html" }
 termide-fetch = { path = "../fetch" }

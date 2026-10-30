@@ -353,16 +353,52 @@ When the plugin stops or its project closes, its windows go.
 
 ### Panels
 
-A plugin can open panels of its own, drawn from Markdown it sends: headings,
-lists, tables, code and links as in the Markdown viewer, with its cursor,
-selection, search and copy. A link to `plugin:<action>` is a button: following
-it (`Enter` on it, or a click) sends the action back to the plugin, which
-answers by updating the panel.
+A plugin can open panels of its own, of three kinds.
+
+A **Markdown** panel shows the Markdown the plugin sends: headings, lists,
+tables, code and links as in the Markdown viewer, with its cursor, selection,
+search and copy. A link to `plugin:<action>` is a button: following it
+(`Enter` on it, or a click) sends the action back to the plugin, which answers
+by updating the panel.
+
+A **list** panel shows rows grouped under headings, each with the actions the
+plugin offers on it, and works as the git status panel does: the arrows move
+between rows, `Enter` or a double click runs a row's first action, `Space` (or
+a right click) lists all of them, and the status bar shows them as buttons
+with their keys. An action marked with a `key` takes that git status key, as
+`[git_status.keybindings]` sets it: `view` (`F3`), `edit` (`F4`) or `revert`
+(`Backspace`, `Delete`); the refresh key (`Ctrl+R`) sends the list's `refresh`.
+A row's `status` colours it as the file manager colours git's states.
+
+```json
+{ "groups": [{
+    "label": "Change 7", "detail": "Guard Heal",
+    "actions": [{ "label": "Submit", "action": "submit-7" }],
+    "items": [{
+      "label": "Source/Game/Health.cpp", "detail": "edit", "status": "modified",
+      "actions": [
+        { "label": "Open", "action": "open-0", "key": "edit" },
+        { "label": "Diff", "action": "diff-0", "key": "view" },
+        { "label": "Revert", "action": "revert-0", "key": "revert" } ] }] }],
+  "empty": "No files are opened.",
+  "refresh": "refresh" }
+```
+
+`status` is one of `modified`, `added`, `deleted`, `ignored`; `detail`, the
+actions, `empty` and `refresh` may be left out. A row has at most 6 actions,
+and a key goes to the first action that names it.
+
+A **diff** panel shows a unified diff, the text `diff -u` writes, as the git
+diff panel shows git's: a header by file that folds its changes, added and
+removed lines coloured, both sides' line numbers. Files are told apart by their
+`---`/`+++` headers (or `diff --git` lines); a path is taken from the `+++`
+side, without git's `b/`, and relative to the project for `F4` to open it. The
+panel does not reload by itself: the plugin updates it.
 
 | Method | Kind | Direction | Params / result |
 |---|---|---|---|
-| `panel/open` | request | plugin → termide | `title`, `markdown`, `menu` (optional); the result is `{ "panel" }`, its id |
-| `panel/update` | request | plugin → termide | `panel`, `markdown`, `title` and `menu` (optional) |
+| `panel/open` | request | plugin → termide | `title`, one of `markdown`, `list` or `diff`, `menu` (optional); the result is `{ "panel" }`, its id |
+| `panel/update` | request | plugin → termide | `panel`, `markdown`, `list` or `diff` (the kind it was opened with), `title` and `menu` (optional) |
 | `panel/close` | request | plugin → termide | `panel` |
 | `panel/action` | notification | termide → plugin | `panel`, `action` |
 | `panel/closed` | notification | termide → plugin | `panel`: the user closed it |
@@ -376,8 +412,9 @@ characters and cut to length.
 
 A panel opens in the plugin's project, which must be the current one; it is
 not saved with the layout. An update keeps the reader's place as far as the
-new content reaches. When the plugin stops, its panels stay and say so; a
-plugin started again does not get them back.
+new content reaches, a list's selection on the same row, and a diff's selected
+and folded files. When the plugin stops, its panels stay and say so; a plugin
+started again does not get them back.
 
 ```python
 # in the loop of the example below

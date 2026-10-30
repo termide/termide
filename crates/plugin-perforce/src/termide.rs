@@ -122,20 +122,42 @@ impl Termide {
 
     /// Open a panel; its id.
     ///
+    /// Open a panel of `diff`, a unified diff, shown as git's are.
+    ///
     /// # Errors
     ///
     /// When termide does not open it.
-    pub fn open_panel(
+    pub fn open_diff(&self, title: &str, diff: &str) -> Result<u64, String> {
+        self.open_with(title, "diff", json!(diff), &[])
+    }
+
+    /// Open a panel of a `list` (groups of rows with their actions).
+    ///
+    /// # Errors
+    ///
+    /// When termide does not open it.
+    pub fn open_list(
         &self,
         title: &str,
-        markdown: &str,
+        list: Value,
+        menu: &[(&str, &str)],
+    ) -> Result<u64, String> {
+        self.open_with(title, "list", list, menu)
+    }
+
+    fn open_with(
+        &self,
+        title: &str,
+        kind: &str,
+        content: Value,
         menu: &[(&str, &str)],
     ) -> Result<u64, String> {
         let menu: Vec<Value> = menu
             .iter()
             .map(|(label, action)| json!({ "label": label, "action": action }))
             .collect();
-        let mut params = json!({ "title": title, "markdown": markdown });
+        let mut params = json!({ "title": title });
+        params[kind] = content;
         if !menu.is_empty() {
             params["menu"] = Value::Array(menu);
         }
@@ -145,13 +167,15 @@ impl Termide {
             .ok_or_else(|| "panel/open gave no panel".to_string())
     }
 
+    /// Show a new `list` in a list panel.
+    ///
     /// # Errors
     ///
     /// When the panel is gone.
-    pub fn update_panel(&self, panel: u64, markdown: &str) -> Result<(), String> {
+    pub fn update_list(&self, panel: u64, list: Value) -> Result<(), String> {
         self.request(
             protocol::PANEL_UPDATE,
-            json!({ "panel": panel, "markdown": markdown }),
+            json!({ "panel": panel, "list": list }),
         )
         .map(drop)
     }

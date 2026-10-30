@@ -54,6 +54,7 @@ mod panel_operations;
 mod parked_projects;
 mod plugin_editor;
 mod plugin_files;
+mod plugin_list;
 mod plugin_providers;
 mod plugin_windows;
 mod plugins;
