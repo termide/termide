@@ -104,6 +104,43 @@ fn user_less_lookup_takes_any_user_and_kinds_are_separate() {
 }
 
 #[test]
+fn api_keys_are_kept_by_connection_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = new_vault(&dir);
+    v.lock();
+    v.put(SecretKind::ApiKey, "openrouter", None, "sk-or-1", None)
+        .unwrap();
+    let info = v.find(SecretKind::ApiKey, "openrouter", None).unwrap();
+    assert_eq!(info.kind, "api-key");
+    assert_eq!(info.secret_kind(), Some(SecretKind::ApiKey));
+    assert!(v.find(SecretKind::Password, "openrouter", None).is_none());
+    v.unlock("master").unwrap();
+    let (_, key) = v
+        .get(SecretKind::ApiKey, "openrouter", None)
+        .unwrap()
+        .unwrap();
+    assert_eq!(key.as_str(), "sk-or-1");
+    assert!(v.remove(SecretKind::ApiKey, "openrouter", None).unwrap());
+}
+
+#[test]
+fn entries_of_unknown_kinds_survive_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = new_vault(&dir);
+    v.put(SecretKind::Password, "ftp://h", None, "pw", None)
+        .unwrap();
+    // A newer termide's kind: kept, listed, never addressable.
+    let path = v.path().to_path_buf();
+    let text = fs::read_to_string(&path).unwrap();
+    fs::write(&path, text.replace("\"password\"", "\"from-the-future\"")).unwrap();
+    v.reload().unwrap();
+    v.put(SecretKind::ApiKey, "c", None, "k", None).unwrap();
+    let kinds: Vec<_> = v.entries().into_iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, ["from-the-future", "api-key"]);
+    assert!(v.entries()[0].secret_kind().is_none());
+}
+
+#[test]
 fn edited_metadata_fails_authentication() {
     let dir = tempfile::tempdir().unwrap();
     let mut v = new_vault(&dir);

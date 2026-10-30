@@ -170,8 +170,9 @@ pub struct AiSettings {
 }
 
 /// One connection to a model: the wire protocol or CLI agent, where it
-/// listens, the key and the model. The API key is read from `api_key_env`
-/// rather than stored, so the config file never holds a secret.
+/// listens, the key and the model. The API key comes from the variable
+/// `api_key_env` names or from the password vault, under the connection's
+/// name, so the config file never holds a secret.
 ///
 /// Only what a connection sets is written: a new one is a table the
 /// defaults do not have, so the diff-against-defaults save would otherwise
@@ -195,7 +196,8 @@ pub struct Connection {
     /// pre-select on its own login.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub model: String,
-    /// Environment variable holding the API key; empty for local servers.
+    /// Environment variable holding the API key; empty for local servers
+    /// and for a key kept in the password vault.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub api_key_env: String,
     /// Fallback context window in tokens, used only when the provider does
@@ -300,6 +302,40 @@ impl Connection {
     #[must_use]
     pub fn min_context_limit(&self) -> Option<u64> {
         (self.provider == "claude_code").then_some(CLAUDE_CODE_MIN_CONTEXT_LIMIT)
+    }
+
+    /// The environment variable `api_key_env` names, when it is set and
+    /// reads as a variable name rather than a pasted key.
+    #[must_use]
+    pub fn api_key_env_name(&self) -> Option<&str> {
+        let name = self.api_key_env.trim();
+        (!name.is_empty() && !self.api_key_env_looks_like_key()).then_some(name)
+    }
+
+    /// Whether `api_key_env` holds what looks like the key itself rather
+    /// than the name of the variable holding it: a character a variable
+    /// name does not have, a leading digit, a key's well-known prefix, or a
+    /// long run of mixed-case letters and digits.
+    #[must_use]
+    pub fn api_key_env_looks_like_key(&self) -> bool {
+        /// Prefixes of the keys of common services that would pass for a
+        /// variable name otherwise.
+        const KEY_PREFIXES: [&str; 5] = ["gsk_", "hf_", "AIza", "ghp_", "github_pat_"];
+        let value = self.api_key_env.trim();
+        if value.is_empty() {
+            return false;
+        }
+        let name_chars = value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_');
+        let leading_digit = value.starts_with(|c: char| c.is_ascii_digit());
+        let has = |test: fn(&char) -> bool| value.chars().any(|c| test(&c));
+        let random = value.len() >= 32
+            && has(char::is_ascii_lowercase)
+            && has(char::is_ascii_uppercase)
+            && has(char::is_ascii_digit);
+        !name_chars
+            || leading_digit
+            || random
+            || KEY_PREFIXES.iter().any(|prefix| value.starts_with(prefix))
     }
 }
 
@@ -1402,6 +1438,34 @@ impl Config {
 #[cfg(test)]
 mod ai_settings_tests {
     use super::*;
+
+    #[test]
+    fn a_pasted_key_is_told_from_a_variable_name() {
+        let with = |value: &str| Connection {
+            api_key_env: value.to_string(),
+            ..Connection::default()
+        };
+        for name in ["OPENROUTER_API_KEY", "HF_TOKEN", "my_key_2", ""] {
+            assert!(!with(name).api_key_env_looks_like_key(), "{name}");
+        }
+        for key in [
+            "sk-or-v1-0123abcd",
+            "sk-ant-api03-xyz",
+            "gsk_abcdef",
+            "AIzaSyD0123456789",
+            "2abc",
+            "has space",
+            "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4z",
+        ] {
+            assert!(with(key).api_key_env_looks_like_key(), "{key}");
+        }
+        assert_eq!(
+            with(" OPENAI_API_KEY ").api_key_env_name(),
+            Some("OPENAI_API_KEY")
+        );
+        assert_eq!(with("sk-or-v1-0").api_key_env_name(), None);
+        assert_eq!(with("").api_key_env_name(), None);
+    }
 
     #[test]
     fn recall_settings_keep_their_defaults_where_left_out() {

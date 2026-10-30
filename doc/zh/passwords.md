@@ -8,6 +8,7 @@ Termide 将远程连接的密码保存在一个由主密码保护的加密密码
 - **数据库** — PostgreSQL 和 MySQL（参见[数据库查看器](database.md)）。
 - **通过 HTTPS 的 Git** — push、pull 和 fetch 所用的用户名和密码或令牌。
 - **通过 SSH 的 Git** — SSH 密钥的密码短语。
+- **AI 连接** — 代理连接的 API 密钥（见[编码代理](agent.md#配置模型)）。
 
 ## 工作方式
 

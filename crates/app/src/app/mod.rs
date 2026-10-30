@@ -30,6 +30,7 @@ use crate::PanelExt;
 pub use termide_core::Panel;
 
 pub mod agent_panel;
+mod api_keys;
 mod background_ops;
 mod bg_fetch;
 mod bg_git;
@@ -679,6 +680,7 @@ impl App {
         if let Some(save) = self.settings_save.take() {
             self.persist_settings(save);
         }
+        self.take_settings_key_changes();
     }
 
     /// Make `config`, a config as the files give it, the running config,
@@ -958,6 +960,9 @@ impl App {
         // Initialize terminal dimensions
         let size = terminal.size()?;
         self.state.update_terminal_size(size.width, size.height);
+        // Agent work resumed below may ask for an API key before the first
+        // tick answers.
+        api_keys::Broker::global().attach();
         self.load_reopenable_projects();
         if let Some(resume_agent_work) = self.restore_projects.take() {
             if self.state.reopenable_projects.is_empty() {

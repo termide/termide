@@ -11,6 +11,8 @@ The vault serves:
 - **Git over HTTPS** — user name and password or token for push, pull and
   fetch.
 - **Git over SSH** — the passphrase of your SSH key.
+- **AI connections** — the API key of an agent connection (see
+  [Coding Agent](agent.md#configuring-a-model)).
 
 ## How it works
 
@@ -48,6 +50,20 @@ the vault. Answer **Yes**:
 - once it is stored, the bookmark is rewritten without it.
 
 Project bookmarks (`.termide/bookmarks.toml`) can then be committed safely.
+
+## API keys of AI connections
+
+An agent connection's API key is kept as one entry under the connection's
+name. It differs from a server password:
+
+- it is stored when you enter it in the connection's **API key** field, not
+  after a server accepted it;
+- cancelling the master password prompt fails the request instead of asking
+  for the key;
+- renaming the connection moves the entry and deleting it removes the entry;
+- a key in the variable named by `api_key_env` comes first.
+
+See [Coding Agent](agent.md#configuring-a-model) for the details.
 
 ## Locking
 

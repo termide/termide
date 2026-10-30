@@ -805,6 +805,14 @@ impl Translation for RuntimeTranslation {
         settings_agent_base_url,
         settings_agent_model,
         settings_agent_api_key_env,
+        settings_agent_api_key,
+        settings_api_key_stored,
+        settings_api_key_not_stored,
+        settings_api_key_enter,
+        settings_api_key_replace,
+        settings_api_key_remove,
+        settings_api_key_move_env,
+        settings_api_key_env_misuse,
         settings_agent_context_window,
         settings_agent_max_tokens,
         settings_agent_reasoning,
@@ -1042,6 +1050,8 @@ impl Translation for RuntimeTranslation {
         vault_target_ssh_key,
         palette_lock_vault,
         vault_move_bookmark_password,
+        vault_api_key_saved,
+        vault_api_key_removed,
         status_vfs_resolving_link,
         status_vfs_loading,
         status_vfs_connected,
@@ -2046,6 +2056,10 @@ impl Translation for RuntimeTranslation {
 
     fn vault_error(&self, error: &str) -> String {
         self.format("vault_error", &[("error", error)])
+    }
+
+    fn vault_api_key_not_moved(&self, from: &str, to: &str) -> String {
+        self.format("vault_api_key_not_moved", &[("from", from), ("to", to)])
     }
 
     fn git_username_prompt(&self, target: &str) -> String {

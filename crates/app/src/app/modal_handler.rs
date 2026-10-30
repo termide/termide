@@ -71,6 +71,8 @@ impl App {
             // Taken now: the result below may close the modal.
             if let ActiveModal::Settings(settings) = modal {
                 self.settings_save = settings.take_save_request().or(self.settings_save.take());
+                self.vault
+                    .queue_key_changes(settings.take_api_key_changes());
             }
 
             // If modal window returned result, handle it
@@ -248,6 +250,8 @@ impl App {
             // Taken now: the result below may close the modal.
             if let termide_modal::ActiveModal::Settings(settings) = modal {
                 self.settings_save = settings.take_save_request().or(self.settings_save.take());
+                self.vault
+                    .queue_key_changes(settings.take_api_key_changes());
             }
 
             // If modal window returned result, handle it

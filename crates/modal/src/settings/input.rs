@@ -195,14 +195,20 @@ impl SettingsModal {
         };
         if let Some(value) = options.values.get(picker.cursor) {
             let value = value.clone();
-            // The model dropdown's last entry is the "type an id" escape: it
-            // opens inline editing rather than storing a value.
-            if value == crate::settings::fields::MODEL_TYPE_SENTINEL {
+            // The model dropdown's last entry is the "type an id" escape, and
+            // the API key's "enter a key": they open inline editing rather
+            // than storing a value.
+            if value == crate::settings::fields::MODEL_TYPE_SENTINEL
+                || value == super::connection::API_KEY_ENTER
+            {
                 self.start_edit();
                 return;
             }
             self.apply_enum(picker.field_index, &value);
-            self.mark_dirty();
+            // The API key's choices change the vault, not the config.
+            if !self.is_api_key_field(picker.field_index) {
+                self.mark_dirty();
+            }
         }
     }
 

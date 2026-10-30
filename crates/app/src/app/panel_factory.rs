@@ -200,7 +200,8 @@ impl App {
         let plugin_names = self.plugin_names();
         let modal = SettingsModal::new(config, global_layer, in_project)
             .with_plugins(plugin_names)
-            .with_debugger_defaults(debugger_defaults);
+            .with_debugger_defaults(debugger_defaults)
+            .with_stored_api_keys(self.vault.stored_api_keys());
         self.settings_model_fetch = None;
         self.state.set_pending_action(
             crate::state::PendingAction::Settings,
@@ -214,13 +215,18 @@ impl App {
     /// — a no-op with nothing asked and no fetch in flight.
     pub(super) fn poll_settings_model_fetch(&mut self) {
         use termide_modal::ActiveModal;
-        if let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() {
-            // A newer request replaces the fetch in flight: its list is for a
-            // connection no longer open.
-            if let Some(connection) = modal.take_model_fetch_request() {
-                self.settings_model_fetch =
-                    super::agent_panel::spawn_settings_model_fetch(&connection);
-                if self.settings_model_fetch.is_none() {
+        let asked = match self.state.active_modal.as_mut() {
+            Some(ActiveModal::Settings(modal)) => modal.take_model_fetch_request(),
+            _ => None,
+        };
+        // A newer request replaces the fetch in flight: its list is for a
+        // connection no longer open.
+        if let Some((name, connection)) = asked {
+            let api_key = self.settings_api_key(&name, &connection);
+            self.settings_model_fetch =
+                super::agent_panel::spawn_settings_model_fetch(&connection, api_key);
+            if self.settings_model_fetch.is_none() {
+                if let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() {
                     modal.set_model_options(Vec::new());
                 }
             }

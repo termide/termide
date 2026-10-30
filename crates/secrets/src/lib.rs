@@ -63,6 +63,9 @@ pub enum SecretKind {
     SshPassphrase,
     /// Git credentials over HTTPS; origin is `https://host[:port]`.
     GitHttps,
+    /// API key of an agent connection; origin is the connection's name,
+    /// with no user.
+    ApiKey,
 }
 
 impl SecretKind {
@@ -72,6 +75,7 @@ impl SecretKind {
             Self::Password => "password",
             Self::SshPassphrase => "ssh-passphrase",
             Self::GitHttps => "git-https",
+            Self::ApiKey => "api-key",
         }
     }
 
@@ -82,6 +86,7 @@ impl SecretKind {
             "password" => Some(Self::Password),
             "ssh-passphrase" => Some(Self::SshPassphrase),
             "git-https" => Some(Self::GitHttps),
+            "api-key" => Some(Self::ApiKey),
             _ => None,
         }
     }
