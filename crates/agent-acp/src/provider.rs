@@ -174,10 +174,15 @@ impl Shared {
     ) -> Result<String, String> {
         let mut params = json!({ "cwd": self.cwd, "mcpServers": [] });
         let text = if flavor == AcpFlavor::ClaudeCode {
+            // A side call's request is unique and never read again, and the
+            // calls come in bursts: the five-minute cache writes it for less
+            // than the hour a subscription gives a session's conversation.
             params["_meta"] = json!({
                 "systemPrompt": system,
                 "claudeCode": { "options": {
-                    "settingSources": [], "strictMcpConfig": true, "tools": []
+                    "settingSources": [], "strictMcpConfig": true, "tools": [],
+                    "promptSuggestions": false,
+                    "env": { "CLAUDE_CODE_PROMPT_CACHE_TTL": "5m" },
                 } },
             });
             user.to_string()
@@ -546,6 +551,11 @@ mod tests {
             new["params"]["_meta"]["claudeCode"]["options"]["tools"],
             json!([])
         );
+        // Its unique request goes to the five-minute cache, with no
+        // follow-up suggestion generated after it.
+        let options = &new["params"]["_meta"]["claudeCode"]["options"];
+        assert_eq!(options["env"]["CLAUDE_CODE_PROMPT_CACHE_TTL"], "5m");
+        assert_eq!(options["promptSuggestions"], false);
         let picked: Vec<&Value> = seen
             .iter()
             .filter(|m| m["method"] == "session/set_config_option")

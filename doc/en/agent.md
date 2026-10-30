@@ -232,7 +232,11 @@ the log keeps the history whole), a run cannot pause between steps, and there is
 timing (token totals show when the agent reports them, as Claude Code does).
 The **Permissions** chip works for all three, `auto` with termide's
 [reviewer](#auto-mode), by default on the agent's own subscription. The settings modal says the same under a
-connection's page.
+connection's page. On Claude Code each side call — the reviewer, the recall
+solver — writes the five-minute prompt cache rather than the hour a
+subscription gives a conversation, since its request is never read again; no
+session asks Claude Code for its predicted next prompt, which termide does not
+show.
 
 The rest of the panel works with them as with the built-in loop:
 
