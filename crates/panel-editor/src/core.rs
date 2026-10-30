@@ -132,6 +132,12 @@ pub struct Editor {
     pub(crate) save_gate: bool,
     /// `Ctrl+S` was pressed while the gate was up.
     pub(crate) gated_save: bool,
+    /// Plugins of the project open files for edit and revert them: turning
+    /// editing on for a read-only file, or off for a writable one (saved or
+    /// not), is left to the app ([`Editor::take_gated_edit`]).
+    pub(crate) edit_gate: bool,
+    /// Editing was asked on (`true`) or off behind the gate.
+    pub(crate) gated_edit: Option<bool>,
     /// Updated config after save (for applying in AppState)
     config_update: Option<Config>,
     /// Status message to display to user
@@ -702,8 +708,21 @@ impl Editor {
         std::mem::take(&mut self.gated_save)
     }
 
-    /// Turn editing on or off, whatever the file's permission: as the
-    /// app's answer about unsaved work does.
+    /// Leave turning editing on for a file that is read-only on disk, and
+    /// off for one that is writable, to the app, which asks plugins first
+    /// (`p4 edit`, `p4 revert`, what to do with unsaved work).
+    pub fn set_edit_gate(&mut self, on: bool) {
+        self.edit_gate = on;
+    }
+
+    /// Whether editing was asked on (`Some(true)`) or off behind the gate
+    /// since the last call.
+    pub fn take_gated_edit(&mut self) -> Option<bool> {
+        self.gated_edit.take()
+    }
+
+    /// Turn editing on or off, whatever the file's permission: what
+    /// `Ctrl+E` does when no plugin dealt with it.
     pub fn set_editable(&mut self, editable: bool) {
         self.config.read_only = !editable;
     }
@@ -714,11 +733,24 @@ impl Editor {
     }
 
     /// `Ctrl+E` or a click on `Edit:`: switch between viewing and editing.
-    /// Turning it off over unsaved work in a file is left to the app, which
-    /// asks what to do with the work: `true` then.
+    /// While the edit gate is up, turning editing on for a file that is
+    /// read-only on disk, or off for one that is writable, goes to the app
+    /// instead. Turning it off over unsaved work in a file is left to the
+    /// app as well, which asks what to do with the work: `true` then.
     #[must_use]
     pub(crate) fn toggle_read_only(&mut self) -> bool {
         let editable = self.config.read_only;
+        let gated = self.edit_gate
+            && !self.file_state.is_remote()
+            && self
+                .buffer
+                .file_path()
+                .and_then(crate::file_io::file_readonly)
+                == Some(editable);
+        if gated {
+            self.gated_edit = Some(editable);
+            return false;
+        }
         if !editable && self.buffer.is_modified() && self.buffer.file_path().is_some() {
             return true;
         }

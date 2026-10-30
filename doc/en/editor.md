@@ -66,6 +66,18 @@ with unsaved work keeps it: the title shows `[changed on disk]`, saving is
 refused, and you choose between `Ctrl+Shift+R` to take the disk version
 (discarding your changes) and `Ctrl+Shift+S` to save yours elsewhere.
 
+A file without write permission opens read-only, and the editor follows the
+permission afterwards: once a version control system that keeps files
+read-only until they are checked out (`p4 edit`) makes it writable, the editor
+becomes editable, and it turns read-only again when the file does (`p4
+revert`). A buffer with unsaved work is not made read-only. `Ctrl+E` overrides
+the mode until the permission changes next; a file opened to view only stays
+read-only. A plugin may take `Ctrl+E` over for a file that is read-only on
+disk: the built-in Perforce plugin answers it with `p4 edit`, so the file is
+checked out and the editor follows. Turning editing off in a file that is
+opened in Perforce asks whether to revert it or only stop editing, and, with
+unsaved changes, whether to save or discard them (see [Plugins](plugins.md)).
+
 ## Ending termide from outside
 
 Quitting asks about unsaved changes. When termide is ended from outside

@@ -13,6 +13,7 @@ mod keyboard;
 mod mouse;
 mod navigation;
 mod operations;
+mod plugin_status;
 mod rendering;
 mod search_bar;
 mod selection;
@@ -103,6 +104,8 @@ pub struct FileManager {
     /// Selection state (multi-select and drag)
     selection: SelectionState,
     /// Git status cache for the current directory
+    /// What plugins say of the files git says nothing about.
+    plugin_statuses: plugin_status::PluginStatuses,
     git_status_cache: Option<GitStatusCache>,
     /// Channel receiver for async git status loading
     git_status_receiver: Option<mpsc::Receiver<GitStatusAsyncResult>>,
@@ -301,6 +304,7 @@ impl FileManager {
             click_tracker: IndexClickTracker::new(),
             selection: SelectionState::default(),
             git_status_cache: None,
+            plugin_statuses: Default::default(),
             git_status_receiver: None,
             dir_size_receiver: None,
             dir_item_count_memo: None,

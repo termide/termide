@@ -330,7 +330,16 @@ impl App {
     /// Always creates a NEW panel (like editors/terminals) rather than focusing
     /// an existing one, so several repositories can be watched side by side —
     /// each instance tracks its own repo via the repo dropdown.
+    ///
+    /// Outside a git repository a plugin's status command stands in for it,
+    /// such as Perforce's opened files: git comes first.
     pub(super) fn handle_open_git_status(&mut self) -> Result<()> {
+        if termide_git::find_repo_root(&self.project_root).is_none() {
+            if let Some(action) = self.plugin_stand_in(termide_plugins::protocol::STATUS_ACTION) {
+                self.run_plugin_command(&action);
+                return Ok(());
+            }
+        }
         self.close_help_panels();
 
         let paths = self.collect_repo_search_paths();

@@ -171,5 +171,31 @@ Contributions, declared in `initialize` (they can change later):
    plugin's code action edits the file asked about only and is titled with
    its name.
 
+7. Another version control. Done: `files/status` colours paths in the file
+   manager and `editor/base` gives the text the editor's gutter diffs
+   against, both only where git is silent — a git status other than
+   unmodified, or a git original for the file, wins — so a plugin can stand
+   in for git outside a repository and never contradict it inside one. The
+   base is a fallback original in `GitDiffCache`, kept across reloads; the
+   statuses are drawn over git's at render time, the directories above a
+   changed file marked modified. `file/will_edit` hands `Ctrl+E` on a file
+   that is read-only on disk, and back off on a saved writable one, to the
+   plugins before the editor toggles: an editor gate like `file/will_save`'s,
+   so a version control that keeps files read-only checks them out and
+   reverts them on the editor's own toggle instead of keys of its own; the
+   editor then follows the permission. Turning editing off over unsaved work
+   is gated too, with `modified` set: the plugin's answer says whether the
+   buffer is saved first or read again, so the question about the unsaved
+   work and the revert is one, and termide does the writing through its own
+   save path. `replaces` lets a command stand in for `open_git_status`
+   outside git, so a version control's status panel sits on `Alt+G`
+   instead of a key of its own.
+
+8. Built-in plugins. Done: a plugin may ship inside termide, run as
+   `termide --plugin <name>` over the same protocol, so it needs no runtime
+   on the user's machine. It is off until the global file gives it a mode
+   (`builtin_plugin_enabled`): unlike an installed plugin, the user did not
+   choose to have it. The first is `perforce` (`crates/plugin-perforce`).
+
 Out of scope: an install command (copying the directory is enough), declared
 capability permissions, and a shared daemon.

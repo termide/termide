@@ -18,7 +18,7 @@ pub mod rpc;
 use std::path::{Path, PathBuf};
 
 pub use host::{Host, HostEvent, Launch, PluginKey, PluginState, ProcessLauncher, Timing};
-pub use manifest::{discover, Installed, Manifest};
+pub use manifest::{discover, with_builtins, Installed, Manifest, BUILTIN_FLAG};
 pub use protocol::{CommandInfo, Contributions, ToolInfo};
 pub use rpc::{Peer, RpcError};
 

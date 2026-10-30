@@ -39,16 +39,42 @@ pub struct Installed {
     pub name: String,
     pub dir: PathBuf,
     pub manifest: Manifest,
+    /// Shipped inside termide: the program is termide itself, run with
+    /// `--plugin <name>`. Such a plugin sleeps until the global config gives
+    /// it a mode, so a repository can never wake it.
+    pub builtin: bool,
 }
 
+/// The argument that runs termide as one of its built-in plugins.
+pub const BUILTIN_FLAG: &str = "--plugin";
+
 impl Installed {
-    /// The program to start, resolved as [`resolve_program`] does with the
-    /// current `PATH`.
+    /// The built-in plugin `name`, run in `dir`.
+    #[must_use]
+    pub fn builtin(name: &str, description: &str, dir: PathBuf) -> Self {
+        Self {
+            name: name.to_string(),
+            dir,
+            manifest: Manifest {
+                description: description.to_string(),
+                command: String::new(),
+                args: vec![BUILTIN_FLAG.to_string(), name.to_string()],
+                env: BTreeMap::new(),
+            },
+            builtin: true,
+        }
+    }
+
+    /// The program to start: termide's own for a built-in plugin, else
+    /// resolved as [`resolve_program`] does with the current `PATH`.
     ///
     /// # Errors
     ///
     /// When the program cannot be found.
     pub fn program(&self) -> Result<PathBuf, String> {
+        if self.builtin {
+            return std::env::current_exe().map_err(|e| format!("termide's own program: {e}"));
+        }
         resolve_program(
             &self.dir,
             &self.manifest.command,
@@ -104,12 +130,27 @@ pub fn discover(plugins_dir: &Path) -> (Vec<Installed>, Vec<String>) {
                 name,
                 dir,
                 manifest,
+                builtin: false,
             }),
             Err(e) => problems.push(format!("plugin {name}: {}: {e}", manifest_path.display())),
         }
     }
     found.sort_by(|a, b| a.name.cmp(&b.name));
     (found, problems)
+}
+
+/// `found` with each of `builtins` the plugins directory does not hold a
+/// plugin of the same name for, sorted by name: an installed plugin takes
+/// the place of the built-in one.
+#[must_use]
+pub fn with_builtins(mut found: Vec<Installed>, builtins: Vec<Installed>) -> Vec<Installed> {
+    for builtin in builtins {
+        if !found.iter().any(|p| p.name == builtin.name) {
+            found.push(builtin);
+        }
+    }
+    found.sort_by(|a, b| a.name.cmp(&b.name));
+    found
 }
 
 /// The program `command` names for the plugin in `dir`.
@@ -237,6 +278,25 @@ mod tests {
             resolve_program(&plugin_dir, "tool", Some(&mixed)).unwrap(),
             trusted.join("tool")
         );
+    }
+
+    #[test]
+    fn an_installed_plugin_takes_the_place_of_a_builtin_one() {
+        let root = tempfile::tempdir().unwrap();
+        write_plugin(root.path(), "perforce", "command = \"/bin/sh\"\n");
+        let (found, _) = discover(root.path());
+        let dir = root.path().to_path_buf();
+        let all = with_builtins(
+            found,
+            vec![
+                Installed::builtin("perforce", "", dir.clone()),
+                Installed::builtin("another", "", dir),
+            ],
+        );
+        let names: Vec<_> = all.iter().map(|p| (p.name.as_str(), p.builtin)).collect();
+        assert_eq!(names, [("another", true), ("perforce", false)]);
+        assert_eq!(all[0].manifest.args, [BUILTIN_FLAG, "another"]);
+        assert_eq!(all[0].program().unwrap(), std::env::current_exe().unwrap());
     }
 
     #[test]

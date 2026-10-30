@@ -156,7 +156,7 @@
 - [文件管理器](file-manager.md) — `Alt+F`
 - [终端](terminal.md) — `Alt+T`
 - [文本编辑器](editor.md) — `Alt+E`
-- Git 状态 — `Alt+G`
+- Git 状态 — `Alt+G`；在 git 仓库之外，若版本控制插件提供状态面板则打开它（Perforce 的已打开文件）
 - 大纲 — `Alt+O`
 - 诊断 — `Alt+I`
 - Git 日志 — `Alt+C`
@@ -289,7 +289,7 @@ toggle_hex = "Ctrl+L"
 | `Alt+F`           | 打开文件管理器面板                         |
 | `Alt+T`           | 打开终端面板                               |
 | `Alt+E`           | 打开新文件编辑器面板                       |
-| `Alt+G`           | 打开 Git 状态面板                          |
+| `Alt+G`           | 打开 Git 状态面板（git 之外：插件的面板，如 Perforce 的已打开文件） |
 | `Alt+O`           | 打开大纲面板                               |
 | `Alt+A`           | 打开编码代理面板                           |
 | `Alt+I`           | 打开诊断面板                               |

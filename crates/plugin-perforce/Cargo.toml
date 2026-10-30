@@ -1,0 +1,16 @@
+[package]
+name = "termide-plugin-perforce"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "termide's built-in Perforce plugin: run as `termide --plugin perforce`, it speaks the plugin protocol on stdio"
+
+[dependencies]
+dunce.workspace = true
+serde_json.workspace = true
+termide-plugins = { path = "../plugins" }
+
+[dev-dependencies]
+tempfile.workspace = true

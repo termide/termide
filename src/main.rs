@@ -428,6 +428,18 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
+    // A built-in plugin: termide started by itself as `termide --plugin
+    // <name>`, speaking the plugin protocol on stdin and stdout. No TUI, no
+    // clap; stdout belongs to the protocol.
+    if std::env::args().nth(1).as_deref() == Some(termide_plugins::BUILTIN_FLAG) {
+        let name = std::env::args().nth(2).unwrap_or_default();
+        if name == termide_plugin_perforce::NAME {
+            termide_plugin_perforce::run();
+            return Ok(());
+        }
+        anyhow::bail!("no built-in plugin {name:?}");
+    }
+
     // Parse CLI arguments
     let cli = Cli::parse();
 

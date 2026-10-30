@@ -5155,6 +5155,8 @@ dependencies = [
  "termide-panel-editor",
  "termide-panel-file-manager",
  "termide-panel-terminal",
+ "termide-plugin-perforce",
+ "termide-plugins",
  "termide-project",
  "termide-theme",
  "termide-ui-render",
@@ -5329,6 +5331,7 @@ dependencies = [
  "termide-panel-operations",
  "termide-panel-outline",
  "termide-panel-terminal",
+ "termide-plugin-perforce",
  "termide-plugins",
  "termide-project",
  "termide-secrets",
@@ -5994,6 +5997,16 @@ dependencies = [
  "unicode-width",
  "vte",
  "windows-sys 0.59.0",
+]
+
+[[package]]
+name = "termide-plugin-perforce"
+version = "0.47.1"
+dependencies = [
+ "dunce",
+ "serde_json",
+ "tempfile",
+ "termide-plugins",
 ]
 
 [[package]]

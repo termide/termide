@@ -10,10 +10,26 @@ use super::fields::ContentRow;
 use super::SettingsModal;
 
 impl SettingsModal {
-    /// Name the plugins installed, for the Plugins tab.
-    pub fn with_plugins(mut self, names: Vec<String>) -> Self {
-        self.plugin_names = names;
+    /// Name the plugins installed, for the Plugins tab, each with whether
+    /// termide carries it itself.
+    pub fn with_plugins(mut self, plugins: Vec<(String, bool)>) -> Self {
+        self.builtin_plugins = plugins
+            .iter()
+            .filter(|(_, builtin)| *builtin)
+            .map(|(name, _)| name.clone())
+            .collect();
+        self.plugin_names = plugins.into_iter().map(|(name, _)| name).collect();
         self
+    }
+
+    /// The mode plugin `name` runs in without one set: on for an installed
+    /// plugin, off for a built-in one.
+    fn default_mode(&self, name: &str) -> PluginMode {
+        if self.builtin_plugins.contains(name) {
+            PluginMode::Off
+        } else {
+            PluginMode::On
+        }
     }
 
     /// The rows of the Plugins tab.
@@ -37,7 +53,8 @@ impl SettingsModal {
     pub(super) fn plugin_summary(&self, name: &str) -> String {
         let t = i18n::t();
         let entry = self.plugin_entry(name);
-        let mode = match entry.mode.unwrap_or_default() {
+        let effective = entry.mode.unwrap_or(self.default_mode(name));
+        let mode = match effective {
             PluginMode::On => t.settings_plugin_mode_on(),
             PluginMode::OptIn => t.settings_plugin_mode_opt_in(),
             PluginMode::Off => t.settings_plugin_mode_off(),
@@ -50,7 +67,7 @@ impl SettingsModal {
             Some(true) => t.settings_plugin_on(),
             Some(false) => t.settings_plugin_off(),
         };
-        let note = if entry.enabled == Some(true) && entry.mode == Some(PluginMode::Off) {
+        let note = if entry.enabled == Some(true) && effective == PluginMode::Off {
             t.settings_plugin_blocked()
         } else {
             mode
@@ -65,12 +82,20 @@ impl SettingsModal {
             return;
         };
         let in_project = self.in_project;
+        let builtin = self.builtin_plugins.contains(&name);
         let entry = self.config.plugins.entry(name).or_default();
         if in_project {
             entry.enabled = match entry.enabled {
                 None => Some(true),
                 Some(true) => Some(false),
                 Some(false) => None,
+            };
+        } else if builtin {
+            // Off by default: on, opt-in, then back to no mode at all.
+            entry.mode = match entry.mode {
+                None | Some(PluginMode::Off) => Some(PluginMode::On),
+                Some(PluginMode::On) => Some(PluginMode::OptIn),
+                Some(PluginMode::OptIn) => None,
             };
         } else {
             entry.mode = match entry.mode.unwrap_or_default() {
@@ -90,7 +115,8 @@ mod tests {
 
     fn modal(in_project: bool) -> SettingsModal {
         let config = Config::default();
-        SettingsModal::new(config.clone(), config, in_project).with_plugins(vec!["fmt".into()])
+        SettingsModal::new(config.clone(), config, in_project)
+            .with_plugins(vec![("fmt".into(), false), ("p4".into(), true)])
     }
 
     #[test]
@@ -117,5 +143,25 @@ mod tests {
         assert!(m
             .plugin_summary("fmt")
             .contains(i18n::t().settings_plugin_blocked()));
+    }
+
+    #[test]
+    fn a_builtin_plugin_is_off_until_given_a_mode() {
+        let mut m = modal(false);
+        let t = i18n::t();
+        assert_eq!(m.plugin_summary("p4"), t.settings_plugin_mode_off());
+        m.cycle_plugin(1);
+        assert_eq!(m.config.plugins["p4"].mode, Some(PluginMode::On));
+        m.cycle_plugin(1);
+        assert_eq!(m.config.plugins["p4"].mode, Some(PluginMode::OptIn));
+        m.cycle_plugin(1);
+        assert_eq!(m.config.plugins["p4"].mode, None, "back to off");
+
+        let mut m = modal(true);
+        m.cycle_plugin(1);
+        assert!(
+            m.plugin_summary("p4").contains(t.settings_plugin_blocked()),
+            "a project cannot wake it alone"
+        );
     }
 }

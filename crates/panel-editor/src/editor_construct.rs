@@ -55,6 +55,8 @@ impl Editor {
             saved_paths: Vec::new(),
             save_gate: false,
             gated_save: false,
+            edit_gate: false,
+            gated_edit: None,
             config_update: None,
             status_message: None,
             scroll_follows_cursor: true,
@@ -78,14 +80,18 @@ impl Editor {
 
         let buffer = TextBuffer::from_file(&path)?;
 
-        // Check file access rights for auto-detection of read-only
-        if file_io::is_file_readonly(&path) {
+        // A file without write permission opens read-only; an editor not
+        // asked to view only keeps following the permission afterwards.
+        let follows_disk = !config.read_only;
+        let disk_read_only = file_io::is_file_readonly(&path);
+        if disk_read_only {
             log::warn!("File detected as read-only: {}", path.display());
             config.read_only = true;
         }
 
         // Create file state
-        let file_state = FileState::from_path(&path, file_mtime, file_size);
+        let mut file_state = FileState::from_path(&path, file_mtime, file_size);
+        file_state.disk_read_only = follows_disk.then_some(disk_read_only);
 
         // Create rendering cache and set syntax by file extension
         let mut render_cache = RenderingCache::new();
@@ -138,6 +144,8 @@ impl Editor {
             saved_paths: Vec::new(),
             save_gate: false,
             gated_save: false,
+            edit_gate: false,
+            gated_edit: None,
             config_update: None,
             status_message: None,
             scroll_follows_cursor: true,
@@ -186,6 +194,8 @@ impl Editor {
             saved_paths: Vec::new(),
             save_gate: false,
             gated_save: false,
+            edit_gate: false,
+            gated_edit: None,
             config_update: None,
             status_message: None,
             scroll_follows_cursor: true,

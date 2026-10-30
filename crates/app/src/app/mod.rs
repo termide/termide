@@ -53,6 +53,7 @@ mod panel_manager;
 mod panel_operations;
 mod parked_projects;
 mod plugin_editor;
+mod plugin_files;
 mod plugin_providers;
 mod plugin_windows;
 mod plugins;
@@ -756,6 +757,7 @@ impl App {
             });
         }
 
+        self.apply_plugin_files(&mut panel);
         let terminal_width = self.state.terminal.width;
         let config = &self.state.config;
         self.layout_manager.add_panel(panel, config, terminal_width);
@@ -781,6 +783,7 @@ impl App {
             });
         }
 
+        self.apply_plugin_files(&mut panel);
         let terminal_width = self.state.terminal.width;
         let config = &self.state.config;
         self.layout_manager

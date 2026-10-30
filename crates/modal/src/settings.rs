@@ -270,6 +270,8 @@ pub struct SettingsModal {
     debugger_defaults: std::collections::HashMap<String, Vec<String>>,
     /// The plugins installed, by name, for the Plugins tab.
     plugin_names: Vec<String>,
+    /// Those of them termide carries itself: off until given a mode.
+    builtin_plugins: std::collections::BTreeSet<String>,
 
     // --- AI connections ---
     /// The connection page, while one is open from the AI tab.

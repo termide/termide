@@ -47,6 +47,7 @@ impl SettingsModal {
             debugger_edit: None,
             debugger_defaults: Default::default(),
             plugin_names: Vec::new(),
+            builtin_plugins: Default::default(),
             connection_edit: None,
             model_fetch_request: None,
             kb_mode: KbMode::Bindings,

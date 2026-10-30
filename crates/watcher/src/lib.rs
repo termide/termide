@@ -1390,6 +1390,29 @@ mod tests {
         panic!("no event for {}", path.display());
     }
 
+    /// A change of a file's permission alone is an event too: the editor
+    /// follows it, as Perforce makes a file writable on `p4 edit` and
+    /// read-only on `p4 revert` without touching its contents.
+    #[test]
+    fn a_permission_change_alone_is_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = dunce::canonicalize(tmp.path()).unwrap();
+        let file = dir.join("a.txt");
+        std::fs::write(&file, b"a").unwrap();
+
+        let mut w = UnifiedWatcher::new().unwrap();
+        w.watch_directory(dir.clone()).unwrap();
+        // Let the registration settle and drop whatever it reported.
+        std::thread::sleep(std::time::Duration::from_millis(500));
+        w.poll_pending();
+        w.poll_events();
+
+        let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+        permissions.set_readonly(true);
+        std::fs::set_permissions(&file, permissions).unwrap();
+        wait_for_change(&mut w, &file);
+    }
+
     /// Releasing either of two nested repos keeps every watch the other
     /// installed, and the other still hears changes below the nested root.
     #[test]

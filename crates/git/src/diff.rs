@@ -133,6 +133,12 @@ pub struct GitDiffCache {
     last_updated: std::time::Instant,
     /// Original content from HEAD (for in-memory diff)
     original_content: Option<String>,
+    /// What to diff against when git has no original for the file — it is
+    /// outside a repository, or ignored: a base another version control
+    /// system gave. Git's own original always comes first.
+    fallback_original: Option<String>,
+    /// Whether `original_content` came from git.
+    original_from_git: bool,
 }
 
 impl GitDiffCache {
@@ -148,14 +154,38 @@ impl GitDiffCache {
             modified_line_mapping: HashMap::new(),
             last_updated: std::time::Instant::now(),
             original_content: None,
+            fallback_original: None,
+            original_from_git: false,
         }
+    }
+
+    /// Take what git gave as the original, the fallback where git gave none.
+    fn take_original(&mut self, from_git: Option<String>) {
+        self.original_from_git = from_git.is_some();
+        self.original_content = from_git.or_else(|| self.fallback_original.clone());
+    }
+
+    /// Diff against `content` while git has no original for the file;
+    /// `None` takes the fallback back. Recompute with
+    /// [`Self::update_from_buffer`] afterwards.
+    pub fn set_fallback_original(&mut self, content: Option<String>) {
+        if !self.original_from_git {
+            self.original_content = content.clone();
+        }
+        self.fallback_original = content;
+    }
+
+    /// Whether the original diffed against is the fallback.
+    pub fn diffs_against_fallback(&self) -> bool {
+        !self.original_from_git && self.fallback_original.is_some()
     }
 
     /// Load original content from HEAD. Never errors: a file outside a repo,
     /// gitignored, or unreadable simply yields no original (and thus no diff
     /// markers). Returns `Result` for call-site ergonomics.
     pub fn load_original_from_head(&mut self) -> Result<()> {
-        self.original_content = crate::command::head_file_content(&self.file_path);
+        let from_git = crate::command::head_file_content(&self.file_path);
+        self.take_original(from_git);
         Ok(())
     }
 
@@ -163,6 +193,7 @@ impl GitDiffCache {
     /// Lets callers compute an in-memory diff via [`Self::update_from_buffer`]
     /// without invoking git (also used to set up deterministic tests).
     pub fn set_original_content(&mut self, content: Option<String>) {
+        self.original_from_git = content.is_some();
         self.original_content = content;
     }
 
@@ -296,7 +327,7 @@ impl GitDiffCache {
     /// Called when background thread completes loading original content
     pub fn apply_async_result(&mut self, async_result: GitDiffAsyncResult) {
         // Store original content
-        self.original_content = async_result.original_content;
+        self.take_original(async_result.original_content);
 
         // Recompute diff if we have original content
         let original = match self.original_content.as_deref() {
@@ -640,6 +671,8 @@ mod tests {
             deleted_after_lines: HashMap::new(),
             modified_line_mapping: HashMap::new(),
             last_updated: std::time::Instant::now(),
+            fallback_original: None,
+            original_from_git: true,
         };
 
         let result = cache.update_from_buffer("line1\nline2\n");
@@ -657,5 +690,48 @@ mod tests {
         );
         assert!(cache.deleted_after_lines.is_empty());
         assert!(cache.modified_line_mapping.is_empty());
+    }
+
+    /// A file outside any repository diffs against the fallback, and keeps
+    /// it when git is asked again; git's original, once there, comes first.
+    #[test]
+    fn the_fallback_original_fills_in_only_where_git_has_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("a.c");
+        std::fs::write(&file, "one\nTWO\nthree\n").unwrap();
+        let mut cache = GitDiffCache::new(file.clone());
+
+        cache.set_fallback_original(Some("one\ntwo\nthree\n".to_string()));
+        cache.update_from_buffer("one\nTWO\nthree\n").unwrap();
+        assert_eq!(cache.get_line_status(1), LineStatus::Modified);
+        assert!(cache.diffs_against_fallback());
+
+        // A reload finds no repository: the fallback stays.
+        cache.apply_async_result(GitDiffAsyncResult {
+            file_path: file.clone(),
+            original_content: None,
+        });
+        assert_eq!(cache.get_line_status(1), LineStatus::Modified);
+
+        // Git has the file: its original wins over the fallback.
+        cache.apply_async_result(GitDiffAsyncResult {
+            file_path: file,
+            original_content: Some("one\nTWO\nthree\n".to_string()),
+        });
+        assert_eq!(cache.get_line_status(1), LineStatus::Unchanged);
+        assert!(!cache.diffs_against_fallback());
+        cache.set_fallback_original(Some("x\n".to_string()));
+        cache.update_from_buffer("one\nTWO\nthree\n").unwrap();
+        assert_eq!(cache.get_line_status(1), LineStatus::Unchanged);
+
+        // Taken back while git is silent: no markers.
+        let mut outside = GitDiffCache::new(dir.path().join("b.c"));
+        outside.set_fallback_original(Some("x\n".to_string()));
+        outside.set_fallback_original(None);
+        outside.apply_async_result(GitDiffAsyncResult {
+            file_path: dir.path().join("b.c"),
+            original_content: None,
+        });
+        assert_eq!(outside.get_line_status(0), LineStatus::Unchanged);
     }
 }

@@ -36,7 +36,7 @@ pub use placeholders::{
     expand_placeholder_line, expand_placeholders, placeholder_names, PlaceholderValue, Quoting,
     CONTEXT_PLACEHOLDERS,
 };
-pub use plugins::{plugin_enabled, PluginMode, PluginSettings};
+pub use plugins::{builtin_plugin_enabled, plugin_enabled, PluginMode, PluginSettings};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{
@@ -895,6 +895,20 @@ mod layered_load_tests {
         assert_eq!(loaded.warnings.len(), 2, "{:?}", loaded.warnings);
         assert!(loaded.warnings[0].contains("plugins.deploy.enabled"));
         assert!(loaded.warnings[1].contains("plugins.risky.mode"));
+    }
+
+    #[test]
+    fn a_project_alone_cannot_wake_a_builtin_plugin() {
+        let (loaded, _dir) = layered(
+            "[plugins.p4]\nmode = \"opt-in\"\n",
+            Some(
+                "[plugins.p4]\nenabled = true\n\
+                 [plugins.other]\nmode = \"on\"\nenabled = true\n",
+            ),
+        );
+        let plugins = &loaded.effective.plugins;
+        assert!(builtin_plugin_enabled(plugins, "p4"));
+        assert!(!builtin_plugin_enabled(plugins, "other"));
     }
 
     #[test]

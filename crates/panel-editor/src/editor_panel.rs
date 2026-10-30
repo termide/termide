@@ -524,7 +524,7 @@ impl Panel for Editor {
             }
             PanelCommand::CheckExternalModification => {
                 self.check_external_modification();
-                CommandResult::None
+                CommandResult::NeedsRedraw(self.follow_disk_permissions())
             }
             PanelCommand::GetFsWatchInfo => {
                 // For Editor, return file path info for watcher registration
@@ -557,6 +557,7 @@ impl Panel for Editor {
                     if file_changed {
                         self.update_git_diff();
                         self.check_external_modification();
+                        self.follow_disk_permissions();
                         return CommandResult::NeedsRedraw(true);
                     }
                 }
@@ -608,6 +609,7 @@ impl Panel for Editor {
                 if self.is_stale {
                     self.is_stale = false;
                     self.check_external_modification();
+                    self.follow_disk_permissions();
                     self.update_git_diff();
                     CommandResult::NeedsRedraw(true)
                 } else {

@@ -58,6 +58,18 @@ pub fn plugin_enabled(plugins: &BTreeMap<String, PluginSettings>, name: &str) ->
     plugins.get(name).is_none_or(PluginSettings::is_enabled)
 }
 
+/// Whether the built-in plugin `name` runs under `plugins`: only once the
+/// global file gives it a mode, since every termide carries it whether its
+/// user wants it or not. A project's `enabled` then switches it as for an
+/// installed plugin; `mode` reaches the effective section from the global
+/// file only, so a repository alone never wakes it.
+#[must_use]
+pub fn builtin_plugin_enabled(plugins: &BTreeMap<String, PluginSettings>, name: &str) -> bool {
+    plugins
+        .get(name)
+        .is_some_and(|entry| entry.mode.is_some() && entry.is_enabled())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +110,28 @@ mod tests {
     #[test]
     fn a_plugin_without_an_entry_runs() {
         assert!(plugin_enabled(&BTreeMap::new(), "any"));
+    }
+
+    #[test]
+    fn a_builtin_plugin_sleeps_until_the_global_file_gives_it_a_mode() {
+        use PluginMode::{Off, On, OptIn};
+        let cases = [
+            (None, None, false),
+            (None, Some(true), false),
+            (Some(On), None, true),
+            (Some(On), Some(false), false),
+            (Some(OptIn), None, false),
+            (Some(OptIn), Some(true), true),
+            (Some(Off), Some(true), false),
+        ];
+        assert!(!builtin_plugin_enabled(&BTreeMap::new(), "p"));
+        for (mode, enabled, expected) in cases {
+            let plugins = BTreeMap::from([("p".to_string(), settings(mode, enabled))]);
+            assert_eq!(
+                builtin_plugin_enabled(&plugins, "p"),
+                expected,
+                "mode {mode:?}, enabled {enabled:?}"
+            );
+        }
     }
 }

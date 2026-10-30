@@ -150,6 +150,8 @@ termide-layout = { path = "crates/layout" }
 termide-panel-editor = { path = "crates/panel-editor" }
 termide-panel-file-manager = { path = "crates/panel-file-manager" }
 termide-panel-terminal = { path = "crates/panel-terminal" }
+termide-plugin-perforce = { path = "crates/plugin-perforce" }
+termide-plugins = { path = "crates/plugins" }
 termide-project = { path = "crates/project" }
 termide-theme = { path = "crates/theme" }
 termide-ui-render = { path = "crates/ui-render" }

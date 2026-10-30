@@ -75,6 +75,7 @@ termide-agent-recall = { path = "../agent-recall" }
 termide-agent-web = { path = "../agent-web" }
 termide-agent-hooks = { path = "../agent-hooks" }
 termide-agent-acp = { path = "../agent-acp" }
+termide-plugin-perforce = { path = "../plugin-perforce" }
 termide-plugins = { path = "../plugins" }
 termide-panel-agent = { path = "../panel-agent" }
 termide-panel-operations = { path = "../panel-operations" }

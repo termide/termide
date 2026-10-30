@@ -45,6 +45,28 @@ language features of one installed since reach the editors opened after it.
 lists the installed plugins and their state in the current project, and
 **Plugins: restart <name>** starts one afresh.
 
+## Built-in plugins
+
+termide carries some plugins in its own program, so they need no Python, no
+download and no plugins directory: termide runs itself as one, as
+`termide --plugin <name>`, a process of its own like any installed plugin.
+
+| Plugin | What it does |
+|---|---|
+| `perforce` | Perforce: the file's state in the status bar, `p4 edit` on `Ctrl+E` in a read-only file and revert on turning it off, open for add, diff, opened files by changelist with submit on `Alt+G` outside git, sync, colours in the file manager, changed lines in the editor, tools for the agent. Needs `p4` on `PATH`. |
+
+A built-in plugin is off until the global `config.toml` gives it a mode, since
+every termide carries it whether you want it or not:
+
+```toml
+[plugins.perforce]
+mode = "on"       # every project; or "opt-in" and `enabled = true` per project
+```
+
+A project's `enabled` then switches it as for an installed plugin; a project
+alone never turns it on. A plugin of the same name in the plugins directory
+takes the built-in one's place.
+
 ## Turning plugins on and off
 
 The global `config.toml` sets each plugin's mode:
@@ -134,6 +156,23 @@ plugin in turn, three seconds each, applies the edits to the buffer if it has
 not changed meanwhile, then writes the file. Saving on close and Save As do
 not ask.
 
+`file/will_edit` is a request too: a plugin that subscribes to it is asked
+`{ "path", "edit": true }` when editing is turned on (`Ctrl+E`, or a click on
+`Edit: No`) in an editor of its project whose file is read-only on disk, and
+`{ "path", "edit": false, "modified" }` when it is turned off for a file that
+is writable, `modified` saying whether the buffer has unsaved work. It
+answers `{ "handled": true }` once it has settled it — made the file
+writable, as `p4 edit` does, or agreed with the user to leave editing as it
+is; the editor follows the file's permission. Any other answer, an error, or
+no plugin wanting it toggles editing as `Ctrl+E` does without plugins, which
+asks about unsaved work. Turning editing off, a plugin may answer
+`{ "buffer": "save" }` to have the buffer written first, as `Ctrl+S` does
+(the `file/will_save` plugins included), or `{ "buffer": "discard" }` to have
+it read from disk again — after a revert (`p4 revert`), say; the other
+plugins are then not asked. termide asks such plugins in turn and waits for
+each up to five minutes, the time to answer the questions it may ask on the
+way; the editor stays as it was meanwhile.
+
 The result of `initialize`, and the params of a `contributions/changed`
 notification sent later to replace it:
 
@@ -157,6 +196,11 @@ included — and it is `Ctrl` or `Alt` with another modifier (`Ctrl+Alt+K`,
 `Ctrl+Shift+K`, `Alt+Shift+K`) or an F-key with one (`Shift+F7`): keys a
 program in the terminal rarely wants. A key that does not qualify is left
 unbound, with a line in the log.
+
+A command may stand in for a termide action where termide has nothing to do:
+`"replaces": "open_git_status"` runs it instead of the git status panel
+(`Alt+G`, the menu and the palette) in a project outside a git repository,
+so a version control plugin's own status panel needs no key of its own.
 
 Tools are offered to the agent sessions of the plugin's project as
 `plugin-<plugin>__<tool>`. The agent's permission rules treat them as MCP
@@ -255,6 +299,34 @@ Lines count from 0 and columns as LSP counts them (UTF-16 code units). Without
 `col` the whole line is marked; with `col` alone, the word there. `severity`
 is `error`, `warning` (the default), `info` or `hint`. A file opened later
 shows the marks set before; a plugin's marks go when it stops.
+
+### Files and changed lines
+
+A plugin for a version control system other than git shows its state as
+termide shows git's.
+
+`files/status` (request) `{ "items": [{ "path", "status" }] }` colours files
+in the file manager: `status` is `modified`, `added`, `deleted` or `ignored`,
+in git's colours, and `null` says nothing of the file again. Each call
+replaces what the plugin said of the paths it names and leaves the others;
+a directory above a changed file shows as modified. `path` is absolute.
+
+`editor/base` (request) `{ "path", "text" }` gives the file as the plugin's
+version control has it: the editor marks the lines changed against it in the
+gutter, as it does against git's last commit. `text` empty marks every line
+as added; `null` takes the base back. A file opened later gets the base set
+before.
+
+Git comes first in both: a file git has a status for keeps git's colour, and
+a file in a git repository keeps git's markers. Both go when the plugin
+stops.
+
+```json
+{ "items": [
+  { "path": "/home/me/ws/src/main.c", "status": "modified" },
+  { "path": "/home/me/ws/src/new.c", "status": "added" }
+] }
+```
 
 ### Windows
 

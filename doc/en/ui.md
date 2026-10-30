@@ -165,7 +165,7 @@ The layout adapts to the terminal width, showing more panel groups on wider scre
 - [file manager](file-manager.md) — `Alt+F`
 - [terminal](terminal.md) — `Alt+T`
 - [text editor](editor.md) — `Alt+E`
-- git status — `Alt+G`
+- git status — `Alt+G`; outside a git repository, a version control plugin's status panel if one offers it (Perforce's opened files)
 - outline — `Alt+O`
 - diagnostics — `Alt+I`
 - git log — `Alt+C`
@@ -338,7 +338,7 @@ The disk window lists one row per storage pool, with the filesystem type as a se
 | `Alt+F`           | Open file manager panel                    |
 | `Alt+T`           | Open terminal panel                        |
 | `Alt+E`           | Open new file editor panel                 |
-| `Alt+G`           | Open git status panel                      |
+| `Alt+G`           | Open git status panel (outside git: a plugin's, such as Perforce's opened files) |
 | `Alt+O`           | Open outline panel                         |
 | `Alt+A`           | Open coding agent panel                    |
 | `Alt+I`           | Open diagnostics panel                     |

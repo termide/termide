@@ -29,6 +29,10 @@ pub struct FileState {
     pub remote_mtime: Option<SystemTime>,
     /// Flag: file is currently being uploaded to remote server.
     pub uploading: bool,
+    /// Whether the file was read-only on disk when last looked at, for an
+    /// editor whose editability follows the file's permissions; `None` for
+    /// one opened to view only, which stays read-only whatever they become.
+    pub disk_read_only: Option<bool>,
 }
 
 impl FileState {
@@ -45,6 +49,7 @@ impl FileState {
             temp_local_path: None,
             remote_mtime: None,
             uploading: false,
+            disk_read_only: None,
         }
     }
 
@@ -61,6 +66,7 @@ impl FileState {
             temp_local_path: None,
             remote_mtime: None,
             uploading: false,
+            disk_read_only: None,
         }
     }
 
@@ -87,6 +93,7 @@ impl FileState {
             temp_local_path: Some(temp_path),
             remote_mtime: mtime,
             uploading: false,
+            disk_read_only: None,
         }
     }
 

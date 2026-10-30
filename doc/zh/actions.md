@@ -188,7 +188,7 @@ default = true
 [p4-edit]
 name = "p4 edit"
 command = "p4 edit {file}"
-key = "Alt+E"
+key = "Shift+F5"
 ```
 
 每个值都会按读取该命令行的程序进行引用，因此包含空格、引号或 `;` 的路径始终是一个参数，绝不会被当作命令执行：

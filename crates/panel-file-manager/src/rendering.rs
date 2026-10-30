@@ -146,8 +146,11 @@ impl FileManager {
             let name_width = name.width();
             let full_name = format!("{}{}", dir_prefix, name);
 
+            let status =
+                self.plugin_statuses
+                    .over(entry.git_status, &tree_entry.full_path, entry.is_dir);
             let (bg_style, fg_style) = if is_cursor && is_focused {
-                let normal_fg_style = git_status_style(entry.git_status, theme);
+                let normal_fg_style = git_status_style(status, theme);
                 let fg_color = normal_fg_style.fg.unwrap_or(theme.fg);
                 let cursor_style = Style::default()
                     .bg(fg_color)
@@ -155,7 +158,7 @@ impl FileManager {
                     .add_modifier(Modifier::BOLD);
                 (cursor_style, cursor_style)
             } else {
-                let fg_style = git_status_style(entry.git_status, theme);
+                let fg_style = git_status_style(status, theme);
                 (Style::default(), fg_style)
             };
 

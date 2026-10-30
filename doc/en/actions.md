@@ -190,7 +190,7 @@ Paths are absolute. Without a file to give — a terminal focused, say, or a fil
 [p4-edit]
 name = "p4 edit"
 command = "p4 edit {file}"
-key = "Alt+E"
+key = "Shift+F5"
 ```
 
 Each value is quoted for whatever reads the line, so a path with spaces, quotes or `;` stays one argument and is never run as a command:

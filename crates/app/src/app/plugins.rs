@@ -14,7 +14,7 @@ use serde_json::{json, Value};
 use termide_agent_core::{
     CancelToken, LateTools, Tool, ToolCall, ToolContext, ToolResultMessage, ToolTraits, ToolUpdate,
 };
-use termide_config::{plugin_enabled, Config, PluginSettings};
+use termide_config::{builtin_plugin_enabled, plugin_enabled, Config, PluginSettings};
 use termide_plugins::protocol::{self, events};
 use termide_plugins::rpc::{RpcError, INTERNAL_ERROR, INVALID_PARAMS, METHOD_NOT_FOUND};
 use termide_plugins::{
@@ -56,10 +56,31 @@ pub(crate) struct PluginRuntime {
     pub(super) windows: super::plugin_windows::Windows,
     /// What the plugins were last told of the editors.
     pub(super) editors: super::plugin_editor::EditorWatch,
+    /// What the plugins said of files: statuses and bases.
+    pub(super) files: super::plugin_files::PluginFiles,
 }
 
-/// What the plugins directory beside the global config file holds now.
+/// The plugins termide carries in its own program, run in the directory of
+/// that program.
+fn builtin_plugins() -> Vec<Installed> {
+    let dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .unwrap_or_else(std::env::temp_dir);
+    vec![Installed::builtin(
+        termide_plugin_perforce::NAME,
+        termide_plugin_perforce::DESCRIPTION,
+        dir,
+    )]
+}
+
+/// What the plugins directory beside the global config file holds now,
+/// with the built-in plugins it holds no plugin of the same name for.
 fn discover_installed() -> Vec<Installed> {
+    termide_plugins::with_builtins(discover_directory(), builtin_plugins())
+}
+
+fn discover_directory() -> Vec<Installed> {
     match Config::config_file_path() {
         Ok(config_file) => {
             let dir = config_file
@@ -111,6 +132,7 @@ impl PluginRuntime {
             next_panel: 1,
             windows: Default::default(),
             editors: Default::default(),
+            files: Default::default(),
         }
     }
 
@@ -144,7 +166,12 @@ impl PluginRuntime {
         let mut launches = Vec::new();
         let mut problems = Vec::new();
         for installed in &self.installed {
-            if !plugin_enabled(plugins, &installed.name) {
+            let enabled = if installed.builtin {
+                builtin_plugin_enabled(plugins, &installed.name)
+            } else {
+                plugin_enabled(plugins, &installed.name)
+            };
+            if !enabled {
                 continue;
             }
             let program = match installed.program() {
@@ -243,6 +270,7 @@ impl App {
         self.orphan_plugin_panels(key);
         self.drop_plugin_windows(key);
         self.clear_plugin_diagnostics(key);
+        self.forget_plugin_files(key);
         self.refresh_plugin_ui();
     }
 
@@ -274,6 +302,7 @@ impl App {
         self.serve_plugin_windows();
         self.watch_editors_for_plugins();
         self.serve_plugin_saves();
+        self.serve_plugin_edits();
     }
 
     /// Tell each plugin about its panels the user closed since the last tick.
@@ -479,6 +508,14 @@ impl App {
                 let items = plugin_diagnostics(&key.name, &params["items"])
                     .map_err(|e| RpcError::new(INVALID_PARAMS, e))?;
                 self.set_plugin_diagnostics(key, path, items);
+                Ok(Value::Null)
+            }
+            protocol::FILES_STATUS => {
+                self.set_plugin_file_status(key, params)?;
+                Ok(Value::Null)
+            }
+            protocol::EDITOR_BASE => {
+                self.set_plugin_base(key, params)?;
                 Ok(Value::Null)
             }
             protocol::PANEL_OPEN => {
@@ -699,6 +736,23 @@ impl App {
         keys
     }
 
+    /// The current project's plugin command standing in for `action`, as
+    /// the action name it runs as; the first plugin's when several do.
+    pub(super) fn plugin_stand_in(&self, action: &str) -> Option<String> {
+        let current = self.open_projects.current();
+        self.plugins
+            .contributions
+            .iter()
+            .filter(|(key, _)| key.project == current)
+            .find_map(|(key, contributions)| {
+                contributions
+                    .commands
+                    .iter()
+                    .find(|command| command.replaces.as_deref() == Some(action))
+                    .map(|command| format!("{}:{}", key.name, command.id))
+            })
+    }
+
     /// Run a plugin command named by its action, `<plugin>:<id>` after the
     /// prefix. The plugin is asked on a thread of its own: it answers when it
     /// is done, and speaks through `window/notify` if it has something to say.
@@ -728,12 +782,13 @@ impl App {
         });
     }
 
-    /// The names of the plugins installed, for the settings.
-    pub(super) fn plugin_names(&self) -> Vec<String> {
+    /// The plugins installed, by name, each with whether termide carries it
+    /// itself, for the settings.
+    pub(super) fn plugin_names(&self) -> Vec<(String, bool)> {
         self.plugins
             .installed
             .iter()
-            .map(|p| p.name.clone())
+            .map(|p| (p.name.clone(), p.builtin))
             .collect()
     }
 
@@ -1159,6 +1214,7 @@ mod tests {
             next_panel: 1,
             windows: Default::default(),
             editors: Default::default(),
+            files: Default::default(),
         };
         plugins
             .status

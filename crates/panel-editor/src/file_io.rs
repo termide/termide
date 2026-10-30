@@ -47,9 +47,14 @@ pub(crate) fn check_file_metadata(path: &Path) -> Result<FileMetadata> {
 
 /// Check if file is read-only.
 pub(crate) fn is_file_readonly(path: &Path) -> bool {
+    file_readonly(path).unwrap_or(false)
+}
+
+/// Whether the file is read-only, or `None` when it cannot be looked at.
+pub(crate) fn file_readonly(path: &Path) -> Option<bool> {
     std::fs::metadata(path)
+        .ok()
         .map(|m| m.permissions().readonly())
-        .unwrap_or(false)
 }
 
 /// Get current modification time of a file.

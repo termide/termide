@@ -44,6 +44,23 @@ impl Editor {
         }
     }
 
+    /// Mark the lines changed against `base` — the file as another version
+    /// control system has it — while git has no original for the file;
+    /// `None` takes it back. Git's markers, where git has the file, win.
+    pub fn set_base_text(&mut self, base: Option<String>) {
+        let Some(path) = self.file_path().map(Path::to_path_buf) else {
+            return;
+        };
+        let cache = self
+            .git
+            .diff_cache
+            .get_or_insert_with(|| termide_git::GitDiffCache::new(path));
+        cache.set_fallback_original(base);
+        if let Err(e) = cache.update_from_buffer(&self.buffer.to_string()) {
+            log::warn!("diff against the base failed: {e}");
+        }
+    }
+
     /// Check and apply async git diff result if ready (called on each tick)
     ///
     /// Returns true if result was applied and needs_redraw should be set.
@@ -92,6 +109,34 @@ impl Editor {
             log::warn!("cannot reload {}: {error}", file_path.display());
             self.file_state.external_change_detected = true;
         }
+    }
+
+    /// Follow a change of the file's write permission: `p4 edit` or a
+    /// `chmod +w` makes a read-only editor editable, `p4 revert` or a
+    /// `chmod -w` makes it read-only again. Only a change is followed, so
+    /// `Ctrl+E` holds until the permission changes next. A buffer with unsaved
+    /// work is not made read-only under the user's hands. Returns whether
+    /// the editor's mode changed.
+    pub fn follow_disk_permissions(&mut self) -> bool {
+        if self.file_state.is_remote() {
+            return false;
+        }
+        let Some(last) = self.file_state.disk_read_only else {
+            return false;
+        };
+        let Some(now) = self.buffer.file_path().and_then(file_io::file_readonly) else {
+            return false;
+        };
+        if now == last {
+            return false;
+        }
+        self.file_state.disk_read_only = Some(now);
+        if now && self.buffer.is_modified() {
+            return false;
+        }
+        let changed = self.config.read_only != now;
+        self.config.read_only = now;
+        changed
     }
 
     /// Check if external modification was detected

@@ -245,6 +245,8 @@ impl App {
                 }
             }
         }
+        // What plugins said of files while the project was parked.
+        self.reapply_plugin_files();
         // The outline may have missed edits and focus moves while parked.
         self.resync_outline();
         self.state.needs_watcher_registration = true;
