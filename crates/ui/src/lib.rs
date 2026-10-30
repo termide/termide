@@ -20,6 +20,7 @@ pub mod suggestion_input;
 pub mod system_monitor;
 pub mod text_utils;
 pub mod textarea;
+pub mod tree_lines;
 pub mod viewport;
 
 pub use checkbox::{checkbox, checkbox_mark};
@@ -40,6 +41,7 @@ pub use selection_style::{
 };
 pub use suggestion_input::{DropdownState, SuggestionAction, SuggestionInput};
 pub use textarea::TextArea;
+pub use tree_lines::tree_prefixes;
 pub use viewport::{ensure_offset_visible, wheel_scroll, Viewport};
 
 // Re-exports for convenience
