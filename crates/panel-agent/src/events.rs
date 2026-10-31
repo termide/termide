@@ -7,7 +7,8 @@ use std::sync::PoisonError;
 use std::time::{Duration, Instant};
 
 use termide_agent_core::{
-    AgentEvent, Message, StopReason, StreamEvent, Timing, ToolResultMessage, ToolUpdate,
+    AgentEvent, Message, Spender, StopReason, StreamEvent, Timing, ToolResultMessage, ToolUpdate,
+    Usage,
 };
 use termide_core::PanelEvent;
 use termide_ui::ChoiceForm;
@@ -337,9 +338,7 @@ impl AgentPanel {
                         }
                         // What the cache served is counted apart from what is
                         // billed in full.
-                        self.session_input += assistant.usage.uncached();
-                        self.session_cached += assistant.usage.cache_read;
-                        self.session_output += assistant.usage.output;
+                        self.count_spent(&assistant.usage);
                         // A call that failed before its first token (no network,
                         // say) went through no prefill or generation: it has
                         // no cost to show, only its time and failure. Nor has
@@ -447,9 +446,7 @@ impl AgentPanel {
                 // A subagent's tokens join the session's totals; its context
                 // was its own, so the context fill stays as it is.
                 if let Some(spent) = result.spent() {
-                    self.session_input += spent.uncached();
-                    self.session_cached += spent.cache_read;
-                    self.session_output += spent.output;
+                    self.count_spent(&spent);
                 }
                 if let Some(path) = changed_file(&result) {
                     self.pending_events
@@ -551,6 +548,9 @@ impl AgentPanel {
                 // the next turn finishes.
                 self.context_tokens = tokens_after;
                 self.end_compaction();
+                // The summary's tokens count with the session's; the log
+                // keeps them with the compaction.
+                self.count_spent(&call.usage);
                 // Nothing kept verbatim, as with an external agent: the
                 // summary is all that stands for the history.
                 let notice = if kept == 0 {
@@ -585,6 +585,9 @@ impl AgentPanel {
                 reply,
             } => {
                 self.end_compaction();
+                if let Some(call) = &call {
+                    self.count_spent(&call.usage);
+                }
                 self.notice(
                     termide_i18n::t().agent_notice_compaction_failed_fmt(&error.to_string()),
                     NoticeKind::Warn,
@@ -624,6 +627,7 @@ impl AgentPanel {
                     self.context_stale = true;
                 }
             }
+            AgentEvent::Spent { by, model, usage } => self.log_spent(by, &model, usage),
             AgentEvent::ExternalSession { agent, session_id } => {
                 if let Some(session) = &mut self.session {
                     if let Err(error) = session.append_external_session(&agent, &session_id) {
@@ -917,13 +921,47 @@ impl AgentPanel {
     /// The context fill stays: a review is a call of its own. `true` when
     /// there was anything.
     pub(crate) fn take_reviewer_spent(&mut self) -> bool {
-        let spent = self.reviewer.spent.take();
-        if spent.total() == 0 {
+        let spent = self.reviewer.spent.take_by_model();
+        if spent.is_empty() {
             return false;
         }
-        self.session_input += spent.uncached();
-        self.session_cached += spent.cache_read;
-        self.session_output += spent.output;
+        for (model, usage) in spent {
+            self.log_spent(Spender::Reviewer, &model, usage);
+        }
         true
+    }
+
+    /// Count what a side call of `by`'s spent on `model` with the session's
+    /// totals, and log it so a reopened session counts it again.
+    fn log_spent(&mut self, by: Spender, model: &str, usage: Usage) {
+        if usage.total() == 0 {
+            return;
+        }
+        self.count_spent(&usage);
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_spent(by, model, usage) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
+    /// Add `usage` to the session's totals: what the cache served apart
+    /// from what is billed in full.
+    pub(crate) fn count_spent(&mut self, usage: &Usage) {
+        self.session_input += usage.uncached();
+        self.session_cached += usage.cache_read;
+        self.session_output += usage.output;
+    }
+
+    /// Start the session's totals at what its log says it spent.
+    pub(crate) fn seed_spent(&mut self) {
+        let total = self
+            .session
+            .as_ref()
+            .map(|session| session.spending().total())
+            .unwrap_or_default();
+        self.session_input = total.uncached();
+        self.session_cached = total.cache_read;
+        self.session_output = total.output;
     }
 }

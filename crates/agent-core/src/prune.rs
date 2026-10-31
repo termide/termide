@@ -137,6 +137,7 @@ mod tests {
                 output: 10,
                 cache_read: 0,
                 cache_write: 0,
+                ..Default::default()
             },
             provider: "fake".into(),
             model: "m".into(),

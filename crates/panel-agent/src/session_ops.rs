@@ -5,7 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
 use crate::runtime::local_minute;
-use termide_agent_core::{EntryKind, PromptError, Session, SessionSummary};
+use termide_agent_core::{ContextLoad, EntryKind, PromptError, Session, SessionSummary};
 use termide_core::{ConfirmAction, InputAction, PanelEvent};
 use termide_ui::ChoiceForm;
 
@@ -66,8 +66,10 @@ impl AgentPanel {
         // A search in the banner's list ends with the banner it searched,
         // and the prompt box gets its own text back.
         self.end_session_search();
-        // What the session being left has going is written before it goes.
+        // What the session being left has going is written before it goes,
+        // what its reviewer spent last included.
         self.sync_autorun();
+        self.take_reviewer_spent();
         let session = session.or_else(|| {
             start_session(
                 self.session_dir.as_deref(),
@@ -224,6 +226,8 @@ impl AgentPanel {
         self.pause_requested = false;
         self.stop_requested = None;
         self.context_tokens = 0;
+        // The totals are the session's: what its log says it spent so far.
+        self.seed_spent();
         // What the previous agent stated is not this one's.
         self.acp_has_models = false;
         self.acp_options.clear();
@@ -820,6 +824,15 @@ impl AgentPanel {
         }
         rows.push((t.agent_info_messages().into(), messages.to_string()));
         rows.push((t.agent_info_tokens().into(), self.token_totals()));
+        // Who spent them and on which model, from the log, so a reopened
+        // session shows it all, and from the subagents' logs: their models
+        // and their own reviewers.
+        if let Some(session) = self.session.as_ref() {
+            let spending = session.spending_with_subagents();
+            rows.extend(crate::spending::spending_rows(&spending, |id| {
+                self.model_name(id)
+            }));
+        }
         rows.push((
             t.agent_info_context().into(),
             format!(
@@ -828,6 +841,29 @@ impl AgentPanel {
                 format_tokens(self.model.context_window)
             ),
         ));
+        // What the context is made of, and what each tool's results cost
+        // as later calls read them again. The system prompt and the tool
+        // definitions are known only for the built-in agent's own.
+        if let Some(session) = self.session.as_ref() {
+            let load = ContextLoad::of(session, &self.compaction_prompts);
+            let (system, tools) = if self.external {
+                (None, None)
+            } else {
+                let tools: usize = self
+                    .tools
+                    .specs()
+                    .iter()
+                    .map(|spec| {
+                        spec.name.len()
+                            + spec.description.chars().count()
+                            + spec.parameters.to_string().chars().count()
+                    })
+                    .sum();
+                let system = self.effective_system_prompt().chars().count();
+                (Some((system / 4) as u64), Some((tools / 4) as u64))
+            };
+            rows.extend(crate::spending::context_rows(&load, system, tools));
+        }
         // How much the clean mechanism has shrunk shell output this session,
         // when any ran: raw → cleaned and the percentage saved.
         if self.clean_raw_bytes > 0 {

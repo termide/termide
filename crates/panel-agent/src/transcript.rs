@@ -4792,6 +4792,7 @@ mod tests {
             output: 300,
             cache_read: 2000,
             cache_write: 0,
+            ..Default::default()
         };
         transcript.push(Item::Tool {
             call: task.clone(),

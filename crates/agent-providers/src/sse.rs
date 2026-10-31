@@ -225,11 +225,18 @@ fn parse_usage(usage: &Value) -> Usage {
         .and_then(|d| d.get("cached_tokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
+    // Reasoning models count their thinking within `completion_tokens`.
+    let thinking = usage
+        .get("completion_tokens_details")
+        .and_then(|d| d.get("reasoning_tokens"))
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
     Usage {
         input: get("prompt_tokens").saturating_sub(cache_read),
         output: get("completion_tokens"),
         cache_read,
         cache_write: 0,
+        thinking,
     }
 }
 
@@ -355,7 +362,8 @@ data: [DONE]
                 input: 20,
                 output: 7,
                 cache_read: 100,
-                cache_write: 0
+                cache_write: 0,
+                ..Default::default()
             }
         );
         let deltas = events

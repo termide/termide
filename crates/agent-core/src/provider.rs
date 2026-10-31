@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::cancel::CancelToken;
-use crate::message::{AssistantMessage, Message, StopReason, UserMessage};
+use crate::message::{AssistantMessage, Message, StopReason, Usage, UserMessage};
 
 /// How much reasoning effort to request from a model that supports it.
 ///
@@ -227,6 +227,17 @@ pub fn one_shot(
     user: &str,
     cancel: &CancelToken,
 ) -> Result<String, String> {
+    one_shot_spent(provider, model, system, user, cancel).0
+}
+
+/// [`one_shot`] with what the call spent, a failed one's too.
+pub fn one_shot_spent(
+    provider: &dyn Provider,
+    model: &ModelSpec,
+    system: &str,
+    user: &str,
+    cancel: &CancelToken,
+) -> (Result<String, String>, Usage) {
     let messages = [Message::User(UserMessage::text(user))];
     let request = Request {
         model,
@@ -236,16 +247,18 @@ pub fn one_shot(
         thinking: ThinkingLevel::Off,
     };
     let reply = provider.stream(&request, &mut |_| {}, cancel);
+    let usage = reply.usage;
     if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted) {
-        return Err(reply
+        let error = reply
             .error_message
-            .unwrap_or_else(|| "the call did not finish".to_string()));
+            .unwrap_or_else(|| "the call did not finish".to_string());
+        return (Err(error), usage);
     }
     let text = reply.plain_text();
     if text.trim().is_empty() {
-        return Err("the model answered nothing".to_string());
+        return (Err("the model answered nothing".to_string()), usage);
     }
-    Ok(text)
+    (Ok(text), usage)
 }
 
 #[cfg(test)]

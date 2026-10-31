@@ -7,6 +7,7 @@
 //! case. What it is told comes from `system/classify.md`, the seed being a
 //! data file in `assets/`, the way the other service prompts are.
 
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
@@ -375,20 +376,41 @@ impl ModelChoice {
 /// The tokens model calls spent, added up across the threads that make
 /// them; clones share the count. The reviewers a host builds from one
 /// [`ReviewerSetup`] add to its meter, and the host takes what they spent.
+/// The count is kept by model, `""` for a model not known.
 #[derive(Clone, Default, Debug)]
-pub struct SpentMeter(Arc<Mutex<Usage>>);
+pub struct SpentMeter(Arc<Mutex<BTreeMap<String, Usage>>>);
 
 impl SpentMeter {
     pub fn add(&self, usage: &Usage) {
+        self.add_on("", usage);
+    }
+
+    /// Add what a call on `model` spent.
+    pub fn add_on(&self, model: &str, usage: &Usage) {
+        if usage.total() == 0 {
+            return;
+        }
         self.0
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .entry(model.to_string())
+            .or_default()
             .add(usage);
     }
 
     /// What was spent since the last take, leaving the meter at nothing.
     #[must_use]
     pub fn take(&self) -> Usage {
+        let mut total = Usage::default();
+        for usage in self.take_by_model().values() {
+            total.add(usage);
+        }
+        total
+    }
+
+    /// [`Self::take`] by model.
+    #[must_use]
+    pub fn take_by_model(&self) -> BTreeMap<String, Usage> {
         std::mem::take(
             &mut *self
                 .0
@@ -497,7 +519,14 @@ impl Classifier for ModelClassifier {
         };
         let reply = provider.stream(&request, &mut |_| {}, &self.cancel);
         // Spent whatever the verdict, a failed call's prompt included.
-        self.spent.add(&reply.usage);
+        // On the model that answered: an external agent names the one it
+        // picked, which the request may have left to it.
+        let on = if reply.model.is_empty() {
+            &model.id
+        } else {
+            &reply.model
+        };
+        self.spent.add_on(on, &reply.usage);
         if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted) {
             return Verdict::Unavailable {
                 reason: reply

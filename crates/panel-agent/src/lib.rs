@@ -25,6 +25,7 @@ mod select;
 mod session_ops;
 mod session_search;
 mod slash;
+mod spending;
 mod strip;
 mod submit;
 mod toolset;
@@ -1479,6 +1480,7 @@ impl AgentPanel {
         panel.notice_definition_problems();
         panel.notice_held_hooks();
         panel.refresh_recent_sessions();
+        panel.seed_spent();
         // The other termide's run may be going on right now: none is offered
         // to carry on here until this panel takes the session up.
         if panel.held.is_some() {

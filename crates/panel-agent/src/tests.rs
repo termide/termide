@@ -117,6 +117,7 @@ fn reply(text: &str) -> AssistantMessage {
             output: 20,
             cache_read: 0,
             cache_write: 0,
+            ..Default::default()
         },
         provider: "scripted".into(),
         model: "m".into(),
@@ -1833,6 +1834,7 @@ fn an_external_agents_turn_usage_does_not_fill_the_context_bar() {
         output: 100,
         cache_read: 0,
         cache_write: 0,
+        ..Default::default()
     };
     panel.apply(AgentEvent::MessageEnd(Message::Assistant(own)));
     assert_eq!(panel.context_tokens, 1_000);
@@ -1844,6 +1846,7 @@ fn an_external_agents_turn_usage_does_not_fill_the_context_bar() {
         output: 19_189,
         cache_read: 1_397_173,
         cache_write: 79_138,
+        ..Default::default()
     };
     panel.apply(AgentEvent::MessageEnd(Message::Assistant(external)));
     assert_eq!(panel.context_tokens, 1_000);
@@ -3714,6 +3717,7 @@ fn the_reviewers_tokens_join_the_session_totals() {
         output: 4,
         cache_read: 1000,
         cache_write: 0,
+        ..Default::default()
     });
     panel.tick();
     assert_eq!(
@@ -3726,6 +3730,81 @@ fn the_reviewers_tokens_join_the_session_totals() {
     );
     assert_eq!(panel.context_tokens, 500);
     assert!(!panel.take_reviewer_spent());
+}
+
+/// What the reviewer spent is logged by model, so a panel reopening the
+/// session starts its totals where they were, and its info tells who spent
+/// what on which model.
+#[test]
+fn spending_outlives_a_reopen_and_shows_by_whom() {
+    use termide_agent_core::Usage;
+    let dir = tempfile::tempdir().unwrap();
+    let mut answer = reply("ok");
+    answer.usage = Usage {
+        input: 1_000,
+        output: 50,
+        ..Default::default()
+    };
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![answer])
+    });
+    type_text(&mut panel, "do something");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    panel.reviewer.spent.add_on(
+        "small",
+        &Usage {
+            input: 300,
+            output: 4,
+            cache_read: 1_000,
+            ..Default::default()
+        },
+    );
+    panel.tick();
+    let totals = (
+        panel.session_input,
+        panel.session_cached,
+        panel.session_output,
+    );
+    assert_eq!(totals, (1_300, 1_000, 54));
+    let path = panel.session.as_ref().unwrap().path().to_path_buf();
+    drop(panel);
+
+    let mut reopened = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![])
+    });
+    assert!(reopened.switch_session(Some(Session::open(&path).unwrap())));
+    assert_eq!(
+        (
+            reopened.session_input,
+            reopened.session_cached,
+            reopened.session_output,
+        ),
+        totals
+    );
+    let Some(PanelEvent::ShowInfo { rows, .. }) = reopened.session_summary().into_iter().next()
+    else {
+        panic!("the session info shows");
+    };
+    let row = |key: &str| {
+        rows.iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.clone())
+            .unwrap_or_default()
+    };
+    let by = row("Spent by");
+    assert!(
+        by.contains("Conversation") && by.contains("Reviewer"),
+        "{by}"
+    );
+    assert!(row("By model").contains("small"), "{rows:?}");
+    // 1000 of the 2300 prompt tokens came from the cache.
+    assert_eq!(row("Cache hits"), "43%");
+    // What the context holds now: the request and the answer.
+    let parts = row("Context holds");
+    assert!(parts.starts_with("Conversation"), "{parts}");
 }
 
 /// A subagent's tokens join the session's totals when its `task` ends; its
@@ -3748,6 +3827,7 @@ fn a_subagents_tokens_join_the_session_totals() {
             output: 7,
             cache_read: 900,
             cache_write: 2,
+            ..Default::default()
         }),
     });
     assert_eq!(
@@ -7815,6 +7895,7 @@ fn token_totals_keep_the_cache_apart_from_what_is_billed_in_full() {
                 output: 63,
                 cache_read: 919,
                 cache_write: 1009,
+                ..Default::default()
             },
             ..reply("ok")
         },

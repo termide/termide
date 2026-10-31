@@ -27,7 +27,7 @@ use serde_json::{json, Value};
 use termide_agent_core::{chars_for_tokens, handoff, recap};
 use termide_agent_core::{
     companion_tools, parse_verdict, GoalPrompt, HandoffPrompt, IntentLog, ModelSpec, Provider,
-    ReviewerSetup, SessionView, ThinkingLevel,
+    ReviewerSetup, SessionView, Spender, ThinkingLevel,
 };
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
@@ -808,7 +808,11 @@ impl Backend for AcpRuntime {
                 shared.goal.system_prompt(&goal),
                 shared.goal.request
             );
-            let event = match shared.side_query(&text) {
+            let answer = shared.side_query(&text).map(|(reply, usage)| {
+                shared.report_spent(Spender::GoalJudge, usage);
+                reply
+            });
+            let event = match answer {
                 Ok(reply) if !reply.trim().is_empty() => match parse_verdict(&reply) {
                     Ok(verdict) => AgentEvent::GoalJudged {
                         outcome: verdict.outcome,
@@ -841,7 +845,11 @@ impl Backend for AcpRuntime {
                 "{}\n\n{}",
                 shared.handoff.instructions, shared.handoff.request
             );
-            let brief = match shared.side_query(&text) {
+            let answer = shared.side_query(&text).map(|(reply, usage)| {
+                shared.report_spent(Spender::Handoff, usage);
+                reply
+            });
+            let brief = match answer {
                 Ok(reply) if !reply.trim().is_empty() => Ok(reply.trim().to_string()),
                 Ok(_) => Err("the handoff call did not produce a brief".to_string()),
                 Err(error) => Err(error),
@@ -1890,8 +1898,8 @@ impl Shared {
     /// closed afterwards when it closes one; else in the session itself, as
     /// a turn kept from the panel and the log (the agent's own session still
     /// holds it). Its tools are not asked for: a permission request from it
-    /// is refused.
-    fn side_query(self: &Arc<Self>, text: &str) -> Result<String, String> {
+    /// is refused. What the request spent comes with the answer.
+    fn side_query(self: &Arc<Self>, text: &str) -> Result<(String, Usage), String> {
         let main = self.session_id()?;
         let forked = if self.can_fork.load(Ordering::Acquire) {
             let reply = self.request(
@@ -1941,14 +1949,14 @@ impl Shared {
     }
 
     /// Send `text` as a side request in session `session_id` and return the
-    /// answer's text, which reaches neither the panel nor the log; several
-    /// may run at once, each in its own session.
+    /// answer's text, which reaches neither the panel nor the log, and what
+    /// the request spent; several may run at once, each in its own session.
     fn side_prompt(
         &self,
         session_id: &str,
         text: &str,
         timeout: Duration,
-    ) -> Result<String, String> {
+    ) -> Result<(String, Usage), String> {
         self.side
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1967,7 +1975,7 @@ impl Shared {
         let reply = result?;
         match reply["stopReason"].as_str() {
             Some(stop @ ("cancelled" | "refusal")) => Err(format!("the agent stopped: {stop}")),
-            _ => Ok(answer),
+            _ => Ok((answer, usage_of(&reply))),
         }
     }
 
@@ -2378,6 +2386,18 @@ impl Shared {
         let _ = self
             .events
             .send(AgentEvent::MessageEnd(Message::Assistant(message)));
+    }
+
+    /// Tell the panel what a side request of `by`'s spent, credited to the
+    /// session's model, so the log keeps it.
+    fn report_spent(&self, by: Spender, usage: Usage) {
+        if usage.total() > 0 {
+            let _ = self.events.send(AgentEvent::Spent {
+                by,
+                model: self.model_name(),
+                usage,
+            });
+        }
     }
 
     /// The model to credit a message to: the agent's current one, or the
@@ -3509,6 +3529,9 @@ fn usage_of(result: &Value) -> Usage {
         output: count("outputTokens"),
         cache_read: count("cachedReadTokens"),
         cache_write: count("cachedWriteTokens"),
+        // Codex's reasoning, within its output; Claude Code never counts
+        // its thinking apart.
+        thinking: count("thoughtTokens"),
     }
 }
 

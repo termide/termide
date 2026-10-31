@@ -60,6 +60,15 @@ pub struct Usage {
     pub cache_read: u64,
     #[serde(default)]
     pub cache_write: u64,
+    /// Of `output`, the tokens spent reasoning, when the provider counts
+    /// them apart (OpenAI, Codex); Anthropic's are in `output` uncounted.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub thinking: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_zero_u64(n: &u64) -> bool {
+    *n == 0
 }
 
 impl Usage {
@@ -86,6 +95,7 @@ impl Usage {
         self.output = self.output.saturating_add(other.output);
         self.cache_read = self.cache_read.saturating_add(other.cache_read);
         self.cache_write = self.cache_write.saturating_add(other.cache_write);
+        self.thinking = self.thinking.saturating_add(other.thinking);
     }
 }
 
@@ -695,6 +705,7 @@ mod tests {
             output: 5,
             cache_read: 100,
             cache_write: 0,
+            ..Default::default()
         };
         assert_eq!(ToolResultMessage::text(&call, "ok").spent(), None);
         let nothing = ToolResultMessage::text(&call, "ok").with_spent(Usage::default());
@@ -731,6 +742,7 @@ mod tests {
                 output: 5,
                 cache_read: 0,
                 cache_write: 0,
+                ..Default::default()
             },
             provider: "fake".into(),
             model: "m".into(),

@@ -37,6 +37,7 @@ pub mod handoff;
 pub mod hooks;
 pub mod layers;
 pub mod line_window;
+pub mod load;
 pub mod loop_guard;
 pub mod mcp;
 pub mod message;
@@ -50,6 +51,7 @@ pub mod refusals;
 pub mod runtime;
 pub mod session;
 pub mod shell;
+pub mod spend;
 pub mod suggest;
 pub mod tool;
 pub mod tool_text;
@@ -91,6 +93,7 @@ pub use layers::{
     SYSTEM_DIR, WEB_ENGINES_DIR,
 };
 pub use line_window::{read_line_window, LineWindow, WindowLine, WindowSpec};
+pub use load::{ContextLoad, ContextNow, ToolLoad};
 pub use loop_guard::{LoopGuard, LoopPrompt, LoopReport, SEED_LOOP};
 pub use mcp::{
     expand_env, mcp_servers_from_json, McpOAuth, McpReload, McpServerConfig, McpServerState,
@@ -109,7 +112,8 @@ pub use permissions::{
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{
-    one_shot, ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel, ToolSpec,
+    one_shot, one_shot_spent, ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel,
+    ToolSpec,
 };
 pub use prune::{prune_by, prune_to_decisions};
 pub use recall::{RecallPrompt, SEED_RECALL};
@@ -124,6 +128,7 @@ pub use session::{
     RunMark, Session, SessionHeader, SessionModel, SessionParent, SessionSummary, Timing,
 };
 pub use shell::{ShellOutput, ShellRunner};
+pub use spend::{Spender, Spending};
 pub use suggest::{
     suggestion_channel, CommandSuggester, Suggestion, SuggestionEnvelope, SuggestionReply,
 };

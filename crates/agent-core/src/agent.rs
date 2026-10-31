@@ -24,6 +24,7 @@ use crate::message::{
 use crate::permissions::{ChannelPrompter, DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
 use crate::shell::ShellRunner;
+use crate::spend::Spender;
 use crate::suggest::CommandSuggester;
 use crate::tool::{ToolContext, ToolRegistry, ToolUpdate};
 
@@ -511,6 +512,13 @@ pub enum AgentEvent {
     GoalJudgeFailed {
         error: String,
         reply: String,
+    },
+    /// A side call — the goal judge's, a handoff brief's — spent `usage`
+    /// on `model`; the session log records it. Not part of the transcript.
+    Spent {
+        by: Spender,
+        model: String,
+        usage: Usage,
     },
     /// A `/handoff` brief was produced (or the call failed): the forward-looking
     /// brief for a fresh session, or an error to report.
@@ -1518,6 +1526,13 @@ impl Agent {
             &mut |event| emit(AgentEvent::GoalJudgeUpdate(event)),
             cancel,
         );
+        if reply.usage.total() > 0 {
+            emit(AgentEvent::Spent {
+                by: Spender::GoalJudge,
+                model: self.model.id.clone(),
+                usage: reply.usage,
+            });
+        }
         if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted) {
             let error = reply
                 .error_message
@@ -1565,6 +1580,13 @@ impl Agent {
             thinking: ThinkingLevel::Off,
         };
         let reply = self.provider.stream(&request, &mut |_| {}, cancel);
+        if reply.usage.total() > 0 {
+            emit(AgentEvent::Spent {
+                by: Spender::Handoff,
+                model: self.model.id.clone(),
+                usage: reply.usage,
+            });
+        }
         let brief = reply.plain_text();
         let result = if matches!(reply.stop_reason, StopReason::Error | StopReason::Aborted)
             || brief.trim().is_empty()

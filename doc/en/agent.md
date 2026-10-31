@@ -449,7 +449,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `Ctrl+T` | In a view of another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
 | `F9` | In a view of another agent's task shown over the layout, move it into a panel of its own (see [Subagents](#subagents)) |
-| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
+| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens and who spent them on which model, context, how much shell output was cleaned); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
@@ -877,7 +877,39 @@ are cut, never these. The totals are `↑` the prompt tokens billed in full (the
 uncached input and what was written to the prompt cache), `↻` those the cache
 served, shown once there are any, and `↓` the output: `↑2.1k ↻48k ↓900`. They
 include what subagents spent, added when their task ends, and what the `auto`
-mode reviewer spent; the window counts only the session's own context. The
+mode reviewer, `recall`'s solver, summaries, the `/goal` judge and `/handoff`
+spent; the window counts only the session's own context. They are the
+session's, kept in its log: a reopened session starts from what it had spent.
+The session info (`F3`) breaks them down: **Spent by** the conversation,
+subagents, the reviewer, recall, summaries, the goal judge and handoff, and
+**By model**, each with a bar and its share, heaviest first; **Cache hits**,
+the share of prompt tokens the cache served; and **Reasoning**, the output
+spent thinking, when the provider counts it apart (Codex and OpenAI-compatible
+servers do; Claude Code counts it within its output and never apart). A share
+weighs the tokens as they cost — a cache read a tenth of an input token, a
+cache write a quarter more, an output token five times, Anthropic's price
+ratios — so a part with few tokens of output can outweigh one with many cache
+reads. A Claude Code or Codex reviewer is credited to the model it ran on, the
+cheapest the CLI offers by default. A subagent's share is read from its own
+session log: its turns count as **Subagents** on the model it ran on, and what
+its own reviewer, summaries and subagents spent joins those rows; what its task
+reports beyond its log — a log from before this was recorded, one deleted —
+counts as the subagent's on an `unknown` model.
+
+Below the context window the session info shows what the context is made of,
+estimated at four characters a token. **Context holds** splits what it holds
+now: the system prompt and the tool definitions (the built-in agent's own; a
+CLI agent's are its own and not known), skills the `skill` tool loaded, the
+other tools' output, the conversation and a compaction's summary. **Tool
+output** shows each tool's results across the session, a skill's as
+`skill:<name>`: `≈` what they brought into the context and `↻` how much the
+model calls after them read again while they stayed, until a summary,
+pruning or fitting took them out. The share weighs both as they cost — written
+to the cache once, read from it with each call — so a skill loaded early and
+carried through a long session can outweigh a large command output read once;
+the eight heaviest are named and the rest summed as `others`. A CLI agent's
+session logs its turns rather than each call, so what its calls read again
+comes out low. The
 window is the tokens used of it with a fill bar, `66k/262k ▰▰▱▱▱▱▱▱`; for
 Claude Code, Codex and Gemini CLI both come from what the agent reports, and the window
 shows once it has.

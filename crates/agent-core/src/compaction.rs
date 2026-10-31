@@ -304,6 +304,7 @@ mod tests {
             output: 100,
             cache_read: 0,
             cache_write: 0,
+            ..Default::default()
         };
         let messages = vec![user("q"), Message::Assistant(reply), user(&"x".repeat(400))];
         assert_eq!(context_tokens(&messages), 1000 + 100);
@@ -333,6 +334,7 @@ mod tests {
             output: 100,
             cache_read: 0,
             cache_write: 0,
+            ..Default::default()
         };
         // What a whole Claude Code turn spent, cache reads included.
         let mut external = text_reply(&"z".repeat(400));
@@ -342,6 +344,7 @@ mod tests {
             output: 19_189,
             cache_read: 1_397_173,
             cache_write: 79_138,
+            ..Default::default()
         };
         let messages = vec![
             user("q"),

@@ -157,20 +157,25 @@ impl Provider for AcpProvider {
             )
         });
         match answer {
-            Ok(text) if !text.trim().is_empty() => {
+            Ok(SideAnswer { text, usage, model }) if !text.trim().is_empty() => {
                 on_event(StreamEvent::TextDelta(text.clone()));
                 AssistantMessage {
                     content: vec![AssistantContent::Text { text }],
                     stop_reason: StopReason::Stop,
-                    usage: Usage::default(),
+                    usage,
                     provider: ACP_PROVIDER.into(),
-                    model: request.model.id.clone(),
+                    // The model that answered, which the request may have
+                    // left to the agent to pick.
+                    model: model.unwrap_or_else(|| request.model.id.clone()),
                     error_message: None,
                     failure: None,
                     timestamp: now_millis(),
                 }
             }
-            Ok(_) => failed("the agent answered nothing".to_string()),
+            Ok(SideAnswer { usage, .. }) => AssistantMessage {
+                usage,
+                ..failed("the agent answered nothing".to_string())
+            },
             Err(error) => failed(error),
         }
     }
@@ -187,6 +192,14 @@ impl Provider for AcpProvider {
     }
 }
 
+/// A side call's answer, what it spent and the model it was switched to
+/// (`None`: the agent's own, not known here).
+struct SideAnswer {
+    text: String,
+    usage: Usage,
+    model: Option<String>,
+}
+
 impl Shared {
     /// Ask `system` and `user` in a session of their own, on `model` when it
     /// names one the agent offers; see the module.
@@ -197,7 +210,7 @@ impl Shared {
         user: &str,
         model: &str,
         unnamed: Unnamed,
-    ) -> Result<String, String> {
+    ) -> Result<SideAnswer, String> {
         let mut params = json!({ "cwd": self.cwd, "mcpServers": [] });
         let text = if flavor == AcpFlavor::ClaudeCode {
             // A side call's request is unique and never read again, and the
@@ -222,11 +235,13 @@ impl Shared {
             .as_str()
             .ok_or("session/new returned no sessionId")?
             .to_string();
-        if !model.trim().is_empty() {
-            self.pick_model(&session_id, &opened, model);
+        let picked = if !model.trim().is_empty() {
+            self.pick_model(&session_id, &opened, model)
         } else if unnamed == Unnamed::Cheapest {
-            self.pick_cheapest(&session_id, &opened, flavor);
-        }
+            self.pick_cheapest(&session_id, &opened, flavor)
+        } else {
+            None
+        };
         if flavor == AcpFlavor::Codex {
             // It asks before anything but reading, and is refused.
             let _ = self.request(
@@ -243,7 +258,11 @@ impl Shared {
                 Duration::from_secs(10),
             );
         }
-        answer
+        answer.map(|(text, usage)| SideAnswer {
+            text,
+            usage,
+            model: picked,
+        })
     }
 
     /// The models the agent offers on its login: a session is opened, as
@@ -273,7 +292,7 @@ impl Shared {
     /// Switch session `session_id` to the model `wanted` names among those
     /// `opened` (its `session/new` result) offers; a name that matches none,
     /// or more than one, leaves the agent's own.
-    fn pick_model(&self, session_id: &str, opened: &Value, wanted: &str) {
+    fn pick_model(&self, session_id: &str, opened: &Value, wanted: &str) -> Option<String> {
         let (offered, config_id) = offered_models(opened);
         let Some(id) = match_model(wanted, &offered) else {
             log::warn!(
@@ -281,28 +300,34 @@ impl Shared {
                 self.name,
                 offered.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
             );
-            return;
+            return None;
         };
-        self.set_model(session_id, config_id.as_deref(), &id);
+        self.set_model(session_id, config_id.as_deref(), &id)
+            .then_some(id)
     }
 
     /// Switch session `session_id` to the first model `opened` offers of
     /// `flavor`'s cheapest class; none such leaves the agent's own.
-    fn pick_cheapest(&self, session_id: &str, opened: &Value, flavor: AcpFlavor) {
+    fn pick_cheapest(&self, session_id: &str, opened: &Value, flavor: AcpFlavor) -> Option<String> {
         let (offered, config_id) = offered_models(opened);
         match cheapest_model(flavor, &offered) {
-            Some(id) => self.set_model(session_id, config_id.as_deref(), &id),
-            None => log::warn!(
-                "acp {}: no cheap model among {:?}; the agent's own answers",
-                self.name,
-                offered.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
-            ),
+            Some(id) => self
+                .set_model(session_id, config_id.as_deref(), &id)
+                .then_some(id),
+            None => {
+                log::warn!(
+                    "acp {}: no cheap model among {:?}; the agent's own answers",
+                    self.name,
+                    offered.iter().map(|m| m.id.as_str()).collect::<Vec<_>>()
+                );
+                None
+            }
         }
     }
 
     /// Switch session `session_id` to model `id`, through the config option
-    /// `config_id` when the agent switches models with one.
-    fn set_model(&self, session_id: &str, config_id: Option<&str>, id: &str) {
+    /// `config_id` when the agent switches models with one; whether it did.
+    fn set_model(&self, session_id: &str, config_id: Option<&str>, id: &str) -> bool {
         let set = match config_id {
             Some(config_id) => self.request(
                 "session/set_config_option",
@@ -315,8 +340,12 @@ impl Shared {
                 Duration::from_secs(30),
             ),
         };
-        if let Err(error) = set {
-            log::warn!("acp {}: cannot switch to {id}: {error}", self.name);
+        match set {
+            Ok(_) => true,
+            Err(error) => {
+                log::warn!("acp {}: cannot switch to {id}: {error}", self.name);
+                false
+            }
         }
     }
 }
@@ -502,7 +531,21 @@ mod tests {
             Box::new(move || Ok(reviewer_agent(&for_connect))),
         )
         .cheapest();
-        assert_eq!(ask(&provider, "").plain_text(), "ALLOW r1");
+        let reply = ask(&provider, "");
+        assert_eq!(reply.plain_text(), "ALLOW r1");
+        // Credited to the model picked, and with what it spent: the
+        // reviewer's tokens are counted, on the model they went to.
+        assert_eq!(reply.model, "claude-haiku-4-5");
+        assert_eq!(
+            reply.usage,
+            Usage {
+                input: 3,
+                output: 9,
+                cache_read: 40,
+                cache_write: 7,
+                thinking: 4,
+            }
+        );
         let seen = seen.lock().unwrap();
         let picked: Vec<&Value> = seen
             .iter()
@@ -513,7 +556,8 @@ mod tests {
     }
 
     /// An agent that records what it is sent and answers every prompt with
-    /// `ALLOW <the session id>` after a pause, so calls overlap.
+    /// `ALLOW <the session id>` after a pause, so calls overlap, reporting
+    /// what the prompt spent.
     fn reviewer_agent(seen: &Arc<Mutex<Vec<Value>>>) -> AcpRuntime {
         let (to_agent_rx, to_agent_tx) = pipe().unwrap();
         let (from_agent_rx, from_agent_tx) = pipe().unwrap();
@@ -557,7 +601,10 @@ mod tests {
                             send(
                                 &out,
                                 json!({ "jsonrpc": "2.0", "id": id,
-                                "result": { "stopReason": "end_turn" } }),
+                                "result": { "stopReason": "end_turn", "usage": {
+                                    "inputTokens": 3, "outputTokens": 9,
+                                    "cachedReadTokens": 40, "cachedWriteTokens": 7,
+                                    "thoughtTokens": 4, "totalTokens": 59 } } }),
                             );
                         });
                         continue;

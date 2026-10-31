@@ -16,8 +16,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use termide_agent_core::message::now_millis;
 use termide_agent_core::{
-    civil_date, one_shot, CancelToken, ModelChoice, RecallPrompt, SessionView, Tool, ToolCall,
-    ToolContext, ToolResultMessage, ToolText, ToolUpdate,
+    civil_date, one_shot_spent, CancelToken, ModelChoice, RecallPrompt, SessionView, Tool,
+    ToolCall, ToolContext, ToolResultMessage, ToolText, ToolUpdate, Usage,
 };
 
 mod files;
@@ -246,6 +246,8 @@ pub struct Outcome {
     /// `Some(Ok)` with the answer, `Some(Err)` when the solver failed (the
     /// hits then stand alone), `None` when it did not run.
     pub answer: Option<Result<String, String>>,
+    /// What the solver's call spent.
+    pub spent: Usage,
     /// Sources their time limit stopped before they were searched through,
     /// with that limit.
     pub incomplete: Vec<(&'static str, Duration)>,
@@ -589,11 +591,15 @@ impl RecallTool {
             }
             hit.reference = format!("file:{shown}:{line}");
         }
-        let answer = self.solve(&request, &hits, session, cancel);
+        let (answer, spent) = match self.solve(&request, &hits, session, cancel) {
+            Some((answer, spent)) => (Some(answer), spent),
+            None => (None, Usage::default()),
+        };
         Outcome {
             request,
             hits,
             answer,
+            spent,
             incomplete,
         }
     }
@@ -619,17 +625,17 @@ impl RecallTool {
         hits: &[Hit],
         session: Option<&SessionView>,
         cancel: &CancelToken,
-    ) -> Option<Result<String, String>> {
+    ) -> Option<(Result<String, String>, Usage)> {
         let solver = self.setup.solver.as_ref()?;
         if request.raw || hits.is_empty() {
             return None;
         }
         let Some((provider, model)) = solver.model.resolve(session) else {
-            return Some(Err("no model to answer with".into()));
+            return Some((Err("no model to answer with".into()), Usage::default()));
         };
         let question = request.queries.join(" / ");
         let user = solver.prompt.user_turn(&question, &render_hits(hits));
-        Some(one_shot(
+        Some(one_shot_spent(
             provider.as_ref(),
             &model,
             &solver.prompt.instructions,
@@ -822,7 +828,9 @@ impl Tool for RecallTool {
             "results": outcome.hits.len(),
             "answered": matches!(outcome.answer, Some(Ok(_))),
         });
-        ToolResultMessage::text(call, render(&outcome)).with_details(details)
+        ToolResultMessage::text(call, render(&outcome))
+            .with_details(details)
+            .with_spent(outcome.spent)
     }
 }
 

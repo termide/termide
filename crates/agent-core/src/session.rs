@@ -23,10 +23,11 @@ use crate::context::file_timestamp;
 use crate::failure::Failure;
 use crate::fit::{fit, FitStep};
 use crate::goal::GoalOutcome;
-use crate::message::{now_millis, Message, StopReason, UserMessage};
+use crate::message::{now_millis, Message, StopReason, Usage, UserMessage};
 use crate::permissions::Mode;
 use crate::provider::ThinkingLevel;
 use crate::prune::{prune_by, prune_to_decisions};
+use crate::spend::{Spender, Spending};
 
 /// Bumped when a line shape changes incompatibly.
 pub const SESSION_FORMAT_VERSION: u32 = 1;
@@ -231,6 +232,15 @@ pub enum EntryKind {
         #[serde(default, skip_serializing_if = "String::is_empty")]
         reply: String,
     },
+    /// Tokens a model call spent that nothing else in the log records — the
+    /// `auto` reviewer's, the judge's, a handoff brief's — on `model` when
+    /// known. Changes nothing on the branch; see [`crate::spend::Spending`].
+    Spent {
+        by: Spender,
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        model: String,
+        usage: Usage,
+    },
 }
 
 /// How much of a judge's answer a [`EntryKind::GoalVerdict`] keeps.
@@ -346,7 +356,7 @@ enum HeaderTag {
 
 /// The header and every entry of the log at `path`, in file order. Malformed
 /// lines are skipped with a warning so one bad write does not lose a session.
-fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
+pub(crate) fn read_file(path: &Path) -> std::io::Result<(SessionHeader, Vec<Entry>)> {
     let reader = BufReader::new(File::open(path)?);
     let mut header = None;
     let mut entries = Vec::new();
@@ -1113,6 +1123,7 @@ impl Session {
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::GoalVerdict { .. }
+                | EntryKind::Spent { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1162,6 +1173,7 @@ impl Session {
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::GoalVerdict { .. }
+                | EntryKind::Spent { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1343,6 +1355,7 @@ impl Session {
                 | EntryKind::Autorun { .. }
                 | EntryKind::CompactionFailed { .. }
                 | EntryKind::GoalVerdict { .. }
+                | EntryKind::Spent { .. }
                 | EntryKind::Fitted { .. } => None,
             })
     }
@@ -1479,6 +1492,7 @@ impl Session {
                 | EntryKind::HeldReports { .. }
                 | EntryKind::Autorun { .. }
                 | EntryKind::GoalVerdict { .. }
+                | EntryKind::Spent { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
         }
@@ -1517,6 +1531,34 @@ impl Session {
     /// Record that a run started.
     pub fn append_run_start(&mut self) -> std::io::Result<String> {
         self.append(EntryKind::RunStart)
+    }
+
+    /// Record the tokens a call of `by`'s spent on `model`, see
+    /// [`EntryKind::Spent`].
+    pub fn append_spent(
+        &mut self,
+        by: Spender,
+        model: &str,
+        usage: Usage,
+    ) -> std::io::Result<String> {
+        self.append(EntryKind::Spent {
+            by,
+            model: model.to_string(),
+            usage,
+        })
+    }
+
+    /// What the whole log spent, by whom and on which model.
+    #[must_use]
+    pub fn spending(&self) -> Spending {
+        Spending::of_entries(&self.entries)
+    }
+
+    /// [`Self::spending`] with the subagents' logs read, see
+    /// [`Spending::with_subagents`]: files are read, so not for every frame.
+    #[must_use]
+    pub fn spending_with_subagents(&self) -> Spending {
+        Spending::with_subagents(&self.entries)
     }
 
     /// Record that the run ended, `paused` when at a `/pause`.
@@ -1828,6 +1870,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::Autorun { .. }
             | EntryKind::CompactionFailed { .. }
             | EntryKind::GoalVerdict { .. }
+            | EntryKind::Spent { .. }
             | EntryKind::Fitted { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {

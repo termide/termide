@@ -15,8 +15,8 @@ use termide_agent_core::{
     Failure, FailureKind, HostTools, IntentLog, LimitPolicy, Message, MessageOrigin, ModeHandle,
     ModelChoice, ModelSpec, OriginKind, PermissionAnswer, PermissionHooks, PermissionRules,
     PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup, Session,
-    SessionParent, SessionSummary, ShellOutput, ShellRunner, StreamEvent, ThinkingLevel, Tool,
-    ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT,
+    SessionParent, SessionSummary, ShellOutput, ShellRunner, Spender, StreamEvent, ThinkingLevel,
+    Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT,
     GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
@@ -1679,6 +1679,21 @@ impl DelegateLog {
         Self(Some(session))
     }
 
+    /// Log what the task's reviewer spent since the last look, by model, as
+    /// a panel logs its own reviewer's; the sum comes back for the outcome.
+    fn note_reviews(&mut self, reviews: &termide_agent_core::SpentMeter) -> Usage {
+        let mut total = Usage::default();
+        for (model, usage) in reviews.take_by_model() {
+            total.add(&usage);
+            if let Some(session) = &mut self.0 {
+                if let Err(error) = session.append_spent(Spender::Reviewer, &model, usage) {
+                    log::warn!("delegate session write failed: {error}");
+                }
+            }
+        }
+        total
+    }
+
     /// Write a finished message of the task's.
     fn note(&mut self, message: &Message) {
         if let Some(session) = &mut self.0 {
@@ -2247,12 +2262,8 @@ impl Subagents {
         // The session's connection says who reviews, wherever the task runs.
         let reviewer = reviewer_setup(&settings, &self.dirs, &active.connection);
         // A meter of its own: what its reviewer spends counts in the task,
-        // not in the panel's own reviews.
+        // and in its log, not in the panel's own reviews.
         let reviews = reviewer.spent.clone();
-        let with_reviews = |mut outcome: SubagentOutcome| {
-            outcome.spent.add(&reviews.take());
-            outcome
-        };
 
         let mut rules = self.rules.clone();
         rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
@@ -2361,9 +2372,7 @@ impl Subagents {
                 prompter,
                 panel: ctx.panel,
             };
-            return self
-                .run_cli(run, message, log, &budget, cancel, caller, task, on_update)
-                .map(with_reviews);
+            return self.run_cli(run, message, log, &budget, cancel, caller, task, on_update);
         }
 
         let (provider, requested, context_window, connection_name, kind) = match target {
@@ -2401,9 +2410,7 @@ impl Subagents {
                     prompter,
                     panel: ctx.panel,
                 };
-                return self
-                    .run_cli(run, message, log, &budget, cancel, caller, task, on_update)
-                    .map(with_reviews);
+                return self.run_cli(run, message, log, &budget, cancel, caller, task, on_update);
             }
             // On a connection of its own the subagent runs that connection's
             // model: the id its `AGENT.md` names is one of the session's
@@ -2541,16 +2548,12 @@ impl Subagents {
         }
         let answered = report.answer.is_some();
         let session = log.path();
-        let outcome = self.after_run(
-            ctx.panel,
-            task,
-            with_reviews(match live.control().ended_by_user() {
-                Some(why) if !cancel.is_cancelled() => report.ended_by_user(why),
-                _ => report.into_outcome(cancel.is_cancelled()),
-            }),
-            &connection_name,
-            session.as_deref(),
-        );
+        let mut ended = match live.control().ended_by_user() {
+            Some(why) if !cancel.is_cancelled() => report.ended_by_user(why),
+            _ => report.into_outcome(cancel.is_cancelled()),
+        };
+        ended.spent.add(&log.note_reviews(&reviews));
+        let outcome = self.after_run(ctx.panel, task, ended, &connection_name, session.as_deref());
         // Held at its panel's pause, or parked at a limit that will pass: the
         // reopened session asks to carry the task on. One that answered is
         // over, whatever pause or limit came after its last step.
@@ -2580,6 +2583,7 @@ impl Subagents {
         let mut noted = noting(&live, on_update);
         let on_update: &mut dyn FnMut(ToolUpdate) = &mut noted;
         let config = run.config;
+        let reviews = run.reviewer.spent.clone();
         // The agent's own requests go where its parent's panel asks; with
         // no one there they come here, and are refused.
         let (prompter, permission_rx) = match run.prompter {
@@ -2649,7 +2653,8 @@ impl Subagents {
             on_update,
         );
         let outcome = match outcome {
-            Ok(outcome) => {
+            Ok(mut outcome) => {
+                outcome.spent.add(&log.note_reviews(&reviews));
                 Ok(self.after_run(panel, task, outcome, &connection, session.as_deref()))
             }
             Err(error) => {
@@ -4277,6 +4282,43 @@ mod tests {
     /// A subagent on Claude Code runs on the connection's model, reports
     /// what it says as it goes and answers with its last words; stopped
     /// before it starts, it is not handed the task.
+    /// What a task's reviewer spent goes into the task's own log, by model,
+    /// so its session shows who spent what; the sum joins its outcome.
+    #[test]
+    fn a_tasks_reviews_are_logged_with_the_task() {
+        let logs = tempfile::tempdir().unwrap();
+        let mut log = DelegateLog::start(
+            Some(logs.path()),
+            Path::new("/proj"),
+            SessionParent {
+                session: Some("p1".into()),
+                agent: "lead".into(),
+                call: "call-7".into(),
+            },
+            &DelegateRun {
+                connection: "claude",
+                provider: "claude_code",
+                model: "haiku",
+                context_window: None,
+                agent: "search",
+            },
+        );
+        let reviews = termide_agent_core::SpentMeter::default();
+        let spent = Usage {
+            input: 30,
+            output: 2,
+            ..Default::default()
+        };
+        reviews.add_on("tiny", &spent);
+        assert_eq!(log.note_reviews(&reviews), spent);
+        // Taken once.
+        assert_eq!(log.note_reviews(&reviews), Usage::default());
+        let session = Session::open(&log.path().unwrap()).unwrap();
+        let spending = session.spending();
+        assert_eq!(spending.by.get(&Spender::Reviewer), Some(&spent));
+        assert_eq!(spending.models.get("tiny"), Some(&spent));
+    }
+
     #[test]
     fn a_subagent_on_a_cli_agent_runs_its_task_to_the_end() {
         let (_prompter, permission_rx) = permission_channel(CancelToken::new());
