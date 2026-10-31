@@ -1391,7 +1391,11 @@ impl Shared {
         if self.flavor != AcpFlavor::ClaudeCode {
             return params;
         }
-        let mut options = json!({ "settingSources": [], "strictMcpConfig": true });
+        // No predicted follow-up prompt: termide shows none, and each would
+        // be one more request a turn.
+        let mut options = json!({
+            "settingSources": [], "strictMcpConfig": true, "promptSuggestions": false
+        });
         if served {
             options["tools"] = json!([]);
             options["allowedTools"] = json!([format!("mcp__{SERVER_NAME}")]);
@@ -4632,6 +4636,7 @@ mod tests {
         let options = &params["_meta"]["claudeCode"]["options"];
         assert_eq!(options["tools"], json!([]));
         assert_eq!(options["settingSources"], json!([]));
+        assert_eq!(options["promptSuggestions"], false);
         assert_eq!(options["allowedTools"], json!(["mcp__termide"]));
         let server = &params["mcpServers"][0];
         assert_eq!(server["type"], "http");
