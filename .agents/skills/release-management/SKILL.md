@@ -169,6 +169,17 @@ is a single user-visible change, possibly spanning many commits.
 - Translation updates for the same change in multiple languages
   (mention once, list affected locales if useful).
 
+**Describe the release against the previous one, not the path to it.**
+The notes say what differs between the last release and this one, as the
+code stands at the tag. A key bound in one commit and rebound in the next
+appears once, as the final key; a design replaced inside the window (a
+panel that became a list, a command that became a dialog) appears only
+as what shipped; a fix to something this release introduced is no fix at
+all. This holds for an `[Unreleased]` section written commit by commit:
+re-read it against `git diff <last_tag>..HEAD` and the code, and rewrite
+every entry that keeps an intermediate state, a superseded alternative or
+a sentence whose reference was lost to later insertions.
+
 **Keep, with rewording:**
 - User-visible behavior change → describe the *effect on the user*, not
   the implementation. "Migrated to XDG Base Directory Specification" is
