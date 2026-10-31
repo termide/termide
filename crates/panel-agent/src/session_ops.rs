@@ -5,6 +5,7 @@ use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
 use crate::runtime::local_minute;
+use crate::spending::Cell;
 use termide_agent_core::{ContextLoad, EntryKind, PromptError, Session, SessionSummary};
 use termide_core::{ConfirmAction, InputAction, PanelEvent};
 use termide_ui::ChoiceForm;
@@ -798,8 +799,8 @@ impl AgentPanel {
             }
         }
         rows.push((t.agent_info_agent().into(), self.agent.clone()));
-        rows.push((t.agent_info_provider().into(), self.provider_kind.clone()));
-        rows.push((t.agent_info_model().into(), self.model.id.clone()));
+        rows.push((t.agent_info_provider().into(), self.connection_display()));
+        rows.push((t.agent_info_model().into(), self.model_name(&self.model.id)));
         rows.push((
             t.agent_info_mode().into(),
             self.mode.get().label().to_string(),
@@ -822,25 +823,28 @@ impl AgentPanel {
                 .filter(|e| matches!(e.kind, EntryKind::Compaction { .. }))
                 .count();
             rows.push((t.agent_info_compactions().into(), compactions.to_string()));
+            rows.extend(crate::spending::cleaning_row(session));
         }
         rows.push((t.agent_info_messages().into(), messages.to_string()));
         rows.push((t.agent_info_tokens().into(), self.token_totals()));
         // Who spent them and on which model, from the log, so a reopened
         // session shows it all, and from the subagents' logs: their models
-        // and their own reviewers.
+        // and their own reviewers. The breakdowns are rendered together so
+        // their bars line up.
+        let mut breakdown: Vec<(String, Cell)> = Vec::new();
         if let Some(session) = self.session.as_ref() {
             let spending = session.spending_with_subagents();
-            rows.extend(crate::spending::spending_rows(&spending, |id| {
+            breakdown.extend(crate::spending::spending_rows(&spending, |id| {
                 self.model_name(id)
             }));
         }
-        rows.push((
+        breakdown.push((
             t.agent_info_context().into(),
-            format!(
+            Cell::Text(format!(
                 "{} / {}",
                 format_tokens(self.context_tokens),
                 format_tokens(self.model.context_window)
-            ),
+            )),
         ));
         // What the context is made of, and what each tool's results cost
         // as later calls read them again. The system prompt and the tool
@@ -863,22 +867,9 @@ impl AgentPanel {
                 let system = self.effective_system_prompt().chars().count();
                 (Some((system / 4) as u64), Some((tools / 4) as u64))
             };
-            rows.extend(crate::spending::context_rows(&load, system, tools));
+            breakdown.extend(crate::spending::context_rows(&load, system, tools));
         }
-        // How much the clean mechanism has shrunk shell output this session,
-        // when any ran: raw → cleaned and the percentage saved.
-        if self.clean_raw_bytes > 0 {
-            let saved = self.clean_raw_bytes.saturating_sub(self.clean_out_bytes);
-            let percent = saved * 100 / self.clean_raw_bytes;
-            rows.push((
-                t.agent_info_output_cleaned().into(),
-                format!(
-                    "{} → {} (−{percent}%)",
-                    format_bytes(self.clean_raw_bytes),
-                    format_bytes(self.clean_out_bytes),
-                ),
-            ));
-        }
+        rows.extend(crate::spending::render(breakdown));
         vec![PanelEvent::ShowInfo {
             title: t.agent_session_info().to_string(),
             rows,
@@ -927,16 +918,5 @@ impl AgentPanel {
         );
         events.push(PanelEvent::NeedsRedraw);
         events
-    }
-}
-
-/// A byte count as `B`/`KB`/`MB`, for the output-cleaning diagnostic.
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1_000_000 {
-        format!("{:.1}MB", bytes as f64 / 1_000_000.0)
-    } else if bytes >= 1000 {
-        format!("{}KB", (bytes + 500) / 1000)
-    } else {
-        format!("{bytes}B")
     }
 }

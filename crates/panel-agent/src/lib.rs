@@ -1124,10 +1124,6 @@ pub struct AgentPanel {
     /// Prompt tokens the cache served this session.
     session_cached: u64,
     session_output: u64,
-    /// Bytes of shell output before and after cleaning, summed over the
-    /// session, for the "output cleaned" diagnostic in the summary.
-    clean_raw_bytes: u64,
-    clean_out_bytes: u64,
     /// When each running tool started, to report how long it took (`🕒`).
     tool_starts: HashMap<String, Instant>,
     /// Throttles the animation redraws requested while busy.
@@ -1461,8 +1457,6 @@ impl AgentPanel {
             session_input: 0,
             session_cached: 0,
             session_output: 0,
-            clean_raw_bytes: 0,
-            clean_out_bytes: 0,
             tool_starts: HashMap::new(),
             last_anim: Instant::now(),
             colors: ThemeColors::default(),

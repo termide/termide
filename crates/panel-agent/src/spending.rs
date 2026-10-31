@@ -36,9 +36,25 @@ fn spender_label(by: Spender) -> &'static str {
     }
 }
 
-/// Lines of `parts` weighed as they cost, heaviest first, each with its
-/// tokens as the totals show them.
-fn usage_lines(parts: Vec<(String, Usage)>, of: f64) -> String {
+/// One part of a breakdown: its name, its share of the whole (0 to 1) and
+/// its figures.
+#[derive(Debug, Clone)]
+pub(crate) struct Share {
+    name: String,
+    share: f64,
+    figures: String,
+}
+
+/// The value of a session-info row: text, or a breakdown drawn as bars.
+#[derive(Debug, Clone)]
+pub(crate) enum Cell {
+    Text(String),
+    Shares(Vec<Share>),
+}
+
+/// `parts` weighed as they cost, heaviest first, each with its tokens as
+/// the totals show them.
+fn usage_shares(parts: Vec<(String, Usage)>, of: f64) -> Cell {
     let mut parts: Vec<(String, f64, String)> = parts
         .into_iter()
         .map(|(name, usage)| {
@@ -47,39 +63,71 @@ fn usage_lines(parts: Vec<(String, Usage)>, of: f64) -> String {
         })
         .collect();
     parts.sort_by(|a, b| b.1.total_cmp(&a.1));
-    share_lines(parts, of)
+    shares(parts, of)
 }
 
-/// One line per part, in the order given: its name padded to the longest, a
-/// share bar, its share of `of` and its figures.
-fn share_lines(parts: Vec<(String, f64, String)>, of: f64) -> String {
-    let parts: Vec<(String, f64, String)> = parts
-        .into_iter()
-        .map(|(name, weight, figures)| {
-            let share = if of > 0.0 { weight / of } else { 0.0 };
-            (name, share, figures)
+/// `parts` in the order given, each weight a share of `of`.
+fn shares(parts: Vec<(String, f64, String)>, of: f64) -> Cell {
+    Cell::Shares(
+        parts
+            .into_iter()
+            .map(|(name, weight, figures)| Share {
+                name,
+                share: if of > 0.0 { weight / of } else { 0.0 },
+                figures,
+            })
+            .collect(),
+    )
+}
+
+/// A share as a percentage: a part too small to round to one still shows
+/// it is there.
+fn percent(share: f64) -> String {
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let percent = (share * 100.0).round() as u64;
+    if percent == 0 && share > 0.0 {
+        "<1%".to_string()
+    } else {
+        format!("{percent}%")
+    }
+}
+
+/// `rows` as text, every breakdown a line per part: its name, a share bar,
+/// its share and its figures, each in a column of its own across all the
+/// breakdowns, so the bars of one row stand under those of the others.
+pub(crate) fn render(rows: Vec<(String, Cell)>) -> Vec<(String, String)> {
+    let all = || {
+        rows.iter().flat_map(|(_, cell)| match cell {
+            Cell::Shares(parts) => parts.as_slice(),
+            Cell::Text(_) => &[],
         })
-        .collect();
-    let name_width = parts
-        .iter()
-        .map(|(name, ..)| name.chars().count())
-        .max()
-        .unwrap_or(0);
-    parts
-        .iter()
-        .map(|(name, share, figures)| {
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let filled = ((share * BAR as f64).round() as usize).min(BAR);
-            #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-            let percent = (share * 100.0).round() as u64;
-            format!(
-                "{name:<name_width$}  {}{}  {percent:>3}%  {figures}",
-                "█".repeat(filled),
-                "░".repeat(BAR - filled),
-            )
+    };
+    let name_width = all().map(|p| p.name.chars().count()).max().unwrap_or(0);
+    let percent_width = all().map(|p| percent(p.share).len()).max().unwrap_or(0);
+    rows.into_iter()
+        .map(|(label, cell)| {
+            let text = match cell {
+                Cell::Text(text) => text,
+                Cell::Shares(parts) => parts
+                    .iter()
+                    .map(|part| {
+                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                        let filled = ((part.share * BAR as f64).round() as usize).min(BAR);
+                        format!(
+                            "{:<name_width$}  {}{}  {:>percent_width$}  {}",
+                            part.name,
+                            "█".repeat(filled),
+                            "░".repeat(BAR - filled),
+                            percent(part.share),
+                            part.figures,
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n"),
+            };
+            (label, text)
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+        .collect()
 }
 
 /// The breakdown rows for `spending`, none when nothing was spent. A
@@ -87,7 +135,7 @@ fn share_lines(parts: Vec<(String, f64, String)>, of: f64) -> String {
 pub(crate) fn spending_rows(
     spending: &Spending,
     model_name: impl Fn(&str) -> String,
-) -> Vec<(String, String)> {
+) -> Vec<(String, Cell)> {
     let t = termide_i18n::t();
     let total = spending.total();
     if total.total() == 0 {
@@ -100,7 +148,7 @@ pub(crate) fn spending_rows(
         .iter()
         .map(|(by, usage)| (spender_label(*by).to_string(), *usage))
         .collect();
-    rows.push((t.agent_info_spent_by().into(), usage_lines(by, of)));
+    rows.push((t.agent_info_spent_by().into(), usage_shares(by, of)));
     let models: Vec<(String, Usage)> = spending
         .models
         .iter()
@@ -113,21 +161,68 @@ pub(crate) fn spending_rows(
             (name, *usage)
         })
         .collect();
-    rows.push((t.agent_info_by_model().into(), usage_lines(models, of)));
+    rows.push((t.agent_info_by_model().into(), usage_shares(models, of)));
     // What the cache served of all the prompt tokens.
     let prompt = total.uncached().saturating_add(total.cache_read);
     if prompt > 0 {
         let percent = total.cache_read.saturating_mul(100) / prompt;
-        rows.push((t.agent_info_cache_hits().into(), format!("{percent}%")));
+        rows.push((
+            t.agent_info_cache_hits().into(),
+            Cell::Text(format!("{percent}%")),
+        ));
     }
     if total.thinking > 0 && total.output > 0 {
         let percent = total.thinking.saturating_mul(100) / total.output;
         rows.push((
             t.agent_info_thinking().into(),
-            format!("↓{} ({percent}%)", format_tokens(total.thinking)),
+            Cell::Text(format!("↓{} ({percent}%)", format_tokens(total.thinking))),
         ));
     }
     rows
+}
+
+/// The row of what cleaning took out of `bash` output over the session —
+/// its share of the raw output and its estimated tokens — read from the
+/// results in the log, a fork's from its own start; none when no `bash`
+/// ran.
+pub(crate) fn cleaning_row(session: &termide_agent_core::Session) -> Option<(String, String)> {
+    use termide_agent_core::{EntryKind, Message};
+    let since = session.header().created;
+    let (mut raw, mut cleaned) = (0_u64, 0_u64);
+    for entry in session.entries() {
+        if entry.timestamp < since {
+            continue;
+        }
+        let EntryKind::Message {
+            message: Message::ToolResult(result),
+            ..
+        } = &entry.kind
+        else {
+            continue;
+        };
+        let Some(details) = result.details.as_ref() else {
+            continue;
+        };
+        if let (Some(r), Some(c)) = (
+            details.get("raw_bytes").and_then(serde_json::Value::as_u64),
+            details
+                .get("cleaned_bytes")
+                .and_then(serde_json::Value::as_u64),
+        ) {
+            raw += r;
+            cleaned += c;
+        }
+    }
+    if raw == 0 {
+        return None;
+    }
+    let saved = raw.saturating_sub(cleaned);
+    #[allow(clippy::cast_precision_loss)]
+    let share = saved as f64 / raw as f64;
+    Some((
+        termide_i18n::t().agent_info_output_cleaned().into(),
+        format!("{}  ≈{}", percent(share), format_tokens(saved / 4)),
+    ))
 }
 
 /// The tools shown by name in the tool output row; the rest are summed.
@@ -148,7 +243,7 @@ pub(crate) fn context_rows(
     load: &ContextLoad,
     system: Option<u64>,
     tools: Option<u64>,
-) -> Vec<(String, String)> {
+) -> Vec<(String, Cell)> {
     let t = termide_i18n::t();
     let mut rows = Vec::new();
     let now = &load.now;
@@ -168,7 +263,7 @@ pub(crate) fn context_rows(
     let sum: u64 = parts.iter().map(|(_, tokens)| tokens).sum();
     if sum > 0 {
         #[allow(clippy::cast_precision_loss)]
-        let lines = share_lines(
+        let lines = shares(
             parts
                 .into_iter()
                 .map(|(name, tokens)| (name, tokens as f64, format!("≈{}", format_tokens(tokens))))
@@ -198,7 +293,7 @@ pub(crate) fn context_rows(
             }
             shown.push((t.agent_tools_others().to_string(), rest));
         }
-        let lines = share_lines(
+        let lines = shares(
             shown
                 .into_iter()
                 .map(|(name, load)| {
@@ -245,11 +340,11 @@ mod tests {
         // 5 × 400 = 2000 units: as much, for far fewer tokens.
         spending.add(Spender::Reviewer, "small", &usage(0, 0, 400));
         spending.add(Spender::Subagent, "", &usage(0, 0, 0));
-        let rows = spending_rows(&spending, |id| format!("M-{id}"));
+        let rows = render(spending_rows(&spending, |id| format!("M-{id}")));
         let by = &rows[0].1;
         let lines: Vec<&str> = by.lines().collect();
         assert_eq!(lines.len(), 2, "{by}");
-        assert!(lines.iter().all(|l| l.contains("█████░░░░░   50%")), "{by}");
+        assert!(lines.iter().all(|l| l.contains("█████░░░░░  50%")), "{by}");
         assert!(by.contains("↑1k ↻10k ↓0"), "{by}");
         let models = &rows[1].1;
         assert!(
@@ -280,7 +375,7 @@ mod tests {
         for n in 0..TOOLS_SHOWN {
             tool(&format!("t{n}"), 1, 0);
         }
-        let rows = context_rows(&load, Some(600), None);
+        let rows = render(context_rows(&load, Some(600), None));
         let parts = &rows[0].1;
         let lines: Vec<&str> = parts.lines().collect();
         assert_eq!(lines.len(), 3, "{parts}");
@@ -293,13 +388,21 @@ mod tests {
         assert!(tools[TOOLS_SHOWN].starts_with("others"), "{tools:?}");
     }
 
+    /// A part too small to round to a percent still shows it is there.
+    #[test]
+    fn a_tiny_share_is_not_shown_as_none() {
+        assert_eq!(percent(0.004), "<1%");
+        assert_eq!(percent(0.0), "0%");
+        assert_eq!(percent(0.996), "100%");
+    }
+
     #[test]
     fn reasoning_shows_as_a_part_of_the_output() {
         let mut spending = Spending::default();
         let mut spent = usage(10, 0, 200);
         spent.thinking = 50;
         spending.add(Spender::Main, "m", &spent);
-        let rows = spending_rows(&spending, str::to_string);
+        let rows = render(spending_rows(&spending, str::to_string));
         assert_eq!(rows.last().map(|r| r.1.as_str()), Some("↓50 (25%)"));
     }
 }

@@ -3807,6 +3807,13 @@ fn spending_outlives_a_reopen_and_shows_by_whom() {
     // What the context holds now: the request and the answer.
     let parts = row("Context holds");
     assert!(parts.starts_with("Conversation"), "{parts}");
+    // The bars of every breakdown stand in one column.
+    let columns: Vec<usize> = [by, row("By model"), parts]
+        .iter()
+        .flat_map(|cell| cell.lines().map(str::to_string).collect::<Vec<_>>())
+        .map(|line| line.chars().position(|c| c == '█' || c == '░').unwrap())
+        .collect();
+    assert!(columns.windows(2).all(|w| w[0] == w[1]), "{rows:?}");
 }
 
 /// A subagent's tokens join the session's totals when its `task` ends; its
@@ -3843,31 +3850,44 @@ fn a_subagents_tokens_join_the_session_totals() {
     assert_eq!(panel.context_tokens, 500);
 }
 
+/// What cleaning took out of `bash` output is read from the results in the
+/// log, so a reopened session shows it, right after the compactions.
 #[test]
 fn the_summary_reports_output_cleaning_savings() {
-    use termide_agent_core::ToolCall;
-    let mut panel = panel(vec![]);
+    use termide_agent_core::{Message, ToolCall};
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
     let call = ToolCall {
         id: "b1".into(),
         name: "bash".into(),
         arguments: serde_json::json!({ "command": "ls" }),
         extra_content: None,
     };
-    panel.apply(AgentEvent::ToolExecutionStart { call: call.clone() });
-    panel.apply(AgentEvent::ToolExecutionEnd {
-        result: ToolResultMessage::text(&call, "out")
-            .with_details(serde_json::json!({ "raw_bytes": 1000_u64, "cleaned_bytes": 250_u64 })),
+    session
+        .append_message(&Message::ToolResult(
+            ToolResultMessage::text(&call, "out").with_details(
+                serde_json::json!({ "raw_bytes": 100_000_u64, "cleaned_bytes": 25_000_u64 }),
+            ),
+        ))
+        .unwrap();
+    let path = session.path().to_path_buf();
+    drop(session);
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![])
     });
+    assert!(panel.switch_session(Some(Session::open(&path).unwrap())));
     let events = panel.session_summary();
     let Some(PanelEvent::ShowInfo { rows, .. }) = events.first() else {
         panic!("expected a summary modal, got {events:?}");
     };
-    let cleaned = rows
+    let at = rows
         .iter()
-        .find(|(key, _)| key == "Output cleaned")
-        .map(|(_, value)| value.as_str())
+        .position(|(key, _)| key == "Cleaned bash")
         .unwrap_or_else(|| panic!("no cleaning row: {rows:?}"));
-    assert!(cleaned.contains("−75%"), "{cleaned}");
+    assert_eq!(rows[at - 1].0, "Compactions");
+    // 75 000 of 100 000 bytes taken out, about 19k tokens.
+    assert_eq!(rows[at].1, "75%  ≈19k");
 }
 
 #[test]

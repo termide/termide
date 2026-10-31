@@ -453,17 +453,6 @@ impl AgentPanel {
                     self.pending_events
                         .push(PanelEvent::FileChangedOnDisk(path));
                 }
-                // Tally how much the output cleaning saved (bash reports the
-                // raw and cleaned byte counts in its details).
-                if let Some(details) = result.details.as_ref() {
-                    if let (Some(raw), Some(clean)) = (
-                        details.get("raw_bytes").and_then(|v| v.as_u64()),
-                        details.get("cleaned_bytes").and_then(|v| v.as_u64()),
-                    ) {
-                        self.clean_raw_bytes += raw;
-                        self.clean_out_bytes += clean;
-                    }
-                }
                 let id = result.tool_call_id.clone();
                 let finished = now_hms();
                 // A wait on a permission answer is the call's pause, not its
