@@ -45,16 +45,12 @@ pub(crate) struct Share {
     figures: String,
 }
 
-/// The value of a session-info row: text, or a breakdown drawn as bars.
-#[derive(Debug, Clone)]
-pub(crate) enum Cell {
-    Text(String),
-    Shares(Vec<Share>),
-}
+/// A breakdown: its parts, in the order shown.
+pub(crate) type Shares = Vec<Share>;
 
 /// `parts` weighed as they cost, heaviest first, each with its tokens as
 /// the totals show them.
-fn usage_shares(parts: Vec<(String, Usage)>, of: f64) -> Cell {
+fn usage_shares(parts: Vec<(String, Usage)>, of: f64) -> Shares {
     let mut parts: Vec<(String, f64, String)> = parts
         .into_iter()
         .map(|(name, usage)| {
@@ -67,17 +63,15 @@ fn usage_shares(parts: Vec<(String, Usage)>, of: f64) -> Cell {
 }
 
 /// `parts` in the order given, each weight a share of `of`.
-fn shares(parts: Vec<(String, f64, String)>, of: f64) -> Cell {
-    Cell::Shares(
-        parts
-            .into_iter()
-            .map(|(name, weight, figures)| Share {
-                name,
-                share: if of > 0.0 { weight / of } else { 0.0 },
-                figures,
-            })
-            .collect(),
-    )
+fn shares(parts: Vec<(String, f64, String)>, of: f64) -> Shares {
+    parts
+        .into_iter()
+        .map(|(name, weight, figures)| Share {
+            name,
+            share: if of > 0.0 { weight / of } else { 0.0 },
+            figures,
+        })
+        .collect()
 }
 
 /// A share as a percentage: a part too small to round to one still shows
@@ -92,39 +86,31 @@ fn percent(share: f64) -> String {
     }
 }
 
-/// `rows` as text, every breakdown a line per part: its name, a share bar,
-/// its share and its figures, each in a column of its own across all the
-/// breakdowns, so the bars of one row stand under those of the others.
-pub(crate) fn render(rows: Vec<(String, Cell)>) -> Vec<(String, String)> {
-    let all = || {
-        rows.iter().flat_map(|(_, cell)| match cell {
-            Cell::Shares(parts) => parts.as_slice(),
-            Cell::Text(_) => &[],
-        })
-    };
+/// `rows` as text, a line per part: its name, a share bar, its share and
+/// its figures, each in a column of its own across all the breakdowns, so
+/// the bars of one row stand under those of the others.
+pub(crate) fn render(rows: Vec<(String, Shares)>) -> Vec<(String, String)> {
+    let all = || rows.iter().flat_map(|(_, parts)| parts);
     let name_width = all().map(|p| p.name.chars().count()).max().unwrap_or(0);
     let percent_width = all().map(|p| percent(p.share).len()).max().unwrap_or(0);
     rows.into_iter()
-        .map(|(label, cell)| {
-            let text = match cell {
-                Cell::Text(text) => text,
-                Cell::Shares(parts) => parts
-                    .iter()
-                    .map(|part| {
-                        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                        let filled = ((part.share * BAR as f64).round() as usize).min(BAR);
-                        format!(
-                            "{:<name_width$}  {}{}  {:>percent_width$}  {}",
-                            part.name,
-                            "█".repeat(filled),
-                            "░".repeat(BAR - filled),
-                            percent(part.share),
-                            part.figures,
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n"),
-            };
+        .map(|(label, parts)| {
+            let text = parts
+                .iter()
+                .map(|part| {
+                    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+                    let filled = ((part.share * BAR as f64).round() as usize).min(BAR);
+                    format!(
+                        "{:<name_width$}  {}{}  {:>percent_width$}  {}",
+                        part.name,
+                        "█".repeat(filled),
+                        "░".repeat(BAR - filled),
+                        percent(part.share),
+                        part.figures,
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
             (label, text)
         })
         .collect()
@@ -135,7 +121,7 @@ pub(crate) fn render(rows: Vec<(String, Cell)>) -> Vec<(String, String)> {
 pub(crate) fn spending_rows(
     spending: &Spending,
     model_name: impl Fn(&str) -> String,
-) -> Vec<(String, Cell)> {
+) -> Vec<(String, Shares)> {
     let t = termide_i18n::t();
     let total = spending.total();
     if total.total() == 0 {
@@ -162,20 +148,26 @@ pub(crate) fn spending_rows(
         })
         .collect();
     rows.push((t.agent_info_by_model().into(), usage_shares(models, of)));
+    rows
+}
+
+/// The rows that sum `spending` up: what the cache served of all the
+/// prompt tokens, and what went on reasoning when the provider counts it.
+pub(crate) fn spending_figures(spending: &Spending) -> Vec<(String, String)> {
+    let t = termide_i18n::t();
+    let total = spending.total();
+    let mut rows = Vec::new();
     // What the cache served of all the prompt tokens.
     let prompt = total.uncached().saturating_add(total.cache_read);
     if prompt > 0 {
         let percent = total.cache_read.saturating_mul(100) / prompt;
-        rows.push((
-            t.agent_info_cache_hits().into(),
-            Cell::Text(format!("{percent}%")),
-        ));
+        rows.push((t.agent_info_cache_hits().into(), format!("{percent}%")));
     }
     if total.thinking > 0 && total.output > 0 {
         let percent = total.thinking.saturating_mul(100) / total.output;
         rows.push((
             t.agent_info_thinking().into(),
-            Cell::Text(format!("↓{} ({percent}%)", format_tokens(total.thinking))),
+            format!("↓{} ({percent}%)", format_tokens(total.thinking)),
         ));
     }
     rows
@@ -243,7 +235,7 @@ pub(crate) fn context_rows(
     load: &ContextLoad,
     system: Option<u64>,
     tools: Option<u64>,
-) -> Vec<(String, Cell)> {
+) -> Vec<(String, Shares)> {
     let t = termide_i18n::t();
     let mut rows = Vec::new();
     let now = &load.now;
@@ -328,6 +320,7 @@ mod tests {
     #[test]
     fn nothing_spent_shows_no_breakdown() {
         assert!(spending_rows(&Spending::default(), str::to_string).is_empty());
+        assert!(spending_figures(&Spending::default()).is_empty());
     }
 
     /// Shares weigh output and cache reads as they cost, heaviest first,
@@ -352,8 +345,10 @@ mod tests {
             "{models}"
         );
         // 10 000 of 11 000 prompt tokens came from the cache.
-        assert_eq!(rows[2].1, "90%");
-        assert_eq!(rows.len(), 3, "no reasoning counted, no row for it");
+        assert_eq!(rows.len(), 2);
+        let figures = spending_figures(&spending);
+        assert_eq!(figures[0].1, "90%");
+        assert_eq!(figures.len(), 1, "no reasoning counted, no row for it");
     }
 
     /// The context's parts share what it holds; a tool's results weigh what
@@ -402,7 +397,7 @@ mod tests {
         let mut spent = usage(10, 0, 200);
         spent.thinking = 50;
         spending.add(Spender::Main, "m", &spent);
-        let rows = render(spending_rows(&spending, str::to_string));
+        let rows = spending_figures(&spending);
         assert_eq!(rows.last().map(|r| r.1.as_str()), Some("↓50 (25%)"));
     }
 }

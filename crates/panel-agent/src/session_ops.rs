@@ -5,7 +5,6 @@ use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
 use crate::runtime::local_minute;
-use crate::spending::Cell;
 use termide_agent_core::{ContextLoad, EntryKind, PromptError, Session, SessionSummary};
 use termide_core::{ConfirmAction, InputAction, PanelEvent};
 use termide_ui::ChoiceForm;
@@ -822,30 +821,33 @@ impl AgentPanel {
                 .iter()
                 .filter(|e| matches!(e.kind, EntryKind::Compaction { .. }))
                 .count();
+            rows.push((t.agent_info_messages().into(), messages.to_string()));
             rows.push((t.agent_info_compactions().into(), compactions.to_string()));
-            rows.extend(crate::spending::cleaning_row(session));
+        } else {
+            rows.push((t.agent_info_messages().into(), messages.to_string()));
         }
-        rows.push((t.agent_info_messages().into(), messages.to_string()));
+        rows.push((
+            t.agent_info_context().into(),
+            format!(
+                "{} / {}",
+                format_tokens(self.context_tokens),
+                format_tokens(self.model.context_window)
+            ),
+        ));
         rows.push((t.agent_info_tokens().into(), self.token_totals()));
         // Who spent them and on which model, from the log, so a reopened
         // session shows it all, and from the subagents' logs: their models
         // and their own reviewers. The breakdowns are rendered together so
         // their bars line up.
-        let mut breakdown: Vec<(String, Cell)> = Vec::new();
+        let mut breakdown = Vec::new();
         if let Some(session) = self.session.as_ref() {
             let spending = session.spending_with_subagents();
+            rows.extend(crate::spending::spending_figures(&spending));
+            rows.extend(crate::spending::cleaning_row(session));
             breakdown.extend(crate::spending::spending_rows(&spending, |id| {
                 self.model_name(id)
             }));
         }
-        breakdown.push((
-            t.agent_info_context().into(),
-            Cell::Text(format!(
-                "{} / {}",
-                format_tokens(self.context_tokens),
-                format_tokens(self.model.context_window)
-            )),
-        ));
         // What the context is made of, and what each tool's results cost
         // as later calls read them again. The system prompt and the tool
         // definitions are known only for the built-in agent's own.

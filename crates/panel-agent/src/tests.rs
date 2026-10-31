@@ -3796,6 +3796,25 @@ fn spending_outlives_a_reopen_and_shows_by_whom() {
             .map(|(_, v)| v.clone())
             .unwrap_or_default()
     };
+    // The counts first, the figures next, the breakdowns last.
+    let order = [
+        "Messages",
+        "Compactions",
+        "Context",
+        "Tokens",
+        "Cache hits",
+        "Spent by",
+        "By model",
+        "Context holds",
+    ];
+    let at: Vec<Option<usize>> = order
+        .iter()
+        .map(|key| rows.iter().position(|(k, _)| k == key))
+        .collect();
+    assert!(
+        at.iter().all(Option::is_some) && at.windows(2).all(|w| w[0] < w[1]),
+        "{rows:?}"
+    );
     let by = row("Spent by");
     assert!(
         by.contains("Conversation") && by.contains("Reviewer"),
@@ -3885,7 +3904,7 @@ fn the_summary_reports_output_cleaning_savings() {
         .iter()
         .position(|(key, _)| key == "Cleaned bash")
         .unwrap_or_else(|| panic!("no cleaning row: {rows:?}"));
-    assert_eq!(rows[at - 1].0, "Compactions");
+    assert_eq!(rows[at - 1].0, "Tokens", "nothing spent, no cache hits");
     // 75 000 of 100 000 bytes taken out, about 19k tokens.
     assert_eq!(rows[at].1, "75%  ≈19k");
 }
