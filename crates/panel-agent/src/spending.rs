@@ -228,17 +228,28 @@ fn tool_weight(load: &ToolLoad) -> f64 {
 }
 
 /// The rows of what the context is made of: its parts now, `system` and
-/// `tools` the system prompt's and the tool definitions' estimated tokens
-/// when known; and each tool's results, a skill's as `skill:<name>`, by what
-/// they brought in and what later calls read again.
+/// `tools` the estimated tokens of termide's system prompt and of the tool
+/// definitions it served, when the model has them; with `fill`, how full an
+/// external agent reports its context, what it holds beyond those parts as
+/// the agent's own — its prompt, its tools, what it adds. And each tool's
+/// results, a skill's as `skill:<name>`, by what they brought in and what
+/// later calls read again.
 pub(crate) fn context_rows(
     load: &ContextLoad,
     system: Option<u64>,
     tools: Option<u64>,
+    fill: Option<u64>,
 ) -> Vec<(String, Shares)> {
     let t = termide_i18n::t();
     let mut rows = Vec::new();
     let now = &load.now;
+    let known = system.unwrap_or(0)
+        + tools.unwrap_or(0)
+        + now.skills
+        + now.tool_output
+        + now.conversation
+        + now.summary;
+    let own = fill.map_or(0, |fill| fill.saturating_sub(known));
     let mut parts: Vec<(String, u64)> = [
         (t.agent_context_system(), system.unwrap_or(0)),
         (t.agent_context_tools(), tools.unwrap_or(0)),
@@ -246,6 +257,7 @@ pub(crate) fn context_rows(
         (t.agent_context_tool_output(), now.tool_output),
         (t.agent_context_conversation(), now.conversation),
         (t.agent_context_summary(), now.summary),
+        (t.agent_context_agent(), own),
     ]
     .into_iter()
     .filter(|(_, tokens)| *tokens > 0)
@@ -370,7 +382,7 @@ mod tests {
         for n in 0..TOOLS_SHOWN {
             tool(&format!("t{n}"), 1, 0);
         }
-        let rows = render(context_rows(&load, Some(600), None));
+        let rows = render(context_rows(&load, Some(600), None, None));
         let parts = &rows[0].1;
         let lines: Vec<&str> = parts.lines().collect();
         assert_eq!(lines.len(), 3, "{parts}");
@@ -381,6 +393,20 @@ mod tests {
         assert!(tools[1].starts_with("bash"), "{tools:?}");
         assert_eq!(tools.len(), TOOLS_SHOWN + 1);
         assert!(tools[TOOLS_SHOWN].starts_with("others"), "{tools:?}");
+    }
+
+    /// An external agent's reported fill beyond the parts termide knows is
+    /// the agent's own; with none reported, there is no such part.
+    #[test]
+    fn what_an_agent_adds_to_its_context_is_its_own() {
+        let mut load = ContextLoad::default();
+        load.now.conversation = 3_000;
+        let rows = render(context_rows(&load, Some(1_000), None, Some(10_000)));
+        let lines: Vec<&str> = rows[0].1.lines().collect();
+        assert!(lines[0].starts_with("Agent's own"), "{lines:?}");
+        assert!(lines[0].ends_with(" 60%  ≈6k"), "{lines:?}");
+        let rows = render(context_rows(&load, Some(1_000), None, None));
+        assert_eq!(rows[0].1.lines().count(), 2);
     }
 
     /// A part too small to round to a percent still shows it is there.

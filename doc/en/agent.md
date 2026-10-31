@@ -449,7 +449,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `Ctrl+T` | In a view of another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
 | `F9` | In a view of another agent's task shown over the layout, move it into a panel of its own (see [Subagents](#subagents)) |
-| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, context, tokens, cache hits, how much `bash` output was cleaned, who spent the tokens on which model, what fills the context); also `/usage` and the `[≡]` menu |
+| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, tokens, cache hits, how much `bash` output was cleaned, context and what fills it, who spent the tokens on which model); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
@@ -865,8 +865,8 @@ so a noisy command costs far fewer tokens. A test run — Rust (`cargo test`,
 `vitest`) — drops the passing and skipped test lines and keeps the failures and
 the result summary. The full, untouched log is still
 written to a file whose path the tool reports, and you still see the raw
-stream live in the panel. The session info (`F3`) shows, after the
-compactions, **Cleaned bash**: the share of the session's raw `bash` output
+stream live in the panel. The session info (`F3`) shows, after the cache
+hits, **Cleaned bash**: the share of the session's raw `bash` output
 the cleaning took out and about how many tokens that was, read from the log.
 
 The status chips run, left to right: the agent, the permission mode, the
@@ -905,11 +905,15 @@ reports beyond its log — a log from before this was recorded, one deleted —
 counts as the subagent's on an `unknown` model. A fork counts from its own
 start: what was spent on the conversation it carries is its source's.
 
-Below the context window the session info shows what the context is made of,
-estimated at four characters a token. **Context holds** splits what it holds
-now: the system prompt and the tool definitions (the built-in agent's own; a
-CLI agent's are its own and not known), skills the `skill` tool loaded, the
-other tools' output, the conversation and a compaction's summary. **Tool
+Right below the context window the session info shows what the context is
+made of, estimated at four characters a token. **Context holds** splits what it
+holds now: termide's system prompt, where the model works under it (the
+built-in agent and Claude Code, which takes termide's for its own), the
+definitions of the tools termide serves it (all of them, or for Codex and
+Gemini CLI the few beside their own), skills the `skill` tool loaded, the other
+tools' output, the conversation and a compaction's summary; and, for a CLI
+agent that reported its fill, **Agent's own**: what the fill holds beyond those
+parts — its own prompt and tools, and what it adds. **Tool
 output** shows each tool's results across the session, a skill's as
 `skill:<name>`: `≈` what they brought into the context and `↻` how much the
 model calls after them read again while they stayed, until a summary,

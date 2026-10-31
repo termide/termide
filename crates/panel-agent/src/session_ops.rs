@@ -826,6 +826,38 @@ impl AgentPanel {
         } else {
             rows.push((t.agent_info_messages().into(), messages.to_string()));
         }
+        rows.push((t.agent_info_tokens().into(), self.token_totals()));
+        // Who spent them and on which model, from the log, so a reopened
+        // session shows it all, and from the subagents' logs: their models
+        // and their own reviewers; what the context is made of, and what
+        // each tool's results cost as later calls read them again. The
+        // breakdowns are rendered together so their bars line up.
+        let mut breakdown = Vec::new();
+        let mut cleaning = None;
+        if let Some(session) = self.session.as_ref() {
+            let spending = session.spending_with_subagents();
+            rows.extend(crate::spending::spending_figures(&spending));
+            cleaning = crate::spending::cleaning_row(session);
+            breakdown.extend(crate::spending::spending_rows(&spending, |id| {
+                self.model_name(id)
+            }));
+            let load = ContextLoad::of(session, &self.compaction_prompts);
+            let (system, tools) = self.context_head();
+            // An external agent's fill, when it told it, holds its own part
+            // too; the built-in loop's is all the parts above.
+            let fill = (self.external
+                && (self.runtime.context_usage().is_some() || self.context_logged.is_some()))
+            .then_some(self.context_tokens);
+            breakdown.extend(crate::spending::context_rows(&load, system, tools, fill));
+        }
+        let mut rendered = crate::spending::render(breakdown);
+        let mut take = |label: &str| {
+            rendered
+                .iter()
+                .position(|(key, _)| key == label)
+                .map(|at| rendered.remove(at))
+        };
+        rows.extend(cleaning);
         rows.push((
             t.agent_info_context().into(),
             format!(
@@ -834,48 +866,47 @@ impl AgentPanel {
                 format_tokens(self.model.context_window)
             ),
         ));
-        rows.push((t.agent_info_tokens().into(), self.token_totals()));
-        // Who spent them and on which model, from the log, so a reopened
-        // session shows it all, and from the subagents' logs: their models
-        // and their own reviewers. The breakdowns are rendered together so
-        // their bars line up.
-        let mut breakdown = Vec::new();
-        if let Some(session) = self.session.as_ref() {
-            let spending = session.spending_with_subagents();
-            rows.extend(crate::spending::spending_figures(&spending));
-            rows.extend(crate::spending::cleaning_row(session));
-            breakdown.extend(crate::spending::spending_rows(&spending, |id| {
-                self.model_name(id)
-            }));
-        }
-        // What the context is made of, and what each tool's results cost
-        // as later calls read them again. The system prompt and the tool
-        // definitions are known only for the built-in agent's own.
-        if let Some(session) = self.session.as_ref() {
-            let load = ContextLoad::of(session, &self.compaction_prompts);
-            let (system, tools) = if self.external {
-                (None, None)
-            } else {
-                let tools: usize = self
-                    .tools
-                    .specs()
+        rows.extend(take(t.agent_info_context_parts()));
+        rows.extend(take(t.agent_info_spent_by()));
+        rows.extend(take(t.agent_info_by_model()));
+        rows.extend(take(t.agent_info_tool_output()));
+        vec![PanelEvent::ShowInfo {
+            title: t.agent_session_info().to_string(),
+            rows,
+        }]
+    }
+
+    /// What termide put at the head of the model's context, in estimated
+    /// tokens: its system prompt, when the model works under it, and the
+    /// definitions of the tools it serves the model. `None` for what the
+    /// model does not have from termide: an external agent's own prompt.
+    fn context_head(&self) -> (Option<u64>, Option<u64>) {
+        let estimate = |chars: usize| Some((chars / 4) as u64);
+        let system = if self.runtime.takes_system_prompt() {
+            estimate(self.effective_system_prompt().chars().count())
+        } else {
+            None
+        };
+        let served = if !self.external || self.runtime.runs_host_tools() {
+            Some(self.tools.specs())
+        } else if self.runtime.takes_mcp_tools() {
+            Some(self.companions_served().specs())
+        } else {
+            None
+        };
+        let tools = served.and_then(|specs| {
+            estimate(
+                specs
                     .iter()
                     .map(|spec| {
                         spec.name.len()
                             + spec.description.chars().count()
                             + spec.parameters.to_string().chars().count()
                     })
-                    .sum();
-                let system = self.effective_system_prompt().chars().count();
-                (Some((system / 4) as u64), Some((tools / 4) as u64))
-            };
-            breakdown.extend(crate::spending::context_rows(&load, system, tools));
-        }
-        rows.extend(crate::spending::render(breakdown));
-        vec![PanelEvent::ShowInfo {
-            title: t.agent_session_info().to_string(),
-            rows,
-        }]
+                    .sum(),
+            )
+        });
+        (system, tools)
     }
 
     /// Put the last request's files back, rewind the session to before it

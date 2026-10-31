@@ -96,6 +96,27 @@ impl AgentPanel {
 
     /// The prompt the worker runs on: the agent's, plus the plan-mode
     /// instructions while that mode is on.
+    /// The tools an external agent on its own tools is served: termide's it
+    /// has no counterpart of and the MCP servers' beside them, save those
+    /// its context was built without.
+    pub(crate) fn companions_served(&self) -> crate::ToolRegistry {
+        let skills = served_skills(
+            self.catalog.as_ref(),
+            &self.offered_skills,
+            &self.context_off,
+        );
+        let mut served = companion_tools(&self.tools, &skills);
+        for name in &self.context_off {
+            served.remove(name);
+        }
+        for (_, tool) in &self.mcp_arrived {
+            if !self.context_off.contains(tool.name()) {
+                served.insert(Arc::clone(tool));
+            }
+        }
+        served
+    }
+
     pub(crate) fn effective_system_prompt(&self) -> String {
         if self.mode.get() == Mode::Plan {
             self.plan_prompt.apply(&self.system_prompt)
@@ -528,24 +549,7 @@ impl AgentPanel {
                 }
                 self.runtime.update_host_tools(served)
             } else if self.external && self.runtime.takes_mcp_tools() {
-                // One on its own tools is served termide's it has no
-                // counterpart of and the MCP servers' beside them, save those
-                // its context was built without.
-                let skills = served_skills(
-                    self.catalog.as_ref(),
-                    &self.offered_skills,
-                    &self.context_off,
-                );
-                let mut served = companion_tools(&self.tools, &skills);
-                for name in &self.context_off {
-                    served.remove(name);
-                }
-                for (_, tool) in &self.mcp_arrived {
-                    if !self.context_off.contains(tool.name()) {
-                        served.insert(Arc::clone(tool));
-                    }
-                }
-                self.runtime.update_host_tools(served)
+                self.runtime.update_host_tools(self.companions_served())
             } else if self.external {
                 // One on its own tools alone takes none of ours.
                 Err(PromptError::Unsupported)

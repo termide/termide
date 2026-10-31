@@ -188,6 +188,7 @@ impl Translation for RuntimeTranslation {
         agent_context_tool_output,
         agent_context_conversation,
         agent_context_summary,
+        agent_context_agent,
         agent_tools_others,
         agent_chip_agent,
         agent_chip_mode,

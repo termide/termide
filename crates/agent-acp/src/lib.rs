@@ -908,6 +908,12 @@ impl Backend for AcpRuntime {
         self.shared.flavor == AcpFlavor::ClaudeCode && self.shared.serving()
     }
 
+    /// Claude Code, which is handed termide's prompt for its own when its
+    /// session starts.
+    fn takes_system_prompt(&self) -> bool {
+        self.shared.flavor == AcpFlavor::ClaudeCode && !self.shared.system_prompt.is_empty()
+    }
+
     /// Codex and Gemini CLI, on the same terms as [`Self::runs_host_tools`],
     /// and only when they take an MCP server over HTTP.
     fn takes_mcp_tools(&self) -> bool {

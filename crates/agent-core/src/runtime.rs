@@ -295,6 +295,12 @@ pub trait Backend: Send {
     fn runs_host_tools(&self) -> bool {
         false
     }
+    /// Whether the model works under termide's system prompt: the built-in
+    /// loop's, or an external agent's that takes it in place of its own. The
+    /// default — an external agent on its own prompt — does not.
+    fn takes_system_prompt(&self) -> bool {
+        false
+    }
     /// Whether an external agent on its own tools is served the tools of
     /// termide's MCP servers beside them, through termide's checks. The
     /// default takes none.
@@ -362,6 +368,10 @@ impl Backend for AgentRuntime {
     }
 
     fn runs_host_tools(&self) -> bool {
+        true
+    }
+
+    fn takes_system_prompt(&self) -> bool {
         true
     }
 

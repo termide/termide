@@ -851,6 +851,7 @@ pub trait Translation: Send + Sync {
     fn agent_context_tool_output(&self) -> &str;
     fn agent_context_conversation(&self) -> &str;
     fn agent_context_summary(&self) -> &str;
+    fn agent_context_agent(&self) -> &str;
     fn agent_tools_others(&self) -> &str;
     fn agent_chip_agent(&self) -> &str;
     fn agent_chip_mode(&self) -> &str;
