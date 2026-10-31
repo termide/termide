@@ -826,8 +826,7 @@ impl AgentPanel {
         } else {
             rows.push((t.agent_info_messages().into(), messages.to_string()));
         }
-        rows.push((t.agent_info_tokens().into(), self.token_totals()));
-        // Who spent them and on which model, from the log, so a reopened
+        // Who spent the tokens and on which model, from the log, so a reopened
         // session shows it all, and from the subagents' logs: their models
         // and their own reviewers; what the context is made of, and what
         // each tool's results cost as later calls read them again. The
@@ -858,6 +857,7 @@ impl AgentPanel {
                 .map(|at| rendered.remove(at))
         };
         rows.extend(cleaning);
+        rows.push((t.agent_info_tokens().into(), self.token_totals()));
         rows.push((
             t.agent_info_context().into(),
             format!(

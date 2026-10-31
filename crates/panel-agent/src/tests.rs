@@ -3796,12 +3796,13 @@ fn spending_outlives_a_reopen_and_shows_by_whom() {
             .map(|(_, v)| v.clone())
             .unwrap_or_default()
     };
-    // The counts and figures first, then the context and the breakdowns.
+    // The counts and figures first, then the tokens right before the
+    // context, then the breakdowns.
     let order = [
         "Messages",
         "Compactions",
-        "Tokens",
         "Cache hits",
+        "Tokens",
         "Context",
         "Context holds",
         "Spent by",
@@ -3913,7 +3914,8 @@ fn the_summary_reports_output_cleaning_savings() {
         .iter()
         .position(|(key, _)| key == "Cleaned bash")
         .unwrap_or_else(|| panic!("no cleaning row: {rows:?}"));
-    assert_eq!(rows[at + 1].0, "Context");
+    assert_eq!(rows[at + 1].0, "Tokens");
+    assert_eq!(rows[at + 2].0, "Context");
     // 77 000 of 104 000 taken out: 74%, about 19k tokens.
     assert_eq!(rows[at].1, "74%  ≈19k");
 }
