@@ -84,9 +84,13 @@ impl Spending {
     /// What every entry of a log spent, in file order — the branches an
     /// undo left behind too, since their tokens were spent all the same. A
     /// subagent counts as its task's result says, all of it its own.
+    ///
+    /// Only entries from `since` on count: a fork carries its source's
+    /// branch in the entries' own timestamps under a header made later, and
+    /// what was spent on that branch is the source's, not the fork's.
     #[must_use]
-    pub fn of_entries(entries: &[Entry]) -> Self {
-        Self::read(entries, None)
+    pub fn of_entries(entries: &[Entry], since: u64) -> Self {
+        Self::read(entries, since, None)
     }
 
     /// [`Self::of_entries`] with each subagent's log read for what its task
@@ -95,13 +99,17 @@ impl Spending {
     /// beyond its log (an older log, one gone) counts as the subagent's on
     /// no known model.
     #[must_use]
-    pub fn with_subagents(entries: &[Entry]) -> Self {
-        Self::read(entries, Some((&mut HashSet::new(), SUBAGENT_DEPTH)))
+    pub fn with_subagents(entries: &[Entry], since: u64) -> Self {
+        Self::read(entries, since, Some((&mut HashSet::new(), SUBAGENT_DEPTH)))
     }
 
     /// Add up `entries`; with `delegates`, the logs already read and the
     /// levels left, the subagents' logs are read too.
-    fn read(entries: &[Entry], mut delegates: Option<(&mut HashSet<PathBuf>, usize)>) -> Self {
+    fn read(
+        entries: &[Entry],
+        since: u64,
+        mut delegates: Option<(&mut HashSet<PathBuf>, usize)>,
+    ) -> Self {
         let mut spending = Self::default();
         // What the tasks said each delegate's log spent, a log carried on
         // by several tasks counted once.
@@ -109,8 +117,15 @@ impl Spending {
         // A summary runs on the model the session ran on at the time.
         let mut model = String::new();
         for entry in entries {
+            // A model change before `since` still sets the model a later
+            // summary runs on.
+            if let EntryKind::ModelChange { model: changed, .. } = &entry.kind {
+                model.clone_from(changed);
+            }
+            if entry.timestamp < since {
+                continue;
+            }
             match &entry.kind {
-                EntryKind::ModelChange { model: changed, .. } => model.clone_from(changed),
                 EntryKind::Message { message, .. } => match message {
                     Message::Assistant(reply) => {
                         let on = if reply.model.is_empty() {
@@ -159,15 +174,14 @@ impl Spending {
 
     /// Count delegate log `log`, whose tasks said they spent `said`.
     fn add_delegate(&mut self, log: &Path, said: Usage, seen: &mut HashSet<PathBuf>, depth: usize) {
-        let entries = (depth > 0 && seen.insert(log.to_path_buf()))
+        let read = (depth > 0 && seen.insert(log.to_path_buf()))
             .then(|| read_file(log).ok())
-            .flatten()
-            .map(|(_, entries)| entries);
-        let Some(entries) = entries else {
+            .flatten();
+        let Some((header, entries)) = read else {
             self.add(Spender::Subagent, "", &said);
             return;
         };
-        let theirs = Self::read(&entries, Some((seen, depth - 1)));
+        let theirs = Self::read(&entries, header.created, Some((seen, depth - 1)));
         for (by, usage) in &theirs.by {
             let by = match by {
                 Spender::Main => Spender::Subagent,
@@ -230,6 +244,34 @@ mod tests {
             extra_content: None,
         };
         Message::ToolResult(ToolResultMessage::text(&call, "done").with_spent(usage))
+    }
+
+    /// A fork carries its source's branch but not what the source spent on
+    /// it; what the fork spends after counts, on the model it carried over.
+    #[test]
+    fn a_fork_counts_only_what_it_spent_itself() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut source = Session::create(dir.path(), Path::new("/work")).unwrap();
+        source.append_model_change("local", "big", None).unwrap();
+        let mut reply = text_reply("ok");
+        reply.usage = spent(100, 10);
+        source.append_message(&Message::Assistant(reply)).unwrap();
+        source
+            .append_spent(Spender::Reviewer, "small", spent(30, 1))
+            .unwrap();
+        // The fork's header is stamped after the last carried entry.
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        let path = source.fork(Path::new("/work"), None).unwrap();
+        let mut fork = Session::open(&path).unwrap();
+        assert_eq!(fork.spending().total(), Usage::default());
+        let mut reply = text_reply("again");
+        reply.usage = spent(7, 1);
+        reply.model.clear();
+        fork.append_message(&Message::Assistant(reply)).unwrap();
+        let spending = fork.spending_with_subagents();
+        assert_eq!(spending.total().input, 7);
+        assert_eq!(spending.models.keys().collect::<Vec<_>>(), ["big"]);
+        assert_eq!(source.spending().total().input, 130);
     }
 
     /// Each kind of call is read from where the log keeps it, and a reopened

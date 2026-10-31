@@ -1548,17 +1548,18 @@ impl Session {
         })
     }
 
-    /// What the whole log spent, by whom and on which model.
+    /// What the whole log spent, by whom and on which model — a fork not
+    /// counting what its source spent before it.
     #[must_use]
     pub fn spending(&self) -> Spending {
-        Spending::of_entries(&self.entries)
+        Spending::of_entries(&self.entries, self.header.created)
     }
 
     /// [`Self::spending`] with the subagents' logs read, see
     /// [`Spending::with_subagents`]: files are read, so not for every frame.
     #[must_use]
     pub fn spending_with_subagents(&self) -> Spending {
-        Spending::with_subagents(&self.entries)
+        Spending::with_subagents(&self.entries, self.header.created)
     }
 
     /// Record that the run ended, `paused` when at a `/pause`.

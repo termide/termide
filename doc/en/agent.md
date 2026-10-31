@@ -894,7 +894,8 @@ cheapest the CLI offers by default. A subagent's share is read from its own
 session log: its turns count as **Subagents** on the model it ran on, and what
 its own reviewer, summaries and subagents spent joins those rows; what its task
 reports beyond its log — a log from before this was recorded, one deleted —
-counts as the subagent's on an `unknown` model.
+counts as the subagent's on an `unknown` model. A fork counts from its own
+start: what was spent on the conversation it carries is its source's.
 
 Below the context window the session info shows what the context is made of,
 estimated at four characters a token. **Context holds** splits what it holds
