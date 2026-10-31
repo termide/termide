@@ -8,17 +8,12 @@ use crate::{format_tokens, token_label};
 /// Cells of a share bar.
 const BAR: usize = 10;
 
-/// What `usage` weighs against a subscription limit or a bill, in input
-/// tokens: a cache read at a tenth, a cache write at a quarter more, output
-/// at five times — Anthropic's price ratios, close to the others'. Only the
-/// shares are shown, so the scale does not matter.
+/// Every token `usage` counts — uncached input, cache writes and reads,
+/// output — each as one: what they cost is the user's to weigh, on terms
+/// termide does not know.
+#[allow(clippy::cast_precision_loss)]
 fn weight(usage: &Usage) -> f64 {
-    #[allow(clippy::cast_precision_loss)]
-    let tokens = |n: u64| n as f64;
-    tokens(usage.input)
-        + tokens(usage.cache_write) * 1.25
-        + tokens(usage.cache_read) * 0.1
-        + tokens(usage.output) * 5.0
+    usage.total() as f64
 }
 
 fn spender_label(by: Spender) -> &'static str {
@@ -48,7 +43,7 @@ pub(crate) struct Share {
 /// A breakdown: its parts, in the order shown.
 pub(crate) type Shares = Vec<Share>;
 
-/// `parts` weighed as they cost, heaviest first, each with its tokens as
+/// `parts` as shares of `of` tokens, the largest first, each with its tokens as
 /// the totals show them.
 fn usage_shares(parts: Vec<(String, Usage)>, of: f64) -> Shares {
     let mut parts: Vec<(String, f64, String)> = parts
@@ -72,6 +67,16 @@ fn shares(parts: Vec<(String, f64, String)>, of: f64) -> Shares {
             figures,
         })
         .collect()
+}
+
+/// `part` of `whole`, 0 to 1.
+#[allow(clippy::cast_precision_loss)]
+fn ratio(part: u64, whole: u64) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        part as f64 / whole as f64
+    }
 }
 
 /// A share as a percentage: a part too small to round to one still shows
@@ -160,14 +165,19 @@ pub(crate) fn spending_figures(spending: &Spending) -> Vec<(String, String)> {
     // What the cache served of all the prompt tokens.
     let prompt = total.uncached().saturating_add(total.cache_read);
     if prompt > 0 {
-        let percent = total.cache_read.saturating_mul(100) / prompt;
-        rows.push((t.agent_info_cache_hits().into(), format!("{percent}%")));
+        rows.push((
+            t.agent_info_cache_hits().into(),
+            percent(ratio(total.cache_read, prompt)),
+        ));
     }
     if total.thinking > 0 && total.output > 0 {
-        let percent = total.thinking.saturating_mul(100) / total.output;
         rows.push((
             t.agent_info_thinking().into(),
-            format!("↓{} ({percent}%)", format_tokens(total.thinking)),
+            format!(
+                "↓{} ({})",
+                format_tokens(total.thinking),
+                percent(ratio(total.thinking, total.output))
+            ),
         ));
     }
     rows
@@ -176,15 +186,12 @@ pub(crate) fn spending_figures(spending: &Spending) -> Vec<(String, String)> {
 /// The row of what cleaning took out of `bash` output over the session —
 /// its share of the raw output and its estimated tokens — read from the
 /// results in the log, a fork's from its own start; none when no `bash`
-/// ran.
+/// ran. Counted in characters, as tokens are estimated; a result logged
+/// before they were counted, in bytes.
 pub(crate) fn cleaning_row(session: &termide_agent_core::Session) -> Option<(String, String)> {
     use termide_agent_core::{EntryKind, Message};
-    let since = session.header().created;
     let (mut raw, mut cleaned) = (0_u64, 0_u64);
-    for entry in session.entries() {
-        if entry.timestamp < since {
-            continue;
-        }
+    for entry in session.own_entries() {
         let EntryKind::Message {
             message: Message::ToolResult(result),
             ..
@@ -195,12 +202,11 @@ pub(crate) fn cleaning_row(session: &termide_agent_core::Session) -> Option<(Str
         let Some(details) = result.details.as_ref() else {
             continue;
         };
-        if let (Some(r), Some(c)) = (
-            details.get("raw_bytes").and_then(serde_json::Value::as_u64),
-            details
-                .get("cleaned_bytes")
-                .and_then(serde_json::Value::as_u64),
-        ) {
+        let count = |unit: &str| {
+            let get = |key: String| details.get(key).and_then(serde_json::Value::as_u64);
+            Some((get(format!("raw_{unit}"))?, get(format!("cleaned_{unit}"))?))
+        };
+        if let Some((r, c)) = count("chars").or_else(|| count("bytes")) {
             raw += r;
             cleaned += c;
         }
@@ -209,22 +215,24 @@ pub(crate) fn cleaning_row(session: &termide_agent_core::Session) -> Option<(Str
         return None;
     }
     let saved = raw.saturating_sub(cleaned);
-    #[allow(clippy::cast_precision_loss)]
-    let share = saved as f64 / raw as f64;
     Some((
         termide_i18n::t().agent_info_output_cleaned().into(),
-        format!("{}  ≈{}", percent(share), format_tokens(saved / 4)),
+        format!(
+            "{}  ≈{}",
+            percent(ratio(saved, raw)),
+            format_tokens(saved / 4)
+        ),
     ))
 }
 
 /// The tools shown by name in the tool output row; the rest are summed.
 const TOOLS_SHOWN: usize = 8;
 
-/// A tool's results weighed as they cost: written to the cache once, read
-/// from it with every call after.
+/// A tool's results in tokens: brought into the context once, read again
+/// with every call after.
 #[allow(clippy::cast_precision_loss)]
 fn tool_weight(load: &ToolLoad) -> f64 {
-    load.brought as f64 * 1.25 + load.carried as f64 * 0.1
+    (load.brought + load.carried) as f64
 }
 
 /// The rows of what the context is made of: its parts now, `system` and
@@ -311,7 +319,7 @@ pub(crate) fn context_rows(
                 .collect(),
             of,
         );
-        rows.push((t.agent_info_tool_output().into(), lines));
+        rows.push((t.agent_info_by_tool().into(), lines));
     }
     rows
 }
@@ -335,37 +343,40 @@ mod tests {
         assert!(spending_figures(&Spending::default()).is_empty());
     }
 
-    /// Shares weigh output and cache reads as they cost, heaviest first,
-    /// with the totals' own token figures.
+    /// Shares count every token as one, the largest first, with the
+    /// totals' own token figures.
     #[test]
-    fn the_breakdown_weighs_what_each_part_cost() {
+    fn the_breakdown_shares_the_tokens() {
         let mut spending = Spending::default();
-        // 1000 + 0.1 × 10 000 = 2000 units.
+        // 1000 + 10 000 + 0 = 11 000 tokens.
         spending.add(Spender::Main, "big", &usage(1_000, 10_000, 0));
-        // 5 × 400 = 2000 units: as much, for far fewer tokens.
-        spending.add(Spender::Reviewer, "small", &usage(0, 0, 400));
+        // 4000 tokens of output: no more than they are, whatever they cost.
+        spending.add(Spender::Reviewer, "small", &usage(0, 0, 4_000));
         spending.add(Spender::Subagent, "", &usage(0, 0, 0));
         let rows = render(spending_rows(&spending, |id| format!("M-{id}")));
         let by = &rows[0].1;
         let lines: Vec<&str> = by.lines().collect();
         assert_eq!(lines.len(), 2, "{by}");
-        assert!(lines.iter().all(|l| l.contains("█████░░░░░  50%")), "{by}");
+        assert!(lines[0].contains("███████░░░  73%"), "{by}");
+        assert!(lines[1].contains("███░░░░░░░  27%"), "{by}");
         assert!(by.contains("↑1k ↻10k ↓0"), "{by}");
         let models = &rows[1].1;
         assert!(
             models.contains("M-big") && models.contains("M-small"),
             "{models}"
         );
-        // 10 000 of 11 000 prompt tokens came from the cache.
+        // 10 000 of 11 000 prompt tokens came from the cache: 90.9%,
+        // rounded as the shares are.
         assert_eq!(rows.len(), 2);
         let figures = spending_figures(&spending);
-        assert_eq!(figures[0].1, "90%");
+        assert_eq!(figures[0].1, "91%");
         assert_eq!(figures.len(), 1, "no reasoning counted, no row for it");
     }
 
-    /// The context's parts share what it holds; a tool's results weigh what
-    /// later calls read of them, so a small result read many times outweighs
-    /// a big one read once, and the tools past the shown ones are summed.
+    /// The context's parts share what it holds; a tool's results count what
+    /// later calls read of them too, so a small result read many times
+    /// outweighs a big one read once, and the tools past the shown ones are
+    /// summed.
     #[test]
     fn the_context_rows_tell_what_it_is_made_of() {
         let mut load = ContextLoad::default();
@@ -375,9 +386,9 @@ mod tests {
             load.tools
                 .insert(name.to_string(), ToolLoad { brought, carried });
         };
-        // 1.25 × 1000 + 0 = 1250 units.
+        // 1000 tokens, read once.
         tool("bash", 1_000, 0);
-        // 1.25 × 100 + 0.1 × 20 000 = 2125 units.
+        // 100 tokens, read again by later calls 200 times over.
         tool("skill:review", 100, 20_000);
         for n in 0..TOOLS_SHOWN {
             tool(&format!("t{n}"), 1, 0);

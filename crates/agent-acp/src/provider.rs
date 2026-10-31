@@ -157,7 +157,11 @@ impl Provider for AcpProvider {
             )
         });
         match answer {
-            Ok(SideAnswer { text, usage, model }) if !text.trim().is_empty() => {
+            Ok(SideAnswer {
+                answer: Ok(text),
+                usage,
+                model,
+            }) if !text.trim().is_empty() => {
                 on_event(StreamEvent::TextDelta(text.clone()));
                 AssistantMessage {
                     content: vec![AssistantContent::Text { text }],
@@ -172,9 +176,19 @@ impl Provider for AcpProvider {
                     timestamp: now_millis(),
                 }
             }
-            Ok(SideAnswer { usage, .. }) => AssistantMessage {
+            // Spent all the same, on the model it went to.
+            Ok(SideAnswer {
+                answer,
                 usage,
-                ..failed("the agent answered nothing".to_string())
+                model,
+            }) => AssistantMessage {
+                usage,
+                model: model.unwrap_or_else(|| request.model.id.clone()),
+                ..failed(
+                    answer
+                        .err()
+                        .unwrap_or_else(|| "the agent answered nothing".to_string()),
+                )
             },
             Err(error) => failed(error),
         }
@@ -192,10 +206,10 @@ impl Provider for AcpProvider {
     }
 }
 
-/// A side call's answer, what it spent and the model it was switched to
-/// (`None`: the agent's own, not known here).
+/// A side call's answer, or why it gave none, what it spent and the model
+/// it was switched to (`None`: the agent's own, not known here).
 struct SideAnswer {
-    text: String,
+    answer: Result<String, String>,
     usage: Usage,
     model: Option<String>,
 }
@@ -250,7 +264,7 @@ impl Shared {
                 Duration::from_secs(30),
             );
         }
-        let answer = self.side_prompt(&session_id, &text, ANSWER_TIMEOUT);
+        let (answer, usage) = self.side_prompt(&session_id, &text, ANSWER_TIMEOUT);
         if self.can_close.load(Ordering::Acquire) {
             let _ = self.request(
                 "session/close",
@@ -258,8 +272,8 @@ impl Shared {
                 Duration::from_secs(10),
             );
         }
-        answer.map(|(text, usage)| SideAnswer {
-            text,
+        Ok(SideAnswer {
+            answer,
             usage,
             model: picked,
         })
@@ -555,9 +569,33 @@ mod tests {
         assert_eq!(picked[0]["params"]["value"], "claude-haiku-4-5");
     }
 
+    /// A call the agent stops still spent its tokens, on the model picked.
+    #[test]
+    fn a_stopped_call_still_counts_what_it_spent() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let for_connect = Arc::clone(&seen);
+        let provider = AcpProvider::with_connector(
+            AcpFlavor::ClaudeCode,
+            Duration::from_secs(5),
+            Box::new(move || Ok(reviewer_agent(&for_connect))),
+        )
+        .cheapest();
+        let reply = ask_text(&provider, "", "refuse this call");
+        assert_eq!(reply.stop_reason, StopReason::Error);
+        assert!(
+            reply
+                .error_message
+                .as_deref()
+                .is_some_and(|e| e.contains("refusal")),
+            "{reply:?}"
+        );
+        assert_eq!(reply.model, "claude-haiku-4-5");
+        assert_eq!((reply.usage.input, reply.usage.output), (3, 9));
+    }
+
     /// An agent that records what it is sent and answers every prompt with
     /// `ALLOW <the session id>` after a pause, so calls overlap, reporting
-    /// what the prompt spent.
+    /// what the prompt spent; a prompt saying `refuse` it refuses.
     fn reviewer_agent(seen: &Arc<Mutex<Vec<Value>>>) -> AcpRuntime {
         let (to_agent_rx, to_agent_tx) = pipe().unwrap();
         let (from_agent_rx, from_agent_tx) = pipe().unwrap();
@@ -588,6 +626,14 @@ mod tests {
                         // Answered from a thread of its own, after a pause.
                         let out = Arc::clone(&out);
                         let session = message["params"]["sessionId"].clone();
+                        let stop = if message["params"]["prompt"][0]["text"]
+                            .as_str()
+                            .is_some_and(|text| text.contains("refuse"))
+                        {
+                            "refusal"
+                        } else {
+                            "end_turn"
+                        };
                         std::thread::spawn(move || {
                             std::thread::sleep(Duration::from_millis(50));
                             send(
@@ -601,7 +647,7 @@ mod tests {
                             send(
                                 &out,
                                 json!({ "jsonrpc": "2.0", "id": id,
-                                "result": { "stopReason": "end_turn", "usage": {
+                                "result": { "stopReason": stop, "usage": {
                                     "inputTokens": 3, "outputTokens": 9,
                                     "cachedReadTokens": 40, "cachedWriteTokens": 7,
                                     "thoughtTokens": 4, "totalTokens": 59 } } }),
@@ -677,6 +723,10 @@ mod tests {
     }
 
     fn ask(provider: &AcpProvider, model: &str) -> AssistantMessage {
+        ask_text(provider, model, "judge this call")
+    }
+
+    fn ask_text(provider: &AcpProvider, model: &str, text: &str) -> AssistantMessage {
         let spec = ModelSpec {
             provider: "agent".into(),
             id: model.into(),
@@ -684,7 +734,7 @@ mod tests {
             max_tokens: None,
             thinking: ThinkingLevel::Off,
         };
-        let messages = [Message::User(UserMessage::text("judge this call"))];
+        let messages = [Message::User(UserMessage::text(text))];
         let request = Request {
             model: &spec,
             system_prompt: "You review calls.",

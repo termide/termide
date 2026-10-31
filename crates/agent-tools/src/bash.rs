@@ -264,6 +264,8 @@ impl BashTool {
             let cleaned = Cleaned {
                 original_bytes: head.original_bytes + tail.original_bytes,
                 cleaned_bytes: head.cleaned_bytes + tail.cleaned_bytes,
+                original_chars: head.original_chars + tail.original_chars,
+                cleaned_chars: head.cleaned_chars + tail.cleaned_chars,
                 text: String::new(),
             };
             (cleaned, body)
@@ -316,6 +318,8 @@ impl BashTool {
             "full_output_path": full_output_path,
             "raw_bytes": cleaned.original_bytes,
             "cleaned_bytes": cleaned.cleaned_bytes,
+            "raw_chars": cleaned.original_chars,
+            "cleaned_chars": cleaned.cleaned_chars,
             "dropped_bytes": run.output.dropped,
         });
         let result = if is_error {
@@ -332,9 +336,12 @@ impl BashTool {
         if self.clean {
             clean_output(raw, command)
         } else {
+            let chars = raw.chars().count();
             Cleaned {
                 original_bytes: raw.len(),
                 cleaned_bytes: raw.len(),
+                original_chars: chars,
+                cleaned_chars: chars,
                 text: raw.to_string(),
             }
         }
@@ -593,6 +600,9 @@ mod tests {
         assert!(
             details["raw_bytes"].as_u64().unwrap() > details["cleaned_bytes"].as_u64().unwrap()
         );
+        // And in characters, which tokens are estimated from.
+        assert_eq!(details["cleaned_chars"].as_u64(), Some(10));
+        assert!(details["raw_chars"].as_u64().unwrap() > 10);
 
         // Turning cleaning off passes the escapes through.
         let raw_tool = BashTool {

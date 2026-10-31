@@ -181,7 +181,7 @@ impl Translation for RuntimeTranslation {
         agent_spender_internal,
         agent_model_unknown,
         agent_info_context_parts,
-        agent_info_tool_output,
+        agent_info_by_tool,
         agent_context_system,
         agent_context_tools,
         agent_context_skills,

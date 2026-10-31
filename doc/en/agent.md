@@ -867,7 +867,8 @@ the result summary. The full, untouched log is still
 written to a file whose path the tool reports, and you still see the raw
 stream live in the panel. The session info (`F3`) shows, after the cache
 hits, **Cleaned bash**: the share of the session's raw `bash` output
-the cleaning took out and about how many tokens that was, read from the log.
+the cleaning took out, in characters, and about how many tokens that was,
+read from the log.
 
 The status chips run, left to right: the agent, the permission mode, the
 **Reasoning** level (none for a model that cannot be asked), the connection with its protocol
@@ -886,14 +887,13 @@ and its window from how full it last stood — a Claude Code or Codex session's
 as the agent last reported it, with the window's size.
 The session info (`F3`) breaks them down: **Spent by** the conversation,
 subagents, the reviewer, recall, summaries, the goal judge and handoff, and
-**By model**, each with a bar and its share, heaviest first; **Cache hits**,
+**By model**, each with a bar and its share, largest first; **Cache hits**,
 the share of prompt tokens the cache served; and **Reasoning**, the output
 spent thinking, when the provider counts it apart (Codex and OpenAI-compatible
 servers do; Claude Code counts it within its output and never apart). A share
-weighs the tokens as they cost — a cache read a tenth of an input token, a
-cache write a quarter more, an output token five times, Anthropic's price
-ratios — so a part with few tokens of output can outweigh one with many cache
-reads. A Claude Code or Codex reviewer is credited to the model it ran on, the
+counts tokens as they are, every kind as one — uncached input, cache writes
+and reads, output — and each part shows its `↑ ↻ ↓` beside it: what they cost
+on your model and plan is yours to weigh. A Claude Code or Codex reviewer is credited to the model it ran on, the
 cheapest the CLI offers by default. Claude Code reports its turn's tokens for
 its conversation alone and, apart, a sum by model that also counts its own
 subagents, its summaries and its helper calls on a smaller model; what that sum
@@ -913,14 +913,13 @@ definitions of the tools termide serves it (all of them, or for Codex and
 Gemini CLI the few beside their own), skills the `skill` tool loaded, the other
 tools' output, the conversation and a compaction's summary; and, for a CLI
 agent that reported its fill, **Agent's own**: what the fill holds beyond those
-parts — its own prompt and tools, and what it adds. **Tool
-output** shows each tool's results across the session, a skill's as
-`skill:<name>`: `≈` what they brought into the context and `↻` how much the
-model calls after them read again while they stayed, until a summary,
-pruning or fitting took them out. The share weighs both as they cost — written
-to the cache once, read from it with each call — so a skill loaded early and
-carried through a long session can outweigh a large command output read once;
-the eight heaviest are named and the rest summed as `others`. A CLI agent's
+parts — its own prompt and tools, and what it adds. **By tool** shows each
+tool's results across the session, a skill's as `skill:<name>`: `≈` what they
+brought into the context and `↻` how much the model calls after them read
+again while they stayed, until a summary, pruning or fitting took them out.
+The share counts both, so a skill loaded early and carried through a long
+session can outweigh a large command output read once; the eight largest are
+named and the rest summed as `others`. A CLI agent's
 session logs its turns rather than each call, so what its calls read again
 comes out low. The
 window is the tokens used of it with a fill bar, `66k/262k ▰▰▱▱▱▱▱▱`; for

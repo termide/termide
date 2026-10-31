@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::message::{Message, Usage, SUBAGENT_SESSION_KEY};
-use crate::session::{read_file, Entry, EntryKind};
+use crate::message::{Message, ToolResultMessage, Usage, SUBAGENT_SESSION_KEY};
+use crate::session::{own_start, read_file, Entry, EntryKind};
 
 /// How many levels of delegates' logs are read: a subagent's, its own
 /// subagent's, and so on.
@@ -89,12 +89,11 @@ impl Spending {
     /// undo left behind too, since their tokens were spent all the same. A
     /// subagent counts as its task's result says, all of it its own.
     ///
-    /// Only entries from `since` on count: a fork carries its source's
-    /// branch in the entries' own timestamps under a header made later, and
-    /// what was spent on that branch is the source's, not the fork's.
+    /// Only entries from index `start` on count: a fork carries its
+    /// source's branch first, and what was spent on it is the source's.
     #[must_use]
-    pub fn of_entries(entries: &[Entry], since: u64) -> Self {
-        Self::read(entries, since, None)
+    pub fn of_entries(entries: &[Entry], start: usize) -> Self {
+        Self::read(entries, start, None)
     }
 
     /// [`Self::of_entries`] with each subagent's log read for what its task
@@ -103,15 +102,32 @@ impl Spending {
     /// beyond its log (an older log, one gone) counts as the subagent's on
     /// no known model.
     #[must_use]
-    pub fn with_subagents(entries: &[Entry], since: u64) -> Self {
-        Self::read(entries, since, Some((&mut HashSet::new(), SUBAGENT_DEPTH)))
+    pub fn with_subagents(entries: &[Entry], start: usize) -> Self {
+        Self::read(entries, start, Some((&mut HashSet::new(), SUBAGENT_DEPTH)))
+    }
+
+    /// What tool result `result` counts for in [`Self::with_subagents`]:
+    /// what it says it spent, or what its subagent's log holds when that is
+    /// more. Reads that log, so for a result as it comes, not every frame.
+    #[must_use]
+    pub fn of_result(result: &ToolResultMessage) -> Usage {
+        let entry = Entry {
+            id: String::new(),
+            parent_id: None,
+            timestamp: 0,
+            kind: EntryKind::Message {
+                message: Message::ToolResult(result.clone()),
+                timing: None,
+            },
+        };
+        Self::with_subagents(std::slice::from_ref(&entry), 0).total()
     }
 
     /// Add up `entries`; with `delegates`, the logs already read and the
     /// levels left, the subagents' logs are read too.
     fn read(
         entries: &[Entry],
-        since: u64,
+        start: usize,
         mut delegates: Option<(&mut HashSet<PathBuf>, usize)>,
     ) -> Self {
         let mut spending = Self::default();
@@ -120,13 +136,13 @@ impl Spending {
         let mut delegated: BTreeMap<PathBuf, Usage> = BTreeMap::new();
         // A summary runs on the model the session ran on at the time.
         let mut model = String::new();
-        for entry in entries {
-            // A model change before `since` still sets the model a later
+        for (index, entry) in entries.iter().enumerate() {
+            // A model change before `start` still sets the model a later
             // summary runs on.
             if let EntryKind::ModelChange { model: changed, .. } = &entry.kind {
                 model.clone_from(changed);
             }
-            if entry.timestamp < since {
+            if index < start {
                 continue;
             }
             match &entry.kind {
@@ -185,7 +201,8 @@ impl Spending {
             self.add(Spender::Subagent, "", &said);
             return;
         };
-        let theirs = Self::read(&entries, header.created, Some((seen, depth - 1)));
+        let start = own_start(&header, &entries);
+        let theirs = Self::read(&entries, start, Some((seen, depth - 1)));
         for (by, usage) in &theirs.by {
             let by = match by {
                 Spender::Main => Spender::Subagent,
@@ -202,7 +219,7 @@ impl Spending {
 }
 
 /// The log of the delegate a task's `result` ran in, when it notes one.
-fn delegate_log(result: &crate::message::ToolResultMessage) -> Option<PathBuf> {
+fn delegate_log(result: &ToolResultMessage) -> Option<PathBuf> {
     let path = result
         .details
         .as_ref()?
@@ -252,10 +269,11 @@ mod tests {
         source
             .append_spent(Spender::Reviewer, "small", spent(30, 1))
             .unwrap();
-        // The fork's header is stamped after the last carried entry.
-        std::thread::sleep(std::time::Duration::from_millis(2));
+        // Copied within the same millisecond: the header counts what it
+        // copied, the clock is not asked.
         let path = source.fork(Path::new("/work"), None).unwrap();
         let mut fork = Session::open(&path).unwrap();
+        assert_eq!(fork.header().copied, Some(3));
         assert_eq!(fork.spending().total(), Usage::default());
         let mut reply = text_reply("again");
         reply.usage = spent(7, 1);
@@ -265,6 +283,25 @@ mod tests {
         assert_eq!(spending.total().input, 7);
         assert_eq!(spending.models.keys().collect::<Vec<_>>(), ["big"]);
         assert_eq!(source.spending().total().input, 130);
+    }
+
+    /// A log older than the header's count of copied entries tells them by
+    /// their timestamps, made before its header.
+    #[test]
+    fn an_older_fork_tells_its_copied_entries_by_their_time() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        let mut reply = text_reply("ok");
+        reply.usage = spent(100, 10);
+        session.append_message(&Message::Assistant(reply)).unwrap();
+        let mut header = session.header().clone();
+        let entries = session.entries();
+        assert_eq!(crate::session::own_start(&header, entries), 0);
+        header.copied = None;
+        header.created = entries[0].timestamp + 1;
+        assert_eq!(crate::session::own_start(&header, entries), 1);
+        header.created = entries[0].timestamp;
+        assert_eq!(crate::session::own_start(&header, entries), 0);
     }
 
     /// Each kind of call is read from where the log keeps it, and a reopened
@@ -388,5 +425,20 @@ mod tests {
         // The totals agree with what the results said.
         assert_eq!(deep.total(), spent(85, 8));
         assert_eq!(ours.spending().total(), spent(85, 8));
+
+        // A result that says nothing of what its subagent spent counts its
+        // log, as the totals with the subagents do.
+        let call = ToolCall {
+            id: "task-2".into(),
+            name: "task".into(),
+            arguments: serde_json::json!({}),
+            extra_content: None,
+        };
+        let mut silent = ToolResultMessage::text(&call, "done").with_details(serde_json::json!({
+            SUBAGENT_SESSION_KEY: theirs.path().to_string_lossy(),
+        }));
+        assert_eq!(Spending::of_result(&silent), spent(70, 7));
+        silent.details = None;
+        assert_eq!(Spending::of_result(&silent), Usage::default());
     }
 }

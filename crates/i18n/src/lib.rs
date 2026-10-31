@@ -844,7 +844,7 @@ pub trait Translation: Send + Sync {
     fn agent_spender_internal(&self) -> &str;
     fn agent_model_unknown(&self) -> &str;
     fn agent_info_context_parts(&self) -> &str;
-    fn agent_info_tool_output(&self) -> &str;
+    fn agent_info_by_tool(&self) -> &str;
     fn agent_context_system(&self) -> &str;
     fn agent_context_tools(&self) -> &str;
     fn agent_context_skills(&self) -> &str;

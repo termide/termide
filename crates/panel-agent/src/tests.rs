@@ -3889,6 +3889,15 @@ fn the_summary_reports_output_cleaning_savings() {
             ),
         ))
         .unwrap();
+    // A newer result counts characters, which its bytes would double.
+    session
+        .append_message(&Message::ToolResult(
+            ToolResultMessage::text(&call, "out").with_details(serde_json::json!({
+                "raw_bytes": 8_000_u64, "cleaned_bytes": 4_000_u64,
+                "raw_chars": 4_000_u64, "cleaned_chars": 2_000_u64,
+            })),
+        ))
+        .unwrap();
     let path = session.path().to_path_buf();
     drop(session);
     let mut panel = AgentPanel::new(AgentPanelSetup {
@@ -3905,8 +3914,8 @@ fn the_summary_reports_output_cleaning_savings() {
         .position(|(key, _)| key == "Cleaned bash")
         .unwrap_or_else(|| panic!("no cleaning row: {rows:?}"));
     assert_eq!(rows[at + 1].0, "Context");
-    // 75 000 of 100 000 bytes taken out, about 19k tokens.
-    assert_eq!(rows[at].1, "75%  ≈19k");
+    // 77 000 of 104 000 taken out: 74%, about 19k tokens.
+    assert_eq!(rows[at].1, "74%  ≈19k");
 }
 
 #[test]

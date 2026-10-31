@@ -869,7 +869,7 @@ impl AgentPanel {
         rows.extend(take(t.agent_info_context_parts()));
         rows.extend(take(t.agent_info_spent_by()));
         rows.extend(take(t.agent_info_by_model()));
-        rows.extend(take(t.agent_info_tool_output()));
+        rows.extend(take(t.agent_info_by_tool()));
         vec![PanelEvent::ShowInfo {
             title: t.agent_session_info().to_string(),
             rows,

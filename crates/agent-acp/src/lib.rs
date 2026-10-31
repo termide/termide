@@ -808,10 +808,8 @@ impl Backend for AcpRuntime {
                 shared.goal.system_prompt(&goal),
                 shared.goal.request
             );
-            let answer = shared.side_query(&text).map(|(reply, usage)| {
-                shared.report_spent(Spender::GoalJudge, usage);
-                reply
-            });
+            let (answer, usage) = shared.side_query(&text);
+            shared.report_spent(Spender::GoalJudge, usage);
             let event = match answer {
                 Ok(reply) if !reply.trim().is_empty() => match parse_verdict(&reply) {
                     Ok(verdict) => AgentEvent::GoalJudged {
@@ -845,10 +843,8 @@ impl Backend for AcpRuntime {
                 "{}\n\n{}",
                 shared.handoff.instructions, shared.handoff.request
             );
-            let answer = shared.side_query(&text).map(|(reply, usage)| {
-                shared.report_spent(Spender::Handoff, usage);
-                reply
-            });
+            let (answer, usage) = shared.side_query(&text);
+            shared.report_spent(Spender::Handoff, usage);
             let brief = match answer {
                 Ok(reply) if !reply.trim().is_empty() => Ok(reply.trim().to_string()),
                 Ok(_) => Err("the handoff call did not produce a brief".to_string()),
@@ -1909,9 +1905,13 @@ impl Shared {
     /// closed afterwards when it closes one; else in the session itself, as
     /// a turn kept from the panel and the log (the agent's own session still
     /// holds it). Its tools are not asked for: a permission request from it
-    /// is refused. What the request spent comes with the answer.
-    fn side_query(self: &Arc<Self>, text: &str) -> Result<(String, Usage), String> {
-        let main = self.session_id()?;
+    /// is refused. What the request spent comes with the answer, or with
+    /// the failure of a request that went out.
+    fn side_query(self: &Arc<Self>, text: &str) -> (Result<String, String>, Usage) {
+        let main = match self.session_id() {
+            Ok(main) => main,
+            Err(error) => return (Err(error), Usage::default()),
+        };
         let forked = if self.can_fork.load(Ordering::Acquire) {
             let reply = self.request(
                 "session/fork",
@@ -1935,7 +1935,7 @@ impl Shared {
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
                 .is_err()
         {
-            return Err("the agent is busy".to_string());
+            return (Err("the agent is busy".to_string()), Usage::default());
         }
         let session_id = forked.clone().unwrap_or(main);
         let answer = self.side_prompt(&session_id, text, Duration::from_secs(60 * 60));
@@ -1961,13 +1961,14 @@ impl Shared {
 
     /// Send `text` as a side request in session `session_id` and return the
     /// answer's text, which reaches neither the panel nor the log, and what
-    /// the request spent; several may run at once, each in its own session.
+    /// the request spent — a stopped one too, as far as the agent tells;
+    /// several may run at once, each in its own session.
     fn side_prompt(
         &self,
         session_id: &str,
         text: &str,
         timeout: Duration,
-    ) -> Result<(String, Usage), String> {
+    ) -> (Result<String, String>, Usage) {
         self.side
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -1983,10 +1984,16 @@ impl Shared {
             .unwrap_or_else(PoisonError::into_inner)
             .remove(session_id)
             .unwrap_or_default();
-        let reply = result?;
+        let reply = match result {
+            Ok(reply) => reply,
+            Err(error) => return (Err(error), Usage::default()),
+        };
+        let usage = usage_of(&reply);
         match reply["stopReason"].as_str() {
-            Some(stop @ ("cancelled" | "refusal")) => Err(format!("the agent stopped: {stop}")),
-            _ => Ok((answer, usage_of(&reply))),
+            Some(stop @ ("cancelled" | "refusal")) => {
+                (Err(format!("the agent stopped: {stop}")), usage)
+            }
+            _ => (Ok(answer), usage),
         }
     }
 

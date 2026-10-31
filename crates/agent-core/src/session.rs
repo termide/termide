@@ -44,6 +44,25 @@ pub struct SessionHeader {
     /// The session that delegated this one's task, for a delegate's session.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent: Option<SessionParent>,
+    /// How many of the log's first entries were copied from another log —
+    /// a fork's source branch, whose spend is the source's — `0` for a
+    /// log begun empty. `None` in a log older than the field, which is
+    /// told by its entries' timestamps instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub copied: Option<usize>,
+}
+
+/// Where the entries this log wrote itself begin in `entries`, those
+/// before having been copied from a fork's source: as `header` counts them,
+/// or in an older log, the first entry stamped after the header.
+pub(crate) fn own_start(header: &SessionHeader, entries: &[Entry]) -> usize {
+    match header.copied {
+        Some(copied) => copied.min(entries.len()),
+        None => entries
+            .iter()
+            .position(|entry| entry.timestamp >= header.created)
+            .unwrap_or(entries.len()),
+    }
 }
 
 /// Where a delegate's session came from: the delegating session and call.
@@ -659,6 +678,7 @@ impl Session {
             cwd: cwd.to_path_buf(),
             name: None,
             parent,
+            copied: Some(0),
         };
         let path = dir.join(format!("{}_{id}.jsonl", file_timestamp(created)));
         let mut file = OpenOptions::new()
@@ -824,6 +844,8 @@ impl Session {
         header.created = created;
         header.cwd = cwd.to_path_buf();
         header.name = name.map(str::to_string);
+        let branch = self.branch();
+        header.copied = Some(branch.len());
         // `create_new` first: the file is removed on a failed copy only once
         // this call has made it, so a name already taken is never touched.
         let mut file = OpenOptions::new()
@@ -838,8 +860,8 @@ impl Session {
                     header: header.clone(),
                 }),
             )?;
-            for entry in self.branch() {
-                write_line(&mut file, &Line::Entry(entry.clone()))?;
+            for entry in &branch {
+                write_line(&mut file, &Line::Entry((*entry).clone()))?;
             }
             if let Some(name) = name {
                 // The copy's own name, hanging off the branch's end: the last
@@ -1593,14 +1615,25 @@ impl Session {
     /// counting what its source spent before it.
     #[must_use]
     pub fn spending(&self) -> Spending {
-        Spending::of_entries(&self.entries, self.header.created)
+        Spending::of_entries(&self.entries, self.own_start())
     }
 
     /// [`Self::spending`] with the subagents' logs read, see
     /// [`Spending::with_subagents`]: files are read, so not for every frame.
     #[must_use]
     pub fn spending_with_subagents(&self) -> Spending {
-        Spending::with_subagents(&self.entries, self.header.created)
+        Spending::with_subagents(&self.entries, self.own_start())
+    }
+
+    /// The entries this log wrote itself, after those a fork copied from its
+    /// source; see [`SessionHeader::copied`].
+    #[must_use]
+    pub fn own_entries(&self) -> &[Entry] {
+        &self.entries[self.own_start()..]
+    }
+
+    fn own_start(&self) -> usize {
+        own_start(&self.header, &self.entries)
     }
 
     /// Record that the run ended, `paused` when at a `/pause`.

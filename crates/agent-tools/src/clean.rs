@@ -21,6 +21,10 @@ pub struct Cleaned {
     pub original_bytes: usize,
     /// Bytes after cleaning.
     pub cleaned_bytes: usize,
+    /// Characters before cleaning, which tokens are estimated from.
+    pub original_chars: usize,
+    /// Characters after cleaning.
+    pub cleaned_chars: usize,
 }
 
 impl Cleaned {
@@ -45,7 +49,9 @@ pub fn clean_output(raw: &str, command: &str) -> Cleaned {
     let text = collapse_blank_runs(&lines);
     Cleaned {
         cleaned_bytes: text.len(),
+        cleaned_chars: text.chars().count(),
         original_bytes,
+        original_chars: raw.chars().count(),
         text,
     }
 }

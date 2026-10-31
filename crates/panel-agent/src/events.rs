@@ -444,11 +444,11 @@ impl AgentPanel {
                 });
             }
             AgentEvent::ToolExecutionEnd { result } => {
-                // A subagent's tokens join the session's totals; its context
-                // was its own, so the context fill stays as it is.
-                if let Some(spent) = result.spent() {
-                    self.count_spent(&spent);
-                }
+                // A subagent's tokens join the session's totals, as its log
+                // tells them when that is more than the result says, so they
+                // agree with the breakdown; its context was its own, so the
+                // context fill stays as it is.
+                self.count_spent(&termide_agent_core::Spending::of_result(&result));
                 if let Some(path) = changed_file(&result) {
                     self.pending_events
                         .push(PanelEvent::FileChangedOnDisk(path));
@@ -977,12 +977,13 @@ impl AgentPanel {
         }
     }
 
-    /// Start the session's totals at what its log says it spent.
+    /// Start the session's totals at what its log says it spent, its
+    /// subagents' logs read as the session info reads them.
     pub(crate) fn seed_spent(&mut self) {
         let total = self
             .session
             .as_ref()
-            .map(|session| session.spending().total())
+            .map(|session| session.spending_with_subagents().total())
             .unwrap_or_default();
         self.session_input = total.uncached();
         self.session_cached = total.cache_read;
