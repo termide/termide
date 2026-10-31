@@ -1,5 +1,7 @@
 //! The password vault: supplying stored passwords to connections, asking
-//! for missing ones, and saving the ones the user asks to keep.
+//! for missing ones, and saving the ones the user asks to keep; and the API
+//! keys of agent connections, which the settings store and the model calls
+//! ask for (see `api_keys`).
 //!
 //! Panels report a refused login with `PanelEvent::CredentialsRequired`;
 //! git network operations are recognised from git's stderr. Either way the
@@ -12,16 +14,19 @@
 //!
 //! The prompts are ordinary input modals under `PendingAction::Vault`; what
 //! a prompt is for lives in [`VaultState::prompt`], so no secret travels in
-//! a pending action.
+//! a pending action. A prompt asked while the settings are open puts them
+//! aside and brings them back once the vault's business is done.
 
+use std::collections::{BTreeSet, VecDeque};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use termide_core::{CredentialAttempt, GitOperationType, PanelCommand, SecretText};
-use termide_modal::{ActiveModal, ConfirmModal, InputModal};
+use termide_modal::{ActiveModal, ApiKeyChange, ConfirmModal, InputModal, SettingsModal};
 use termide_secrets::{origin, KdfParams, SecretKind, Vault};
 use termide_state::PendingAction;
 
+use super::api_keys::{self, Broker};
 use super::App;
 
 /// Vault origin of the SSH key passphrase git network operations use. git
@@ -51,6 +56,13 @@ pub(crate) enum Request {
         repo: PathBuf,
         target: GitTarget,
     },
+    /// The API key of agent connection `connection`, answered to the model
+    /// calls waiting for it. Never typed in a prompt: without the vault's
+    /// key the calls fail.
+    ApiKey { connection: String },
+    /// The key of a connection renamed from `from` to `to`, moved to the
+    /// new name.
+    ApiKeyMove { from: String, to: String },
 }
 
 #[derive(Debug, Clone)]
@@ -76,11 +88,18 @@ impl Request {
                 target: GitTarget::SshKey,
                 ..
             } => SecretKind::SshPassphrase,
+            Request::ApiKey { .. } | Request::ApiKeyMove { .. } => SecretKind::ApiKey,
         }
+    }
+
+    fn is_api_key(&self) -> bool {
+        self.kind() == SecretKind::ApiKey
     }
 
     fn origin(&self) -> &str {
         match self {
+            Request::ApiKey { connection } => connection,
+            Request::ApiKeyMove { from, .. } => from,
             Request::Panel { origin, .. }
             | Request::Git {
                 target: GitTarget::Https { origin, .. },
@@ -103,7 +122,9 @@ impl Request {
             Request::Git {
                 target: GitTarget::SshKey,
                 ..
-            } => None,
+            }
+            | Request::ApiKey { .. }
+            | Request::ApiKeyMove { .. } => None,
         }
     }
 
@@ -134,6 +155,8 @@ struct PendingSave {
 enum AfterSave {
     /// Remove the password from the bookmark URL it was moved out of.
     StripBookmark { url: String, is_project: bool },
+    /// Clear the key pasted into the connection's `api_key_env`.
+    ClearApiKeyEnv { connection: String },
 }
 
 /// Where to go back to after a bookmark prompt.
@@ -176,6 +199,13 @@ pub(crate) struct VaultState {
     git_attempt: Option<CredentialAttempt>,
     /// The HTTPS user name it was retried with; git's refusal names none.
     git_user: Option<String>,
+    /// Model calls waiting for an API key from the vault.
+    key_waiters: Vec<api_keys::Ask>,
+    /// Changes to the API keys the settings asked for, made in order; one
+    /// that needs a prompt holds the rest back.
+    key_changes: VecDeque<ApiKeyChange>,
+    /// The settings, put aside while a vault prompt shows.
+    parked_settings: Option<Box<SettingsModal>>,
 }
 
 impl Default for VaultState {
@@ -195,6 +225,9 @@ impl VaultState {
             pending_saves: Vec::new(),
             git_attempt: None,
             git_user: None,
+            key_waiters: Vec::new(),
+            key_changes: VecDeque::new(),
+            parked_settings: None,
         }
     }
 
@@ -250,6 +283,28 @@ impl VaultState {
     pub(crate) fn note_checkbox(&mut self, checked: bool) {
         self.save_checked = checked;
     }
+
+    /// Queue the API key changes the settings asked for.
+    pub(crate) fn queue_key_changes(&mut self, changes: Vec<ApiKeyChange>) {
+        self.key_changes.extend(changes);
+    }
+
+    /// The connections the vault keeps an API key for.
+    pub(crate) fn stored_api_keys(&mut self) -> BTreeSet<String> {
+        match self.current() {
+            Ok(Some(v)) => v
+                .entries()
+                .into_iter()
+                .filter(|e| e.secret_kind() == Some(SecretKind::ApiKey))
+                .map(|e| e.origin)
+                .collect(),
+            Ok(None) => BTreeSet::new(),
+            Err(e) => {
+                log::warn!("password vault unreadable: {e}");
+                BTreeSet::new()
+            }
+        }
+    }
 }
 
 fn user_name(value: &dyn std::any::Any) -> Option<String> {
@@ -274,12 +329,16 @@ impl App {
         }
     }
 
-    /// Lock the vault after the configured idle time. Called every loop pass.
+    /// Lock the vault after the configured idle time, answer the model
+    /// calls waiting for an API key, and go on with the settings' key
+    /// changes. Called every loop pass.
     pub(super) fn vault_tick(&mut self) {
         let idle = self.vault_idle_limit();
         if self.vault.lock_if_idle(idle) {
             log::info!("password vault locked after idle time");
         }
+        self.serve_api_keys();
+        self.continue_key_changes();
     }
 
     /// Lock the vault now (menu action).
@@ -296,6 +355,7 @@ impl App {
     }
 
     fn open_vault_prompt(&mut self, prompt: Prompt, modal: InputModal) {
+        self.park_settings();
         self.vault.prompt = Some(prompt);
         self.vault.save_checked = false;
         self.state
@@ -463,6 +523,9 @@ impl App {
     }
 
     fn ask_password(&mut self, request: Request, attempt: CredentialAttempt) {
+        if request.is_api_key() {
+            return self.api_key_unavailable(request);
+        }
         if let Request::Git {
             target: GitTarget::Https { user: None, .. },
             ..
@@ -549,10 +612,15 @@ impl App {
                     log::error!("git retry failed to start: {e}");
                 }
             }
+            Request::ApiKey { connection } => self.hand_api_key(connection, Ok(Some(secret))),
+            Request::ApiKeyMove { from, to } => self.move_api_key(from, to, &secret),
         }
     }
 
     fn cancel_request(&mut self, request: &Request) {
+        if request.is_api_key() {
+            return self.api_key_unavailable(request.clone());
+        }
         if let Request::Panel { url, .. } = request {
             for panel in self.layout_manager.iter_all_panels_mut() {
                 let result = panel.handle_command(PanelCommand::CancelCredentials { url });
@@ -586,11 +654,23 @@ impl App {
         };
         match result {
             Ok(()) => {
-                self.state
-                    .set_info(termide_i18n::t().vault_saved().to_string());
+                let t = termide_i18n::t();
+                let saved = match r {
+                    Request::ApiKey { connection } => {
+                        Broker::global().remember(connection, save.secret.clone());
+                        t.vault_api_key_saved()
+                    }
+                    _ => t.vault_saved(),
+                };
+                self.state.set_info(saved.to_string());
                 match &save.then {
                     Some(AfterSave::StripBookmark { url, is_project }) => {
                         self.strip_bookmark_password(url, *is_project)
+                    }
+                    Some(AfterSave::ClearApiKeyEnv { connection }) => {
+                        if let Some(settings) = self.settings_modal_mut() {
+                            settings.forget_api_key_env(connection);
+                        }
                     }
                     None => {}
                 }
@@ -674,6 +754,11 @@ impl App {
 
     /// A vault prompt was confirmed with `value`.
     pub(super) fn vault_prompt_confirmed(&mut self, value: &dyn std::any::Any) {
+        self.answer_vault_prompt(value);
+        self.continue_key_changes();
+    }
+
+    fn answer_vault_prompt(&mut self, value: &dyn std::any::Any) {
         let Some(prompt) = self.vault.prompt.take() else {
             return;
         };
@@ -774,6 +859,11 @@ impl App {
 
     /// A vault prompt was cancelled.
     pub(super) fn vault_prompt_cancelled(&mut self) {
+        self.dismiss_vault_prompt();
+        self.continue_key_changes();
+    }
+
+    fn dismiss_vault_prompt(&mut self) {
         let Some(prompt) = self.vault.prompt.take() else {
             return;
         };
@@ -789,6 +879,208 @@ impl App {
                 self.reopen_bookmarks_menu(back.group, back.is_project, back.selected)
             }
         }
+    }
+
+    // === API keys of agent connections ===
+
+    /// Answer the model calls waiting for a connection's key: from the keys
+    /// handed out before, else from the vault, unlocking it first if need
+    /// be. A prompt or another modal open holds the answer back.
+    fn serve_api_keys(&mut self) {
+        let broker = Broker::global();
+        self.vault.key_waiters.extend(broker.take_asks());
+        self.vault
+            .key_waiters
+            .retain(|ask| !ask.cancel.is_cancelled());
+        let Some(connection) = self.vault.key_waiters.first().map(|a| a.connection.clone()) else {
+            return;
+        };
+        let busy = self.state.active_modal.is_some()
+            || self.vault.prompt.is_some()
+            || self.vault.parked_settings.is_some();
+        if busy {
+            return;
+        }
+        match broker.remembered(&connection) {
+            Some(key) => self.hand_api_key(&connection, Ok(Some(key))),
+            None => self.answer(Request::ApiKey { connection }, CredentialAttempt::Initial),
+        }
+    }
+
+    /// Answer every call waiting for the key of `connection`; a key is
+    /// kept for the calls to come.
+    fn hand_api_key(&mut self, connection: &str, answer: api_keys::Answer) {
+        if let Ok(Some(key)) = &answer {
+            Broker::global().remember(connection, key.clone());
+        }
+        let (now, later) = std::mem::take(&mut self.vault.key_waiters)
+            .into_iter()
+            .partition::<Vec<_>, _>(|ask| ask.connection == connection);
+        self.vault.key_waiters = later;
+        for ask in now {
+            // A call stopped meanwhile no longer listens.
+            let _ = ask.reply.send(answer.clone());
+        }
+    }
+
+    /// The vault did not give the key `request` is for: the master password
+    /// prompt was cancelled, or the entry is gone.
+    fn api_key_unavailable(&mut self, request: Request) {
+        let stored = self.vault.has_entry(&request);
+        match request {
+            Request::ApiKey { connection } => {
+                let answer = if stored { Err(()) } else { Ok(None) };
+                self.hand_api_key(&connection, answer);
+            }
+            Request::ApiKeyMove { from, to } if stored => self
+                .state
+                .set_error(termide_i18n::t().vault_api_key_not_moved(&from, &to)),
+            _ => {}
+        }
+    }
+
+    /// Keep the key of connection `from` under `to`.
+    fn move_api_key(&mut self, from: &str, to: &str, key: &SecretText) {
+        let Some(v) = self.vault.vault.as_mut() else {
+            return;
+        };
+        let moved = v
+            .put(SecretKind::ApiKey, to, None, key.expose(), None)
+            .and_then(|()| v.remove(SecretKind::ApiKey, from, None));
+        match moved {
+            Ok(_) => self.vault.last_used = Instant::now(),
+            Err(e) => self.vault_error(&e),
+        }
+    }
+
+    /// The settings modal, open or put aside.
+    fn settings_modal_mut(&mut self) -> Option<&mut SettingsModal> {
+        if let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() {
+            return Some(modal);
+        }
+        self.vault.parked_settings.as_deref_mut()
+    }
+
+    /// Put the open settings aside for a vault prompt, keeping a change it
+    /// has not handed over yet.
+    fn park_settings(&mut self) {
+        if !matches!(self.state.active_modal, Some(ActiveModal::Settings(_))) {
+            return;
+        }
+        if let Some(ActiveModal::Settings(mut modal)) = self.state.active_modal.take() {
+            if let Some(save) = modal.take_save_request() {
+                self.settings_save = Some(save);
+            }
+            let changes = modal.take_api_key_changes();
+            self.vault.queue_key_changes(changes);
+            self.vault.parked_settings = Some(modal);
+        }
+    }
+
+    /// Take the API key changes the open settings asked for and make them.
+    pub(super) fn take_settings_key_changes(&mut self) {
+        if let Some(ActiveModal::Settings(modal)) = self.state.active_modal.as_mut() {
+            let changes = modal.take_api_key_changes();
+            self.vault.queue_key_changes(changes);
+        }
+        self.continue_key_changes();
+    }
+
+    /// Make the queued key changes until one needs a prompt. Once none is
+    /// left and no prompt shows, the settings put aside come back, told
+    /// which keys the vault keeps now. Cheap with nothing to do.
+    pub(super) fn continue_key_changes(&mut self) {
+        if self.vault.key_changes.is_empty() && self.vault.parked_settings.is_none() {
+            return;
+        }
+        let mut changed = false;
+        while self.vault.prompt.is_none() {
+            let Some(change) = self.vault.key_changes.pop_front() else {
+                break;
+            };
+            self.make_key_change(change);
+            changed = true;
+        }
+        let settled = self.vault.prompt.is_none() && self.vault.key_changes.is_empty();
+        if settled && self.state.active_modal.is_none() {
+            if let Some(modal) = self.vault.parked_settings.take() {
+                self.state
+                    .set_pending_action(PendingAction::Settings, ActiveModal::Settings(modal));
+                self.state.needs_redraw = true;
+                changed = true;
+            }
+        }
+        if changed {
+            let names = self.vault.stored_api_keys();
+            if let Some(settings) = self.settings_modal_mut() {
+                settings.set_stored_api_keys(names);
+            }
+        }
+    }
+
+    fn make_key_change(&mut self, change: ApiKeyChange) {
+        match change {
+            ApiKeyChange::Store {
+                connection,
+                key,
+                from_env,
+            } => {
+                let then = from_env.then(|| AfterSave::ClearApiKeyEnv {
+                    connection: connection.clone(),
+                });
+                self.save_password(PendingSave {
+                    request: Request::ApiKey { connection },
+                    secret: key,
+                    then,
+                });
+            }
+            ApiKeyChange::Remove { connection } => {
+                Broker::global().forget(&connection);
+                let removed = match self.vault.current() {
+                    Ok(Some(v)) => v.remove(SecretKind::ApiKey, &connection, None),
+                    Ok(None) => Ok(false),
+                    Err(e) => Err(e),
+                };
+                match removed {
+                    Ok(true) => self
+                        .state
+                        .set_info(termide_i18n::t().vault_api_key_removed().to_string()),
+                    Ok(false) => {}
+                    Err(e) => self.vault_error(&e),
+                }
+            }
+            ApiKeyChange::Rename { from, to } => {
+                Broker::global().rename(&from, &to);
+                let request = Request::ApiKeyMove { from, to };
+                if self.vault.has_entry(&request) {
+                    self.fulfil_from_vault(request);
+                }
+            }
+        }
+    }
+
+    /// The key of connection `name` for listing its models in the settings:
+    /// one known already or in the unlocked vault. Never asks.
+    pub(super) fn settings_api_key(
+        &mut self,
+        name: &str,
+        connection: &termide_config::Connection,
+    ) -> Option<String> {
+        let broker = Broker::global();
+        if let Some(key) = broker.known(name, connection) {
+            return Some(key.expose().to_string());
+        }
+        if !self.vault.is_unlocked() {
+            return None;
+        }
+        let found = match self.vault.current() {
+            Ok(Some(v)) => v.get(SecretKind::ApiKey, name, None).ok().flatten(),
+            _ => None,
+        };
+        let (_, key) = found?;
+        self.vault.last_used = Instant::now();
+        broker.remember(name, SecretText::new(key.as_str()));
+        Some(key.to_string())
     }
 
     /// Before a vault prompt closes, keep its checkbox.
@@ -852,6 +1144,42 @@ mod tests {
             "git@github.com: Permission denied (publickey)."
         ));
         assert!(!is_ssh_auth_failure("fatal: repository not found"));
+    }
+
+    #[test]
+    fn api_key_requests_address_the_connection_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.toml");
+        let mut state = VaultState::new(Some(path.clone()));
+        assert!(state.stored_api_keys().is_empty(), "no vault yet");
+        let fast = KdfParams {
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        let mut vault = Vault::create(&path, "m", fast).unwrap();
+        vault
+            .put(SecretKind::ApiKey, "openrouter", None, "k", None)
+            .unwrap();
+        vault
+            .put(SecretKind::Password, "sftp://h", Some("u"), "p", None)
+            .unwrap();
+        assert_eq!(
+            state.stored_api_keys(),
+            BTreeSet::from(["openrouter".to_string()])
+        );
+        let use_key = Request::ApiKey {
+            connection: "openrouter".into(),
+        };
+        let moved = Request::ApiKeyMove {
+            from: "openrouter".into(),
+            to: "or".into(),
+        };
+        assert!(state.has_entry(&use_key) && state.has_entry(&moved));
+        assert!(!state.has_entry(&Request::ApiKey {
+            connection: "or".into()
+        }));
+        assert_eq!(use_key.target_label(), "openrouter");
     }
 
     #[test]

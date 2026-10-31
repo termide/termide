@@ -171,6 +171,25 @@ pub struct SettingsSave {
     pub in_project: bool,
 }
 
+/// A change to the API keys the password vault keeps for the connections,
+/// taken by the app with [`SettingsModal::take_api_key_changes`] and made
+/// in order. Nothing about a key goes into the config.
+#[derive(Debug, Clone)]
+pub enum ApiKeyChange {
+    /// Keep `key` as the key of `connection`. `from_env`: it was pasted
+    /// into `api_key_env`, which the app clears through
+    /// [`SettingsModal::forget_api_key_env`] once the key is stored.
+    Store {
+        connection: String,
+        key: termide_core::SecretText,
+        from_env: bool,
+    },
+    /// Remove the key of `connection`, if the vault keeps one.
+    Remove { connection: String },
+    /// Connection `from` is now named `to`: its key moves with it.
+    Rename { from: String, to: String },
+}
+
 /// A destructive action waiting for confirmation in the button row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Confirm {
@@ -277,8 +296,14 @@ pub struct SettingsModal {
     /// The connection page, while one is open from the AI tab.
     connection_edit: Option<connection::ConnectionEdit>,
     /// The connection whose models the app should fetch for the model
-    /// dropdown, taken with [`SettingsModal::take_model_fetch_request`].
-    model_fetch_request: Option<termide_config::Connection>,
+    /// dropdown, by name, taken with
+    /// [`SettingsModal::take_model_fetch_request`].
+    model_fetch_request: Option<(String, termide_config::Connection)>,
+    /// The connections the password vault keeps an API key for, as the app
+    /// last told, with the changes asked since.
+    stored_api_keys: std::collections::BTreeSet<String>,
+    /// Changes to the vault's API keys the app has not taken yet.
+    api_key_changes: Vec<ApiKeyChange>,
 
     // --- Keybindings tab ---
     kb_mode: KbMode,

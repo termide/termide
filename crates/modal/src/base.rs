@@ -207,6 +207,30 @@ pub fn render_text_input(
     );
 }
 
+/// [`render_text_input`] for a secret: every character drawn as `*`.
+pub fn render_masked_text_input(
+    buf: &mut Buffer,
+    area: Rect,
+    input: &mut crate::TextInputHandler,
+    is_focused: bool,
+    theme: &Theme,
+) {
+    let scroll = input.follow_scroll(area.width);
+    let masked = "*".repeat(input.text().chars().count());
+    render_input_field_scrolled(
+        buf,
+        area.x,
+        area.y,
+        area.width,
+        &masked,
+        input.cursor_pos(),
+        input.selection_range(),
+        is_focused,
+        theme,
+        scroll,
+    );
+}
+
 /// The character of `input` under screen column `column` of the field
 /// [`render_text_input`] drew in `area`. Left of the field it is the character
 /// just scrolled out, so a drag past the edge keeps scrolling.

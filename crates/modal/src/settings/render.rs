@@ -346,13 +346,12 @@ impl SettingsModal {
                     if self.editing && is_focused {
                         let width = max_value_width.saturating_sub(1) as u16;
                         let field = Rect::new(value_x as u16, y, width, 1);
-                        crate::base::render_text_input(
-                            buf,
-                            field,
-                            &mut self.edit_input,
-                            true,
-                            theme,
-                        );
+                        let render = if self.is_api_key_field(field_idx) {
+                            crate::base::render_masked_text_input
+                        } else {
+                            crate::base::render_text_input
+                        };
+                        render(buf, field, &mut self.edit_input, true, theme);
                         self.edit_area = Some(field);
                         continue;
                     }
@@ -375,7 +374,12 @@ impl SettingsModal {
                     let refused = self
                         .page_error()
                         .filter(|(field, _)| *field == field_idx && !self.editing)
-                        .map(|(_, error)| error.as_str());
+                        .map(|(_, error)| error.as_str())
+                        .or_else(|| {
+                            (self.field_tab() == SettingsTab::Connection)
+                                .then(|| self.connection_warning(field_idx))
+                                .flatten()
+                        });
                     if let Some(error) = refused {
                         let x = value_x + display_value.width() + 2;
                         let room = (area.x as usize + area.width as usize).saturating_sub(x);

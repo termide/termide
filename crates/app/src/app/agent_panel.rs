@@ -38,6 +38,7 @@ use termide_panel_agent::{
     Trusted,
 };
 
+use super::api_keys::{Broker, KeyedProvider};
 use super::App;
 
 mod debug_tool;
@@ -1013,13 +1014,6 @@ fn session_connection(
         .or_else(|| settings.default_connection().map(str::to_string))?;
     let connection = settings.connections[&name].clone();
     Some((name, connection))
-}
-
-/// The API key the connection names, read from its environment variable.
-fn api_key_of(connection: &Connection) -> Option<String> {
-    (!connection.api_key_env.is_empty())
-        .then(|| std::env::var(&connection.api_key_env).ok())
-        .flatten()
 }
 
 /// A side call's provider when its connection names no model: the first
@@ -3454,15 +3448,17 @@ fn refresh_adapter(package: &'static str) {
 /// of `connection`. A CLI agent is started for it, as for a side call, and
 /// lists the models of its login; the process ends with the fetch. The
 /// receiver is polled by the app loop.
+/// `api_key` is the key the app could find without asking anyone.
 pub(crate) fn spawn_settings_model_fetch(
     connection: &Connection,
+    api_key: Option<String>,
 ) -> Option<std::sync::mpsc::Receiver<Result<Vec<termide_agent_core::ModelInfo>, String>>> {
     let provider: Arc<dyn Provider> = if connection.is_cli() {
         let config = cli_acp_config(connection)?;
         let cwd = std::env::current_dir().unwrap_or_default();
         Arc::new(AcpProvider::new("settings", config, cwd))
     } else {
-        build_provider(connection, api_key_of(connection))
+        build_provider(connection, api_key)
     };
     let (tx, rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
@@ -3474,12 +3470,24 @@ pub(crate) fn spawn_settings_model_fetch(
 /// The provider of connection `name` for a session or a side call: its
 /// requests take the connection's slots, which every panel of the process
 /// shares (see `max_concurrent_requests`). A CLI agent's is a placeholder
-/// that serves no request, so it takes none.
+/// that serves no request, so it takes none. A model connection's key is
+/// resolved for each call (see `api_keys`).
 fn connection_provider(name: &str, connection: &Connection) -> Arc<dyn Provider> {
-    let provider = build_provider(connection, api_key_of(connection));
     if connection.is_cli() {
-        return provider;
+        return build_provider(connection, None);
     }
+    if connection.api_key_env_looks_like_key() {
+        log::warn!(
+            "api_key_env of connection {name} holds what looks like a key, not a variable \
+             name; it is not used"
+        );
+    }
+    let provider: Arc<dyn Provider> = Arc::new(KeyedProvider::new(
+        name,
+        connection,
+        build_provider,
+        Broker::global(),
+    ));
     let slots = Slots::shared(name, connection.max_concurrent_requests as usize);
     Arc::new(SlottedProvider::new(provider, slots))
 }

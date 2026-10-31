@@ -400,6 +400,9 @@ pub trait Translation: Send + Sync {
     fn vault_stored_refused(&self, target: &str) -> String;
     fn vault_password_refused(&self, target: &str) -> String;
     fn vault_error(&self, error: &str) -> String;
+    /// A renamed connection's API key could not follow it: the vault was
+    /// not unlocked.
+    fn vault_api_key_not_moved(&self, from: &str, to: &str) -> String;
     fn git_username_prompt(&self, target: &str) -> String;
     fn status_vfs_connecting(&self, host: &str) -> String;
     /// Status while an archive's table of contents is read.
@@ -1266,6 +1269,17 @@ pub trait Translation: Send + Sync {
     fn settings_agent_base_url(&self) -> &str;
     fn settings_agent_model(&self) -> &str;
     fn settings_agent_api_key_env(&self) -> &str;
+    /// Settings modal: the connection's API key kept in the password vault,
+    /// its state and the dropdown's actions.
+    fn settings_agent_api_key(&self) -> &str;
+    fn settings_api_key_stored(&self) -> &str;
+    fn settings_api_key_not_stored(&self) -> &str;
+    fn settings_api_key_enter(&self) -> &str;
+    fn settings_api_key_replace(&self) -> &str;
+    fn settings_api_key_remove(&self) -> &str;
+    fn settings_api_key_move_env(&self) -> &str;
+    /// Settings modal: `api_key_env` holds a key rather than a name.
+    fn settings_api_key_env_misuse(&self) -> &str;
     fn settings_agent_context_window(&self) -> &str;
     fn settings_agent_max_tokens(&self) -> &str;
     fn settings_agent_reasoning(&self) -> &str;
@@ -1722,6 +1736,8 @@ pub trait Translation: Send + Sync {
     fn vault_target_ssh_key(&self) -> &str;
     fn palette_lock_vault(&self) -> &str;
     fn vault_move_bookmark_password(&self) -> &str;
+    fn vault_api_key_saved(&self) -> &str;
+    fn vault_api_key_removed(&self) -> &str;
     fn status_vfs_resolving_link(&self) -> &str;
     fn status_vfs_loading(&self) -> &str;
     fn status_vfs_connected(&self) -> &str;

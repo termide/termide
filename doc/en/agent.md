@@ -102,7 +102,7 @@ The settings modal (the gear, or the command palette) has all of it under
 **AI**. **Connections** comes first: each row names a connection with its
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
-key variable, model, context window (for a CLI agent, **Context window
+key, API key variable, model, context window (for a CLI agent, **Context window
 limit**, see below), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
@@ -122,9 +122,35 @@ in the input with a notice. Text fields edit like every input in termide: the
 cursor moves by character and word, `Shift` or a mouse drag selects, and
 `Ctrl+C`/`Ctrl+X`/`Ctrl+V`, `Ctrl+A` and undo work.
 
-The API key is read from the environment variable named by `api_key_env`, so
-the configuration file never holds a secret. Local servers usually need no key
-at all; leave the variable unset. `fold_blocks` decides when reasoning and tool
+The configuration file never holds an API key. A connection finds its key in
+two places, in this order:
+
+1. the environment variable named by `api_key_env`, when it is set;
+2. the [password vault](passwords.md), where the **API key** field on a
+   connection's page in the settings stores it.
+
+The **API key** field never shows the key, only whether the vault holds one.
+**Enter a key…** asks for it with the input masked and stores it at once; the
+first key stored creates the vault, asking for a new master password. **Remove
+from the vault** deletes it. Renaming the connection moves the key to the new
+name, which needs the master password when the vault is locked; cancelled, the
+key stays under the old name and a message says so. Deleting the connection
+removes its key without asking.
+
+A request on a connection whose key is in a locked vault asks for the master
+password first. Cancelled, the request fails with an error saying so, and the
+next one asks again. A key once unlocked stays in memory until termide exits,
+even after the vault locks itself. The model list in the settings never asks:
+it uses the key only when the vault is unlocked or the key was used already. A
+run [from the command line](#from-the-command-line) cannot ask for the master
+password, so there a connection needs `api_key_env`.
+
+A value of `api_key_env` that looks like a key rather than a variable name
+(`sk-…`) is never shown back: the field reads `********`, with a warning, and
+the **API key** field offers **Move the key from the variable field to the
+vault**, which stores it in the vault and clears `api_key_env`.
+
+Local servers usually need no key at all; leave both unset. `fold_blocks` decides when reasoning and tool
 calls fold to their one-line headline: `immediately` folds them while they
 still run (a running reasoning block shows its latest line), `on-finish` shows
 them in full until they finish, `never` leaves every block expanded; a

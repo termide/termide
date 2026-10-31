@@ -50,6 +50,8 @@ impl SettingsModal {
             builtin_plugins: Default::default(),
             connection_edit: None,
             model_fetch_request: None,
+            stored_api_keys: Default::default(),
+            api_key_changes: Vec::new(),
             kb_mode: KbMode::Bindings,
             kb_section: 0,
             kb_cursor: 0,
@@ -740,6 +742,14 @@ impl SettingsModal {
             self.editing = false;
             return;
         };
+        // A typed API key goes to the vault, not the config, and is not
+        // kept in the field.
+        if self.is_api_key_field(field_idx) {
+            let key = std::mem::take(&mut self.edit_input);
+            self.store_api_key(key.text());
+            self.editing = false;
+            return;
+        }
         let fields = fields_for_tab(tab);
         let Some(desc) = fields.get(field_idx) else {
             self.editing = false;
@@ -782,6 +792,12 @@ impl SettingsModal {
 
     /// Cancel the current inline edit.
     pub(super) fn cancel_edit(&mut self) {
+        if self
+            .current_field_idx()
+            .is_some_and(|i| self.is_api_key_field(i))
+        {
+            self.edit_input = termide_ui::TextInput::new();
+        }
         self.editing = false;
     }
 
@@ -826,7 +842,7 @@ impl SettingsModal {
             self.field_tab() == SettingsTab::Connection && field_idx == connection::MODEL;
         match desc.field_type {
             FieldType::Bool => return,
-            FieldType::Enum if !is_model => return,
+            FieldType::Enum if !is_model && !self.is_api_key_field(field_idx) => return,
             _ => {}
         }
         let value = if self.field_tab() == SettingsTab::Connection {
