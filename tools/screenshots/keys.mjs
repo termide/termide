@@ -14,7 +14,8 @@
 // Timing comes in two passes. The tape gives the order of the keys and when
 // each falls by its own clock (Sleep, the typing speed, Hide/Show — the
 // shared tapes it sources are read too); VHS drifts from that clock by a
-// tenth of a second or two, so each key is then moved onto the first change
+// tenth of a second or two (and runs a few percent fast, which scales the
+// clock), so each key is then moved onto the first change
 // of the screen near its moment, and the drift found carries on to the next.
 // A key that changes nothing on screen keeps its computed moment.
 import { execFileSync, spawn } from "node:child_process";
@@ -186,16 +187,24 @@ for (let f = 1; f < frames; f++) {
   change[f] = count;
 }
 const THRESHOLD = 2;
+// VHS's recording runs at a steady rate against the tape's clock, a few
+// percent short of it: a tape's 26.6 s come out as 24.5 s of video. Without
+// waits the tape's clock is scaled to the recording's length, so that two
+// keys far apart, with no snap between them, still land near their moments.
+const recorded = frames / fps;
+const pace = !state.uncertain && state.time > 0 && recorded / state.time > 0.8 && recorded / state.time < 1.2
+  ? recorded / state.time
+  : 1;
 let drift = 0;
 for (const event of state.events) {
-  const guess = event.t + drift;
+  const guess = event.t * pace + drift;
   const from = Math.max(1, Math.floor((guess - 0.35) * fps));
   const to = Math.min(frames - 1, Math.ceil((guess + 0.35) * fps));
   let hit = -1;
   for (let f = from; f <= to; f++) if (change[f] > THRESHOLD) { hit = f; break; }
   if (hit >= 0) {
     const seen = hit / fps;
-    drift = seen - event.t;
+    drift = seen - event.t * pace;
     event.at = Math.max(0, seen - LEAD);
     event.snapped = true;
   } else event.at = Math.max(0, guess - LEAD);
