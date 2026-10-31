@@ -18,7 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 
 use crate::acp::ACP_PROVIDER;
-use crate::compaction::{CompactionCall, CompactionPrompts};
+use crate::compaction::{context_tokens, CompactionCall, CompactionPrompts};
 use crate::context::file_timestamp;
 use crate::failure::Failure;
 use crate::fit::{fit, FitStep};
@@ -103,6 +103,23 @@ pub struct LoggedMessage {
     /// When the entry was written (millis).
     pub timestamp: u64,
     pub timing: Option<Timing>,
+}
+
+/// A step of the conversation on the current branch, as
+/// [`Session::history_with_times`] gives it.
+#[derive(Debug, Clone, PartialEq)]
+pub enum HistoryStep {
+    Message(LoggedMessage),
+    /// The context was summarised, its last `kept` messages kept as they were.
+    Compacted {
+        tokens_before: u64,
+        kept: usize,
+    },
+    /// The context was cut down by kinds of content, with no summary.
+    Fitted {
+        tokens_before: u64,
+        tokens_after: u64,
+    },
 }
 
 /// Payload of a tree entry.
@@ -1256,6 +1273,78 @@ impl Session {
             }
         }
         messages
+    }
+
+    /// The current branch as the conversation went, for showing it again:
+    /// every message, those a compaction or a fitting took out of the
+    /// context included, and a step where the context was cut down. A
+    /// fitting's size after it is replayed from the context, worded by
+    /// `prompts`, as the agent measured it.
+    #[must_use]
+    pub fn history_with_times(&self, prompts: &CompactionPrompts) -> Vec<HistoryStep> {
+        let mut steps: Vec<HistoryStep> = Vec::new();
+        // The context as the model saw it, for what a fitting left of it.
+        let mut context: Vec<Message> = Vec::new();
+        for entry in self.branch() {
+            match &entry.kind {
+                EntryKind::Message { message, timing } => {
+                    context.push(message.clone());
+                    steps.push(HistoryStep::Message(LoggedMessage {
+                        message: message.clone(),
+                        timestamp: entry.timestamp,
+                        timing: *timing,
+                    }));
+                }
+                EntryKind::Compaction {
+                    summary,
+                    keep_last,
+                    tokens_before,
+                    ..
+                } => {
+                    let tail = context.split_off(context.len().saturating_sub(*keep_last));
+                    context = vec![prompts.summary_message(summary)];
+                    context.extend(tail);
+                    steps.push(HistoryStep::Compacted {
+                        tokens_before: *tokens_before,
+                        kept: *keep_last,
+                    });
+                }
+                EntryKind::Fitted {
+                    budget,
+                    keep_tail,
+                    tokens_before,
+                    ..
+                } => {
+                    context = fit(&context, *budget, *keep_tail).messages;
+                    steps.push(HistoryStep::Fitted {
+                        tokens_before: *tokens_before,
+                        tokens_after: context_tokens(&context),
+                    });
+                }
+                EntryKind::Pruned => context = prune_to_decisions(&context),
+                EntryKind::ModelChange { .. }
+                | EntryKind::SessionName { .. }
+                | EntryKind::AgentChange { .. }
+                | EntryKind::Rewind
+                | EntryKind::ReasoningChange { .. }
+                | EntryKind::ThinkingChange { .. }
+                | EntryKind::Toolset { .. }
+                | EntryKind::ConnectionChange { .. }
+                | EntryKind::ModeChange { .. }
+                | EntryKind::ExternalSession { .. }
+                | EntryKind::AgentOption { .. }
+                | EntryKind::RunStart
+                | EntryKind::RunEnd { .. }
+                | EntryKind::Retry { .. }
+                | EntryKind::HeldReports { .. }
+                | EntryKind::Autorun { .. }
+                | EntryKind::GoalVerdict { .. }
+                | EntryKind::Spent { .. }
+                | EntryKind::ContextFill { .. }
+                | EntryKind::CompactionFailed { .. } => {}
+            }
+        }
+        steps
     }
 
     /// The conversation's name: the last one set on the current branch, or
@@ -2755,6 +2844,68 @@ mod tests {
         assert!(matches!(&context[1], Message::User(u) if u.plain_text() == "three"));
         assert!(matches!(&context[3], Message::User(u) if u.plain_text() == "four"));
         assert_eq!(SessionSummary::from(&reopened).message_count, 7);
+    }
+
+    #[test]
+    fn history_keeps_what_a_compaction_or_a_fitting_took_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        for text in ["one", "two", "three"] {
+            session
+                .append_message(&Message::User(UserMessage::text(text)))
+                .unwrap();
+            session
+                .append_message(&Message::Assistant(text_reply(&format!("answer {text}"))))
+                .unwrap();
+        }
+        session.append_compaction("the gist", 5000, 2).unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("four")))
+            .unwrap();
+        session.append_fitted(1_000, 10, Vec::new(), 900).unwrap();
+
+        let reopened = Session::open(session.path()).unwrap();
+        let prompts = CompactionPrompts::default();
+        let steps = reopened.history_with_times(&prompts);
+        let texts: Vec<String> = steps
+            .iter()
+            .map(|step| match step {
+                HistoryStep::Message(logged) => match &logged.message {
+                    Message::User(user) => user.plain_text(),
+                    Message::Assistant(assistant) => assistant.plain_text(),
+                    Message::ToolResult(_) => "tool result".into(),
+                },
+                HistoryStep::Compacted {
+                    tokens_before,
+                    kept,
+                } => {
+                    format!("compacted {tokens_before}, kept {kept}")
+                }
+                HistoryStep::Fitted { tokens_before, .. } => format!("fitted {tokens_before}"),
+            })
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "one",
+                "answer one",
+                "two",
+                "answer two",
+                "three",
+                "answer three",
+                "compacted 5000, kept 2",
+                "four",
+                "fitted 900"
+            ]
+        );
+        // A fitting's size after it is the context's, as the agent measured it.
+        let Some(HistoryStep::Fitted { tokens_after, .. }) = steps.last() else {
+            panic!("no fitting")
+        };
+        assert_eq!(
+            *tokens_after,
+            context_tokens(&reopened.context_messages_with(&prompts))
+        );
     }
 
     /// Another termide's claim, as this process sees one: the lock of the

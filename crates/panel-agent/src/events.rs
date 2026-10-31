@@ -14,6 +14,7 @@ use termide_core::PanelEvent;
 use termide_ui::ChoiceForm;
 
 use crate::pending::Pending;
+use crate::runtime::{compacted_notice, fitted_notice};
 use crate::{millis, now_hms, transcript, Activity, AgentPanel, Item, NoticeKind, Phase};
 
 /// A finished run shorter than this rings no bell: the user is most likely
@@ -541,14 +542,7 @@ impl AgentPanel {
                 // The summary's tokens count with the session's; the log
                 // keeps them with the compaction.
                 self.count_spent(&call.usage);
-                // Nothing kept verbatim, as with an external agent: the
-                // summary is all that stands for the history.
-                let notice = if kept == 0 {
-                    termide_i18n::t().agent_notice_compacted_summary_fmt(tokens_before)
-                } else {
-                    termide_i18n::t().agent_notice_compacted_fmt(tokens_before, kept)
-                };
-                self.notice(notice, NoticeKind::Info);
+                self.notice(compacted_notice(tokens_before, kept), NoticeKind::Info);
                 // An external agent may compact without saying how: the log
                 // then keeps the history whole rather than an empty summary.
                 if let Some(session) = self.session.as_mut().filter(|_| !summary.is_empty()) {
@@ -602,10 +596,7 @@ impl AgentPanel {
                 ..
             } => {
                 self.context_tokens = tokens_after;
-                self.notice(
-                    termide_i18n::t().agent_notice_fitted_fmt(tokens_before, tokens_after),
-                    NoticeKind::Info,
-                );
+                self.notice(fitted_notice(tokens_before, tokens_after), NoticeKind::Info);
                 if let Some(session) = &mut self.session {
                     if let Err(error) =
                         session.append_fitted(budget, keep_tail, steps, tokens_before)

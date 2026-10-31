@@ -9731,6 +9731,54 @@ fn logged_request(dir: &Path, finish: impl FnOnce(&mut Session)) -> PathBuf {
     session.path().to_path_buf()
 }
 
+#[test]
+fn a_reopened_session_shows_what_a_compaction_took_out_of_the_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+    for text in ["one", "two", "three"] {
+        session
+            .append_message(&Message::User(UserMessage::text(text)))
+            .unwrap();
+        session
+            .append_message(&Message::Assistant(reply(&format!("answer {text}"))))
+            .unwrap();
+    }
+    session.append_compaction("the gist", 5000, 2).unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("four")))
+        .unwrap();
+    let path = session.path().to_path_buf();
+    drop(session);
+
+    // As the live run showed it: every block, the compaction's notice where
+    // it happened, and no summary posing as a message of the user's.
+    let panel = reopen(&path, dir.path(), vec![]);
+    let shown: Vec<String> = panel
+        .transcript
+        .items()
+        .iter()
+        .filter_map(|item| match item {
+            Item::User { text, .. } | Item::Assistant { text, .. } => Some(text.clone()),
+            Item::Notice { text, .. } => Some(format!("· {text}")),
+            _ => None,
+        })
+        .collect();
+    let notice = format!("· {}", crate::runtime::compacted_notice(5000, 2));
+    assert_eq!(
+        shown,
+        [
+            "one",
+            "answer one",
+            "two",
+            "answer two",
+            "three",
+            "answer three",
+            notice.as_str(),
+            "four"
+        ]
+    );
+}
+
 fn reopen(path: &Path, dir: &Path, replies: Vec<AssistantMessage>) -> AgentPanel {
     AgentPanel::new(AgentPanelSetup {
         session_dir: Some(dir.to_path_buf()),

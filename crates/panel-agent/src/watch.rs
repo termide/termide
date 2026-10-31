@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use termide_agent_core::{CancelToken, PauseGate, Session};
 use termide_core::{ConfirmAction, PanelEvent};
 
-use crate::runtime::push_history;
+use crate::runtime::push_steps;
 use crate::{AgentPanel, NoticeKind, Transcript, STOP_WATCHED_ACTION, TAKE_OVER_ACTION};
 
 /// What the user can do to a delegate running out of sight, from a panel
@@ -216,9 +216,10 @@ impl AgentPanel {
         watch.seen = len;
         let mut transcript = Transcript::default();
         transcript.set_fold(self.fold);
-        for logged in session.context_messages_with_times(&self.compaction_prompts) {
-            push_history(&mut transcript, &logged);
-        }
+        push_steps(
+            &mut transcript,
+            &session.history_with_times(&self.compaction_prompts),
+        );
         self.transcript = transcript;
         self.selected = self
             .selected

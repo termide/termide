@@ -830,7 +830,9 @@ status bar's context figure drops to the summary and the kept tail as soon as it
 ends. An external agent shows no live
 prefill line, as its message starts with its first text. Reopening a
 conversation restores each block's time, its reasoning, the turn's
-prefill/generation lines and each tool call's duration from the log.
+prefill/generation lines and each tool call's duration from the log, and the
+whole conversation: the blocks a compaction took out of the context stay above
+its notice, as they did while it ran.
 
 Unfold a block to see all of it: click it, or press `Tab` to move into the
 chat and `Space`/`Enter` or `→` on the block the `↑`/`↓` cursor is on (`←`
