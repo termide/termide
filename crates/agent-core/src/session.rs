@@ -241,6 +241,11 @@ pub enum EntryKind {
         model: String,
         usage: Usage,
     },
+    /// How full an external agent's context stood at a turn's end, `used`
+    /// of `size` tokens, as the agent reported it: its turns' usage is what
+    /// they spent, not the fill, so a reopened session reads it from here.
+    /// Changes nothing on the branch; see [`Session::context_fill`].
+    ContextFill { used: u64, size: u64 },
 }
 
 /// How much of a judge's answer a [`EntryKind::GoalVerdict`] keeps.
@@ -1124,6 +1129,7 @@ impl Session {
                 | EntryKind::Autorun { .. }
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
+                | EntryKind::ContextFill { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1174,6 +1180,7 @@ impl Session {
                 | EntryKind::Autorun { .. }
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
+                | EntryKind::ContextFill { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1356,6 +1363,7 @@ impl Session {
                 | EntryKind::CompactionFailed { .. }
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
+                | EntryKind::ContextFill { .. }
                 | EntryKind::Fitted { .. } => None,
             })
     }
@@ -1493,6 +1501,7 @@ impl Session {
                 | EntryKind::Autorun { .. }
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
+                | EntryKind::ContextFill { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
         }
@@ -1546,6 +1555,38 @@ impl Session {
             model: model.to_string(),
             usage,
         })
+    }
+
+    /// Record how full an external agent's context stands, see
+    /// [`EntryKind::ContextFill`].
+    pub fn append_context_fill(&mut self, used: u64, size: u64) -> std::io::Result<String> {
+        self.append(EntryKind::ContextFill { used, size })
+    }
+
+    /// How full the context stood when the branch was last written to, as
+    /// far as the log tells: the latest of an external agent's reported
+    /// fill (with the window it reported), the size a compaction left, or
+    /// the last call of the built-in loop's (its usage is one call's, the
+    /// prompt it sent and the reply). `None` when the branch tells nothing.
+    #[must_use]
+    pub fn context_fill(&self) -> Option<(u64, Option<u64>)> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::ContextFill { used, size } => Some((*used, Some(*size))),
+                EntryKind::Compaction {
+                    tokens_after: Some(after),
+                    ..
+                } => Some((*after, None)),
+                EntryKind::Message {
+                    message: Message::Assistant(reply),
+                    ..
+                } if reply.usage.total() > 0 && reply.provider != crate::ACP_PROVIDER => {
+                    Some((reply.usage.total(), None))
+                }
+                _ => None,
+            })
     }
 
     /// What the whole log spent, by whom and on which model — a fork not
@@ -1872,6 +1913,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::CompactionFailed { .. }
             | EntryKind::GoalVerdict { .. }
             | EntryKind::Spent { .. }
+            | EntryKind::ContextFill { .. }
             | EntryKind::Fitted { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
@@ -3063,5 +3105,31 @@ mod lock_tests {
         drop(session);
         assert!(!Session::is_open(&path));
         assert_ne!(Session::open_generation(), claimed);
+    }
+
+    /// The context's fill reads back from the latest that tells it: an
+    /// external agent's logged fill, a compaction, the built-in loop's call.
+    #[test]
+    fn the_context_fill_reads_back_from_the_log() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert_eq!(session.context_fill(), None);
+        let mut reply = crate::agent::test_support::text_reply("ok");
+        reply.usage.input = 900;
+        reply.usage.output = 100;
+        session
+            .append_message(&Message::Assistant(reply.clone()))
+            .unwrap();
+        assert_eq!(session.context_fill(), Some((1_000, None)));
+        session.append_context_fill(5_000, 200_000).unwrap();
+        // An external agent's reply is what its turn spent: not the fill.
+        reply.provider = crate::ACP_PROVIDER.to_string();
+        session.append_message(&Message::Assistant(reply)).unwrap();
+        let reopened = Session::open(session.path()).unwrap();
+        assert_eq!(reopened.context_fill(), Some((5_000, Some(200_000))));
+        session
+            .append_compaction_with("summary", 5_000, 0, Some(700), None)
+            .unwrap();
+        assert_eq!(session.context_fill(), Some((700, None)));
     }
 }

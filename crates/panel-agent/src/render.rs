@@ -1392,7 +1392,9 @@ impl AgentPanel {
         }
         // An external agent's window is known once it reports it; until then
         // the configured fallback would mislead.
-        let window_known = !self.external || self.runtime.context_usage().is_some();
+        let window_known = !self.external
+            || self.runtime.context_usage().is_some()
+            || self.context_logged.is_some();
         if window_known && self.model.context_window > 0 {
             let percent = ((self.context_tokens * 100) / self.model.context_window).min(100);
             let kind = if percent >= 80 {

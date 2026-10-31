@@ -225,9 +225,10 @@ impl AgentPanel {
         self.run_start_due = false;
         self.pause_requested = false;
         self.stop_requested = None;
-        self.context_tokens = 0;
-        // The totals are the session's: what its log says it spent so far.
+        // The totals and the context's fill are the session's: what its log
+        // says it spent so far and how full it last stood.
         self.seed_spent();
+        self.seed_context();
         // What the previous agent stated is not this one's.
         self.acp_has_models = false;
         self.acp_options.clear();

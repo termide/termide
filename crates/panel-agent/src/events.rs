@@ -249,7 +249,8 @@ impl AgentPanel {
                     self.raise_attention(ring);
                 }
             }
-            AgentEvent::TurnStart | AgentEvent::TurnEnd => {}
+            AgentEvent::TurnStart => {}
+            AgentEvent::TurnEnd => self.log_context_fill(),
             AgentEvent::MessageStart { prompt_tokens } => {
                 // The reasoning and answer blocks are created lazily on their
                 // first delta, so the reasoning lands above the answer and a
@@ -951,6 +952,40 @@ impl AgentPanel {
         self.session_input += usage.uncached();
         self.session_cached += usage.cache_read;
         self.session_output += usage.output;
+    }
+
+    /// Log an external agent's context fill as it stands, when it changed
+    /// since it was last logged: a reopened session shows it from there.
+    pub(crate) fn log_context_fill(&mut self) {
+        if !self.external {
+            return;
+        }
+        let Some(fill) = self.runtime.context_usage() else {
+            return;
+        };
+        if self.context_logged == Some(fill) {
+            return;
+        }
+        self.context_logged = Some(fill);
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_context_fill(fill.0, fill.1) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+    }
+
+    /// Start the context's fill at how full the log says it last stood, an
+    /// external agent's window with it; nothing known, at nothing.
+    pub(crate) fn seed_context(&mut self) {
+        let fill = self.session.as_ref().and_then(crate::Session::context_fill);
+        self.context_tokens = fill.map_or(0, |(used, _)| used);
+        self.context_logged = None;
+        if let Some((used, Some(size))) = fill {
+            self.context_logged = Some((used, size));
+            if size > 0 {
+                self.model.context_window = size;
+            }
+        }
     }
 
     /// Start the session's totals at what its log says it spent.

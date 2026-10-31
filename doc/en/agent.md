@@ -879,7 +879,9 @@ served, shown once there are any, and `↓` the output: `↑2.1k ↻48k ↓900`.
 include what subagents spent, added when their task ends, and what the `auto`
 mode reviewer, `recall`'s solver, summaries, the `/goal` judge and `/handoff`
 spent; the window counts only the session's own context. They are the
-session's, kept in its log: a reopened session starts from what it had spent.
+session's, kept in its log: a reopened session starts from what it had spent,
+and its window from how full it last stood — a Claude Code or Codex session's
+as the agent last reported it, with the window's size.
 The session info (`F3`) breaks them down: **Spent by** the conversation,
 subagents, the reviewer, recall, summaries, the goal judge and handoff, and
 **By model**, each with a bar and its share, heaviest first; **Cache hits**,

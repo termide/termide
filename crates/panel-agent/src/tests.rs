@@ -3784,6 +3784,8 @@ fn spending_outlives_a_reopen_and_shows_by_whom() {
         ),
         totals
     );
+    // The context stands where the last call left it, not at nothing.
+    assert_eq!(reopened.context_tokens, 1_050);
     let Some(PanelEvent::ShowInfo { rows, .. }) = reopened.session_summary().into_iter().next()
     else {
         panic!("the session info shows");
