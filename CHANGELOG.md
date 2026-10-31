@@ -5,7 +5,9 @@ All notable changes to Termide will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.48.0] - 2026-10-31
+
+[0.48.0]: https://github.com/termide/termide/releases/tag/0.48.0
 
 ### Added
 - **Perforce, built in.** termide carries a Perforce plugin: no Python, no download, the same on Linux, macOS and Windows; `p4` on `PATH` is all it needs. It sleeps until the global config gives it a mode (`[plugins.perforce]` with `mode = "on"`, or `"opt-in"` and `enabled = true` in a project's file), so a repository alone never wakes it, and it stays a process of its own that starts only in a project that wants it. It shows the state of the file in the editor in the status bar (`p4: #3/5 (out of date)`, `edit · change 1234`, `locked by …`), opens it for edit when `Ctrl+E` turns editing on in the read-only file, asking first when someone else has it open (or for add from the palette), offers to revert it when `Ctrl+E` turns editing back off, and asks then whether to save or discard unsaved changes, lists the opened files by changelist, in a tree of folders, on `Alt+G` in a project outside git, where `Enter` opens a file, `F3` shows its diff in the git diff panel, `Backspace` reverts it, `Space` lists what can be done with it and `Enter` on a changelist submits it — the default changelist from a dialog with its description and the files to go, shows the file's diff from the palette, syncs in a terminal, and gives the agent `opened`, `diff` and `edit` tools. It colours the opened files in the file manager and marks the lines changed against the depot in the editor's gutter, as termide does for git. A plugin of the same name in the plugins directory takes its place.
