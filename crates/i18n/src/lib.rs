@@ -841,6 +841,7 @@ pub trait Translation: Send + Sync {
     fn agent_spender_goal_judge(&self) -> &str;
     fn agent_spender_handoff(&self) -> &str;
     fn agent_spender_tool(&self) -> &str;
+    fn agent_spender_internal(&self) -> &str;
     fn agent_model_unknown(&self) -> &str;
     fn agent_info_context_parts(&self) -> &str;
     fn agent_info_tool_output(&self) -> &str;

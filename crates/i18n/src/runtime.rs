@@ -178,6 +178,7 @@ impl Translation for RuntimeTranslation {
         agent_spender_goal_judge,
         agent_spender_handoff,
         agent_spender_tool,
+        agent_spender_internal,
         agent_model_unknown,
         agent_info_context_parts,
         agent_info_tool_output,

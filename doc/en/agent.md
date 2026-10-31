@@ -890,7 +890,11 @@ weighs the tokens as they cost — a cache read a tenth of an input token, a
 cache write a quarter more, an output token five times, Anthropic's price
 ratios — so a part with few tokens of output can outweigh one with many cache
 reads. A Claude Code or Codex reviewer is credited to the model it ran on, the
-cheapest the CLI offers by default. A subagent's share is read from its own
+cheapest the CLI offers by default. Claude Code reports its turn's tokens for
+its conversation alone and, apart, a sum by model that also counts its own
+subagents, its summaries and its helper calls on a smaller model; what that sum
+holds beyond the turn is **Inside the agent**, on the model it names. A
+subagent's share is read from its own
 session log: its turns count as **Subagents** on the model it ran on, and what
 its own reviewer, summaries and subagents spent joins those rows; what its task
 reports beyond its log — a log from before this was recorded, one deleted —

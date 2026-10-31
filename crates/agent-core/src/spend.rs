@@ -39,6 +39,10 @@ pub enum Spender {
     Handoff,
     /// Any other tool that reports what its own model calls spent.
     Tool,
+    /// A CLI agent's calls beyond its conversation's own turns, which it
+    /// reports only as a sum per model: Claude Code's own subagents, its
+    /// summaries, its helpers on a smaller model.
+    AgentInternal,
 }
 
 impl Spender {
@@ -192,7 +196,7 @@ impl Spending {
         for (model, usage) in &theirs.models {
             self.models.entry(model.clone()).or_default().add(usage);
         }
-        let rest = less(&said, &theirs.total());
+        let rest = said.less(&theirs.total());
         self.add(Spender::Subagent, "", &rest);
     }
 }
@@ -205,17 +209,6 @@ fn delegate_log(result: &crate::message::ToolResultMessage) -> Option<PathBuf> {
         .get(SUBAGENT_SESSION_KEY)?
         .as_str()?;
     (!path.is_empty()).then(|| PathBuf::from(path))
-}
-
-/// What `a` holds beyond `b`, count by count.
-fn less(a: &Usage, b: &Usage) -> Usage {
-    Usage {
-        input: a.input.saturating_sub(b.input),
-        output: a.output.saturating_sub(b.output),
-        cache_read: a.cache_read.saturating_sub(b.cache_read),
-        cache_write: a.cache_write.saturating_sub(b.cache_write),
-        thinking: a.thinking.saturating_sub(b.thinking),
-    }
 }
 
 #[cfg(test)]

@@ -1822,6 +1822,11 @@ impl Shared {
             class
         });
         let usage = result.as_ref().map(usage_of).unwrap_or_default();
+        if let Ok(value) = &result {
+            for (model, beyond) in usage_beyond(value, &usage, &self.model_name()) {
+                self.report_spent_on(Spender::AgentInternal, model, beyond);
+            }
+        }
         // A compaction the turn ended in the middle of: an adapter reporting
         // it as a made-up call never ends it then.
         self.end_compaction("cancelled", None, None);
@@ -2391,12 +2396,13 @@ impl Shared {
     /// Tell the panel what a side request of `by`'s spent, credited to the
     /// session's model, so the log keeps it.
     fn report_spent(&self, by: Spender, usage: Usage) {
+        self.report_spent_on(by, self.model_name(), usage);
+    }
+
+    /// [`Self::report_spent`] on `model`.
+    fn report_spent_on(&self, by: Spender, model: String, usage: Usage) {
         if usage.total() > 0 {
-            let _ = self.events.send(AgentEvent::Spent {
-                by,
-                model: self.model_name(),
-                usage,
-            });
+            let _ = self.events.send(AgentEvent::Spent { by, model, usage });
         }
     }
 
@@ -3532,6 +3538,78 @@ fn usage_of(result: &Value) -> Usage {
         // Codex's reasoning, within its output; Claude Code never counts
         // its thinking apart.
         thinking: count("thoughtTokens"),
+    }
+}
+
+/// What a `session/prompt` result's `_meta.quota.model_usage` counts beyond
+/// its `usage`, by model. Claude Code's `usage` is its conversation's own
+/// turns, while its rows by model also count its subagents, summaries and
+/// helper calls; Codex's single row is its `usage`, so nothing is beyond.
+///
+/// The turns are taken out of one row: among those that hold them whole, one
+/// on `current` (the session's model, named its own way) or else the
+/// largest; with none holding them, the largest row.
+fn usage_beyond(result: &Value, usage: &Usage, current: &str) -> Vec<(String, Usage)> {
+    let Some(rows) = result["_meta"]["quota"]["model_usage"].as_array() else {
+        return Vec::new();
+    };
+    let mut rows: Vec<(String, Usage)> = rows
+        .iter()
+        .filter_map(|row| {
+            Some((
+                bare_model(row["model"].as_str()?),
+                token_count(&row["token_count"]),
+            ))
+        })
+        .collect();
+    let covers = |row: &Usage| {
+        row.input >= usage.input
+            && row.output >= usage.output
+            && row.cache_read >= usage.cache_read
+            && row.cache_write >= usage.cache_write
+    };
+    let current = bare_model(current).to_lowercase();
+    let named = |model: &str| {
+        let model = model.to_lowercase();
+        !current.is_empty() && (model.contains(&current) || current.contains(&model))
+    };
+    let host = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, row))| covers(row))
+        .max_by_key(|(_, (model, row))| (named(model), row.total()))
+        .or_else(|| {
+            rows.iter()
+                .enumerate()
+                .max_by_key(|(_, (_, row))| row.total())
+        })
+        .map(|(index, _)| index);
+    if let Some(index) = host {
+        rows[index].1 = rows[index].1.less(usage);
+    }
+    rows.retain(|(_, row)| row.total() > 0);
+    rows
+}
+
+/// A model id without the context-size suffix Claude Code decorates it
+/// with, `claude-sonnet-5[1m]` read as `claude-sonnet-5`.
+fn bare_model(model: &str) -> String {
+    match model.find('[') {
+        Some(at) if model.ends_with(']') => model[..at].to_string(),
+        _ => model.to_string(),
+    }
+}
+
+/// A `_meta.quota` `token_count`: Codex's shape, which Claude Code's
+/// follows but for spelling its cache writes its own way.
+fn token_count(count: &Value) -> Usage {
+    let count = |key: &str| count[key].as_u64().unwrap_or(0);
+    Usage {
+        input: count("inputTokens"),
+        output: count("outputTokens"),
+        cache_read: count("cachedInputTokens"),
+        cache_write: count("cachedWriteTokens").max(count("cacheWriteInputTokens")),
+        thinking: count("reasoningOutputTokens"),
     }
 }
 
@@ -4936,6 +5014,59 @@ mod tests {
             .shared
             .on_update(&json!({ "sessionUpdate": "usage_update", "used": 975, "size": 1_000_000 }));
         assert_eq!(runtime.context_usage(), Some((975, 200_000)));
+    }
+
+    /// Claude Code's rows by model count more than its turn's `usage`: what
+    /// they hold beyond it is told apart by model, the turn taken out of the
+    /// session's model's row; Codex's single row is the usage itself.
+    #[test]
+    fn what_a_turn_spent_beyond_its_usage_is_read_by_model() {
+        let row = |model: &str, input: u64, output: u64, read: u64, write: u64| {
+            json!({ "model": model, "token_count": {
+                "inputTokens": input, "outputTokens": output,
+                "cachedInputTokens": read, "cachedWriteTokens": write,
+                "reasoningOutputTokens": 0,
+            } })
+        };
+        let usage = Usage {
+            input: 10,
+            output: 20,
+            cache_read: 300,
+            cache_write: 40,
+            thinking: 0,
+        };
+        let claude = json!({ "stopReason": "end_turn", "_meta": { "quota": { "model_usage": [
+            row("claude-haiku-4-5", 5, 1, 0, 0),
+            row("claude-opus-5[1m]", 15, 30, 300, 40),
+        ] } } });
+        assert_eq!(
+            usage_beyond(&claude, &usage, "opus-5"),
+            [
+                (
+                    "claude-haiku-4-5".to_string(),
+                    Usage {
+                        input: 5,
+                        output: 1,
+                        ..Usage::default()
+                    }
+                ),
+                (
+                    "claude-opus-5".to_string(),
+                    Usage {
+                        input: 5,
+                        output: 10,
+                        ..Usage::default()
+                    }
+                ),
+            ]
+        );
+        let codex = json!({ "stopReason": "end_turn", "_meta": { "quota": { "model_usage": [{
+            "model": "gpt-5.5", "token_count": {
+                "inputTokens": 10, "outputTokens": 20, "cachedInputTokens": 300,
+                "cacheWriteInputTokens": 40, "reasoningOutputTokens": 0,
+            } }] } } });
+        assert!(usage_beyond(&codex, &usage, "gpt-5.5").is_empty());
+        assert!(usage_beyond(&json!({ "stopReason": "end_turn" }), &usage, "x").is_empty());
     }
 
     #[test]

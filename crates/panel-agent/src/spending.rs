@@ -32,6 +32,7 @@ fn spender_label(by: Spender) -> &'static str {
         Spender::GoalJudge => t.agent_spender_goal_judge(),
         Spender::Handoff => t.agent_spender_handoff(),
         Spender::Tool => t.agent_spender_tool(),
+        Spender::AgentInternal => t.agent_spender_internal(),
     }
 }
 

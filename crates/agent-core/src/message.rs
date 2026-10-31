@@ -97,6 +97,18 @@ impl Usage {
         self.cache_write = self.cache_write.saturating_add(other.cache_write);
         self.thinking = self.thinking.saturating_add(other.thinking);
     }
+
+    /// These counts less `other`'s, none below zero.
+    #[must_use]
+    pub fn less(&self, other: &Self) -> Self {
+        Self {
+            input: self.input.saturating_sub(other.input),
+            output: self.output.saturating_sub(other.output),
+            cache_read: self.cache_read.saturating_sub(other.cache_read),
+            cache_write: self.cache_write.saturating_sub(other.cache_write),
+            thinking: self.thinking.saturating_sub(other.thinking),
+        }
+    }
 }
 
 /// The key of a tool result's details under which the tool reports the
