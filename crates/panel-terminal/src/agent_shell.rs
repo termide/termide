@@ -78,15 +78,13 @@ fn init_script() -> std::io::Result<&'static Path> {
     Ok(PATH.get_or_init(|| path))
 }
 
-/// The line typed into the shell for `command`. A command of one line goes
-/// as it is; one with a line break or another control character goes
-/// through `eval $'…'`, so that the shell reads it as one command, with one
-/// start and one end.
+/// The line typed into the shell for `command`: always `eval $'…'`, a
+/// simple command, so that the shell reads it as one command with one start
+/// and one end — the start mark comes from the `DEBUG` trap, which bash runs
+/// before a simple command and not before a subshell such as `( … ) &` —
+/// and a line break or another control character in it is typed safely.
 fn typed_line(command: &str) -> String {
     let command = command.trim_end_matches(['\n', '\r']);
-    if !command.chars().any(char::is_control) {
-        return format!("{command}\n");
-    }
     let mut line = String::from("eval $'");
     for c in command.chars() {
         match c {
@@ -387,8 +385,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_command_of_several_lines_is_typed_as_one() {
-        assert_eq!(typed_line("ls -la\n"), "ls -la\n");
+    fn every_command_is_typed_as_one_eval() {
+        assert_eq!(typed_line("ls -la\n"), "eval $'ls -la'\n");
         assert_eq!(
             typed_line("cd /tmp\necho 'a\\b'\tc"),
             "eval $'cd /tmp\\necho \\'a\\\\b\\'\\tc'\n"
@@ -438,6 +436,23 @@ mod shell_tests {
         assert_eq!(out, "42 sub\n");
         assert_eq!(outcome.end, RunEnd::Finished(Some(1)));
         assert_eq!(shell.status(), ShellStatus::Idle);
+    }
+
+    #[test]
+    fn a_compound_command_has_its_start_and_end() {
+        let home = tempfile::tempdir().unwrap();
+        let Some((_term, shell)) = session(home.path()) else {
+            return;
+        };
+        let long = Duration::from_secs(20);
+        // Bash runs no `DEBUG` trap before a subshell or a group.
+        let (_, outcome) = run(&shell, "(true) &", long);
+        assert_eq!(outcome.end, RunEnd::Finished(Some(0)));
+        let (out, outcome) = run(&shell, "{ echo a; }", long);
+        assert_eq!(
+            (out.as_str(), outcome.end),
+            ("a\n", RunEnd::Finished(Some(0)))
+        );
     }
 
     #[test]
@@ -493,3 +508,10 @@ mod shell_tests {
         assert!(shell.has_exited());
     }
 }
+
+#[cfg(test)]
+const _: fn() = || {
+    fn send<T: Send>() {}
+    send::<Terminal>();
+    send::<AgentShell>();
+};
