@@ -19,6 +19,16 @@ use termide_agent_core::{
 use termide_panel_terminal::agent_shell::{AgentShell, RunEnd, RunError, ShellStatus};
 use termide_panel_terminal::Terminal;
 
+/// Where an agent's terminal is, for a panel to show it.
+pub(crate) enum Expand {
+    /// Here, taken out for the panel.
+    Here(Box<Terminal>),
+    /// In a panel already: the one whose shell has this pid.
+    Shown(Option<u32>),
+    /// The session has no terminal by that name (any more).
+    Missing,
+}
+
 /// A new terminal's size, until the user opens it as a panel.
 const ROWS: u16 = 40;
 const COLS: u16 = 160;
@@ -191,6 +201,40 @@ impl AgentTerminals {
     }
 
     /// End every terminal of every owner: termide is quitting.
+    /// Take the terminal of `owner`'s session `name` out, to show it in a
+    /// panel.
+    pub(crate) fn expand(&self, owner: &str, name: &str) -> Expand {
+        let mut owners = self.lock();
+        let Some(entry) = owners
+            .get_mut(owner)
+            .and_then(|entries| entries.iter_mut().find(|entry| entry.name == name))
+        else {
+            return Expand::Missing;
+        };
+        match entry.terminal.take() {
+            Some(terminal) => Expand::Here(Box::new(terminal)),
+            None => Expand::Shown(entry.shell.pid()),
+        }
+    }
+
+    /// Take back a terminal shown in a panel that closes; it runs on. One
+    /// whose session has ended meanwhile comes back, to be dropped.
+    pub(crate) fn collapse(&self, terminal: Terminal) -> Option<Terminal> {
+        let pid = terminal.child_pid()?;
+        let mut owners = self.lock();
+        let entry = owners
+            .values_mut()
+            .flatten()
+            .find(|entry| entry.terminal.is_none() && entry.shell.pid() == Some(pid));
+        match entry {
+            Some(entry) => {
+                entry.terminal = Some(terminal);
+                None
+            }
+            None => Some(terminal),
+        }
+    }
+
     /// End every terminal and wait for them to go, all at once: termide
     /// quits next, and a thread left to end one would die with it.
     pub(crate) fn release_all(&self) {
@@ -332,6 +376,59 @@ impl TerminalSessions for AgentTerminals {
     }
 }
 
+impl crate::app::App {
+    /// Show the agent session `owner`'s terminal `name` in a panel: the one
+    /// showing it comes to the front, else it opens in a new one.
+    pub(in crate::app) fn open_agent_terminal(&mut self, owner: &str, name: &str) {
+        match agent_terminals().expand(owner, name) {
+            Expand::Here(terminal) => {
+                self.add_panel(terminal);
+            }
+            Expand::Shown(pid) => {
+                self.layout_manager.focus_panel_where(|panel| {
+                    panel
+                        .as_any()
+                        .downcast_ref::<Terminal>()
+                        .is_some_and(|terminal| {
+                            terminal.is_agent_shell() && terminal.child_pid() == pid
+                        })
+                });
+            }
+            Expand::Missing => {}
+        }
+        self.state.needs_redraw = true;
+    }
+
+    /// Close the active panel when it shows an agent's terminal: the
+    /// terminal goes back to the agent, still running. Whether it did.
+    pub(in crate::app) fn collapse_agent_terminal(&mut self) -> bool {
+        let shown = self.layout_manager.active_panel().is_some_and(|panel| {
+            panel
+                .as_any()
+                .downcast_ref::<Terminal>()
+                .is_some_and(Terminal::is_agent_shell)
+        });
+        let Some(position) = self
+            .layout_manager
+            .active_panel_position()
+            .filter(|_| shown)
+        else {
+            return false;
+        };
+        let width = self.state.terminal.width;
+        let Some(panel) = self.layout_manager.remove_panel_at(position, width) else {
+            return false;
+        };
+        let panel: Box<dyn std::any::Any> = panel;
+        if let Ok(terminal) = panel.downcast::<Terminal>() {
+            // One whose session ended meanwhile is dropped here.
+            drop(agent_terminals().collapse(*terminal));
+        }
+        self.state.needs_redraw = true;
+        true
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -396,5 +493,27 @@ mod tests {
         assert_eq!(registry.list("b").len(), 1);
         registry.release_all();
         assert!(registry.list("b").is_empty());
+    }
+
+    #[test]
+    fn a_terminal_shown_in_a_panel_comes_back_running() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = AgentTerminals::new(None);
+        let Ok(_) = run(&registry, "a", "x", dir.path(), "X=7") else {
+            return; // No bash or no PTY here.
+        };
+        let Expand::Here(terminal) = registry.expand("a", "x") else {
+            panic!("the terminal is here");
+        };
+        assert!(terminal.is_agent_shell());
+        let pid = terminal.child_pid();
+        assert!(matches!(registry.expand("a", "x"), Expand::Shown(shown) if shown == pid));
+        assert!(matches!(registry.expand("a", "y"), Expand::Missing));
+        // The agent goes on with it while it is shown.
+        let (out, _) = run(&registry, "a", "x", dir.path(), "echo $X").unwrap();
+        assert_eq!(out, "7\n");
+        assert!(registry.collapse(*terminal).is_none());
+        assert!(matches!(registry.expand("a", "x"), Expand::Here(_)));
+        registry.release_all();
     }
 }

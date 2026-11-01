@@ -900,6 +900,11 @@ pub enum PanelEvent {
     /// it comes to the front, else a new agent panel opens on it. Emitted by
     /// the agent panel for a delegated task's session.
     OpenAgentSession(PathBuf),
+    /// Show the terminal session `name` of the agent session `session` in
+    /// a panel: the one showing it comes to the front, else a terminal panel
+    /// opens on it. Closing that panel hands the terminal back to the agent,
+    /// still running. Emitted by the agent panel for its strip's row.
+    OpenAgentTerminal { session: String, name: String },
     /// The user asked, from the panel that delegated them, to carry these
     /// unfinished delegated tasks on: each runs again out of sight on the
     /// panel's own runner, under the `task` call that handed it over, and

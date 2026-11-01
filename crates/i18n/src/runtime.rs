@@ -685,6 +685,9 @@ impl Translation for RuntimeTranslation {
         agent_strip_pause,
         agent_strip_after_step,
         agent_strip_paused,
+        agent_strip_terminal,
+        agent_strip_idle,
+        agent_strip_ended,
         agent_notice_no_parent_panel,
         agent_unfinished_delegates_title,
         agent_strip_left_unfinished,
@@ -1355,6 +1358,10 @@ impl Translation for RuntimeTranslation {
 
     fn agent_stop_command_confirm_fmt(&self, command: &str) -> String {
         self.format("agent_stop_command_confirm_fmt", &[("command", command)])
+    }
+
+    fn agent_close_terminal_confirm_fmt(&self, name: &str) -> String {
+        self.format("agent_close_terminal_confirm_fmt", &[("name", name)])
     }
 
     fn agent_notice_delegates_running_fmt(&self, count: usize) -> String {
@@ -2310,6 +2317,10 @@ impl Translation for RuntimeTranslation {
 
     fn agent_queued_fmt(&self, count: usize) -> String {
         self.format("agent_queued_fmt", &[("count", &count.to_string())])
+    }
+
+    fn agent_terminals_open_fmt(&self, count: usize) -> String {
+        self.format("agent_terminals_open_fmt", &[("count", &count.to_string())])
     }
 
     fn settings_value_default_fmt(&self, value: &str) -> String {

@@ -202,6 +202,7 @@ impl Terminal {
         )?;
         term.shell_kind = crate::shell_utils::ShellKind::from_shell_path("bash");
         term.shell_name = "bash".into();
+        term.agent_shell = true;
         let shell = AgentShell {
             input: term.input.sender(),
             tap,
@@ -218,6 +219,11 @@ impl AgentShell {
     /// The session's output, for reading it apart from a command.
     pub fn tap(&self) -> &Arc<OutputTap> {
         &self.tap
+    }
+
+    /// The shell's pid, which its terminal has as well.
+    pub fn pid(&self) -> Option<u32> {
+        self.pid
     }
 
     /// Whether the shell still runs.

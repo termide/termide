@@ -139,6 +139,10 @@ pub struct Terminal {
     shell_kind: shell_utils::ShellKind,
     /// Name of the shell (`dash`, `nu`, `pwsh`…), for messages about it.
     shell_name: String,
+    /// An agent's shell session shown in a panel: closing the panel hands
+    /// it back to the agent rather than ending it, so nothing asks first,
+    /// and a reopened project has no panel for it.
+    agent_shell: bool,
     /// Events raised outside the event-returning handlers (a refused
     /// [`Terminal::send_command`]), handed over on the next tick.
     pending_events: Vec<PanelEvent>,
@@ -337,6 +341,7 @@ impl Terminal {
             sync_timeout_redrawn: None,
             shell_kind: shell_utils::ShellKind::default(),
             shell_name: "sh".to_string(),
+            agent_shell: false,
             pending_events: Vec::new(),
         }
     }
@@ -562,6 +567,12 @@ impl Terminal {
     /// The pid of the process the terminal runs.
     pub fn child_pid(&self) -> Option<u32> {
         self.shell_pid
+    }
+
+    /// Whether this is an agent's shell session (see
+    /// [`Terminal::new_agent_shell`]).
+    pub fn is_agent_shell(&self) -> bool {
+        self.agent_shell
     }
 
     /// Spawn `cmd` on a new PTY; the device name of its terminal comes back
@@ -1598,6 +1609,10 @@ impl Panel for Terminal {
     }
 
     fn needs_close_confirmation(&self) -> Option<String> {
+        // Closing an agent's session hands it back; nothing ends.
+        if self.agent_shell {
+            return None;
+        }
         // If process is alive and has child processes - request confirmation
         if self.is_alive() && self.has_running_processes() {
             let t = termide_i18n::t();
@@ -1615,6 +1630,10 @@ impl Panel for Terminal {
     }
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<PanelState> {
+        // An agent's session lives with the agent's, not the layout.
+        if self.agent_shell {
+            return None;
+        }
         // Save where the shell was last working, not where the panel was
         // created: reopening the project should put the user back in the
         // directory they left off in.

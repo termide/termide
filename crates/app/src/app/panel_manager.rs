@@ -70,8 +70,11 @@ impl App {
         // Calculate available width for panel groups
         let terminal_width = self.state.terminal.width;
 
-        // Close active panel (LayoutManager handles active panel tracking)
-        let _ = self.layout_manager.close_active_panel(terminal_width);
+        // Close active panel (LayoutManager handles active panel tracking);
+        // an agent's terminal goes back to the agent, still running.
+        if !self.collapse_agent_terminal() {
+            let _ = self.layout_manager.close_active_panel(terminal_width);
+        }
         // Release the watch the closed panel held.
         self.state.needs_watcher_registration = true;
         if let Some((parent, cards)) = cards {

@@ -1375,6 +1375,12 @@ impl AgentPanel {
             ]);
         }
         segments.push(StatusSegment::spacer());
+        if !self.terminal_list.is_empty() {
+            segments.push(StatusSegment::new(
+                format!("{} ", t.agent_terminals_open_fmt(self.terminal_list.len())),
+                SegmentKind::Inactive,
+            ));
+        }
         let queued = self.queued.0 + self.queued.1;
         if queued > 0 {
             segments.push(StatusSegment::new(

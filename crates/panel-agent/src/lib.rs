@@ -100,6 +100,9 @@ const STOP_TASK_ACTION: &str = "agent_stop_task:";
 /// Stop a call the agent moved to the background, once confirmed; its id
 /// follows the colon.
 const STOP_CALL_ACTION: &str = "agent_stop_call:";
+/// Close one of the session's terminals, once confirmed; its name follows
+/// the colon.
+const CLOSE_TERMINAL_ACTION: &str = "agent_close_terminal:";
 /// Give up a delegate's task parked at a limit, once confirmed; the `task`
 /// call's id follows the colon.
 const GIVE_UP_PARKED_ACTION: &str = "agent_give_up_parked:";
@@ -1080,6 +1083,10 @@ pub struct AgentPanel {
     /// The calls of the delegates parked at a limit, as the strip last listed
     /// them; their card has been asked of the user for these tries.
     strip_parked: Vec<String>,
+    /// The session's terminals as last looked at, for the strip and the
+    /// status bar, and when that was: they are looked at once a second.
+    terminal_list: Vec<termide_agent_core::TerminalEntry>,
+    terminals_polled: Option<Instant>,
     /// Which parked tasks have had their card raised, by `task` call and the
     /// try it was parked at: a later park asks again.
     parked_asked: Vec<(String, u32)>,
@@ -1445,6 +1452,8 @@ impl AgentPanel {
             strip_hits: Vec::new(),
             strip_delegates: Vec::new(),
             strip_parked: Vec::new(),
+            terminal_list: Vec::new(),
+            terminals_polled: None,
             parked_asked: Vec::new(),
             parked_shown: String::new(),
             strip_tasks_open: false,
@@ -1602,10 +1611,48 @@ impl Drop for AgentPanel {
 impl AgentPanel {
     /// End the terminal sessions `session`'s agent left open: they live as
     /// long as the session is open in a panel.
-    fn release_terminals(&self, session: &Session) {
+    fn release_terminals(&mut self, session: &Session) {
         if let Some(terminals) = &self.terminals {
             terminals.release(session.id());
         }
+        self.terminal_list.clear();
+        self.terminals_polled = None;
+    }
+
+    /// Look at the session's terminals again, once a second at most.
+    /// Whether what the strip shows of them changed.
+    pub(crate) fn poll_terminals(&mut self) -> bool {
+        if self
+            .terminals_polled
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+        {
+            return false;
+        }
+        self.terminals_polled = Some(Instant::now());
+        let list = match (&self.terminals, &self.session) {
+            (Some(terminals), Some(session)) => terminals.list(session.id()),
+            _ => Vec::new(),
+        };
+        // How long one has been open is not shown; a running command's time is.
+        let shown = |list: &[termide_agent_core::TerminalEntry]| {
+            list.iter()
+                .map(|entry| (entry.name.clone(), entry.state.clone()))
+                .collect::<Vec<_>>()
+        };
+        let changed = shown(&list) != shown(&self.terminal_list);
+        self.terminal_list = list;
+        changed
+    }
+
+    /// Close the session's terminal `name`, as the user asked from its row.
+    fn close_terminal(&mut self, name: &str) {
+        if let (Some(terminals), Some(session)) = (&self.terminals, &self.session) {
+            if let Err(error) = terminals.close(session.id(), name) {
+                log::warn!("cannot close terminal {name}: {error}");
+            }
+        }
+        self.terminals_polled = None;
+        self.poll_terminals();
     }
 }
 
@@ -2205,6 +2252,10 @@ impl Panel for AgentPanel {
             PanelCommand::Confirmed { action } if action.starts_with(GIVE_UP_PARKED_ACTION) => {
                 let call = &action[GIVE_UP_PARKED_ACTION.len()..];
                 self.give_up_parked(call);
+                CommandResult::Handled(true)
+            }
+            PanelCommand::Confirmed { action } if action.starts_with(CLOSE_TERMINAL_ACTION) => {
+                self.close_terminal(&action[CLOSE_TERMINAL_ACTION.len()..]);
                 CommandResult::Handled(true)
             }
             PanelCommand::Confirmed { action } if action.starts_with(STOP_CALL_ACTION) => {

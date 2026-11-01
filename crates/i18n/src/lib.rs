@@ -802,6 +802,12 @@ pub trait Translation: Send + Sync {
     fn agent_strip_after_step(&self) -> &str;
     /// Agent panel state strip: a delegated task held at the panel's pause.
     fn agent_strip_paused(&self) -> &str;
+    /// Agent panel state strip: an agent's terminal session.
+    fn agent_strip_terminal(&self) -> &str;
+    /// Agent panel state strip: a terminal running nothing.
+    fn agent_strip_idle(&self) -> &str;
+    /// Agent panel state strip: a terminal whose shell has exited.
+    fn agent_strip_ended(&self) -> &str;
     /// Agent panel state strip: the delegates held at the panel's pause.
     fn agent_strip_pause_held_fmt(&self, count: usize) -> String;
     /// Agent panel state strip: a goal's judge deciding whether it is reached.
@@ -931,6 +937,8 @@ pub trait Translation: Send + Sync {
     fn agent_running_command_fmt(&self, name: &str) -> String;
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String;
     fn agent_queued_fmt(&self, count: usize) -> String;
+    /// Agent panel status bar: how many terminals the session has open.
+    fn agent_terminals_open_fmt(&self, count: usize) -> String;
     fn settings_value_default_fmt(&self, value: &str) -> String;
     /// Settings modal: a CLI agent's context window limit below the least
     /// it takes.
@@ -1042,6 +1050,8 @@ pub trait Translation: Send + Sync {
     fn agent_close_confirm_delegates_fmt(&self, count: usize) -> String;
     fn agent_stop_task_confirm_fmt(&self, agent: &str) -> String;
     fn agent_stop_command_confirm_fmt(&self, command: &str) -> String;
+    /// Agent panel: closing an agent's terminal session from its strip row.
+    fn agent_close_terminal_confirm_fmt(&self, name: &str) -> String;
     fn agent_take_over_confirm_fmt(&self, agent: &str) -> String;
     /// Agent transcript: who sent a message, and from which panel.
     fn agent_peer_from_panel_fmt(&self, agent: &str, panel: &str) -> String;

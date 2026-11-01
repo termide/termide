@@ -4491,7 +4491,9 @@ fn f8_in_the_banner_list_deletes_the_picked_session_not_the_fresh_one() {
     let events = panel.handle_key(chord(KeyCode::F(8), KeyModifiers::NONE));
     let (message, action) = confirm(&events);
     assert!(message.contains("first task"), "{message}");
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert!(!first_path.exists());
     assert_eq!(panel.session_path(), Some(fresh.as_path()));
     assert_eq!(panel.recent_sessions.len(), 1);
@@ -4502,7 +4504,9 @@ fn f8_in_the_banner_list_deletes_the_picked_session_not_the_fresh_one() {
     let events = panel.handle_key(chord(KeyCode::Delete, KeyModifiers::NONE));
     let (message, action) = confirm(&events);
     assert!(message.contains("second task"), "{message}");
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert!(panel.recent_sessions.is_empty());
     assert!(!panel.chat_focus);
     assert!(fresh.exists(), "the fresh session is untouched");
@@ -11160,7 +11164,9 @@ fn a_command_in_the_background_is_stopped_from_its_row() {
     };
     assert!(message.contains("cargo test --workspace"), "{message}");
     assert!(stopped.lock().unwrap().is_empty(), "asked first");
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert_eq!(*stopped.lock().unwrap(), ["t1"]);
 }
 
@@ -11217,7 +11223,9 @@ fn a_running_task_is_stopped_from_its_row() {
     };
     assert!(message.contains("search"), "{message}");
     assert!(registration.control().ended_by_user().is_none());
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert_eq!(
         registration.control().ended_by_user(),
         Some("the user stopped the subagent")
@@ -11320,7 +11328,9 @@ fn a_followed_task_shows_its_log_and_opens_when_over() {
     else {
         panic!("no confirmation");
     };
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert_eq!(
         control.ended_by_user(),
         Some("the user stopped the subagent")
@@ -11411,7 +11421,9 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
     };
     assert!(message.contains("search"), "{message}");
     assert!(registration.control().ended_by_user().is_none());
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert_eq!(
         registration.control().ended_by_user(),
         Some("the user stopped the subagent")
@@ -11515,7 +11527,9 @@ fn a_parked_delegate_holds_a_row_and_asks_what_to_do() {
         panic!("no confirmation");
     };
     panel.pending = None;
-    panel.handle_command(PanelCommand::Confirmed { action });
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
     assert!(crate::live::parked_of(id).is_empty(), "given up");
 }
 
@@ -13270,4 +13284,137 @@ fn only_a_viewable_file_written_is_a_card() {
         let rows = render_text(&mut panel, 60, 12);
         assert_eq!(rows.iter().any(|r| r.contains('↗')), card, "{rows:?}");
     }
+}
+
+/// Terminals as a test sets them out, recording what the panel asks of them.
+#[derive(Default)]
+struct Terminals {
+    entries: Mutex<Vec<(String, termide_agent_core::TerminalEntry)>>,
+    released: Mutex<Vec<String>>,
+}
+
+impl termide_agent_core::TerminalSessions for Terminals {
+    fn run(
+        &self,
+        _run: &termide_agent_core::TerminalRun<'_>,
+        _on_output: &mut dyn FnMut(&[u8]),
+    ) -> Result<termide_agent_core::TerminalRunOutcome, String> {
+        Err("not in this test".into())
+    }
+    fn free_name(&self, _owner: &str, stem: &str) -> String {
+        stem.to_string()
+    }
+    fn list(&self, owner: &str) -> Vec<termide_agent_core::TerminalEntry> {
+        let entries = self.entries.lock().unwrap();
+        entries
+            .iter()
+            .filter(|(of, _)| of == owner)
+            .map(|(_, entry)| entry.clone())
+            .collect()
+    }
+    fn read(
+        &self,
+        _owner: &str,
+        _name: &str,
+    ) -> Result<termide_agent_core::TerminalOutput, String> {
+        Err("not in this test".into())
+    }
+    fn interrupt(&self, _owner: &str, _name: &str) -> Result<(), String> {
+        Ok(())
+    }
+    fn close(&self, owner: &str, name: &str) -> Result<(), String> {
+        let mut entries = self.entries.lock().unwrap();
+        entries.retain(|(of, entry)| !(of == owner && entry.name == name));
+        Ok(())
+    }
+    fn release(&self, owner: &str) {
+        self.released.lock().unwrap().push(owner.to_string());
+        self.entries.lock().unwrap().retain(|(of, _)| of != owner);
+    }
+}
+
+/// The session's terminals show in the strip and the status bar; a row
+/// opens its terminal, its `✕` closes it once confirmed, and they end with
+/// the session the panel leaves.
+#[test]
+fn the_sessions_terminals_show_in_the_strip_and_end_with_it() {
+    use termide_agent_core::{TerminalEntry, TerminalState};
+    let dir = tempfile::tempdir().unwrap();
+    let session = Session::create(dir.path(), dir.path()).unwrap();
+    let owner = session.id().to_string();
+    let terminals = Arc::new(Terminals::default());
+    let entry = |name: &str, state| TerminalEntry {
+        name: name.into(),
+        state,
+        age: Duration::from_secs(60),
+        log: None,
+    };
+    terminals.entries.lock().unwrap().extend([
+        (
+            owner.clone(),
+            entry(
+                "dev",
+                TerminalState::Running {
+                    command: "npm run dev".into(),
+                    elapsed: Duration::from_secs(5),
+                },
+            ),
+        ),
+        (owner.clone(), entry("tests", TerminalState::Idle)),
+        ("other".to_string(), entry("x", TerminalState::Idle)),
+    ]);
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session: Some(session),
+        terminals: Some(Arc::clone(&terminals) as _),
+        ..setup(vec![])
+    });
+    panel.tick();
+
+    let rows = panel.strip_rows(80);
+    let lines = crate::strip::strip_lines(&rows, 80, &ThemeColors::default());
+    let text: Vec<String> = lines
+        .iter()
+        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
+        .collect();
+    assert!(
+        text[0].starts_with("$ Terminal · dev  npm run dev"),
+        "{text:?}"
+    );
+    assert!(text[0].trim_end().ends_with("✕"), "{text:?}");
+    assert!(text[1].starts_with("$ Terminal · tests · idle"), "{text:?}");
+    assert_eq!(rows.len(), 2, "another session's terminal is not shown");
+    let status: String = panel.segments().iter().map(|s| s.text.as_str()).collect();
+    assert!(status.contains("terminals: 2"), "{status}");
+
+    // The row opens its terminal in a panel.
+    let events = panel.click_strip(rows[0].target, false);
+    assert!(
+        matches!(&events[..], [PanelEvent::OpenAgentTerminal { session, name }]
+            if *session == owner && name == "dev"),
+        "{events:?}"
+    );
+    // `✕` asks first, then closes it.
+    let events = panel.click_strip(rows[1].target, true);
+    let Some(PanelEvent::ShowConfirm {
+        on_confirm: termide_core::ConfirmAction::Custom(action),
+        ..
+    }) = events.first()
+    else {
+        panic!("a confirmation expected: {events:?}");
+    };
+    panel.handle_command(PanelCommand::Confirmed {
+        action: action.clone(),
+    });
+    assert_eq!(panel.strip_rows(80).len(), 1);
+
+    // Leaving the session ends its terminals; the panel's close does too.
+    assert!(panel.switch_session(None));
+    assert_eq!(*terminals.released.lock().unwrap(), [owner]);
+    assert!(panel.strip_rows(80).is_empty());
+    drop(panel);
+    assert_eq!(
+        terminals.released.lock().unwrap().len(),
+        1,
+        "no session left to end"
+    );
 }

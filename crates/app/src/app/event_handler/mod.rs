@@ -462,6 +462,10 @@ impl App {
                 self.ai_open_session(path)?;
             }
 
+            PanelEvent::OpenAgentTerminal { session, name } => {
+                self.open_agent_terminal(&session, &name);
+            }
+
             PanelEvent::RestartDelegates { panel, items } => {
                 // The panel's own runner carries its delegates on, so they run
                 // on its connections and rules and ask through its prompter.

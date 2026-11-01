@@ -715,6 +715,7 @@ impl AgentPanel {
         changed |= self.follow_open_sessions();
         changed |= self.check_held();
         changed |= self.poll_parked();
+        changed |= self.poll_terminals();
         changed |= self.drop_withdrawn_card();
         changed |= self.ask_graphics();
         changed |= self.pictures_settled();

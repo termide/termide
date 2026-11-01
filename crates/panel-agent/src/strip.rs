@@ -1,7 +1,7 @@
 //! The state strip above the input: what holds right now rather than what
 //! happened — a pause asked for or a retry waited for, the queued messages,
 //! an active `/goal` or `/loop`, the running subagents and the commands the
-//! agent moved to the background. Every row reads the same way: its glyph
+//! agent moved to the background, and the session's terminals. Every row reads the same way: its glyph
 //! and what it is, in the accent; what it works on, dim; at the right edge
 //! how long it has gone on and, where it can be called off, `✕`. No row
 //! spins: the transcript's live line does, once, for the run.
@@ -10,7 +10,7 @@ use std::time::Instant;
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use termide_agent_core::ToolCall;
+use termide_agent_core::{TerminalState, ToolCall};
 use termide_core::ThemeColors;
 
 use crate::render::{capitalized, Autorun, GOAL_GLYPH, LOOP_GLYPH, STATE_QUEUED_ROWS};
@@ -36,6 +36,8 @@ pub(crate) enum StripTarget {
     Parked(usize),
     /// A command the agent moved to the background, by its block's index.
     Background(usize),
+    /// One of the session's terminals, by its place in the panel's list.
+    Terminal(usize),
     /// A delegated task left unfinished when termide closed, by its place
     /// among the panel's restored delegates: the row above the input, which
     /// opens that session, where its own card asks to carry it on.
@@ -293,7 +295,48 @@ impl AgentPanel {
             }
         }
         rows.extend(self.background_rows(width));
+        rows.extend(self.terminal_rows());
         rows.extend(self.restored_rows());
+        rows
+    }
+
+    /// The rows of the session's terminals: `$ Terminal · name  command`,
+    /// the command's time when one runs. `✕` closes the terminal, once
+    /// confirmed; elsewhere on the row it opens in a panel.
+    fn terminal_rows(&self) -> Vec<StripRow> {
+        let t = termide_i18n::t();
+        let mut rows: Vec<StripRow> = self
+            .terminal_list
+            .iter()
+            .enumerate()
+            .take(STATE_QUEUED_ROWS)
+            .map(|(index, entry)| {
+                let (body, note, time) = match &entry.state {
+                    TerminalState::Running { command, elapsed } => {
+                        (single_line(command), None, Some(*elapsed))
+                    }
+                    TerminalState::Idle => (String::new(), Some(t.agent_strip_idle()), None),
+                    TerminalState::Exited => (String::new(), Some(t.agent_strip_ended()), None),
+                };
+                let mut row = StripRow::new(
+                    "$",
+                    t.agent_strip_terminal().to_string(),
+                    body,
+                    StripTarget::Terminal(index),
+                )
+                .stoppable();
+                row.notes.push(entry.name.clone());
+                row.notes.extend(note.map(str::to_string));
+                row.time = time.map(|time| u32::try_from(time.as_millis()).unwrap_or(u32::MAX));
+                row
+            })
+            .collect();
+        if self.terminal_list.len() > STATE_QUEUED_ROWS {
+            rows.push(StripRow::more(
+                "$",
+                format!("+{}", self.terminal_list.len() - STATE_QUEUED_ROWS),
+            ));
+        }
         rows
     }
 
@@ -621,6 +664,29 @@ impl AgentPanel {
                 }
             }
             StripTarget::Background(index) => select(self, index),
+            // `✕` closes a terminal, once confirmed; elsewhere on the row it
+            // opens in a panel, and closing that panel hands it back.
+            StripTarget::Terminal(index) => {
+                let (Some(entry), Some(session)) =
+                    (self.terminal_list.get(index), self.session.as_ref())
+                else {
+                    return vec![PanelEvent::NeedsRedraw];
+                };
+                if on_stop {
+                    return vec![PanelEvent::ShowConfirm {
+                        message: termide_i18n::t().agent_close_terminal_confirm_fmt(&entry.name),
+                        on_confirm: termide_core::ConfirmAction::Custom(format!(
+                            "{}{}",
+                            crate::CLOSE_TERMINAL_ACTION,
+                            entry.name
+                        )),
+                    }];
+                }
+                return vec![PanelEvent::OpenAgentTerminal {
+                    session: session.id().to_string(),
+                    name: entry.name.clone(),
+                }];
+            }
             // `✕` takes the queue back into the input, as `↑` does: it goes
             // as one message, so it comes back whole; a recalled request in
             // the input counts as typed.
