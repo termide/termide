@@ -343,7 +343,9 @@ mod tests {
             "rust".into(),
             LspServerConfig {
                 command: "sh".into(),
-                args: vec!["-c".into(), "exit 0".into()],
+                // Exits once `initialize` arrives: a server gone before
+                // that counts as never started, not as crashed.
+                args: vec!["-c".into(), "head -c 1 > /dev/null; exit 0".into()],
                 root_markers: Vec::new(),
             },
         );
