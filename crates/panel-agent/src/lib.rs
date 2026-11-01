@@ -291,6 +291,10 @@ pub struct AgentPanelSetup {
     /// then both are refused with a notice. Built by the app over the same
     /// `shell` tool the agent uses.
     pub shell_run: Option<ShellRunner>,
+    /// The agent sessions' terminals: what the agent is told of its open
+    /// ones at each model call, and ended with the session when the panel
+    /// leaves it. `None` where there are none.
+    pub terminals: Option<Arc<dyn termide_agent_core::TerminalSessions>>,
     /// What to do when a run stops on a limit or an outage (`[ai]
     /// on_limit`); kept in step with the configuration as it changes.
     pub on_limit: LimitPolicy,
@@ -717,6 +721,8 @@ pub struct AgentPanel {
     /// How a hand-run command and a confirmed card reach the shell; `None`
     /// refuses both.
     shell_run: Option<ShellRunner>,
+    /// The agent sessions' terminals; the session's end with it here.
+    terminals: Option<Arc<dyn termide_agent_core::TerminalSessions>>,
     /// A command the user ran by hand, on a thread: the command with what it
     /// printed, or why it could not run, and how long it took in ms.
     shell_job: Option<Receiver<ShellJobDone>>,
@@ -1278,6 +1284,7 @@ impl AgentPanel {
             session.as_ref(),
             &blocked,
             setup.shell_run.clone(),
+            setup.terminals.as_ref(),
             served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
             panel_id,
         );
@@ -1295,6 +1302,7 @@ impl AgentPanel {
             question_rx,
             suggestion_rx,
             shell_run: setup.shell_run,
+            terminals: setup.terminals,
             shell_job: None,
             shell_cancel: None,
             shell_mode: false,
@@ -1585,7 +1593,18 @@ impl Drop for AgentPanel {
         self.log_cut_off_calls();
         self.sync_autorun();
         if let Some(session) = self.session.take() {
+            self.release_terminals(&session);
             discard_if_empty(session);
+        }
+    }
+}
+
+impl AgentPanel {
+    /// End the terminal sessions `session`'s agent left open: they live as
+    /// long as the session is open in a panel.
+    fn release_terminals(&self, session: &Session) {
+        if let Some(terminals) = &self.terminals {
+            terminals.release(session.id());
         }
     }
 }

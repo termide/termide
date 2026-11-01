@@ -27,7 +27,7 @@ use termide_agent_providers::{
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
     builtin_tools, JobsTool, OwnTasks, QuestionTool, ShellTool, SkillTool, SubagentOutcome,
-    SubagentRun, SubagentTask, SuggestCommandTool, TaskTool,
+    SubagentRun, SubagentTask, SuggestCommandTool, TaskTool, TerminalsTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
@@ -46,6 +46,7 @@ pub(in crate::app) use debug_tool::Waiter as DebugWaiter;
 mod headless;
 pub(crate) mod live;
 mod peers;
+pub(crate) mod terminals;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 pub(super) use peers::same_dir;
 
@@ -762,6 +763,16 @@ fn base_tools(
     recall: Option<&Arc<RecallTool>>,
 ) -> ToolRegistry {
     let mut tools = builtin_tools(dirs.shims_dir());
+    // The shell runs commands in terminal sessions too, which `terminals`
+    // looks after.
+    let sessions: Arc<dyn termide_agent_core::TerminalSessions> =
+        Arc::clone(terminals::agent_terminals()) as _;
+    tools.insert(Arc::new(ShellTool {
+        shim_path: dirs.shims_dir(),
+        terminals: Some(Arc::clone(&sessions)),
+        ..ShellTool::default()
+    }));
+    tools.insert(Arc::new(TerminalsTool::new(sessions)));
     for tool in web.map(web_tools).unwrap_or_default() {
         tools.insert(tool);
     }
@@ -890,6 +901,7 @@ static APPLIED_AI: std::sync::RwLock<Option<AiSettings>> = std::sync::RwLock::ne
 /// Record `settings` as the applied `[ai]` settings for open panels.
 pub(crate) fn publish_ai_settings(settings: &AiSettings) {
     *APPLIED_AI.write().unwrap_or_else(PoisonError::into_inner) = Some(settings.clone());
+    terminals::agent_terminals().set_limit(settings.max_terminal_sessions);
     // A limit changed in the settings reaches the requests already queued.
     for (name, connection) in &settings.connections {
         if !connection.is_cli() {
@@ -2483,6 +2495,16 @@ impl Subagents {
         if let Some(panel) = ctx.panel {
             agent = agent.with_panel(panel);
         }
+        // The subagent's terminal sessions are its own, kept under its log's
+        // id and ended with its task; its parent does not reach them.
+        let terminals_owner = log.0.as_ref().map(|session| session.id().to_string());
+        if terminals_owner.is_some() {
+            let terminals: Arc<dyn termide_agent_core::TerminalSessions> =
+                terminals::agent_terminals().clone();
+            agent = agent
+                .with_session_id(terminals_owner.clone())
+                .with_context_note(termide_agent_core::terminals::context_note(terminals));
+        }
 
         // Followed from its parent's panel while it runs.
         let live = register_live(ctx.panel, caller, task, &log);
@@ -2543,6 +2565,12 @@ impl Subagents {
             agent.run(message, &mut hooks, &budget, &mut emit);
             finished.store(true, std::sync::atomic::Ordering::Release);
         });
+        if let Some(owner) = &terminals_owner {
+            termide_agent_core::TerminalSessions::release(
+                terminals::agent_terminals().as_ref(),
+                owner,
+            );
+        }
         if report.answer.is_none() && report.error.is_none() {
             report.error = run_error(agent.messages());
         }
@@ -3102,6 +3130,7 @@ fn agent_setup(
         session_connection(settings, session.as_ref()).unwrap_or_default();
     let provider_kind = connection.provider.clone();
     let provider = connection_provider(&connection_name, &connection);
+    terminals::agent_terminals().set_limit(settings.max_terminal_sessions);
 
     let mut catalog = FsCatalog::new(&cwd, project_root);
     let web = shared_web(&settings.web, &catalog.dirs);
@@ -3230,6 +3259,7 @@ fn agent_setup(
         session_dir,
         session,
         shell_run: Some(shell_run),
+        terminals: Some(Arc::clone(terminals::agent_terminals()) as _),
         on_limit: settings.on_limit,
     }
 }
@@ -5673,9 +5703,9 @@ done"#;
         assert_eq!(review.mode, Some(termide_agent_core::Mode::Auto));
 
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
-        // The built-in four, plus the two that speak to the user watching the
-        // panel, `question` and `suggest_command`, and the two that speak to
-        // the agents of the other panels, and the debugger.
+        // The built-in four and `terminals`, plus the two that speak to the
+        // user watching the panel, `question` and `suggest_command`, and the
+        // two that speak to the agents of the other panels, and the debugger.
         assert_eq!(
             default.tools.names(),
             [
@@ -5683,6 +5713,7 @@ done"#;
                 "edit",
                 "write",
                 "shell",
+                "terminals",
                 "question",
                 "suggest_command",
                 "agents",

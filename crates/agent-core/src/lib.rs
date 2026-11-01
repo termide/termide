@@ -54,14 +54,15 @@ pub mod session;
 pub mod shell;
 pub mod spend;
 pub mod suggest;
+pub mod terminals;
 pub mod tool;
 pub mod tool_text;
 
 pub use acp::{companion_tools, AcpConfig, AcpFlavor, ACP_PROVIDER, COMPANION_TOOLS, MODEL_OPTION};
 pub use agent::{
     execute_tool, judge_tool_call, run_judged_call, unanswered_calls, Agent, AgentConfig,
-    AgentEvent, ChainedHooks, Hooks, JudgedCall, Judgment, NoHooks, QueueHandle, QueueMode,
-    ToolDecision,
+    AgentEvent, ChainedHooks, ContextNote, Hooks, JudgedCall, Judgment, NoHooks, QueueHandle,
+    QueueMode, ToolDecision,
 };
 pub use ask::{
     question_channel, Question, QuestionAnswer, QuestionEnvelope, QuestionOption, QuestionReply,
@@ -133,6 +134,10 @@ pub use shell::{ShellOutput, ShellRunner};
 pub use spend::{Spender, Spending};
 pub use suggest::{
     suggestion_channel, CommandSuggester, Suggestion, SuggestionEnvelope, SuggestionReply,
+};
+pub use terminals::{
+    TerminalEntry, TerminalOutput, TerminalRun, TerminalRunEnd, TerminalRunOutcome,
+    TerminalSessions, TerminalState,
 };
 pub use tool::{
     canonical_tool_name, de_tool_name, de_tool_names, CallsBeside, LateTools, RunningCall,

@@ -9,9 +9,9 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
-use termide_agent_core::{ToolText, SHELL_TOOL};
+use termide_agent_core::{TerminalRun, TerminalRunEnd, TerminalSessions, ToolText, SHELL_TOOL};
 
-use crate::args::{optional_u64, required_str};
+use crate::args::{optional_bool, optional_str, optional_u64, required_str};
 use crate::capture::{Capture, Captured, LiveView};
 use crate::clean::{clean_output, Cleaned};
 use crate::truncate::{head_tail, head_tail_split, SHELL_MAX_BYTES};
@@ -31,6 +31,11 @@ const CAPTURE_SIDE_BYTES: usize = 1024 * 1024;
 /// Cap on the log of one command's output, so a command printing without
 /// end until its timeout cannot fill the disk.
 const MAX_LOG_BYTES: u64 = 256 * 1024 * 1024;
+/// How long a command started in the background is watched before the call
+/// returns: long enough to report a command that fails at once.
+const BACKGROUND_WAIT: Duration = Duration::from_secs(1);
+/// The longest name of a terminal session.
+const MAX_SESSION_NAME: usize = 40;
 
 pub struct ShellTool {
     pub default_timeout: Duration,
@@ -49,6 +54,9 @@ pub struct ShellTool {
     /// after a command shadows the real one (a token-saving wrapper). `None`
     /// leaves `PATH` untouched.
     pub shim_path: Option<PathBuf>,
+    /// The terminal sessions `session` and `background` run commands in;
+    /// `None` where there are none (a run outside termide's own loop).
+    pub terminals: Option<Arc<dyn TerminalSessions>>,
 }
 
 impl Default for ShellTool {
@@ -62,6 +70,7 @@ impl Default for ShellTool {
             log_dir: None,
             clean: true,
             shim_path: None,
+            terminals: None,
         }
     }
 }
@@ -80,7 +89,9 @@ impl Tool for ShellTool {
             "type": "object",
             "properties": {
                 "command": { "type": "string", "description": "The command line to run with bash -c" },
-                "timeout": { "type": "integer", "minimum": 1, "description": "Seconds before the command is killed (default 120, max 600)" }
+                "timeout": { "type": "integer", "minimum": 1, "description": "Seconds before the command is killed (default 120, max 600); in a terminal session, seconds to wait for it, after which it runs on" },
+                "session": { "type": "string", "description": "Run in the terminal session of this name, opened on first use: the directory, variables and background jobs carry over from one command to the next (letters, digits, `.`, `_`, `-`)" },
+                "background": { "type": "boolean", "description": "Start the command and return at once, leaving it running in a terminal session (`session`, or a new one); read its output later with `terminals`" }
             },
             "required": ["command"]
         })
@@ -111,6 +122,21 @@ impl Tool for ShellTool {
             Ok(None) => self.default_timeout,
             Err(message) => return ToolResultMessage::error(call, message),
         };
+
+        let session = match optional_str(call, "session") {
+            Ok(session) => session.map(str::trim).filter(|name| !name.is_empty()),
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let background = match optional_bool(call, "background") {
+            Ok(background) => background,
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        if session.is_some() || background {
+            let wait = if background { BACKGROUND_WAIT } else { timeout };
+            return self.run_in_terminal(
+                call, ctx, command, session, wait, background, on_update, cancel,
+            );
+        }
 
         let run = match self.run(command, &call.id, ctx, timeout, on_update, cancel) {
             Ok(run) => run,
@@ -221,61 +247,7 @@ impl ShellTool {
     }
 
     fn render(&self, call: &ToolCall, run: Run) -> ToolResultMessage {
-        let output = &run.output;
-        let mut full_output_path = None;
-        let (cleaned, mut body) = if output.dropped == 0 {
-            let raw = String::from_utf8_lossy(&output.head).into_owned();
-            let cleaned = self.clean(&raw, &run.command);
-            let body = match head_tail(&cleaned.text, self.max_output_bytes) {
-                None => cleaned.text.clone(),
-                Some(cut) => {
-                    // Save the raw output, not the cleaned text: the log is
-                    // the full record for the user.
-                    let path = self.save_log(call, &raw);
-                    let marker = omission_marker(cut.omitted_lines, path.as_deref(), 0);
-                    full_output_path = path;
-                    format!("{}{marker}{}", cut.head, cut.tail)
-                }
-            };
-            (cleaned, body)
-        } else {
-            // The middle was never kept: clean the two ends on their own
-            // whole lines and count the dropped lines as omitted.
-            let head = &output.head[..output
-                .head
-                .iter()
-                .rposition(|&b| b == b'\n')
-                .map_or(output.head.len(), |i| i + 1)];
-            let tail = &output.tail[output
-                .tail
-                .iter()
-                .position(|&b| b == b'\n')
-                .map_or(0, |i| i + 1)..];
-            let head = self.clean(&String::from_utf8_lossy(head), &run.command);
-            let tail = self.clean(&String::from_utf8_lossy(tail), &run.command);
-            let cut = head_tail_split(&head.text, &tail.text, self.max_output_bytes);
-            let omitted = cut.omitted_lines + output.dropped_lines as usize;
-            let skipped = output.log.as_ref().map_or(0, |log| log.skipped);
-            let path = output.log.as_ref().map(|log| log.path.clone());
-            let marker = omission_marker(omitted, path.as_deref(), skipped);
-            let body = format!("{}{marker}{}", cut.head, cut.tail);
-            full_output_path = path;
-            // The cleaning stats cover what was cleaned, not what was cut.
-            let cleaned = Cleaned {
-                original_bytes: head.original_bytes + tail.original_bytes,
-                cleaned_bytes: head.cleaned_bytes + tail.cleaned_bytes,
-                original_chars: head.original_chars + tail.original_chars,
-                cleaned_chars: head.cleaned_chars + tail.cleaned_chars,
-                text: String::new(),
-            };
-            (cleaned, body)
-        };
-        if body.trim().is_empty() {
-            body = "(no output)".to_string();
-        }
-        if !body.ends_with('\n') {
-            body.push('\n');
-        }
+        let (cleaned, mut body, full_output_path) = self.body(call, &run.output, &run.command);
 
         let mut is_error = false;
         if run.cancelled {
@@ -330,6 +302,195 @@ impl ShellTool {
         result.with_details(details)
     }
 
+    /// Run `command` in terminal session `session` of the caller's agent
+    /// session — or in a new one, named after nothing in particular, when it
+    /// goes to the background unnamed — waiting `wait` for it at most.
+    #[allow(clippy::too_many_arguments)]
+    fn run_in_terminal(
+        &self,
+        call: &ToolCall,
+        ctx: &ToolContext,
+        command: &str,
+        session: Option<&str>,
+        wait: Duration,
+        background: bool,
+        on_update: &mut dyn FnMut(ToolUpdate),
+        cancel: &CancelToken,
+    ) -> ToolResultMessage {
+        let owner = ctx.session.as_ref().and_then(|view| view.id.as_deref());
+        let (Some(terminals), Some(owner)) = (&self.terminals, owner) else {
+            return ToolResultMessage::error(
+                call,
+                "terminal sessions are not available here; run the command without `session` \
+                 and `background`",
+            );
+        };
+        let name = match session {
+            Some(name) => match check_session_name(name) {
+                Ok(()) => name.to_string(),
+                Err(message) => return ToolResultMessage::error(call, message),
+            },
+            None => terminals.free_name(owner, "bg"),
+        };
+        let output = Mutex::new(Capture::new(self.capture_bytes, None, 0));
+        let mut view = LiveView::default();
+        let mut last_update = Instant::now();
+        let outcome = terminals.run(
+            &TerminalRun {
+                owner,
+                name: &name,
+                cwd: &ctx.cwd,
+                command,
+                timeout: wait,
+                cancel,
+                shim_path: self.shim_path.as_deref(),
+            },
+            &mut |bytes| {
+                let mut capture = lock(&output);
+                capture.push(bytes);
+                if last_update.elapsed() >= UPDATE_INTERVAL {
+                    capture.update_view(&mut view);
+                    drop(capture);
+                    on_update(ToolUpdate::Output(view.text.clone()));
+                    last_update = Instant::now();
+                }
+            },
+        );
+        let outcome = match outcome {
+            Ok(outcome) => outcome,
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let captured = output
+            .into_inner()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .finish();
+        let (cleaned, mut body, full_output_path) = self.body(call, &captured, command);
+        let mut is_error = false;
+        let mut exit_code = None;
+        match outcome.end {
+            TerminalRunEnd::Finished(code) => {
+                exit_code = code;
+                if let Some(code) = code.filter(|code| *code != 0) {
+                    body.push_str(&format!("[exit code {code}]"));
+                    is_error = true;
+                }
+            }
+            TerminalRunEnd::TimedOut if background => body.push_str(&format!(
+                "[runs on in the background in terminal session `{name}`; `terminals` reads \
+                 what it prints, interrupts or closes it]"
+            )),
+            TerminalRunEnd::TimedOut => body.push_str(&format!(
+                "[still running in terminal session `{name}` after {} s; `terminals` reads what \
+                 it prints, interrupts or closes it]",
+                wait.as_secs()
+            )),
+            TerminalRunEnd::Cancelled => {
+                body.push_str(&format!(
+                    "[cancelled; Ctrl+C sent to terminal session `{name}`]"
+                ));
+                is_error = true;
+            }
+            TerminalRunEnd::ShellExited => {
+                body.push_str(&format!(
+                    "[the shell of terminal session `{name}` exited; the session is closed]"
+                ));
+                is_error = true;
+            }
+        }
+        if outcome.opened && session.is_none() {
+            body = format!("[terminal session `{name}`]\n{body}");
+        }
+        let details = json!({
+            "session": name,
+            "opened": outcome.opened,
+            "background": background,
+            "running": outcome.end == TerminalRunEnd::TimedOut,
+            "session_log": outcome.log,
+            "exit_code": exit_code,
+            "timed_out": outcome.end == TerminalRunEnd::TimedOut && !background,
+            "cancelled": outcome.end == TerminalRunEnd::Cancelled,
+            "truncated": full_output_path.is_some(),
+            "full_output_path": full_output_path,
+            "raw_bytes": cleaned.original_bytes,
+            "cleaned_bytes": cleaned.cleaned_bytes,
+            "raw_chars": cleaned.original_chars,
+            "cleaned_chars": cleaned.cleaned_chars,
+            "dropped_bytes": captured.dropped + outcome.dropped,
+        });
+        let result = if is_error {
+            ToolResultMessage::error(call, body)
+        } else {
+            ToolResultMessage::text(call, body)
+        };
+        result.with_details(details)
+    }
+
+    /// What the model reads of `output`: cleaned, its middle cut when long
+    /// (the raw output then saved to a log, whose path comes back), never
+    /// empty, ending with a line break.
+    fn body(
+        &self,
+        call: &ToolCall,
+        output: &Captured,
+        command: &str,
+    ) -> (Cleaned, String, Option<PathBuf>) {
+        let mut full_output_path = None;
+        let (cleaned, mut body) = if output.dropped == 0 {
+            let raw = String::from_utf8_lossy(&output.head).into_owned();
+            let cleaned = self.clean(&raw, command);
+            let body = match head_tail(&cleaned.text, self.max_output_bytes) {
+                None => cleaned.text.clone(),
+                Some(cut) => {
+                    // Save the raw output, not the cleaned text: the log is
+                    // the full record for the user.
+                    let path = self.save_log(call, &raw);
+                    let marker = omission_marker(cut.omitted_lines, path.as_deref(), 0);
+                    full_output_path = path;
+                    format!("{}{marker}{}", cut.head, cut.tail)
+                }
+            };
+            (cleaned, body)
+        } else {
+            // The middle was never kept: clean the two ends on their own
+            // whole lines and count the dropped lines as omitted.
+            let head = &output.head[..output
+                .head
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(output.head.len(), |i| i + 1)];
+            let tail = &output.tail[output
+                .tail
+                .iter()
+                .position(|&b| b == b'\n')
+                .map_or(0, |i| i + 1)..];
+            let head = self.clean(&String::from_utf8_lossy(head), command);
+            let tail = self.clean(&String::from_utf8_lossy(tail), command);
+            let cut = head_tail_split(&head.text, &tail.text, self.max_output_bytes);
+            let omitted = cut.omitted_lines + output.dropped_lines as usize;
+            let skipped = output.log.as_ref().map_or(0, |log| log.skipped);
+            let path = output.log.as_ref().map(|log| log.path.clone());
+            let marker = omission_marker(omitted, path.as_deref(), skipped);
+            let body = format!("{}{marker}{}", cut.head, cut.tail);
+            full_output_path = path;
+            // The cleaning stats cover what was cleaned, not what was cut.
+            let cleaned = Cleaned {
+                original_bytes: head.original_bytes + tail.original_bytes,
+                cleaned_bytes: head.cleaned_bytes + tail.cleaned_bytes,
+                original_chars: head.original_chars + tail.original_chars,
+                cleaned_chars: head.cleaned_chars + tail.cleaned_chars,
+                text: String::new(),
+            };
+            (cleaned, body)
+        };
+        if body.trim().is_empty() {
+            body = "(no output)".to_string();
+        }
+        if !body.ends_with('\n') {
+            body.push('\n');
+        }
+        (cleaned, body, full_output_path)
+    }
+
     /// The model reads cleaned output; the user's live view and the full log
     /// on disk stay raw. `command` selects the command-aware rules.
     fn clean(&self, raw: &str, command: &str) -> Cleaned {
@@ -376,6 +537,23 @@ impl ShellTool {
                 None
             }
         }
+    }
+}
+
+/// Why `name` cannot name a terminal session, if it cannot.
+pub(crate) fn check_session_name(name: &str) -> Result<(), String> {
+    let fits = !name.is_empty()
+        && name.chars().count() <= MAX_SESSION_NAME
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if fits {
+        Ok(())
+    } else {
+        Err(format!(
+            "`{name}` cannot name a terminal session: use up to {MAX_SESSION_NAME} letters, \
+             digits, `.`, `_` and `-`"
+        ))
     }
 }
 
@@ -819,5 +997,157 @@ mod tests {
         assert!(run(dir.path(), json!({}))
             .plain_text()
             .contains("`command`"));
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+    use termide_agent_core::{
+        AssistantMessage, IntentLog, ModelSpec, Provider, Request, SessionView, StreamEvent,
+        TerminalEntry, TerminalOutput, TerminalRunOutcome, ThinkingLevel,
+    };
+
+    struct NoProvider;
+
+    impl Provider for NoProvider {
+        fn name(&self) -> &str {
+            "none"
+        }
+        fn stream(
+            &self,
+            _request: &Request<'_>,
+            _on_event: &mut dyn FnMut(StreamEvent),
+            _cancel: &CancelToken,
+        ) -> AssistantMessage {
+            unreachable!("no model is called")
+        }
+    }
+
+    /// Prints the command back and ends as told by `end`.
+    struct Echo {
+        end: TerminalRunEnd,
+        seen: Mutex<Vec<(String, String, Duration)>>,
+    }
+
+    impl TerminalSessions for Echo {
+        fn run(
+            &self,
+            run: &TerminalRun<'_>,
+            on_output: &mut dyn FnMut(&[u8]),
+        ) -> Result<TerminalRunOutcome, String> {
+            self.seen.lock().unwrap().push((
+                run.owner.to_string(),
+                run.name.to_string(),
+                run.timeout,
+            ));
+            on_output(format!("ran {}\r\n", run.command).as_bytes());
+            Ok(TerminalRunOutcome {
+                end: self.end,
+                dropped: 0,
+                log: None,
+                opened: true,
+            })
+        }
+        fn free_name(&self, _owner: &str, stem: &str) -> String {
+            format!("{stem}-1")
+        }
+        fn list(&self, _owner: &str) -> Vec<TerminalEntry> {
+            Vec::new()
+        }
+        fn read(&self, _owner: &str, _name: &str) -> Result<TerminalOutput, String> {
+            Err("unused".into())
+        }
+        fn interrupt(&self, _owner: &str, _name: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn close(&self, _owner: &str, _name: &str) -> Result<(), String> {
+            Ok(())
+        }
+        fn release(&self, _owner: &str) {}
+    }
+
+    fn call(tool: &ShellTool, args: Value, session: bool) -> ToolResultMessage {
+        let mut ctx = ToolContext::new("/tmp");
+        if session {
+            ctx.session = Some(SessionView {
+                id: Some("s1".into()),
+                intent: IntentLog::new(),
+                provider: Arc::new(NoProvider),
+                model: ModelSpec {
+                    provider: "none".into(),
+                    id: "m".into(),
+                    context_window: 8192,
+                    max_tokens: None,
+                    thinking: ThinkingLevel::Off,
+                },
+            });
+        }
+        let call = ToolCall {
+            id: "c".into(),
+            name: SHELL_TOOL.into(),
+            arguments: args,
+            extra_content: None,
+        };
+        tool.execute(&call, &ctx, &mut |_| {}, &CancelToken::new())
+    }
+
+    fn tool(end: TerminalRunEnd) -> (ShellTool, Arc<Echo>) {
+        let echo = Arc::new(Echo {
+            end,
+            seen: Mutex::new(Vec::new()),
+        });
+        let tool = ShellTool {
+            terminals: Some(echo.clone()),
+            ..ShellTool::default()
+        };
+        (tool, echo)
+    }
+
+    #[test]
+    fn a_named_session_runs_the_command_in_the_callers_terminal() {
+        let (tool, echo) = tool(TerminalRunEnd::Finished(Some(0)));
+        let result = call(&tool, json!({"command": "make", "session": "build"}), true);
+        assert_eq!(result.plain_text(), "ran make\n");
+        let (tool, _) = self::tool(TerminalRunEnd::TimedOut);
+        let result = call(
+            &tool,
+            json!({"command": "npm run dev", "session": "dev", "timeout": 5}),
+            true,
+        );
+        assert!(!result.is_error);
+        assert!(result
+            .plain_text()
+            .ends_with("[still running in terminal session `dev` after 5 s; `terminals` reads what it prints, interrupts or closes it]"));
+        assert_eq!(
+            echo.seen.lock().unwrap()[0],
+            ("s1".into(), "build".into(), Duration::from_secs(120))
+        );
+    }
+
+    #[test]
+    fn the_background_gets_a_session_of_its_own_and_a_short_wait() {
+        let (tool, echo) = tool(TerminalRunEnd::TimedOut);
+        let result = call(&tool, json!({"command": "watch", "background": true}), true);
+        assert!(result
+            .plain_text()
+            .starts_with("[terminal session `bg-1`]\nran watch\n"));
+        assert_eq!(
+            echo.seen.lock().unwrap()[0],
+            ("s1".into(), "bg-1".into(), BACKGROUND_WAIT)
+        );
+    }
+
+    #[test]
+    fn sessions_need_a_session_a_registry_and_a_fitting_name() {
+        let (tool, _) = tool(TerminalRunEnd::Finished(Some(0)));
+        assert!(call(&tool, json!({"command": "ls", "session": "a"}), false).is_error);
+        assert!(call(&tool, json!({"command": "ls", "session": "a b"}), true).is_error);
+        let bare = ShellTool::default();
+        assert!(call(&bare, json!({"command": "ls", "background": true}), true).is_error);
+        let (tool, _) = self::tool(TerminalRunEnd::Finished(Some(3)));
+        let failed = call(&tool, json!({"command": "false", "session": "a"}), true);
+        assert!(failed.is_error);
+        assert!(failed.plain_text().ends_with("[exit code 3]"));
     }
 }

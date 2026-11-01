@@ -1099,6 +1099,7 @@ impl App {
         termide_debug::breakpoints::flush();
         self.end_debug_session();
         self.shutdown_plugins();
+        agent_panel::terminals::agent_terminals().release_all();
     }
 
     /// Per-tick background polling batch, run once for every `Event::Tick`.

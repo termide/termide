@@ -167,6 +167,11 @@ pub struct AiSettings {
     /// limit's reset (or back off) and try again, or `stop`.
     #[serde(default)]
     pub on_limit: termide_agent_core::LimitPolicy,
+
+    /// How many terminal sessions (`shell` with `session` or `background`)
+    /// an agent session may have open at once.
+    #[serde(default = "agent_defaults::max_terminal_sessions")]
+    pub max_terminal_sessions: usize,
 }
 
 /// One connection to a model: the wire protocol or CLI agent, where it
@@ -576,6 +581,7 @@ impl Default for AiSettings {
             recall: RecallSettings::default(),
             bell_on_attention: agent_defaults::bell_on_attention(),
             on_limit: termide_agent_core::LimitPolicy::default(),
+            max_terminal_sessions: agent_defaults::max_terminal_sessions(),
         }
     }
 }
@@ -1026,6 +1032,9 @@ mod agent_defaults {
     }
     pub fn bell_on_attention() -> bool {
         true
+    }
+    pub fn max_terminal_sessions() -> usize {
+        10
     }
 }
 

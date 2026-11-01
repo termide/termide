@@ -18,8 +18,8 @@ use crate::goal::{parse_verdict, GoalOutcome, GoalPrompt, GoalVerdict};
 use crate::handoff::HandoffPrompt;
 use crate::loop_guard::{LoopGuard, LoopPrompt, LoopReport};
 use crate::message::{
-    AssistantContent, AssistantMessage, Message, StopReason, ToolCall, ToolResultMessage, Usage,
-    UserMessage,
+    AssistantContent, AssistantMessage, Message, StopReason, ToolCall, ToolResultContent,
+    ToolResultMessage, Usage, UserContent, UserMessage,
 };
 use crate::permissions::{ChannelPrompter, DecidedBy, PermissionNote};
 use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
@@ -591,6 +591,31 @@ pub struct Agent {
     /// or none when nothing else holds it. The loop waits at its step
     /// boundaries while it is set, and goes on where it stood once lifted.
     pause_gate: Option<PauseGate>,
+    /// A note for the model at each call, about the session's state; see
+    /// [`ContextNote`].
+    context_note: Option<ContextNote>,
+}
+
+/// What the model is told at each of its calls about the state of the
+/// session — the terminals the agent left open — given the session's id.
+/// The note goes at the end of the request only, never into the
+/// transcript, so it is always current and the cached prefix stays as it
+/// was. `None` when there is nothing to tell.
+pub type ContextNote = Arc<dyn Fn(Option<&str>) -> Option<String> + Send + Sync>;
+
+/// `messages` with `note` added to the text of the last one.
+fn with_note(messages: &[Message], note: &str) -> Vec<Message> {
+    let mut messages = messages.to_vec();
+    let text = format!("<system-reminder>\n{note}\n</system-reminder>");
+    match messages.last_mut() {
+        Some(Message::User(user)) => user.content.push(UserContent::Text { text }),
+        Some(Message::ToolResult(result)) => {
+            result.content.push(ToolResultContent::Text { text });
+        }
+        // The model's own turn last: no call is made on it.
+        Some(Message::Assistant(_)) | None => {}
+    }
+    messages
 }
 
 impl Agent {
@@ -625,7 +650,15 @@ impl Agent {
             session_id: None,
             panel: None,
             pause_gate: None,
+            context_note: None,
         }
+    }
+
+    /// Tell the model what `note` says at each of its calls.
+    #[must_use]
+    pub fn with_context_note(mut self, note: ContextNote) -> Self {
+        self.context_note = Some(note);
+        self
     }
 
     /// Hold the loop at its step boundaries while `gate` is paused: a panel
@@ -1291,10 +1324,15 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) -> (AssistantMessage, Option<LoopReport>) {
+        let noted = self
+            .context_note
+            .as_ref()
+            .and_then(|note| note(self.session_id.as_deref()))
+            .map(|note| with_note(&self.messages, &note));
         let request = Request {
             model: &self.model,
             system_prompt: &self.system_prompt,
-            messages: &self.messages,
+            messages: noted.as_deref().unwrap_or(&self.messages),
             tools: &self.tools.specs(),
             thinking,
         };
@@ -2900,6 +2938,52 @@ OK let me just start implementing and see what happens.\n";
             steering: 0,
             follow_up: 0
         }));
+    }
+
+    #[test]
+    fn the_context_note_rides_on_each_request_but_stays_out_of_the_transcript() {
+        let mut registry = ToolRegistry::new();
+        registry.insert(Arc::new(EchoTool::default()));
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            tool_reply(
+                vec![("c1", "echo", json!({ "text": "x" }))],
+                StopReason::ToolUse,
+            ),
+            text_reply("done"),
+        ]));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = Arc::clone(&calls);
+        let mut agent = Agent::new(provider.clone(), registry, model(), "/tmp".into())
+            .with_session_id(Some("s1".into()))
+            .with_context_note(Arc::new(move |session| {
+                assert_eq!(session, Some("s1"));
+                let n = counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                Some(format!("note {n}"))
+            }));
+
+        collect(&mut agent, "go", &mut NoHooks);
+
+        let requests = provider.seen_requests();
+        let last_text = |messages: &[Message]| match messages.last() {
+            Some(Message::User(user)) => match user.content.last() {
+                Some(UserContent::Text { text }) => text.clone(),
+                _ => String::new(),
+            },
+            Some(Message::ToolResult(result)) => match result.content.last() {
+                Some(ToolResultContent::Text { text }) => text.clone(),
+                _ => String::new(),
+            },
+            _ => String::new(),
+        };
+        assert_eq!(
+            last_text(&requests[0]),
+            "<system-reminder>\nnote 0\n</system-reminder>"
+        );
+        assert_eq!(
+            last_text(&requests[1]),
+            "<system-reminder>\nnote 1\n</system-reminder>"
+        );
+        assert!(!format!("{:?}", agent.messages()).contains("system-reminder"));
     }
 
     #[test]

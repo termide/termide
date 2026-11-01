@@ -12,7 +12,7 @@ use termide_agent_core::{
     LoopPrompt, Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
     PermissionHooks, PermissionRules, PersistRule, PlanGuard, PlanPrompt, Provider,
     QuestionEnvelope, Refusals, ReviewerSetup, Session, ShellRunner, SkillInfo, SuggestionEnvelope,
-    Timing, ToolContext, ToolRegistry, MODEL_OPTION,
+    TerminalSessions, Timing, ToolContext, ToolRegistry, MODEL_OPTION,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -200,6 +200,7 @@ pub(crate) fn spawn_runtime(
     session: Option<&Session>,
     blocked: &Blocked,
     shell_run: Option<ShellRunner>,
+    terminals: Option<&Arc<dyn TerminalSessions>>,
     skills: Vec<SkillInfo>,
     panel: u64,
 ) -> Spawned {
@@ -358,6 +359,12 @@ pub(crate) fn spawn_runtime(
         // A command the user confirms on the card runs through this, in the
         // middle of the call that asked.
         agent = agent.with_shell_run(run);
+    }
+    if let Some(terminals) = terminals {
+        // The agent hears of its open terminal sessions at each model call.
+        agent = agent.with_context_note(termide_agent_core::terminals::context_note(Arc::clone(
+            terminals,
+        )));
     }
     let mut chain = guards(checkpoints);
     chain.push(Box::new(hooks));

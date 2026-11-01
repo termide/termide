@@ -23,6 +23,7 @@ mod shell;
 mod skill;
 mod suggest;
 mod task;
+mod terminals;
 mod truncate;
 mod write;
 
@@ -46,6 +47,7 @@ pub mod jobs_text {
     pub use crate::jobs::{duration, first_line};
 }
 pub use task::{SubagentOutcome, SubagentRun, SubagentTask, TaskTool};
+pub use terminals::TerminalsTool;
 pub use write::WriteTool;
 
 /// The default registry: `read`, `edit`, `write`, `shell`, in prompt order.

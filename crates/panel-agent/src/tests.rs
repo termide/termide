@@ -254,6 +254,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         // No runner by default: a test that exercises `!` installs one that
         // records what reached the shell, so nothing runs for real here.
         shell_run: None,
+        terminals: None,
         fold: FoldMode::OnFinish,
         on_limit: LimitPolicy::Ask,
     }

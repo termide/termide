@@ -152,6 +152,7 @@ impl AgentPanel {
             session.as_ref(),
             &blocked,
             self.shell_run.clone(),
+            self.terminals.as_ref(),
             served_skills(
                 self.catalog.as_ref(),
                 &self.offered_skills,
@@ -175,6 +176,9 @@ impl AgentPanel {
         // same-session rebuild (switch agent, undo) the caller has already
         // taken the session out, so there is nothing to leave here.
         if let Some(old) = self.session.take() {
+            if session.as_ref().map(Session::id) != Some(old.id()) {
+                self.release_terminals(&old);
+            }
             discard_if_empty(old);
             // The unfinished delegates and the answer owed to a delegating
             // panel were the session left's, not the next one's.
