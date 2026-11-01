@@ -1,6 +1,7 @@
 // Allow some clippy lints for VT100 implementation
 #![allow(clippy::needless_range_loop)]
 
+pub mod agent_shell;
 mod clipboard;
 mod input_encoding;
 mod link_detection;
@@ -12,11 +13,13 @@ mod render;
 mod search;
 mod selection;
 pub mod shell_utils;
+mod tap;
 mod terminal;
 mod terminal_info;
 #[cfg(windows)]
 mod windows_proc;
 
+pub use tap::{OutputTap, TapChunk};
 pub use terminal_info::TerminalInfo;
 
 use anyhow::Result;
@@ -242,6 +245,7 @@ impl Terminal {
         screen: &Arc<RwLock<TerminalScreen>>,
         is_alive: &Arc<Mutex<bool>>,
         has_new_data: &Arc<AtomicBool>,
+        tap: Option<Arc<tap::OutputTap>>,
     ) {
         let screen_clone = Arc::clone(screen);
         let is_alive_clone = Arc::clone(is_alive);
@@ -254,6 +258,9 @@ impl Terminal {
             loop {
                 match reader.read(&mut buf) {
                     Ok(n) if n > 0 => {
+                        if let Some(tap) = &tap {
+                            tap.push(&buf[..n]);
+                        }
                         for byte in &buf[..n] {
                             parser.advance(&mut performer, *byte);
                         }
@@ -267,6 +274,9 @@ impl Terminal {
 
             if let Ok(mut alive) = is_alive_clone.lock() {
                 *alive = false;
+            }
+            if let Some(tap) = &tap {
+                tap.close();
             }
             // The program closed the terminal, as it does when it exits:
             // collect its status so it does not linger as a zombie for as
@@ -423,6 +433,7 @@ impl Terminal {
             &screen,
             &is_alive,
             &has_new_data,
+            None,
         );
 
         let username = std::env::var("USER")
@@ -494,6 +505,7 @@ impl Terminal {
             &screen,
             &is_alive,
             &has_new_data,
+            None,
         );
 
         let mut term = Self::build(
@@ -530,7 +542,7 @@ impl Terminal {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| program.clone());
-        Self::spawn_command(rows, cols, cmd, cwd, env, title).map(|(term, _)| term)
+        Self::spawn_command(rows, cols, cmd, cwd, env, title, None).map(|(term, _)| term)
     }
 
     /// A terminal for a program another process starts: what it holds runs
@@ -541,7 +553,8 @@ impl Terminal {
     pub fn new_for_device(rows: u16, cols: u16, title: &str) -> Result<(Self, std::path::PathBuf)> {
         let mut cmd = CommandBuilder::new("/bin/sh");
         cmd.args(["-c", "trap '' INT QUIT TSTP; exec sleep 2147483647"]);
-        let (term, device) = Self::spawn_command(rows, cols, cmd, None, &[], title.to_string())?;
+        let (term, device) =
+            Self::spawn_command(rows, cols, cmd, None, &[], title.to_string(), None)?;
         let device = device.ok_or_else(|| anyhow::anyhow!("the terminal has no device name"))?;
         Ok((term, device))
     }
@@ -560,6 +573,7 @@ impl Terminal {
         cwd: Option<std::path::PathBuf>,
         env: &[(String, String)],
         title: String,
+        tap: Option<Arc<tap::OutputTap>>,
     ) -> Result<(Self, Option<std::path::PathBuf>)> {
         let pty_system = native_pty_system();
         let size = PtySize {
@@ -595,6 +609,7 @@ impl Terminal {
             &screen,
             &is_alive,
             &has_new_data,
+            tap,
         );
         let mut term = Self::build(pty, input, child, pid, screen, size, is_alive, has_new_data);
         term.title = TitleSource::Command(title);

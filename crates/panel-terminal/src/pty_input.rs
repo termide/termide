@@ -171,6 +171,14 @@ impl PtyInput {
         }
     }
 
+    /// Another way into the queue, for a holder off the UI thread (the
+    /// agent's shell session); dropping it leaves the queue open.
+    pub fn sender(&self) -> InputSender {
+        InputSender {
+            shared: Arc::clone(&self.shared),
+        }
+    }
+
     /// Everything queued and not yet written, emptied out.
     #[cfg(test)]
     pub fn take_queued(&self) -> Vec<u8> {
@@ -184,6 +192,19 @@ impl PtyInput {
 impl Drop for PtyInput {
     fn drop(&mut self) {
         self.shared.close();
+    }
+}
+
+/// Input queued from outside the panel, in the same order as the panel's.
+#[derive(Clone)]
+pub struct InputSender {
+    shared: Arc<Shared>,
+}
+
+impl InputSender {
+    /// As [`PtyInput::send`].
+    pub fn send(&self, data: Vec<u8>) -> Result<(), InputError> {
+        self.shared.push(false, data)
     }
 }
 

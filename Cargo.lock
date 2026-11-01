@@ -6003,6 +6003,7 @@ dependencies = [
  "portable-pty",
  "ratatui",
  "regex",
+ "tempfile",
  "termide-config",
  "termide-core",
  "termide-i18n",
