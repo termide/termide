@@ -822,14 +822,26 @@ mod tests {
             let dir = tempfile::tempdir().unwrap();
             let out = dir.path().join("received");
             let reply = r#"{"jsonrpc":"2.0","id":1,"result":{"capabilities":{}}}"#;
-            // Answer `initialize`, then record everything that comes in.
+            // Answer `initialize`, then record everything that comes in. No
+            // `exec`: the shell keeps its output open, so the connection
+            // stands until the shutdown.
             let script = format!(
-                "printf 'Content-Length: {}\\r\\n\\r\\n%s' '{reply}'; exec cat > '{}'",
+                "printf 'Content-Length: {}\\r\\n\\r\\n%s' '{reply}'; cat > '{}'",
                 reply.len(),
                 out.display()
             );
             let server = start(dir.path(), &script);
-            wait_for(&server, ServerStatus::Running);
+            // `Running` shows before the reply to `initialize` is read, and a
+            // shutdown during that wait skips `initialized` by design: wait
+            // for it to reach the server instead.
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while !std::fs::read_to_string(&out)
+                .unwrap_or_default()
+                .contains(r#""method":"initialized""#)
+            {
+                assert!(Instant::now() < deadline, "initialized never arrived");
+                std::thread::sleep(Duration::from_millis(10));
+            }
 
             server.shutdown_within(Duration::from_millis(300), Duration::from_millis(300));
             let received = std::fs::read_to_string(&out).unwrap();
