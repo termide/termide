@@ -5,6 +5,11 @@ All notable changes to Termide will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The agent's `bash` tool is now `shell`.** The tool that runs commands is named for what it does rather than for the shell behind it, which is still bash. termide renames it once in what it keeps itself: `[ai.permissions.bash]` in the global config and in rules granted for projects, `tools` in the global `ai/hooks.toml` and the global agents' `tools:`, the calls in session logs; an untouched `ai/tools/bash.md` is replaced by `ai/tools/shell.md` (an edited one moves there, with the new default beside it as `.new`). A project's own files are not rewritten — a `bash` left there still applies through this release only. What changes for scripts: a hook's input names the tool `"shell"`, and an external agent sees termide's tool as `mcp__termide__shell`.
+
 ## [0.48.0] - 2026-10-31
 
 [0.48.0]: https://github.com/termide/termide/releases/tag/0.48.0

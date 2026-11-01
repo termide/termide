@@ -1,4 +1,4 @@
-//! `bash`: run a shell command, stream its output, kill it on timeout or
+//! `shell`: run a shell command, stream its output, kill it on timeout or
 //! cancel, keep head and tail of long output inline and the full log on disk.
 
 use std::io::Read;
@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use termide_agent_core::ToolText;
 use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
+use termide_agent_core::{ToolText, SHELL_TOOL};
 
 use crate::args::{optional_u64, required_str};
 use crate::capture::{Capture, Captured, LiveView};
@@ -32,7 +32,7 @@ const CAPTURE_SIDE_BYTES: usize = 1024 * 1024;
 /// end until its timeout cannot fill the disk.
 const MAX_LOG_BYTES: u64 = 256 * 1024 * 1024;
 
-pub struct BashTool {
+pub struct ShellTool {
     pub default_timeout: Duration,
     pub max_timeout: Duration,
     pub max_output_bytes: usize,
@@ -51,7 +51,7 @@ pub struct BashTool {
     pub shim_path: Option<PathBuf>,
 }
 
-impl Default for BashTool {
+impl Default for ShellTool {
     fn default() -> Self {
         Self {
             default_timeout: Duration::from_secs(120),
@@ -66,13 +66,13 @@ impl Default for BashTool {
     }
 }
 
-impl Tool for BashTool {
+impl Tool for ShellTool {
     fn name(&self) -> &str {
-        "bash"
+        SHELL_TOOL
     }
 
     fn description(&self) -> &str {
-        &ToolText::seed("bash").description
+        &ToolText::seed(SHELL_TOOL).description
     }
 
     fn parameters(&self) -> Value {
@@ -87,11 +87,11 @@ impl Tool for BashTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        ToolText::seed("bash").snippet.as_deref()
+        ToolText::seed(SHELL_TOOL).snippet.as_deref()
     }
 
     fn prompt_guidelines(&self) -> &[String] {
-        &ToolText::seed("bash").guidelines
+        &ToolText::seed(SHELL_TOOL).guidelines
     }
 
     fn execute(
@@ -134,7 +134,7 @@ struct Run {
     command: String,
 }
 
-impl BashTool {
+impl ShellTool {
     fn run(
         &self,
         command: &str,
@@ -359,7 +359,7 @@ impl BashTool {
             .take(32)
             .collect();
         Some(dir.join(format!(
-            "termide-agent-bash-{}-{safe_id}.log",
+            "termide-agent-shell-{}-{safe_id}.log",
             termide_agent_core::now_millis()
         )))
     }
@@ -370,7 +370,7 @@ impl BashTool {
             Ok(()) => Some(path),
             Err(error) => {
                 log::warn!(
-                    "cannot save full bash output to {}: {error}",
+                    "cannot save full shell output to {}: {error}",
                     path.display()
                 );
                 None
@@ -496,22 +496,22 @@ fn lock(output: &Mutex<Capture>) -> std::sync::MutexGuard<'_, Capture> {
 mod tests {
     use super::*;
 
-    fn tool(dir: &std::path::Path) -> BashTool {
-        BashTool {
+    fn tool(dir: &std::path::Path) -> ShellTool {
+        ShellTool {
             log_dir: Some(dir.to_path_buf()),
-            ..BashTool::default()
+            ..ShellTool::default()
         }
     }
 
     fn run_with(
-        tool: &BashTool,
+        tool: &ShellTool,
         dir: &std::path::Path,
         args: Value,
         cancel: &CancelToken,
     ) -> (ToolResultMessage, Vec<String>) {
         let call = ToolCall {
             id: "b-1".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: args,
             extra_content: None,
         };
@@ -563,10 +563,10 @@ mod tests {
         std::fs::write(&shim, "#!/bin/sh\necho SHIMMED\n").unwrap();
         std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
 
-        let tool = BashTool {
+        let tool = ShellTool {
             log_dir: Some(dir.path().to_path_buf()),
             shim_path: Some(shims),
-            ..BashTool::default()
+            ..ShellTool::default()
         };
         let result = run_with(
             &tool,
@@ -605,7 +605,7 @@ mod tests {
         assert!(details["raw_chars"].as_u64().unwrap() > 10);
 
         // Turning cleaning off passes the escapes through.
-        let raw_tool = BashTool {
+        let raw_tool = ShellTool {
             clean: false,
             ..tool(dir.path())
         };
@@ -706,7 +706,7 @@ mod tests {
     #[test]
     fn long_output_is_truncated_and_saved() {
         let dir = tempfile::tempdir().unwrap();
-        let tool = BashTool {
+        let tool = ShellTool {
             max_output_bytes: 2048,
             ..tool(dir.path())
         };
@@ -733,7 +733,7 @@ mod tests {
     #[test]
     fn endless_output_is_bounded_in_memory_and_spooled_to_the_log() {
         let dir = tempfile::tempdir().unwrap();
-        let tool = BashTool {
+        let tool = ShellTool {
             max_output_bytes: 2048,
             capture_bytes: 16 * 1024,
             ..tool(dir.path())
@@ -777,7 +777,7 @@ mod tests {
     #[test]
     fn the_output_log_is_capped() {
         let dir = tempfile::tempdir().unwrap();
-        let tool = BashTool {
+        let tool = ShellTool {
             max_output_bytes: 2048,
             capture_bytes: 4096,
             max_log_bytes: 64 * 1024,

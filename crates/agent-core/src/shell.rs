@@ -8,11 +8,11 @@
 //!
 //! It lives outside the agent's tool registry on purpose. A command the user
 //! typed is not something the agent was given leave to do, so it must not
-//! depend on whether the agent profile's `tools` list kept `bash`; and a
+//! depend on whether the agent profile's `tools` list kept `shell`; and a
 //! command confirmed on a card arrives in the middle of a tool call, where the
 //! loop is busy and cannot be asked to run another.
 //!
-//! The app builds it over the same `bash` tool the agent uses, so timeouts,
+//! The app builds it over the same `shell` tool the agent uses, so timeouts,
 //! output cleaning and the full-log file behave as they do for a call the agent
 //! made itself.
 

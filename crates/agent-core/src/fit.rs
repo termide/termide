@@ -440,10 +440,10 @@ mod tests {
 
     /// A step that ran a command that changes things, with its output.
     fn command_step(id: &str, output: usize) -> Vec<Message> {
-        let run = call(id, "bash", json!({ "command": "cargo build" }));
+        let run = call(id, "shell", json!({ "command": "cargo build" }));
         vec![
             Message::Assistant(tool_reply(
-                vec![(id, "bash", run.arguments.clone())],
+                vec![(id, "shell", run.arguments.clone())],
                 StopReason::ToolUse,
             )),
             Message::ToolResult(ToolResultMessage::text(

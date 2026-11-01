@@ -350,7 +350,7 @@ are on, connecting, needs sign-in. The banner gives way to the conversation as
 soon as you send your first message, and those lines stay at the top of it;
 from then on every change is a line of its own — a server reconnected or
 changing its tools, a toolset applied (`mcp github: 3 of 12 tools on`,
-`Tools switched off: bash; on: —`) — since from there the model has a
+`Tools switched off: shell; on: —`) — since from there the model has a
 different set.
 
 The **Tools** chip (and the banner's tools line) opens a checklist of what
@@ -449,7 +449,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `Ctrl+T` | In a view of another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
 | `F9` | In a view of another agent's task shown over the layout, move it into a panel of its own (see [Subagents](#subagents)) |
-| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, cache hits, how much `bash` output was cleaned, tokens, context and what fills it, who spent the tokens on which model); also `/usage` and the `[≡]` menu |
+| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, cache hits, how much `shell` output was cleaned, tokens, context and what fills it, who spent the tokens on which model); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
@@ -868,7 +868,7 @@ so a noisy command costs far fewer tokens. A test run — Rust (`cargo test`,
 the result summary. The full, untouched log is still
 written to a file whose path the tool reports, and you still see the raw
 stream live in the panel. The session info (`F3`) shows, after the cache
-hits, **Cleaned bash**: the share of the session's raw `bash` output
+hits, **Cleaned shell**: the share of the session's raw `shell` output
 the cleaning took out, in characters, and about how many tokens that was,
 read from the log.
 
@@ -1013,7 +1013,7 @@ shell mode `↑` and `↓` walk the commands you ran before rather than the
 messages. Text that merely opens with a `$` — pasted, or after a space — is
 still a message.
 
-The command runs in the session's directory through the same `bash` the agent
+The command runs in the session's directory through the same `shell` tool the agent
 uses, so a long output keeps its beginning and end and writes the complete log
 to a file. It shows in the transcript as a shell call block, like the agent's
 own — `$ git status --short`, folded, with its time and a `✗` if it failed;
@@ -1042,7 +1042,7 @@ content is gone.
 Before `edit` or `write` runs, the panel keeps a copy of the target under the
 session's directory (`ai/sessions/<path>/checkpoints/<session id>/`), one
 folder per request, deleted again when the request is undone. Shell commands
-are not covered: what `bash` changes, git or your own backups have to hold.
+are not covered: what `shell` changes, git or your own backups have to hold.
 
 ### Rewinding to a message
 
@@ -1071,7 +1071,7 @@ described after the list, **agents** and **send_message** (see
 [Debugging](#debugging)).
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
-`fetch`, `web_search`, `skill`, a look-only `bash` command such as `rg` or
+`fetch`, `web_search`, `skill`, a look-only `shell` command such as `rg` or
 `git log` — and `task` delegations run side by side; each ends in the
 transcript as it finishes, and the model gets their results in the order it
 asked. Their permission decisions still take turns, before any of them runs.
@@ -1086,11 +1086,15 @@ something. How many delegated tasks think at once is the
 - **edit** replaces a unique piece of text in a file and reports a diff of
   what changed.
 - **write** creates a file or replaces its whole content.
-- **bash** runs a shell command in the project directory, streaming its output.
+- **shell** runs a shell command in the project directory, streaming its output.
   Long output keeps its beginning and end, and the complete log is written to
   a file the agent can read. Only the two ends stay in memory, so a command
   that prints without end until its timeout cannot exhaust it; the log stops
-  at 256 MiB.
+  at 256 MiB. The command runs with bash. The tool used to be called `bash`;
+  termide renames it once in what it keeps itself — the global config and
+  its `ai/` files, rules granted for projects, session logs. A project's own
+  files are not rewritten: a `bash` left in them still applies, through this
+  release only, and is for you to rename.
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
@@ -1098,7 +1102,7 @@ something. How many delegated tasks think at once is the
   and its code for past work, decisions and their reasons; see
   [Recall](#recall).
 
-Searching the project's files by pattern is done through `bash` with the tools
+Searching the project's files by pattern is done through `shell` with the tools
 you already have (`rg`, `find`), rather than through a separate search tool.
 
 One more tool, **skill**, appears when skills are defined; see
@@ -1349,7 +1353,7 @@ that runs its own tools may sandbox them itself; termide does not.
 
 Nothing that changes your project happens without your say-so. When the agent
 wants to do something that is not already allowed, a card appears in the
-panel above the input. Its title is the intent — "Agent wants to run bash:" —
+panel above the input. Its title is the intent — "Agent wants to run shell:" —
 and under it, dim, exactly what that is (the command or path); a long one
 folds to five lines that a click unfolds. The rows follow: allow once, allow
 for this session, in `configured` and `auto` also allow always in this project and
@@ -1394,7 +1398,7 @@ Rules live per tool. Among the rules that match, the strictest wins, so a
 [ai.permissions]
 mode = "auto"       # ask | plan | edit | configured | auto (default) | all — what new sessions start in
 
-[ai.permissions.bash]
+[ai.permissions.shell]
 "cargo *"     = "allow"
 "git status*" = "allow"
 "git push*"   = "ask"
@@ -1813,7 +1817,7 @@ description: Reviews diffs and points at risks
 icon: 🔍
 model: Qwen3.8-27B-MTPLX-Optimized-Quality
 mode: edit
-tools: read, bash
+tools: read, shell
 ---
 You review the changes you are given. …
 
@@ -2051,7 +2055,7 @@ which file, in order: an `edit` or `write` of a file another panel changed
 after this one last read it — or that this one never read — is refused, and
 the agent is told to read the file again first. A delegate's reads and
 changes count as its parent panel's. Changes made outside the agents' tools
-(a `bash` command, your editor) are not tracked.
+(a `shell` command, your editor) are not tracked.
 
 ### External agents
 
@@ -2316,7 +2320,7 @@ to change how the answer is drawn or cited.
 ### Tool texts
 
 What the model is told about each built-in tool is a file too:
-`tools/<name>.md` for `read`, `edit`, `write`, `bash`, `question`,
+`tools/<name>.md` for `read`, `edit`, `write`, `shell`, `question`,
 `suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`,
 `send_message`, `debug` and `jobs`, seeded
 and kept current like the `system/` files, and read from the configuration
@@ -2576,7 +2580,7 @@ output, the shape Claude Code, Gemini CLI and Cursor share:
 ```toml
 [no-force-push]
 event = "before_tool_call"      # or after_tool_call
-tools = ["bash"]                # patterns; every tool when absent
+tools = ["shell"]                # patterns; every tool when absent
 command = "scripts/guard.sh"    # run in the panel's directory
 timeout_secs = 30
 ```
@@ -2603,11 +2607,11 @@ configuration level: one of yours may be a guard.
 ### Command shims
 
 A shim is an executable in `shims/` named after a command. When the built-in
-agent runs a shell command, `shims/` is prepended to the `bash` tool's `PATH`,
+agent runs a shell command, `shims/` is prepended to the `shell` tool's `PATH`,
 so a shim shadows the real command — including inside a pipeline
 (`… | grep …`). It is the token-saving layer you extend by hand: a `shims/grep`
 that runs a leaner search, a `shims/cat` that trims noise, each printing a
-compact result the model reads. (The `bash` tool also cleans output on its own;
+compact result the model reads. (The `shell` tool also cleans output on its own;
 a shim is the part you control.)
 
 ```sh
@@ -2681,7 +2685,7 @@ same fields as `json` — for a caller that follows a long run live.
 termide --prompt "count the TODOs in src" --output json
 # {"ok":true,"answer":"7","stop_reason":"stop","model":"…","provider":"…",
 #  "usage":{"input":…,"output":…,"cache_read":…,"cache_write":…},
-#  "tools":[{"name":"bash","subject":"rg -c TODO src","error":false}],"error":null}
+#  "tools":[{"name":"shell","subject":"rg -c TODO src","error":false}],"error":null}
 ```
 
 No one is watching to answer a permission card, so a headless run does only

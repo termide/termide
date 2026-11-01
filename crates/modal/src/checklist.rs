@@ -714,7 +714,7 @@ mod tests {
             "Off before the first request",
             vec![
                 item("read", "Built-in", true, true),
-                item("bash", "Built-in", true, true),
+                item("shell", "Built-in", true, true),
                 item("review", "Skills", false, false),
             ],
             vec![],
@@ -800,7 +800,7 @@ mod tests {
             "",
             vec![
                 item("read", "Built-in", true, true),
-                item("bash", "Built-in", false, true),
+                item("shell", "Built-in", false, true),
                 item("grep", "Built-in", true, false),
                 item("fetch", "Web", true, true),
             ],
@@ -815,7 +815,7 @@ mod tests {
         assert!(shown.iter().any(|r| r.contains("[✓] Web")), "{shown:?}");
         // Partly on: the heading turns every unlocked item on.
         modal.handle_key(key(KeyCode::Char(' '))).unwrap();
-        assert_eq!(modal.checked(), vec!["read", "bash", "grep", "fetch"]);
+        assert_eq!(modal.checked(), vec!["read", "shell", "grep", "fetch"]);
         assert!(rows(&mut modal).iter().any(|r| r.contains("[✓] Built-in")));
         // All on: off again, except the locked one; the other group is untouched.
         modal.handle_key(key(KeyCode::Char(' '))).unwrap();
@@ -995,7 +995,7 @@ mod tests {
             "Off before the first request.",
             vec![
                 item("read", "Built-in", true, true),
-                item("bash", "Built-in", true, true),
+                item("shell", "Built-in", true, true),
             ],
             vec![heading(
                 "MCP plane",
@@ -1004,7 +1004,7 @@ mod tests {
             )],
         );
         // The user works in the list: one tool off, the built-ins open, the
-        // cursor on `bash`.
+        // cursor on `shell`.
         modal.handle_key(key(KeyCode::Right)).unwrap();
         modal.handle_key(key(KeyCode::Down)).unwrap();
         modal.handle_key(key(KeyCode::Down)).unwrap();
@@ -1014,7 +1014,7 @@ mod tests {
         // The server connects while the list is open and brings two tools.
         let connected = vec![
             item("read", "Built-in", true, true),
-            item("bash", "Built-in", true, true),
+            item("shell", "Built-in", true, true),
             item("plane__query", "MCP plane", true, true),
             item("plane__send", "MCP plane", false, true),
         ];

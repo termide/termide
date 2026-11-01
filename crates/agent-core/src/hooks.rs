@@ -6,7 +6,7 @@
 //! ```toml
 //! [no-force-push]
 //! event = "before_tool_call"
-//! tools = ["bash"]
+//! tools = ["shell"]
 //! command = "scripts/guard.sh"
 //! ```
 
@@ -35,7 +35,7 @@ pub struct HookConfig {
     #[serde(default)]
     pub args: Vec<String>,
     /// Tool names the hook applies to (`*` wildcards); every tool when empty.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::tool::de_tool_names")]
     pub tools: Vec<String>,
     /// Seconds before the program is killed and ignored.
     #[serde(default = "default_timeout")]
@@ -106,5 +106,7 @@ mod tests {
         assert_eq!(hooks["guard"].timeout_secs, 30);
         assert!(hooks["guard"].args.is_empty());
         assert!(!hooks["log"].enabled);
+        // The shell tool's name before its rename still matches it.
+        assert_eq!(hooks["guard"].tools, ["shell"]);
     }
 }

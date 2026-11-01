@@ -1,7 +1,7 @@
 //! Built-in tools of the termide coding agent.
 //!
 //! Four tools cover what a coding agent needs on a local checkout: `read`,
-//! `edit`, `write` and `bash`; `skill` joins them when the project or the
+//! `edit`, `write` and `shell`; `skill` joins them when the project or the
 //! user defines skills, `question` when someone watches the run to answer.
 //! Search is left to the shell (`rg`, `find`), which every model already
 //! knows. Contracts follow the cross-agent
@@ -11,7 +11,6 @@
 //! a file.
 
 mod args;
-mod bash;
 mod capture;
 mod clean;
 mod debug;
@@ -20,6 +19,7 @@ mod jobs;
 mod peers;
 mod question;
 mod read;
+mod shell;
 mod skill;
 mod suggest;
 mod task;
@@ -31,7 +31,6 @@ use std::sync::Arc;
 
 use termide_agent_core::ToolRegistry;
 
-pub use bash::BashTool;
 pub use clean::{clean_output, Cleaned};
 pub use debug::{parse_action as parse_debug_action, DebugAction, DebugCheck, DebugRun, DebugTool};
 pub use edit::EditTool;
@@ -39,6 +38,7 @@ pub use jobs::{JobsTool, OwnTasks};
 pub use peers::{AgentsTool, PeerInfo, PeerList, PeerSend, SendMessageTool};
 pub use question::QuestionTool;
 pub use read::ReadTool;
+pub use shell::ShellTool;
 pub use skill::SkillTool;
 pub use suggest::SuggestCommandTool;
 /// How `jobs` words a line, for the sources that fill it.
@@ -48,8 +48,8 @@ pub mod jobs_text {
 pub use task::{SubagentOutcome, SubagentRun, SubagentTask, TaskTool};
 pub use write::WriteTool;
 
-/// The default registry: `read`, `edit`, `write`, `bash`, in prompt order.
-/// `shim_path` is the command-shim directory prepended to `bash`'s `PATH`
+/// The default registry: `read`, `edit`, `write`, `shell`, in prompt order.
+/// `shim_path` is the command-shim directory prepended to `shell`'s `PATH`
 /// (the configuration-level `shims/`); `None` leaves `PATH` untouched.
 #[must_use]
 pub fn builtin_tools(shim_path: Option<PathBuf>) -> ToolRegistry {
@@ -57,9 +57,9 @@ pub fn builtin_tools(shim_path: Option<PathBuf>) -> ToolRegistry {
     registry.insert(Arc::new(ReadTool));
     registry.insert(Arc::new(EditTool));
     registry.insert(Arc::new(WriteTool));
-    registry.insert(Arc::new(BashTool {
+    registry.insert(Arc::new(ShellTool {
         shim_path,
-        ..BashTool::default()
+        ..ShellTool::default()
     }));
     registry
 }

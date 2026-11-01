@@ -608,7 +608,7 @@ mod tests {
     fn the_turn_shows_user_words_and_calls_but_marks_a_delegated_task() {
         let parent = IntentLog::new();
         parent.push(IntentEntry::User("fix the build".into()));
-        parent.push_calls([call("bash", json!({"command": "cargo build"}))].iter());
+        parent.push_calls([call("shell", json!({"command": "cargo build"}))].iter());
         let log = IntentLog::delegated(&parent);
         log.push(IntentEntry::Delegated("run the tests".into()));
         let entries = log.snapshot();
@@ -621,10 +621,10 @@ mod tests {
             ]
         );
         let turn = ClassifyPrompt::default()
-            .user_turn(&entries, &call("bash", json!({"command": "cargo test"})));
+            .user_turn(&entries, &call("shell", json!({"command": "cargo test"})));
         assert!(turn.contains("[user]\nfix the build"));
         assert!(turn.contains("not written by the user]\nrun the tests"));
-        assert!(turn.contains("[pending call] bash {\"command\":\"cargo test\"}"));
+        assert!(turn.contains("[pending call] shell {\"command\":\"cargo test\"}"));
         assert!(turn.ends_with(&ClassifyPrompt::default().request));
     }
 
@@ -674,7 +674,7 @@ mod tests {
         assert!(IntentLog::delegated(&log)
             .snapshot()
             .contains(&IntentEntry::Agent("push it".into())));
-        let turn = ClassifyPrompt::default().user_turn(&entries, &call("bash", json!({})));
+        let turn = ClassifyPrompt::default().user_turn(&entries, &call("shell", json!({})));
         assert!(turn.contains("[message from another agent, not written by the user]\npush it"));
         assert_eq!(turn.matches("[user]").count(), 1, "{turn}");
     }
@@ -686,7 +686,7 @@ mod tests {
         for n in 0..MAX_CALLS + 5 {
             log.push_calls([call("read", json!({"path": format!("f{n}")}))].iter());
         }
-        let turn = ClassifyPrompt::default().user_turn(&log.snapshot(), &call("bash", json!({})));
+        let turn = ClassifyPrompt::default().user_turn(&log.snapshot(), &call("shell", json!({})));
         assert!(turn.contains("… [cut]"));
         assert!(!turn.contains("\"f4\""));
         assert!(turn.contains("\"f5\""));
@@ -790,7 +790,7 @@ mod tests {
 
     #[test]
     fn the_model_reviewer_asks_the_session_model_unless_given_its_own() {
-        let pending = call("bash", json!({"command": "cargo build"}));
+        let pending = call("shell", json!({"command": "cargo build"}));
         let mut reviewer = ModelClassifier::new(ClassifyPrompt::default(), CancelToken::new());
         // Nothing to judge against: a call from outside a session, or before
         // the user said anything.

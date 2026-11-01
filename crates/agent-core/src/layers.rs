@@ -26,6 +26,7 @@ use crate::permissions::Mode;
 use crate::plan::{PlanPrompt, SEED_PLAN};
 use crate::recall::{RecallPrompt, SEED_RECALL};
 use crate::refusals::{Refusals, SEED_PERMISSIONS};
+use crate::tool::{canonical_tool_name, LEGACY_SHELL_TOOL, SHELL_TOOL};
 use crate::tool_text::{ToolText, SEED_TOOLS, TOOLS_DIR};
 
 /// The `ai` directory inside the configuration directory.
@@ -416,6 +417,9 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
         }),
     };
     let mut manifest_changed = move_legacy_default_template(global, &mut manifest)?;
+    manifest_changed |= move_legacy_tool_text(global, &mut manifest)?;
+    crate::retired_tools::rewrite_global(global);
+    rewrite_session_logs_once(global);
 
     for (relative, seed) in shipped_assets() {
         let path = global.join(&relative);
@@ -492,6 +496,73 @@ fn move_legacy_default_template(
     Ok(true)
 }
 
+/// Rewrite the shell tool's old name out of the session logs under `global`,
+/// on a thread of its own, once per process. Transitional, as
+/// [`move_legacy_tool_text`] is.
+fn rewrite_session_logs_once(global: &Path) {
+    static STARTED: std::sync::Once = std::sync::Once::new();
+    let sessions = global.join(SESSIONS_DIR);
+    STARTED.call_once(|| {
+        let spawned = std::thread::Builder::new()
+            .name("rename-shell-tool".into())
+            .spawn(move || crate::retired_tools::rewrite_session_logs(&sessions));
+        if let Err(error) = spawned {
+            log::warn!("cannot start the session log rewrite: {error}");
+        }
+    });
+}
+
+/// Carry the shell tool's texts over from `tools/bash.md`, its name before the
+/// rename, to `tools/shell.md`. An untouched copy is dropped, so the new seed
+/// is written in its place; an edited one is moved with its seed record, so it
+/// stays in effect and the new default lands beside it as `.new`. Whether
+/// anything changed. Transitional: it ships for one release after the rename.
+fn move_legacy_tool_text(
+    global: &Path,
+    manifest: &mut BTreeMap<String, String>,
+) -> std::io::Result<bool> {
+    let tools = global.join(TOOLS_DIR);
+    let legacy_key = format!("{TOOLS_DIR}/{LEGACY_SHELL_TOOL}.md");
+    let current_key = format!("{TOOLS_DIR}/{SHELL_TOOL}.md");
+    let legacy = tools.join(format!("{LEGACY_SHELL_TOOL}.md"));
+    let current = tools.join(format!("{SHELL_TOOL}.md"));
+    let stale_new = dot_new(&legacy);
+    if stale_new.is_file() {
+        std::fs::remove_file(&stale_new)?;
+    }
+    let recorded = manifest.remove(&legacy_key);
+    if !legacy.is_file() || current.exists() {
+        return Ok(recorded.is_some());
+    }
+    let text = std::fs::read_to_string(&legacy).ok();
+    let untouched = text
+        .as_deref()
+        .is_some_and(|text| recorded.as_deref() == Some(seed_hash(text).as_str()));
+    if untouched {
+        std::fs::remove_file(&legacy)?;
+    } else {
+        std::fs::rename(&legacy, &current)?;
+        if let Some(hash) = recorded {
+            manifest.insert(current_key, hash);
+        }
+    }
+    Ok(true)
+}
+
+/// The names of an agent's `tools:` value: comma-separated, bare or in
+/// brackets, each maybe quoted.
+fn tool_list(value: &str) -> Vec<String> {
+    let value = value.trim();
+    let list = value
+        .strip_prefix('[')
+        .and_then(|inner| inner.strip_suffix(']'))
+        .unwrap_or(value);
+    list.split(',')
+        .map(|tool| unquote(tool.trim()).to_string())
+        .filter(|tool| !tool.is_empty())
+        .collect()
+}
+
 /// The front-matter keys an `AGENT.md` is read for, besides `env.<NAME>`.
 const AGENT_KEYS: [&str; 9] = [
     "description",
@@ -532,7 +603,7 @@ pub struct AgentSpec {
     pub model: Option<String>,
     /// Permission mode the agent starts in: `mode`.
     pub mode: Option<Mode>,
-    /// Tools the agent may use, by name: `tools: read, bash` (or in
+    /// Tools the agent may use, by name: `tools: read, shell` (or in
     /// brackets); all built-in tools when absent, none for `tools: []`.
     pub tools: Option<Vec<String>>,
     /// How many model calls a task delegated to the agent may take before
@@ -567,13 +638,9 @@ impl AgentSpec {
             parsed.map_err(|error| warn("mode", &error)).ok()
         });
         let tools = text("tools").map(|value| {
-            let list = value
-                .strip_prefix('[')
-                .and_then(|inner| inner.strip_suffix(']'))
-                .unwrap_or(value);
-            list.split(',')
-                .map(|tool| unquote(tool.trim()).to_string())
-                .filter(|tool| !tool.is_empty())
+            tool_list(value)
+                .iter()
+                .map(|tool| canonical_tool_name(tool).to_string())
                 .collect()
         });
         let max_turns = text("max_turns").and_then(|value| match value.parse::<usize>() {
@@ -855,8 +922,9 @@ impl AgentDirs {
         files
     }
 
-    /// What the agents' `AGENT.md` files and the tool texts say that nothing
-    /// reads: unknown front-matter keys, and tool texts named after no tool.
+    /// What the agents' `AGENT.md` files, the hooks and the tool texts say
+    /// that nothing reads: unknown front-matter keys, and tool texts named
+    /// after no tool.
     #[must_use]
     pub fn definition_problems(&self) -> Vec<DefinitionProblem> {
         let mut problems = Vec::new();
@@ -1435,7 +1503,7 @@ mod tests {
         .unwrap();
         std::fs::write(tools.join("web-search.md"), "Search.\n").unwrap();
         std::fs::write(tools.join("write.md"), "---\nsnippet: put\n---\n\n").unwrap();
-        std::fs::write(tools.join("bash.md.new"), "---\nwhatever: 1\n---\n").unwrap();
+        std::fs::write(tools.join("shell.md.new"), "---\nwhatever: 1\n---\n").unwrap();
 
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         assert_eq!(
@@ -1521,7 +1589,7 @@ mod tests {
         write(
             "review",
             "---\ndescription: Reviews diffs: risks first\nicon: \"🔍\"\nmodel: big\n\
-             mode: accept-edits\ntools: read, bash\nmax_turns: 120\n---\n\
+             mode: accept-edits\ntools: read, shell\nmax_turns: 120\n---\n\
              You review.\n\n{{tools}}\n",
         );
         write("bracketed", "---\ntools: [\"read\", 'bash']\n---\n");
@@ -1558,15 +1626,16 @@ mod tests {
         assert_eq!(spec.icon.as_deref(), Some("🔍"));
         assert_eq!(spec.model.as_deref(), Some("big"));
         assert_eq!(spec.mode, Some(Mode::Edit));
-        let read_bash = Some(vec!["read".to_string(), "bash".to_string()]);
-        assert_eq!(spec.tools, read_bash);
+        let read_shell = Some(vec!["read".to_string(), "shell".to_string()]);
+        assert_eq!(spec.tools, read_shell);
         assert_eq!(spec.max_turns, Some(120));
         assert!(spec.acp.is_none());
         assert_eq!(
             dirs.soul("review").as_deref(),
             Some("You review.\n\n{{tools}}\n")
         );
-        assert_eq!(dirs.spec("bracketed").tools, read_bash);
+        // `bracketed` names the shell tool as it was called before the rename.
+        assert_eq!(dirs.spec("bracketed").tools, read_shell);
         assert_eq!(dirs.spec("toolless").tools, Some(Vec::new()));
         let broken = dirs.spec("broken");
         assert_eq!(broken.description, "still read");
@@ -1673,7 +1742,7 @@ mod tests {
         let local = project.join(PROJECT_AGENT_DIR).join(TOOLS_DIR);
         std::fs::create_dir_all(&local).unwrap();
         std::fs::write(
-            local.join("bash.md"),
+            local.join("shell.md"),
             "---\n---\nRun anything, ask nobody.\n",
         )
         .unwrap();
@@ -1683,8 +1752,8 @@ mod tests {
         assert_eq!(texts["read"].description, "Mine.");
         assert_eq!(texts["read"].snippet.as_deref(), Some("look"));
         assert_eq!(
-            &texts["bash"],
-            ToolText::seed("bash"),
+            &texts["shell"],
+            ToolText::seed("shell"),
             "a project's file is ignored"
         );
         assert!(AgentDirs::new(&project, None, None).tool_texts().is_empty());
@@ -1810,6 +1879,43 @@ mod tests {
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some(""));
         assert_eq!(dirs.soul("other").as_deref(), Some(""));
+    }
+
+    #[test]
+    fn the_shell_tools_texts_move_over_from_its_old_name() {
+        let old_seed = "---\nsnippet: run\n---\nRun a bash command.\n";
+        let layout = |legacy: &str| {
+            let tmp = tempfile::tempdir().unwrap();
+            let global = tmp.path().join("ai");
+            let tools = global.join(TOOLS_DIR);
+            std::fs::create_dir_all(&tools).unwrap();
+            std::fs::write(tools.join("bash.md"), legacy).unwrap();
+            std::fs::write(tools.join("bash.md.new"), old_seed).unwrap();
+            std::fs::write(
+                global.join(SEEDS_MANIFEST),
+                format!("\"tools/bash.md\" = \"{}\"\n", seed_hash(old_seed)),
+            )
+            .unwrap();
+            ensure_global_layout(&global).unwrap();
+            let manifest = std::fs::read_to_string(global.join(SEEDS_MANIFEST)).unwrap();
+            assert!(!manifest.contains("tools/bash.md"), "{manifest}");
+            assert!(!tools.join("bash.md").exists());
+            assert!(!tools.join("bash.md.new").exists());
+            (tmp, tools)
+        };
+
+        // Untouched: the new seed takes its place.
+        let (_tmp, tools) = layout(old_seed);
+        let shipped = ToolText::seed(SHELL_TOOL);
+        let text = std::fs::read_to_string(tools.join("shell.md")).unwrap();
+        assert_eq!(&ToolText::from_file(&text), shipped);
+        assert!(!tools.join("shell.md.new").exists());
+
+        // Edited: the user's text moves and stays; the new seed lands beside it.
+        let (_tmp, tools) = layout("---\n---\nMine.\n");
+        let text = std::fs::read_to_string(tools.join("shell.md")).unwrap();
+        assert_eq!(text, "---\n---\nMine.\n");
+        assert!(tools.join("shell.md.new").exists());
     }
 
     /// A seed file that exists but cannot be read as text is the user's; it

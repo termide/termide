@@ -285,7 +285,7 @@ mod tests {
     fn bash(command: &str) -> ToolCall {
         ToolCall {
             id: "c".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: json!({ "command": command }),
             extra_content: None,
         }
@@ -303,8 +303,8 @@ mod tests {
             "a-rewrite".to_string(),
             hook(
                 HookEvent::BeforeToolCall,
-                &["bash"],
-                r#"input=$(cat); case "$input" in *'"tool":"bash"'*) printf '{"arguments":{"command":"echo rewritten"}}';; esac"#,
+                &["shell"],
+                r#"input=$(cat); case "$input" in *'"tool":"shell"'*) printf '{"arguments":{"command":"echo rewritten"}}';; esac"#,
                 5,
             ),
         );
@@ -323,7 +323,7 @@ mod tests {
             "c-approve".to_string(),
             hook(
                 HookEvent::BeforeToolCall,
-                &["ba*"],
+                &["sh*"],
                 r#"input=$(cat); case "$input" in *echo*) printf '{"decision":"allow"}';; esac"#,
                 5,
             ),
@@ -383,14 +383,14 @@ mod tests {
             "a-trim".to_string(),
             hook(
                 HookEvent::AfterToolCall,
-                &["bash"],
+                &["shell"],
                 r#"input=$(cat); case "$input" in *'a long output'*) printf '{"text":"trimmed output"}';; esac"#,
                 5,
             ),
         );
         hooks.insert(
             "b-reject".to_string(),
-            hook(HookEvent::AfterToolCall, &["bash"], r#"input=$(cat); case "$input" in *secret*) echo "leaks a secret" >&2; exit 2;; esac"#, 5),
+            hook(HookEvent::AfterToolCall, &["shell"], r#"input=$(cat); case "$input" in *secret*) echo "leaks a secret" >&2; exit 2;; esac"#, 5),
         );
         let mut chain = CommandHooks::new(hooks, PathBuf::from("/tmp"));
         let call = bash("cat file");

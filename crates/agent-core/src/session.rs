@@ -191,7 +191,10 @@ pub enum EntryKind {
     /// What the session switched off from here: tools, skills (`skill:<name>`)
     /// and MCP servers (`mcp:<name>`), kept out of the model's context or
     /// refused, so a reopened session comes back with the same set.
-    Toolset { disabled: Vec<String> },
+    Toolset {
+        #[serde(deserialize_with = "crate::tool::de_tool_names")]
+        disabled: Vec<String>,
+    },
     /// The connection (`[ai.connections.<name>]`) the branch runs on from
     /// here, so a reopened session reconnects to the same endpoint.
     ConnectionChange { connection: String },
@@ -619,6 +622,43 @@ fn take_lease(log: &Path) -> Leased {
 /// file locked on Windows cannot.
 fn lease_holder_id(path: &Path) -> Option<u32> {
     std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+/// A brief hold on a session log for rewriting it in place: no panel of this
+/// process, and no other termide, has it open while the claim lasts.
+pub(crate) struct LogClaim {
+    key: PathBuf,
+    _lease: Option<Lease>,
+}
+
+impl Drop for LogClaim {
+    fn drop(&mut self) {
+        open_registry()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.key);
+    }
+}
+
+/// Claim the log at `path`; an error when a panel here or another termide
+/// holds it.
+pub(crate) fn claim_log(path: &Path) -> std::io::Result<LogClaim> {
+    let key = lock_key(path);
+    let held = || std::io::Error::new(std::io::ErrorKind::WouldBlock, "the session is open");
+    if !open_registry()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(key.clone())
+    {
+        return Err(held());
+    }
+    let mut claim = LogClaim { key, _lease: None };
+    match take_lease(path) {
+        Leased::Taken(lease) => claim._lease = Some(lease),
+        Leased::Held(_) => return Err(held()),
+        Leased::Unavailable => {}
+    }
+    Ok(claim)
 }
 
 /// Paths currently open exclusively, so the same session log cannot back two
@@ -2283,7 +2323,7 @@ mod tests {
             .unwrap();
         session.append_message(&agent_reply("answer")).unwrap();
         // What the session holds does not change with these.
-        session.append_toolset(&["bash".into()]).unwrap();
+        session.append_toolset(&["shell".into()]).unwrap();
         session.set_name("named").unwrap();
         let expected = Some(ExternalSessionRef {
             agent: "claude".into(),
@@ -2676,7 +2716,7 @@ mod tests {
             duration_ms: 198_000,
             usage: crate::message::Usage::default(),
             thinking_chars: 0,
-            tool_calls: vec!["bash".into()],
+            tool_calls: vec!["shell".into()],
             input_cut: Vec::new(),
         };
         session
@@ -3097,14 +3137,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
         assert_eq!(session.current_toolset(), None);
-        session.append_toolset(&["bash".into()]).unwrap();
+        session.append_toolset(&["shell".into()]).unwrap();
         session
-            .append_toolset(&["bash".into(), "mcp:github".into()])
+            .append_toolset(&["shell".into(), "mcp:github".into()])
             .unwrap();
         let reopened = Session::open(session.path()).unwrap();
         assert_eq!(
             reopened.current_toolset(),
-            Some(vec!["bash".to_string(), "mcp:github".to_string()])
+            Some(vec!["shell".to_string(), "mcp:github".to_string()])
         );
     }
 

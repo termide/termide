@@ -117,7 +117,7 @@ termide/
 │   ├── agent-hooks/          # Command hooks: external programs run on tool calls
 │   ├── agent-mcp/            # MCP client (tools from servers) and termide's own MCP server
 │   ├── agent-providers/      # Model providers (OpenAI-compatible chat completions)
-│   ├── agent-tools/          # Built-in agent tools: read, edit, write, bash
+│   ├── agent-tools/          # Built-in agent tools: read, edit, write, shell
 │   ├── agent-web/            # Web tools: fetch and web_search, over HTTP or a local Chrome
 │   ├── app/                  # Application orchestrator, event handling, panel management
 │   ├── app-core/             # Core application traits (LayoutController, PanelProvider)

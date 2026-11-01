@@ -199,7 +199,7 @@ pub(crate) fn question_form(
 pub(crate) fn permission_detail(request: &termide_agent_core::PermissionRequest) -> String {
     let several =
         termide_agent_core::shell_parts(&request.subject, std::path::Path::new("/")).len() > 1;
-    if request.tool != "bash" || !several || request.parts.is_empty() {
+    if request.tool != "shell" || !several || request.parts.is_empty() {
         return request.subject.clone();
     }
     let once = termide_i18n::t().agent_perm_part_once();
@@ -594,8 +594,8 @@ impl AgentPanel {
             return Some(t.agent_suggest_denied_plan().to_string());
         }
         let denied = shell_parts(command, &self.cwd).iter().any(|part| {
-            self.rules.evaluate("bash", &part.text) == Some(Decision::Deny)
-                || self.rules.evaluate("bash", &part.resolved) == Some(Decision::Deny)
+            self.rules.evaluate("shell", &part.text) == Some(Decision::Deny)
+                || self.rules.evaluate("shell", &part.resolved) == Some(Decision::Deny)
         });
         denied.then(|| t.agent_suggest_denied_rule().to_string())
     }

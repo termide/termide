@@ -131,7 +131,7 @@ impl Tool for JobsTool {
 fn summary(name: &str, arguments: &Value) -> String {
     let arg = |key: &str| arguments.get(key).and_then(Value::as_str).unwrap_or("");
     let about = match name {
-        "bash" => arg("command").to_string(),
+        "shell" => arg("command").to_string(),
         "task" => format!("{}: {}", arg("agent"), arg("prompt")),
         _ => match arguments {
             Value::Object(map) if map.is_empty() => String::new(),
@@ -199,7 +199,7 @@ mod tests {
         fn list(&self) -> Vec<RunningCall> {
             vec![RunningCall {
                 id: "toolu_1".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: json!({ "command": "cargo test\n--all" }),
                 elapsed: Duration::from_secs(192),
             }]
@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(
             listed.plain_text(),
             "- t1 · background task · search: find it · running 5s\n\
-             - toolu_1 · call · bash cargo test · running 3m12s"
+             - toolu_1 · call · shell cargo test · running 3m12s"
         );
 
         // A task of the panel's goes first; a call beside is stopped by the
@@ -242,7 +242,7 @@ mod tests {
         );
         let stopped = run(&ctx, json!({ "stop": "toolu_1" }));
         assert!(!stopped.is_error);
-        assert!(stopped.plain_text().contains("bash cargo test"));
+        assert!(stopped.plain_text().contains("shell cargo test"));
         assert_eq!(*beside.stopped.lock().unwrap(), ["toolu_1"]);
 
         let unknown = run(&ctx, json!({ "stop": "nope" }));

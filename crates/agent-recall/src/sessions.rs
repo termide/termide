@@ -412,7 +412,7 @@ fn parse(
                                     .filter_map(|key| call.arguments[*key].as_str())
                                     .map(str::to_string)
                                     .collect();
-                                let commits = call.name == "bash"
+                                let commits = call.name == "shell"
                                     && call.arguments["command"]
                                         .as_str()
                                         .is_some_and(|c| c.contains("git commit"));
@@ -930,7 +930,7 @@ pub(crate) mod tests {
         let mut session = Session::create(dir.path(), dir.path()).unwrap();
         let commit = ToolCall {
             id: "c1".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: serde_json::json!({ "command": "git commit -m 'feat: walrus'" }),
             extra_content: None,
         };

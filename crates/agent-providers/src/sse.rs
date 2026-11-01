@@ -375,7 +375,7 @@ data: [DONE]
 
     #[test]
     fn length_stop_and_broken_arguments_are_preserved() {
-        let transcript = r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"bash","arguments":"{\"command\": \"ls"}}]},"finish_reason":"length"}]}
+        let transcript = r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"shell","arguments":"{\"command\": \"ls"}}]},"finish_reason":"length"}]}
 data: [DONE]
 "#;
         let (message, _) = replay(transcript);

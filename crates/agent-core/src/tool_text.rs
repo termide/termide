@@ -40,7 +40,7 @@ pub const SEED_TOOLS: [(&str, &str); 15] = [
     ("read", include_str!("../assets/tools/read.md")),
     ("edit", include_str!("../assets/tools/edit.md")),
     ("write", include_str!("../assets/tools/write.md")),
-    ("bash", include_str!("../assets/tools/bash.md")),
+    ("shell", include_str!("../assets/tools/shell.md")),
     ("question", include_str!("../assets/tools/question.md")),
     (
         "suggest_command",

@@ -45,7 +45,7 @@ Landlock) and optionally in Claude Code and Gemini CLI. Output limits: pi keeps
 the last 2000 lines / 50 KB, Claude Code about 30 000 characters, Codex keeps
 head and tail *(unverified)*.
 
-Decision: `bash` with a timeout, cooperative cancel that kills the process
+Decision: a `shell` tool (named `bash` until it was renamed) with a timeout, cooperative cancel that kills the process
 group, **head-and-tail truncation** (the command echo and the final error both
 survive) and the full output saved to a file whose path is returned.
 
@@ -274,7 +274,7 @@ which runs under its parent's panel number. A process-wide ledger orders
 every successful `read`, `edit` and `write` by panel; an `edit` or `write`
 of a file whose last change is another panel's and later than this panel's
 last read of it, or that this panel never read, is blocked. Paths are keyed
-canonically (a new file by its directory). Changes through `bash` or from
+canonically (a new file by its directory). Changes through `shell` or from
 outside are not seen. A git worktree per
 delegate may come later only as an explicit choice (`isolation =
 "worktree"`), its result the branch and a diff summary, merged by the
@@ -450,7 +450,7 @@ window**: it flips a flag on the shared service and relaunches the browser on
 a thread of its own, so the window appears or goes at once without blocking
 the UI behind a call in progress; the idle shutdown leaves a watched browser
 alone. "Show me this page" is a different request, answered in the user's
-own browser (`open <url>` through `bash`), not in the agent's. Without a display server the browser runs headless
+own browser (`open <url>` through `shell`), not in the agent's. Without a display server the browser runs headless
 whatever the setting says.
 
 When an engine answers with a challenge anyway, its window is restored and
@@ -527,7 +527,7 @@ actionability waits, not screenshots and coordinates.
 | ACP | `session/request_permission` with `allow_once`, `allow_always`, `reject_once`, `reject_always` options |
 
 Decision: **rules plus a mode**. Rules are `deny`, `ask`, `allow` lists keyed by
-tool and an argument pattern (`bash: "git push *"`, `edit: "src/**"`), evaluated
+tool and an argument pattern (`shell: "git push *"`, `edit: "src/**"`), evaluated
 deny → ask → allow. The mode decides which rules count and what unresolved
 calls do: `ask` (everything asks, configured `allow` rules set aside), `plan`
 (reads and the web pass, changes are refused), `edit` (edits inside the
@@ -560,7 +560,7 @@ Chosen TOML shape (OpenCode-style tables, so "allow always" appends one key):
 [ai.permissions]
 mode = "auto" # ask | plan | edit | configured | auto | all
 
-[ai.permissions.bash]
+[ai.permissions.shell]
 "git status*" = "allow"
 "git push*"   = "ask"
 "rm -rf *"    = "deny"
@@ -572,7 +572,7 @@ mode = "auto" # ask | plan | edit | configured | auto | all
 
 Implementation (`crates/agent-core/src/permissions.rs`): `*` spans any text
 including slashes, a leading `**/` is optional. Subjects are the command for
-`bash` and the project-relative path for file tools. Shell commands are split
+`shell` and the project-relative path for file tools. Shell commands are split
 on `&&`, `||`, `;`, `|`, a background `&` and newlines with quote awareness, as Claude Code
 does: every part needs its own allow, a deny or ask on any part wins, and
 command substitution is never auto-allowed. A built-in read-only command list
@@ -1281,7 +1281,7 @@ page can ask to be remembered); what must always apply is already in
 Decision (`crates/agent-recall`): no memory store; a read-only built-in tool
 that searches the project's session logs, git history and files. Built in
 rather than an agent, a skill or an MCP server: those reach the logs through
-`bash` or an unknown tool name, which plan mode refuses and a subagent's
+`shell` or an unknown tool name, which plan mode refuses and a subagent's
 `AutoDenyPrompter` denies, and the log format belongs to `session.rs`
 (`Session::read_branch` walks the live branch, so a rewind's dead entries stay
 out and a compaction's originals stay in). `recall` sits on the read-only lists

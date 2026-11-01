@@ -14,6 +14,40 @@ use crate::provider::ToolSpec;
 use crate::shell::ShellRunner;
 use crate::suggest::CommandSuggester;
 
+/// The name of the built-in tool that runs shell commands.
+pub const SHELL_TOOL: &str = "shell";
+
+/// What the shell tool was called before it was renamed, as the user's rules,
+/// hooks, agent profiles and old session logs may still name it.
+pub const LEGACY_SHELL_TOOL: &str = "bash";
+
+/// The name a tool goes by now: a name from before a rename maps to the
+/// current one, any other passes through.
+#[must_use]
+pub fn canonical_tool_name(name: &str) -> &str {
+    if name == LEGACY_SHELL_TOOL {
+        SHELL_TOOL
+    } else {
+        name
+    }
+}
+
+/// Deserialize a tool name, mapped through [`canonical_tool_name`].
+pub fn de_tool_name<'de, D: serde::Deserializer<'de>>(de: D) -> Result<String, D::Error> {
+    let name = <String as serde::Deserialize>::deserialize(de)?;
+    Ok(canonical_tool_name(&name).to_string())
+}
+
+/// Deserialize a list of tool names, each mapped through
+/// [`canonical_tool_name`].
+pub fn de_tool_names<'de, D: serde::Deserializer<'de>>(de: D) -> Result<Vec<String>, D::Error> {
+    let names = <Vec<String> as serde::Deserialize>::deserialize(de)?;
+    Ok(names
+        .iter()
+        .map(|name| canonical_tool_name(name).to_string())
+        .collect())
+}
+
 /// Environment a tool runs in.
 #[derive(Debug, Clone)]
 pub struct ToolContext {
@@ -345,12 +379,12 @@ mod tests {
     fn insert_replaces_same_name_in_place() {
         let mut registry = ToolRegistry::new();
         registry.insert(Arc::new(Named("read")));
-        registry.insert(Arc::new(Named("bash")));
+        registry.insert(Arc::new(Named("shell")));
         registry.insert(Arc::new(Named("read")));
-        assert_eq!(registry.names(), vec!["read", "bash"]);
+        assert_eq!(registry.names(), vec!["read", "shell"]);
         assert_eq!(registry.len(), 2);
-        assert!(registry.get("bash").is_some());
+        assert!(registry.get("shell").is_some());
         assert!(registry.remove("read").is_some());
-        assert_eq!(registry.names(), vec!["bash"]);
+        assert_eq!(registry.names(), vec!["shell"]);
     }
 }

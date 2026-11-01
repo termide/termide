@@ -108,7 +108,7 @@ fn read_text(
     ensure_not_special(&path)?;
     if path.is_dir() {
         return Err(format!(
-            "{} is a directory; use `bash` with `ls` to list it",
+            "{} is a directory; use `shell` with `ls` to list it",
             path.display()
         ));
     }

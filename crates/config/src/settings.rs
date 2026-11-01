@@ -1543,10 +1543,10 @@ mod ai_settings_tests {
         assert_eq!(defaults.permissions.mode, termide_agent_core::Mode::Auto);
         // A file that only adds a rule keeps the mode.
         let parsed: AiSettings =
-            toml::from_str("[permissions.bash]\n\"ls *\" = \"allow\"\n").unwrap();
+            toml::from_str("[permissions.shell]\n\"ls *\" = \"allow\"\n").unwrap();
         assert_eq!(parsed.permissions.mode, termide_agent_core::Mode::Auto);
         assert_eq!(
-            parsed.permissions.evaluate("bash", "ls -la"),
+            parsed.permissions.evaluate("shell", "ls -la"),
             Some(termide_agent_core::Decision::Allow)
         );
         let parsed: AiSettings =

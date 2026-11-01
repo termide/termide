@@ -1,5 +1,5 @@
 # Coding agent against the scripted mock model, set to work by /goal: the
-# goal's row in the state strip, read, edit, a permission card for bash, the
+# goal's row in the state strip, read, edit, a permission card for shell, the
 # answer, then the judge's verdict.
 Output out/agent.gif
 Source tapes/_settings.tape

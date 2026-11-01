@@ -31,7 +31,7 @@ use crate::cancel::CancelToken;
 use crate::classifier::{Classifier, Verdict};
 use crate::message::ToolCall;
 use crate::refusals::Refusals;
-use crate::tool::ToolContext;
+use crate::tool::{canonical_tool_name, ToolContext, SHELL_TOOL};
 
 /// Which rules count and what happens to calls none covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -171,7 +171,7 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
         // Reading the debug session changes nothing; every other action runs
         // or stops the program.
         "debug" if call.arguments["action"] == "state" => None,
-        "bash" => {
+        SHELL_TOOL => {
             let parsed = split_shell(call.arguments["command"].as_str().unwrap_or(""));
             if parsed.has_substitution {
                 return Some("a command substitution".to_string());
@@ -369,7 +369,7 @@ impl PermissionRules {
     pub fn evaluate_narrow(&self, tool: &str, subject: &str) -> Option<Decision> {
         [&self.tools, &self.granted]
             .into_iter()
-            .filter_map(|tables| tables.get(tool))
+            .flat_map(|tables| tool_tables(tables, tool))
             .flatten()
             .filter(|(pattern, decision)| {
                 **decision != Decision::Allow || !broad_allow(tool, pattern)
@@ -398,7 +398,7 @@ fn broad_allow(tool: &str, pattern: &str) -> bool {
         return true;
     }
     // What the pattern fixes, followed by an argument its wildcard would take.
-    tool == "bash" && delegating_command(&format!("{fixed} x"))
+    canonical_tool_name(tool) == SHELL_TOOL && delegating_command(&format!("{fixed} x"))
 }
 
 fn add_rule(tables: &mut RuleTables, tool: &str, pattern: &str, decision: Decision) {
@@ -408,10 +408,22 @@ fn add_rule(tables: &mut RuleTables, tool: &str, pattern: &str, decision: Decisi
         .insert(pattern.to_string(), decision);
 }
 
-fn evaluate_rules(tables: &RuleTables, tool: &str, subject: &str) -> Option<Decision> {
+/// The tables of `tool`: its own and any kept under a name it had before,
+/// which the user's config and granted rules may still use.
+fn tool_tables<'a>(
+    tables: &'a RuleTables,
+    tool: &'a str,
+) -> impl Iterator<Item = &'a BTreeMap<String, Decision>> {
+    let tool = canonical_tool_name(tool);
     tables
-        .get(tool)?
         .iter()
+        .filter(move |(name, _)| canonical_tool_name(name) == tool)
+        .map(|(_, table)| table)
+}
+
+fn evaluate_rules(tables: &RuleTables, tool: &str, subject: &str) -> Option<Decision> {
+    tool_tables(tables, tool)
+        .flatten()
         .filter(|(pattern, _)| wildcard_match(pattern, subject))
         .map(|(_, decision)| *decision)
         .max()
@@ -493,7 +505,7 @@ impl PermissionRequest {
     /// shell command.
     #[must_use]
     pub fn patterns(&self) -> Vec<String> {
-        if self.tool == "bash" {
+        if self.tool == SHELL_TOOL {
             self.parts
                 .iter()
                 .filter_map(|p| p.pattern.clone())
@@ -857,7 +869,7 @@ impl PermissionHooks {
     pub fn decide(&self, call: &ToolCall, ctx: &ToolContext) -> Decision {
         let subject = subject_of(call, ctx);
         let mode = self.mode.get();
-        if call.name == "bash" {
+        if call.name == SHELL_TOOL {
             return self.judge_command(&subject, ctx).decision;
         }
         // What git keeps under `.git` — its config, its hooks — names programs
@@ -968,7 +980,10 @@ impl PermissionHooks {
         let mut verdict = Decision::Allow;
         let mut forced = false;
         if parts.len() > 1 {
-            if let Some(whole) = self.rule("bash", command).filter(|d| *d != Decision::Allow) {
+            if let Some(whole) = self
+                .rule(SHELL_TOOL, command)
+                .filter(|d| *d != Decision::Allow)
+            {
                 forced |= whole == Decision::Ask;
                 verdict = verdict.max(whole);
             }
@@ -976,9 +991,9 @@ impl PermissionHooks {
         let mut asked = Vec::new();
         for part in parts {
             let matched = self
-                .rule("bash", &part.text)
+                .rule(SHELL_TOOL, &part.text)
                 .into_iter()
-                .chain(self.rule("bash", &part.resolved))
+                .chain(self.rule(SHELL_TOOL, &part.resolved))
                 .max();
             forced |= matched == Some(Decision::Ask);
             let mut reads_out = false;
@@ -1011,7 +1026,7 @@ impl PermissionHooks {
                         if reads_out {
                             part.resolved.clone()
                         } else {
-                            suggested_pattern("bash", &part.resolved)
+                            suggested_pattern(SHELL_TOOL, &part.resolved)
                         }
                     }),
                     text: part.text,
@@ -1133,7 +1148,7 @@ impl PermissionHooks {
             ),
             Decision::Ask => {
                 let subject = subject_of(call, ctx);
-                let (parts, forced) = if call.name == "bash" {
+                let (parts, forced) = if call.name == SHELL_TOOL {
                     let verdict = self.judge_command(&subject, ctx);
                     (verdict.asked, verdict.forced)
                 } else {
@@ -1169,12 +1184,12 @@ impl PermissionHooks {
                     // A whole-command `ask` rule can ask about a command
                     // whose every part is settled, which leaves no part, and
                     // so no rule, to record.
-                    && (call.name != "bash" || parts.first().is_some_and(|p| p.pattern.is_some()));
+                    && (call.name != SHELL_TOOL || parts.first().is_some_and(|p| p.pattern.is_some()));
                 // A destructive call is allowed once at a time; `all` is the
                 // mode that lets a run through without asking. Denying for the
                 // session stays on offer: it trusts nothing.
                 let can_allow_session = !destructive;
-                let suggested = if call.name == "bash" {
+                let suggested = if call.name == SHELL_TOOL {
                     parts
                         .iter()
                         .filter_map(|p| p.pattern.clone())
@@ -1281,12 +1296,12 @@ impl PermissionHooks {
     }
 }
 
-/// The text rules are matched against: the command for `bash`, the
+/// The text rules are matched against: the command for `shell`, the
 /// project-relative path for file tools, empty otherwise.
 #[must_use]
 pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
     match call.name.as_str() {
-        "bash" => call.arguments["command"].as_str().unwrap_or("").to_string(),
+        SHELL_TOOL => call.arguments["command"].as_str().unwrap_or("").to_string(),
         "read" | "edit" | "write" => {
             let raw = call.arguments["path"].as_str().unwrap_or("");
             real_relative_to_project(raw, &ctx.cwd)
@@ -1420,7 +1435,7 @@ fn inside_project(call: &ToolCall, ctx: &ToolContext) -> bool {
 }
 
 /// Pattern offered when the user allows a call for longer than once: the
-/// command's leading words for `bash`, the exact path for file tools.
+/// command's leading words for `shell`, the exact path for file tools.
 #[must_use]
 pub fn suggested_pattern(tool: &str, subject: &str) -> String {
     match tool {
@@ -1438,7 +1453,7 @@ pub fn suggested_pattern(tool: &str, subject: &str) -> String {
         "web_search" => return "*".to_string(),
         _ => {}
     }
-    if tool != "bash" {
+    if tool != SHELL_TOOL {
         return if subject.is_empty() {
             "*".to_string()
         } else {
@@ -2544,7 +2559,7 @@ const MAX_GLOB_MATCHES: usize = 1024;
 /// The words the shell turns `word` into in `dir`: the paths its pattern
 /// matches, sorted and spelled as the shell spells them (relative to `dir`
 /// for a relative pattern), or the word itself when it has no pattern or
-/// nothing matches, as `bash` leaves it by default. A dotfile matches only
+/// nothing matches, as `shell` leaves it by default. A dotfile matches only
 /// a pattern that names its leading `.`. A pattern left as it is: a
 /// relative one when `dir` is unknown, one with a component like `.*`
 /// (which some shells let match `..`), `~user/…` — [`path_outside`] asks
@@ -3295,7 +3310,7 @@ mod tests {
     }
 
     fn bash(command: &str) -> ToolCall {
-        call("bash", json!({ "command": command }))
+        call("shell", json!({ "command": command }))
     }
 
     fn rules(toml_text: &str) -> PermissionRules {
@@ -3339,7 +3354,7 @@ mod tests {
         let rules = rules(
             r#"
             mode = "edit"
-            [bash]
+            [shell]
             "git status*" = "allow"
             "git push*" = "ask"
             "rm -rf *" = "deny"
@@ -3350,7 +3365,7 @@ mod tests {
         );
         assert_eq!(rules.mode, Mode::Edit);
         assert_eq!(
-            rules.evaluate("bash", "git push origin main"),
+            rules.evaluate("shell", "git push origin main"),
             Some(Decision::Ask)
         );
         assert_eq!(rules.evaluate("edit", "src/lib.rs"), Some(Decision::Allow));
@@ -3371,16 +3386,16 @@ mod tests {
     #[test]
     fn strictest_matching_rule_wins() {
         let mut rules = PermissionRules::default();
-        rules.add("bash", "git *", Decision::Allow);
-        rules.add("bash", "git push*", Decision::Ask);
-        rules.add("bash", "*--force*", Decision::Deny);
-        assert_eq!(rules.evaluate("bash", "git status"), Some(Decision::Allow));
+        rules.add("shell", "git *", Decision::Allow);
+        rules.add("shell", "git push*", Decision::Ask);
+        rules.add("shell", "*--force*", Decision::Deny);
+        assert_eq!(rules.evaluate("shell", "git status"), Some(Decision::Allow));
         assert_eq!(
-            rules.evaluate("bash", "git push origin"),
+            rules.evaluate("shell", "git push origin"),
             Some(Decision::Ask)
         );
         assert_eq!(
-            rules.evaluate("bash", "git push --force"),
+            rules.evaluate("shell", "git push --force"),
             Some(Decision::Deny)
         );
     }
@@ -3446,7 +3461,7 @@ mod tests {
                 mode,
                 ..Default::default()
             };
-            rules.add("bash", "cargo *", Decision::Allow);
+            rules.add("shell", "cargo *", Decision::Allow);
             rules.add("edit", "src/**", Decision::Allow);
             rules.add("edit", "**/.env*", Decision::Deny);
             let (hooks, _) = hooks(rules, vec![]);
@@ -3515,8 +3530,8 @@ mod tests {
             mode: Mode::Ask,
             ..Default::default()
         };
-        rules.add_session("bash", "make *", Decision::Allow);
-        rules.add_session("bash", "rm *", Decision::Deny);
+        rules.add_session("shell", "make *", Decision::Allow);
+        rules.add_session("shell", "rm *", Decision::Deny);
         let (hooks, _) = hooks(rules, vec![]);
         let handle = hooks.mode_handle();
         // `make *` is a broad pattern, yet in `auto` too an answer the user
@@ -3535,8 +3550,8 @@ mod tests {
     #[test]
     fn shell_commands_are_split_and_each_part_judged() {
         let mut rules = PermissionRules::default();
-        rules.add("bash", "cargo *", Decision::Allow);
-        rules.add("bash", "git push*", Decision::Ask);
+        rules.add("shell", "cargo *", Decision::Allow);
+        rules.add("shell", "git push*", Decision::Ask);
         let (hooks, _) = hooks(rules, vec![]);
         let decide = |cmd: &str| hooks.decide(&bash(cmd), &ctx());
 
@@ -3691,7 +3706,7 @@ mod tests {
         );
         // And a rule written for the text cannot vouch for it.
         let mut rules = PermissionRules::default();
-        rules.add("bash", "./run*", Decision::Allow);
+        rules.add("shell", "./run*", Decision::Allow);
         let (hooks, _) = super::tests::hooks(rules, vec![]);
         assert_eq!(
             hooks.decide(&bash("cd $BUILD && ./run"), &ctx()),
@@ -4006,7 +4021,7 @@ mod tests {
     fn a_plan_mode_refusal_names_what_is_not_look_only() {
         let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
         let reason = match guard.before_tool_call(
-            &call("bash", json!({ "command": "rg x src && sed -i 1d f" })),
+            &call("shell", json!({ "command": "rg x src && sed -i 1d f" })),
             &ctx(),
         ) {
             ToolDecision::Block { reason } => reason,
@@ -4636,7 +4651,7 @@ mod tests {
             Decision::Deny
         );
         let mut configured = rules("mode = \"configured\"");
-        configured.add("bash", "cargo test*", Decision::Allow);
+        configured.add("shell", "cargo test*", Decision::Allow);
         let (configured, _) = hooks(configured, vec![]);
         assert_eq!(
             configured.decide(&bash("cargo test & rm -rf src"), &ctx()),
@@ -4678,10 +4693,10 @@ mod tests {
     #[test]
     fn a_substitution_asks_about_its_own_part_only() {
         let mut rules = PermissionRules::default();
-        rules.add("bash", "cd *", Decision::Allow);
-        rules.add("bash", "ls *", Decision::Allow);
-        rules.add("bash", "echo *", Decision::Allow);
-        rules.add("bash", "head *", Decision::Allow);
+        rules.add("shell", "cd *", Decision::Allow);
+        rules.add("shell", "ls *", Decision::Allow);
+        rules.add("shell", "echo *", Decision::Allow);
+        rules.add("shell", "head *", Decision::Allow);
         let (hooks, _) = hooks(rules, vec![]);
 
         let CommandVerdict {
@@ -4823,8 +4838,8 @@ mod tests {
             ToolDecision::Allow
         );
         assert!(persisted.lock().unwrap().is_empty());
-        assert_eq!(hooks.rules().evaluate("bash", "rm x"), None);
-        assert_eq!(hooks.rules().evaluate_session("bash", "rm x"), None);
+        assert_eq!(hooks.rules().evaluate("shell", "rm x"), None);
+        assert_eq!(hooks.rules().evaluate_session("shell", "rm x"), None);
         assert_eq!(hooks.decide(&bash("rm -rf target"), &ctx()), Decision::Ask);
     }
 
@@ -4860,7 +4875,7 @@ mod tests {
             rules(
                 r#"
                 mode = "configured"
-                [bash]
+                [shell]
                 "*&&*" = "ask"
                 "#,
             ),
@@ -4929,14 +4944,14 @@ mod tests {
         assert_eq!(
             *persisted.lock().unwrap(),
             vec![(
-                "bash".to_string(),
+                "shell".to_string(),
                 "npm test *".to_string(),
                 Decision::Allow,
                 PersistScope::Project
             )]
         );
         assert_eq!(
-            hooks.rules().evaluate("bash", "npm test -- x"),
+            hooks.rules().evaluate("shell", "npm test -- x"),
             Some(Decision::Allow)
         );
         // 4. deny
@@ -4988,7 +5003,7 @@ mod tests {
             hooks.decide(&bash("cargo build --release"), &ctx()),
             Decision::Allow
         );
-        assert_eq!(hooks.rules().evaluate("bash", "cargo build"), None);
+        assert_eq!(hooks.rules().evaluate("shell", "cargo build"), None);
     }
 
     #[test]
@@ -5007,13 +5022,13 @@ mod tests {
     #[test]
     fn suggested_patterns() {
         assert_eq!(
-            suggested_pattern("bash", "git push origin main"),
+            suggested_pattern("shell", "git push origin main"),
             "git push *"
         );
-        assert_eq!(suggested_pattern("bash", "ls -la"), "ls *");
-        assert_eq!(suggested_pattern("bash", "git -C x status"), "git *");
+        assert_eq!(suggested_pattern("shell", "ls -la"), "ls *");
+        assert_eq!(suggested_pattern("shell", "git -C x status"), "git *");
         assert_eq!(
-            suggested_pattern("bash", "cargo test && cargo fmt"),
+            suggested_pattern("shell", "cargo test && cargo fmt"),
             "cargo test *"
         );
         assert_eq!(suggested_pattern("edit", "src/lib.rs"), "src/lib.rs");
@@ -5448,21 +5463,24 @@ mod tests {
         ));
         assert!(!blocked(
             &mut guard,
-            &call("bash", json!({ "command": "git status && rg TODO src" }))
+            &call("shell", json!({ "command": "git status && rg TODO src" }))
         ));
         assert!(blocked(
             &mut guard,
-            &call("bash", json!({ "command": "cat $(ls)" }))
+            &call("shell", json!({ "command": "cat $(ls)" }))
         ));
         assert!(blocked(
             &mut guard,
-            &call("bash", json!({ "command": "ls > out" }))
+            &call("shell", json!({ "command": "ls > out" }))
         ));
         assert!(blocked(
             &mut guard,
-            &call("bash", json!({ "command": "git status; cargo build" }))
+            &call("shell", json!({ "command": "git status; cargo build" }))
         ));
-        assert!(blocked(&mut guard, &call("bash", json!({ "command": "" }))));
+        assert!(blocked(
+            &mut guard,
+            &call("shell", json!({ "command": "" }))
+        ));
         assert!(blocked(
             &mut guard,
             &call("edit", json!({ "path": "src/main.rs" }))
@@ -5569,7 +5587,7 @@ mod tests {
             mode: Mode::Configured,
             ..rules(
                 r#"
-                [bash]
+                [shell]
                 "sudo*" = "deny"
                 "#,
             )
@@ -5637,7 +5655,7 @@ mod tests {
     fn auto_mode_reviews_what_the_rules_leave_open() {
         let (mut hooks, judged, asked) = auto_hooks(
             r#"
-            [bash]
+            [shell]
             "cargo test*" = "allow"
             "python3*" = "allow"
             "git push*" = "ask"
@@ -5758,23 +5776,23 @@ mod tests {
     #[test]
     fn broad_allows_are_those_that_run_any_program() {
         for (tool, pattern) in [
-            ("bash", "*"),
-            ("bash", "python3*"),
-            ("bash", "python *"),
-            ("bash", "npm run *"),
-            ("bash", "env *"),
-            ("bash", "sh -c*"),
-            ("bash", "make*"),
+            ("shell", "*"),
+            ("shell", "python3*"),
+            ("shell", "python *"),
+            ("shell", "npm run *"),
+            ("shell", "env *"),
+            ("shell", "sh -c*"),
+            ("shell", "make*"),
             ("task", "reviewer"),
             ("mcp__db__query", "*"),
         ] {
             assert!(broad_allow(tool, pattern), "{tool} {pattern}");
         }
         for (tool, pattern) in [
-            ("bash", "cargo test*"),
-            ("bash", "git status*"),
-            ("bash", "npm run build"),
-            ("bash", "python3 --version"),
+            ("shell", "cargo test*"),
+            ("shell", "git status*"),
+            ("shell", "npm run build"),
+            ("shell", "python3 --version"),
             ("edit", "src/**"),
         ] {
             assert!(!broad_allow(tool, pattern), "{tool} {pattern}");
@@ -5821,11 +5839,11 @@ mod prompter_tests {
 
     fn request() -> PermissionRequest {
         PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: "git push".into(),
             call: ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: json!({ "command": "git push" }),
                 extra_content: None,
             },
@@ -5896,17 +5914,37 @@ mod granted_tests {
     #[test]
     fn granted_rules_count_beside_the_configured_ones_and_stay_out_of_the_file() {
         let mut rules = PermissionRules::default();
-        rules.add("bash", "rm *", Decision::Deny);
-        add_rule(&mut rules.granted, "bash", "cargo *", Decision::Allow);
-        add_rule(&mut rules.granted, "bash", "*", Decision::Allow);
-        assert_eq!(rules.evaluate("bash", "cargo test"), Some(Decision::Allow));
+        rules.add("shell", "rm *", Decision::Deny);
+        add_rule(&mut rules.granted, "shell", "cargo *", Decision::Allow);
+        add_rule(&mut rules.granted, "shell", "*", Decision::Allow);
+        assert_eq!(rules.evaluate("shell", "cargo test"), Some(Decision::Allow));
         // The strictest still wins.
-        assert_eq!(rules.evaluate("bash", "rm -rf x"), Some(Decision::Deny));
+        assert_eq!(rules.evaluate("shell", "rm -rf x"), Some(Decision::Deny));
         assert_eq!(
-            rules.evaluate_narrow("bash", "cargo test"),
+            rules.evaluate_narrow("shell", "cargo test"),
             Some(Decision::Allow)
         );
         let text = toml::to_string(&rules).unwrap();
         assert!(!text.contains("cargo"), "{text}");
+    }
+
+    #[test]
+    fn rules_kept_under_the_shell_tools_old_name_still_apply() {
+        let mut rules: PermissionRules =
+            toml::from_str("[bash]\n\"git push*\" = \"deny\"\n\"cargo *\" = \"allow\"\n").unwrap();
+        add_rule(&mut rules.granted, "bash", "make *", Decision::Allow);
+        assert_eq!(rules.evaluate("shell", "git push"), Some(Decision::Deny));
+        assert_eq!(rules.evaluate("shell", "make all"), Some(Decision::Allow));
+        assert_eq!(
+            rules.evaluate_narrow("shell", "cargo test"),
+            Some(Decision::Allow)
+        );
+        // A rule the user adds now goes under the new name, beside the old.
+        rules.add("shell", "rm *", Decision::Deny);
+        assert_eq!(rules.evaluate("shell", "rm x"), Some(Decision::Deny));
+        assert_eq!(
+            rules.evaluate("shell", "cargo build"),
+            Some(Decision::Allow)
+        );
     }
 }

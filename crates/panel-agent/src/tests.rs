@@ -629,7 +629,7 @@ fn shortcuts_work_on_a_cyrillic_layout() {
         .join("\n");
     let call = ToolCall {
         id: "t1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "ls" }),
         extra_content: None,
     };
@@ -1272,7 +1272,7 @@ fn activity_follows_the_events_and_totals_accumulate() {
     panel.apply(AgentEvent::ToolExecutionStart {
         call: termide_agent_core::ToolCall {
             id: "1".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: serde_json::json!({}),
             extra_content: None,
         },
@@ -1435,7 +1435,7 @@ fn the_live_footer_shows_generation_meta_and_a_clock() {
     panel.apply(AgentEvent::ToolExecutionStart {
         call: termide_agent_core::ToolCall {
             id: "t1".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: serde_json::json!({ "command": "sleep 1" }),
             extra_content: None,
         },
@@ -1739,7 +1739,7 @@ fn a_compaction_and_a_refused_summary_call_are_logged_with_how_the_call_went() {
     // The model went on with the work instead of summarising it.
     let refused = CompactionCall {
         stop_reason: StopReason::ToolUse,
-        tool_calls: vec!["bash".into()],
+        tool_calls: vec!["shell".into()],
         thinking_chars: 1_200,
         ..summary_call()
     };
@@ -2180,7 +2180,7 @@ fn a_resumed_session_keeps_its_timing() {
     let mut session = Session::create(dir.path(), dir.path()).unwrap();
     let tool_call = ToolCall {
         id: "t1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "ls" }),
         extra_content: None,
     };
@@ -3870,7 +3870,7 @@ fn a_subagents_tokens_join_the_session_totals() {
     assert_eq!(panel.context_tokens, 500);
 }
 
-/// What cleaning took out of `bash` output is read from the results in the
+/// What cleaning took out of `shell` output is read from the results in the
 /// log, so a reopened session shows it, right after the compactions.
 #[test]
 fn the_summary_reports_output_cleaning_savings() {
@@ -3879,7 +3879,7 @@ fn the_summary_reports_output_cleaning_savings() {
     let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
     let call = ToolCall {
         id: "b1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "ls" }),
         extra_content: None,
     };
@@ -3912,7 +3912,7 @@ fn the_summary_reports_output_cleaning_savings() {
     };
     let at = rows
         .iter()
-        .position(|(key, _)| key == "Cleaned bash")
+        .position(|(key, _)| key == "Cleaned shell")
         .unwrap_or_else(|| panic!("no cleaning row: {rows:?}"));
     assert_eq!(rows[at + 1].0, "Tokens");
     assert_eq!(rows[at + 2].0, "Context");
@@ -4939,7 +4939,7 @@ fn a_message_of_calls_alone_leaves_no_answer_block() {
     panel.external = true;
     let call = termide_agent_core::ToolCall {
         id: "c".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "ls" }),
         extra_content: None,
     };
@@ -4995,11 +4995,11 @@ fn a_withdrawn_permission_question_comes_down() {
     let (prompter, rx) = permission_channel(CancelToken::new());
     panel.permission_rx = rx;
     let request = |command: &str| termide_agent_core::PermissionRequest {
-        tool: "bash".into(),
+        tool: "shell".into(),
         subject: command.into(),
         call: termide_agent_core::ToolCall {
             id: "c".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: serde_json::json!({ "command": command }),
             extra_content: None,
         },
@@ -5047,11 +5047,11 @@ fn delegates_asking_at_once_take_turns_on_the_card() {
     let ask = |agent: &str, command: &str| {
         let mut delegate = prompter.for_delegate(agent, CancelToken::new());
         let request = termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: command.into(),
             call: termide_agent_core::ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": command }),
                 extra_content: None,
             },
@@ -5098,11 +5098,11 @@ fn permission_prompt_is_answered_in_the_panel() {
     panel.permission_rx = rx;
     let worker = std::thread::spawn(move || {
         prompter.ask(&termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: "git push".into(),
             call: termide_agent_core::ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": "git push" }),
                 extra_content: None,
             },
@@ -5134,7 +5134,7 @@ fn permission_prompt_is_answered_in_the_panel() {
     }
     {
         let form = panel.pending.as_ref().unwrap().form();
-        assert_eq!(form.title(), "Agent wants to run bash:");
+        assert_eq!(form.title(), "Agent wants to run shell:");
         assert_eq!(form.detail(), Some("git push"));
         assert_eq!(
             form.options()[2],
@@ -5221,11 +5221,11 @@ fn a_compound_command_card_lists_the_parts_it_asks_about() {
     let command = "cd $BUILD && ./run && make install";
     let worker = std::thread::spawn(move || {
         prompter.ask(&termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: command.into(),
             call: termide_agent_core::ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": command }),
                 extra_content: None,
             },
@@ -5267,11 +5267,11 @@ fn a_compound_command_card_lists_the_parts_it_asks_about() {
     assert_eq!(
         panel
             .effective_rules()
-            .evaluate_session("bash", "make install x"),
+            .evaluate_session("shell", "make install x"),
         Some(Decision::Allow)
     );
     assert_eq!(
-        panel.effective_rules().evaluate_session("bash", "./run"),
+        panel.effective_rules().evaluate_session("shell", "./run"),
         None
     );
 
@@ -5280,11 +5280,11 @@ fn a_compound_command_card_lists_the_parts_it_asks_about() {
     panel.permission_rx = rx;
     let worker = std::thread::spawn(move || {
         prompter.ask(&termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: "cd $BUILD && ./run".into(),
             call: termide_agent_core::ToolCall {
                 id: "d".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": "cd $BUILD && ./run" }),
                 extra_content: None,
             },
@@ -5314,11 +5314,11 @@ fn always_is_not_offered_where_the_configured_rules_do_not_count() {
     panel.permission_rx = rx;
     let worker = std::thread::spawn(move || {
         prompter.ask(&termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: "make".into(),
             call: termide_agent_core::ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": "make" }),
                 extra_content: None,
             },
@@ -5344,7 +5344,9 @@ fn always_is_not_offered_where_the_configured_rules_do_not_count() {
     panel.handle_key(chord(KeyCode::Char('4'), KeyModifiers::NONE));
     assert_eq!(worker.join().unwrap(), PermissionAnswer::DenySession);
     assert_eq!(
-        panel.effective_rules().evaluate_session("bash", "make all"),
+        panel
+            .effective_rules()
+            .evaluate_session("shell", "make all"),
         Some(Decision::Deny)
     );
 }
@@ -5356,11 +5358,11 @@ fn a_single_click_selects_and_a_double_click_answers_a_permission() {
     panel.permission_rx = rx;
     let worker = std::thread::spawn(move || {
         prompter.ask(&termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: "git push".into(),
             call: termide_agent_core::ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": "git push" }),
                 extra_content: None,
             },
@@ -5580,7 +5582,7 @@ fn a_cli_agent_connection_is_taken_on_mid_conversation_and_left_again() {
 #[test]
 fn the_toolset_guard_refuses_what_is_switched_off_in_context() {
     let blocked: Blocked = Arc::new(RwLock::new(
-        ["bash".to_string(), "skill:review".to_string()].into(),
+        ["shell".to_string(), "skill:review".to_string()].into(),
     ));
     let mut guard = ToolsetGuard { blocked };
     let ctx = ToolContext::new(PathBuf::from("/tmp"));
@@ -5592,7 +5594,7 @@ fn the_toolset_guard_refuses_what_is_switched_off_in_context() {
     };
     let refused = |d: ToolDecision| matches!(d, ToolDecision::Block { .. });
     assert!(refused(
-        guard.before_tool_call(&call("bash", serde_json::json!({})), &ctx)
+        guard.before_tool_call(&call("shell", serde_json::json!({})), &ctx)
     ));
     assert!(refused(guard.before_tool_call(
         &call("skill", serde_json::json!({ "name": "review" })),
@@ -5614,11 +5616,11 @@ fn switching_off_before_the_first_request_keeps_it_out_of_the_context() {
         session_dir: Some(dir.path().to_path_buf()),
         ..setup(vec![])
     });
-    panel.offered_tools = vec!["read".into(), "bash".into()];
+    panel.offered_tools = vec!["read".into(), "shell".into()];
     panel.offered_skills = vec!["review".into()];
     assert!(panel.is_fresh());
     panel.apply_toolset(&["read".to_string()]);
-    let off: BTreeSet<String> = ["bash".to_string(), "skill:review".to_string()].into();
+    let off: BTreeSet<String> = ["shell".to_string(), "skill:review".to_string()].into();
     assert_eq!(panel.toolset_off, off);
     // Rebuilt at once without them: out of the context, nothing to refuse.
     assert_eq!(panel.context_off, off);
@@ -5628,7 +5630,7 @@ fn switching_off_before_the_first_request_keeps_it_out_of_the_context() {
     let session = Session::open(&path).unwrap();
     assert_eq!(
         session.current_toolset(),
-        Some(vec!["bash".to_string(), "skill:review".to_string()])
+        Some(vec!["shell".to_string(), "skill:review".to_string()])
     );
     // Reopened, the session comes back with it, built without it: a new
     // worker has no cache to keep.
@@ -5645,7 +5647,7 @@ fn switching_off_before_the_first_request_keeps_it_out_of_the_context() {
 #[test]
 fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
     let mut panel = panel(vec![]);
-    panel.offered_tools = vec!["read".into(), "bash".into()];
+    panel.offered_tools = vec!["read".into(), "shell".into()];
     panel.transcript.push(Item::User {
         text: "go".into(),
         at: String::new(),
@@ -5656,9 +5658,9 @@ fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
     panel.apply_toolset(&["read".to_string()]);
     // Still in the context (the prompt cache stays): refused, not gone.
     assert!(panel.context_off.is_empty());
-    assert!(panel.blocked.read().unwrap().contains("bash"));
+    assert!(panel.blocked.read().unwrap().contains("shell"));
     let items = panel.toolset_items();
-    let bash = items.iter().find(|i| i.key == "bash").unwrap();
+    let bash = items.iter().find(|i| i.key == "shell").unwrap();
     assert!(
         bash.enabled && !bash.checked && !bash.note.is_empty(),
         "{bash:?}"
@@ -5673,15 +5675,15 @@ fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
     });
     assert!(panel.context_stale);
     panel.tick();
-    assert!(panel.context_off.contains("bash"));
+    assert!(panel.context_off.contains("shell"));
     assert!(panel.blocked.read().unwrap().is_empty());
     // Out of the context now, it cannot come back in this session.
     let items = panel.toolset_items();
-    let bash = items.iter().find(|i| i.key == "bash").unwrap();
+    let bash = items.iter().find(|i| i.key == "shell").unwrap();
     assert!(!bash.enabled);
-    panel.apply_toolset(&["read".to_string(), "bash".to_string()]);
+    panel.apply_toolset(&["read".to_string(), "shell".to_string()]);
     assert!(
-        panel.toolset_off.contains("bash"),
+        panel.toolset_off.contains("shell"),
         "a locked item keeps its state"
     );
 }
@@ -5776,7 +5778,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
     let mut panel = panel(vec![]);
     let call = termide_agent_core::ToolCall {
         id: "c".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "cat notes.txt" }),
         extra_content: None,
     };
@@ -5791,7 +5793,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
         envelope: PermissionEnvelope {
             id: 1,
             request: termide_agent_core::PermissionRequest {
-                tool: "bash".into(),
+                tool: "shell".into(),
                 subject: "cat notes.txt".into(),
                 call: call.clone(),
                 suggested_pattern: "cat *".into(),
@@ -5852,11 +5854,11 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
             envelope: PermissionEnvelope {
                 id: 1,
                 request: termide_agent_core::PermissionRequest {
-                    tool: "bash".into(),
+                    tool: "shell".into(),
                     subject: "cat notes.txt".into(),
                     call: termide_agent_core::ToolCall {
                         id: "c".into(),
-                        name: "bash".into(),
+                        name: "shell".into(),
                         arguments: serde_json::json!({ "command": "cat notes.txt" }),
                         extra_content: None,
                     },
@@ -5886,14 +5888,14 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
     pending(&mut session);
     assert!(session.answer_permission(PermissionAnswer::AllowSession));
     assert_eq!(
-        session.effective_rules().evaluate_session("bash", "cat x"),
+        session.effective_rules().evaluate_session("shell", "cat x"),
         Some(Decision::Allow)
     );
-    assert_eq!(session.effective_rules().evaluate("bash", "cat x"), None);
+    assert_eq!(session.effective_rules().evaluate("shell", "cat x"), None);
     pending(&mut session);
     assert!(session.answer_permission(PermissionAnswer::DenySession));
     assert_eq!(
-        session.effective_rules().evaluate_session("bash", "cat x"),
+        session.effective_rules().evaluate_session("shell", "cat x"),
         Some(Decision::Deny)
     );
 
@@ -5902,7 +5904,7 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
     pending(&mut always);
     assert!(always.answer_permission(PermissionAnswer::AllowAlways));
     assert_eq!(
-        always.rules.evaluate("bash", "cat x"),
+        always.rules.evaluate("shell", "cat x"),
         Some(Decision::Allow)
     );
 
@@ -5914,7 +5916,7 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
     assert_eq!(
         delegated
             .effective_rules()
-            .evaluate_session("bash", "cat x"),
+            .evaluate_session("shell", "cat x"),
         None
     );
 }
@@ -6188,7 +6190,7 @@ fn a_successful_edit_reports_the_changed_file() {
         result: ToolResultMessage::text(&read, "…")
             .with_details(serde_json::json!({ "path": "/tmp/g.rs" })),
     });
-    let bash = call("bash");
+    let bash = call("shell");
     panel.apply(AgentEvent::ToolExecutionEnd {
         result: ToolResultMessage::text(&bash, "ok"),
     });
@@ -6907,7 +6909,7 @@ fn a_server_s_line_tracks_the_toolset_under_the_banner_and_logs_it_after() {
         ],
     };
     // A built-in tool beside the server's, as an agent offers one.
-    panel.offered_tools = vec!["bash".into()];
+    panel.offered_tools = vec!["shell".into()];
     tx.send(ready()).unwrap();
     panel.tick();
     let keys = |panel: &AgentPanel| -> Vec<String> {
@@ -7602,7 +7604,7 @@ fn an_external_agent_on_termides_tools_lists_gets_and_refuses_them() {
             late_tools: Some(rx),
             ..setup(vec![])
         });
-        panel.offered_tools = vec!["read".into(), "bash".into()];
+        panel.offered_tools = vec!["read".into(), "shell".into()];
         // An MCP server of termide's connects after the agent started.
         tx.send(LateTools::Ready {
             source: "db".into(),
@@ -7638,17 +7640,17 @@ fn an_external_agent_on_termides_tools_lists_gets_and_refuses_them() {
         panic!("the toolset list opens: {events:?}");
     };
     let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
-    assert_eq!(keys, ["read", "bash", "db__query"]);
+    assert_eq!(keys, ["read", "shell", "db__query"]);
 
     // Its session took the tools when it started: switched off, even before
     // the first request, a tool is refused rather than taken out.
     panel.apply_toolset(&["read".to_string(), "db__query".to_string()]);
-    assert!(panel.toolset_off.contains("bash"));
+    assert!(panel.toolset_off.contains("shell"));
     assert!(panel.context_off.is_empty());
-    assert!(panel.blocked.read().unwrap().contains("bash"));
+    assert!(panel.blocked.read().unwrap().contains("shell"));
     assert_eq!(chip(&panel, TOOLSET_ACTION), "2/3");
     let items = panel.toolset_items();
-    let bash = items.iter().find(|i| i.key == "bash").unwrap();
+    let bash = items.iter().find(|i| i.key == "shell").unwrap();
     assert!(
         bash.enabled && !bash.checked && !bash.note.is_empty(),
         "{bash:?}"
@@ -7660,13 +7662,13 @@ fn the_tools_chip_counts_only_what_the_list_offers() {
     // A resumed session switched off the tools of an MCP server that has not
     // connected (yet): they are not in the list, so not in the count either.
     let mut panel = AgentPanel::new(setup(vec![]));
-    panel.offered_tools = vec!["read".into(), "bash".into()];
+    panel.offered_tools = vec!["read".into(), "shell".into()];
     panel.toolset_off = ["gone__a", "gone__b", "gone__c"]
         .into_iter()
         .map(String::from)
         .collect();
     assert_eq!(chip(&panel, TOOLSET_ACTION), "2/2");
-    panel.toolset_off.insert("bash".into());
+    panel.toolset_off.insert("shell".into());
     assert_eq!(chip(&panel, TOOLSET_ACTION), "1/2");
 }
 
@@ -7685,7 +7687,7 @@ fn an_external_agent_on_its_own_tools_gets_and_lists_the_mcp_servers_alone() {
         late_tools: Some(rx),
         ..setup(vec![])
     });
-    panel.offered_tools = vec!["read".into(), "bash".into()];
+    panel.offered_tools = vec!["read".into(), "shell".into()];
     // No MCP tools yet: nothing of termide's to show.
     assert!(!panel
         .status_segments()
@@ -8893,7 +8895,7 @@ fn user_command(item: &Item) -> Option<(String, String, bool, Option<u32>)> {
     else {
         return None;
     };
-    (call.id == crate::transcript::USER_COMMAND_ID && call.name == "bash").then(|| {
+    (call.id == crate::transcript::USER_COMMAND_ID && call.name == "shell").then(|| {
         (
             call.arguments["command"].as_str().unwrap_or("").to_string(),
             result.plain_text(),
@@ -9087,7 +9089,7 @@ fn a_suggested_command_shows_on_a_card_with_the_exact_command() {
 fn a_suggested_command_denied_by_a_rule_withholds_run() {
     termide_ui::clipboard::use_fake_clipboard("");
     let mut panel = panel(vec![]);
-    panel.rules.add("bash", "git push*", Decision::Deny);
+    panel.rules.add("shell", "git push*", Decision::Deny);
     let worker = suggest_in_worker(&mut panel, "git push origin main", "publish");
     let form = panel.pending.as_ref().unwrap().form();
     // No `[Run]`, no `[Edit first]`: only the text may be taken away.
@@ -9942,7 +9944,7 @@ fn a_call_a_cut_off_run_left_is_closed_not_run_again() {
     let dir = tempfile::tempdir().unwrap();
     let call = ToolCall {
         id: "c1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "git push" }),
         extra_content: None,
     };
@@ -10381,7 +10383,7 @@ fn an_external_agent_closed_in_a_call_leaves_it_logged_cut_off() {
     assert!(panel.external);
     let call = ToolCall {
         id: "c1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "./deploy.sh" }),
         extra_content: None,
     };
@@ -11038,7 +11040,7 @@ impl Backend for Backgrounded {
         vec![termide_agent_core::BackgroundCall {
             call: ToolCall {
                 id: "t1".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": "cargo test --workspace" }),
                 extra_content: None,
             },
@@ -11059,7 +11061,7 @@ fn a_command_moved_to_the_background_shows_in_the_state_strip() {
     let mut panel = panel(vec![]);
     let call = ToolCall {
         id: "t1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "cargo test --workspace" }),
         extra_content: None,
     };
@@ -11119,7 +11121,7 @@ fn a_command_in_the_background_is_stopped_from_its_row() {
     let mut panel = panel(vec![]);
     let call = ToolCall {
         id: "t1".into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": "cargo test --workspace" }),
         extra_content: None,
     };
@@ -12154,11 +12156,11 @@ fn a_delegates_cards_follow_the_view_of_its_task() {
         .for_task("call-cards");
     let worker = std::thread::spawn(move || {
         delegate.ask(&termide_agent_core::PermissionRequest {
-            tool: "bash".into(),
+            tool: "shell".into(),
             subject: "git fetch".into(),
             call: termide_agent_core::ToolCall {
                 id: "c".into(),
-                name: "bash".into(),
+                name: "shell".into(),
                 arguments: serde_json::json!({ "command": "git fetch" }),
                 extra_content: None,
             },

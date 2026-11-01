@@ -37,7 +37,7 @@ use termide_agent_core::{
     ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage,
     ACP_PROVIDER, RECAP_LIMIT,
 };
-use termide_agent_core::{CompactionCall, CompactionReason};
+use termide_agent_core::{CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
 mod provider;
@@ -3380,7 +3380,7 @@ fn tool_call_of(update: &Value) -> ToolCall {
         .unwrap_or_else(|| json!({}));
     let kind = update["kind"].as_str().unwrap_or("other");
     // `other` names no tool: the title does — what the model called, such as
-    // a `bash` it made up in place of `mcp__termide__bash` — so the block
+    // a `shell` it made up in place of `mcp__termide__shell` — so the block
     // reads as that call, not as the ACP kind.
     let name = if kind == "other" && !title.is_empty() {
         title
@@ -3678,7 +3678,7 @@ fn gemini_mode(mode: Mode) -> &'static str {
 
 /// A `session/request_permission` `toolCall` as a termide [`ToolCall`], its
 /// ACP `kind` translated to the tool name the permission rules speak so the
-/// same logic judges it: `execute` becomes `bash` (the command placed under
+/// same logic judges it: `execute` becomes `shell` (the command placed under
 /// `command`, from the raw input or the title), `read`/`edit` keep their
 /// names, and anything else stands as its kind, which no built-in rule covers
 /// and so reaches the user.
@@ -3686,7 +3686,7 @@ fn permission_call(tool_call: &Value) -> ToolCall {
     let title = tool_call["title"].as_str().unwrap_or("").to_string();
     let kind = tool_call["kind"].as_str().unwrap_or("other");
     let name = match kind {
-        "execute" => "bash",
+        "execute" => SHELL_TOOL,
         other => other,
     };
     let mut arguments = tool_call
@@ -3694,9 +3694,9 @@ fn permission_call(tool_call: &Value) -> ToolCall {
         .filter(|v| v.is_object())
         .cloned()
         .unwrap_or_else(|| json!({}));
-    // `bash` rules match on the command line; if the agent gave none in the
+    // `shell` rules match on the command line; if the agent gave none in the
     // raw input, the title is the best stand-in for a read-only check.
-    if name == "bash" && arguments.get("command").and_then(Value::as_str).is_none() {
+    if name == SHELL_TOOL && arguments.get("command").and_then(Value::as_str).is_none() {
         arguments["command"] = json!(title);
     }
     if !title.is_empty() {
@@ -4775,22 +4775,22 @@ mod tests {
         assert!(served_tools(url, auth).is_empty());
         // Its calls of termide's tools show under their own names.
         let call = tool_call_of(&json!({
-            "toolCallId": "t1", "title": "mcp__termide__bash", "kind": "other",
+            "toolCallId": "t1", "title": "mcp__termide__shell", "kind": "other",
             "rawInput": { "command": "ls" }
         }));
         assert_eq!(
             (call.name.as_str(), &call.arguments),
-            ("bash", &json!({ "command": "ls" }))
+            ("shell", &json!({ "command": "ls" }))
         );
         // A tool the model made up comes as kind `other`: the block takes
         // the name it called, not the kind.
         let call = tool_call_of(&json!({
-            "toolCallId": "t2", "title": "bash", "kind": "other",
+            "toolCallId": "t2", "title": "shell", "kind": "other",
             "rawInput": { "command": "ls" }
         }));
         assert_eq!(
             (call.name.as_str(), &call.arguments),
-            ("bash", &json!({ "command": "ls" }))
+            ("shell", &json!({ "command": "ls" }))
         );
         // A kind that names an action keeps it, the title beside.
         let call = tool_call_of(&json!({
@@ -4907,7 +4907,7 @@ mod tests {
         );
         let shared = &runtime.shared;
         shared.on_update(&json!({ "sessionUpdate": "tool_call", "toolCallId": "t1",
-            "title": "mcp__termide__bash", "kind": "other", "rawInput": {}, "status": "pending" }));
+            "title": "mcp__termide__shell", "kind": "other", "rawInput": {}, "status": "pending" }));
         let starts = |events: &[AgentEvent]| -> Vec<ToolCall> {
             events
                 .iter()
@@ -4923,7 +4923,7 @@ mod tests {
         );
         shared.on_update(
             &json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1",
-            "title": "mcp__termide__bash", "rawInput": { "command": "ls" } }),
+            "title": "mcp__termide__shell", "rawInput": { "command": "ls" } }),
         );
         shared.on_update(
             &json!({ "sessionUpdate": "tool_call_update", "toolCallId": "t1",
@@ -4932,7 +4932,7 @@ mod tests {
         let events = runtime.drain();
         let started = starts(&events);
         assert_eq!(started.len(), 1, "{events:?}");
-        assert_eq!(started[0].name, "bash");
+        assert_eq!(started[0].name, "shell");
         assert_eq!(started[0].arguments, json!({ "command": "ls" }));
         assert!(events
             .iter()
@@ -4954,7 +4954,7 @@ mod tests {
         let shared = &runtime.shared;
         let call = |id: &str, command: &str| {
             json!({ "sessionUpdate": "tool_call", "toolCallId": id,
-                "title": "mcp__termide__bash", "kind": "other",
+                "title": "mcp__termide__shell", "kind": "other",
                 "rawInput": { "command": command }, "status": "pending" })
         };
         let done = |id: &str, text: &str| {
@@ -6524,21 +6524,21 @@ mod tests {
     }
 
     #[test]
-    fn an_execute_request_maps_to_a_bash_call() {
+    fn an_execute_request_maps_to_a_shell_call() {
         let call = permission_call(&json!({
             "toolCallId": "t1",
             "title": "Run cat",
             "kind": "execute",
             "rawInput": { "command": "cat notes.txt" }
         }));
-        assert_eq!(call.name, "bash");
+        assert_eq!(call.name, "shell");
         assert_eq!(call.arguments["command"], "cat notes.txt");
 
         // With no raw command, the title stands in so a read-only check works.
         let from_title = permission_call(&json!({
             "toolCallId": "t2", "title": "ls -la", "kind": "execute"
         }));
-        assert_eq!(from_title.name, "bash");
+        assert_eq!(from_title.name, "shell");
         assert_eq!(from_title.arguments["command"], "ls -la");
     }
 

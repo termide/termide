@@ -183,9 +183,9 @@ pub(crate) fn spending_figures(spending: &Spending) -> Vec<(String, String)> {
     rows
 }
 
-/// The row of what cleaning took out of `bash` output over the session —
+/// The row of what cleaning took out of `shell` output over the session —
 /// its share of the raw output and its estimated tokens — read from the
-/// results in the log, a fork's from its own start; none when no `bash`
+/// results in the log, a fork's from its own start; none when no `shell`
 /// ran. Counted in characters, as tokens are estimated; a result logged
 /// before they were counted, in bytes.
 pub(crate) fn cleaning_row(session: &termide_agent_core::Session) -> Option<(String, String)> {
@@ -387,7 +387,7 @@ mod tests {
                 .insert(name.to_string(), ToolLoad { brought, carried });
         };
         // 1000 tokens, read once.
-        tool("bash", 1_000, 0);
+        tool("shell", 1_000, 0);
         // 100 tokens, read again by later calls 200 times over.
         tool("skill:review", 100, 20_000);
         for n in 0..TOOLS_SHOWN {
@@ -401,7 +401,7 @@ mod tests {
         let tools: Vec<&str> = rows[1].1.lines().collect();
         assert!(tools[0].starts_with("skill:review"), "{tools:?}");
         assert!(tools[0].ends_with("≈100 ↻20k"), "{tools:?}");
-        assert!(tools[1].starts_with("bash"), "{tools:?}");
+        assert!(tools[1].starts_with("shell"), "{tools:?}");
         assert_eq!(tools.len(), TOOLS_SHOWN + 1);
         assert!(tools[TOOLS_SHOWN].starts_with("others"), "{tools:?}");
     }

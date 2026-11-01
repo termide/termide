@@ -2285,7 +2285,7 @@ mod tests {
         parent.push(IntentEntry::User("publish it".into()));
         parent.push(IntentEntry::Ran("git push".into()));
         parent.push(IntentEntry::Call {
-            tool: "bash".into(),
+            tool: "shell".into(),
             arguments: "{\"command\":\"ls\"}".into(),
         });
         let log = IntentLog::delegated(&parent);
@@ -3118,7 +3118,7 @@ OK let me just start implementing and see what happens.\n";
             call("read", json!({ "path": "a" })),
             call("fetch", json!({ "url": "https://x" })),
             call("task", json!({ "agent": "a", "prompt": "p" })),
-            call("bash", json!({ "command": "rg foo src" })),
+            call("shell", json!({ "command": "rg foo src" })),
         ] {
             assert!(runs_alongside(&together), "{}", together.name);
         }
@@ -3126,7 +3126,7 @@ OK let me just start implementing and see what happens.\n";
             call("edit", json!({})),
             call("write", json!({})),
             call("question", json!({})),
-            call("bash", json!({ "command": "cargo build" })),
+            call("shell", json!({ "command": "cargo build" })),
             call("mcp_tool", json!({})),
         ] {
             assert!(!runs_alongside(&alone), "{}", alone.name);
@@ -3348,7 +3348,7 @@ OK let me just start implementing and see what happens.\n";
                 text_reply("first answer"),
                 // The summary call goes on with the work instead.
                 tool_reply(
-                    vec![("c1", "bash", json!({ "command": "ls" }))],
+                    vec![("c1", "shell", json!({ "command": "ls" }))],
                     StopReason::ToolUse,
                 ),
                 text_reply("second answer"),
@@ -3564,7 +3564,7 @@ OK let me just start implementing and see what happens.\n";
         // The model goes on with the work instead of summarising: a line of
         // narration and a call, as in a session where this slipped through.
         let mut went_on = tool_reply(
-            vec![("c1", "bash", json!({ "command": "rg emit_fn" }))],
+            vec![("c1", "shell", json!({ "command": "rg emit_fn" }))],
             StopReason::ToolUse,
         );
         went_on.content.insert(
@@ -3598,7 +3598,7 @@ OK let me just start implementing and see what happens.\n";
         let call = call.expect("a call was made");
         assert_eq!(call.reason, CompactionReason::Threshold);
         assert_eq!(call.stop_reason, StopReason::ToolUse);
-        assert_eq!(call.tool_calls, vec!["bash".to_string()]);
+        assert_eq!(call.tool_calls, vec!["shell".to_string()]);
         assert_eq!(call.thinking_chars, "where is the loop".len());
         assert_eq!(reply, "Found it:");
         assert_eq!(roles(agent.messages()), vec!["user", "assistant"]);
@@ -3755,7 +3755,7 @@ OK let me just start implementing and see what happens.\n";
         }
         let call = |command: &str| ToolCall {
             id: "c".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: serde_json::json!({ "command": command }),
             extra_content: None,
         };

@@ -25,7 +25,7 @@ mode = "configured"
 "inventory/**" = "allow"
 
 # The agent tape shows the permission card on the test run.
-[ai.permissions.bash]
+[ai.permissions.shell]
 "python3 *" = "ask"
 
 # VHS can send Alt only with a letter: no Alt+digit, Alt+Home or F-keys. The

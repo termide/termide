@@ -45,7 +45,7 @@ SCRIPT = [
         "reasoning": "Now run the test suite to make sure nothing else depends on the "
         "four-column rows.",
         "text": "Now the tests.",
-        "tool": ("bash", {"command": "python3 -m unittest -q"}),
+        "tool": ("shell", {"command": "python3 -m unittest -q"}),
     },
     {
         "reasoning": "",

@@ -187,7 +187,7 @@ mod tests {
             r#"
             [ai.permissions]
             mode = "all"
-            [ai.permissions.bash]
+            [ai.permissions.shell]
             "*" = "allow"
             "rm *" = "deny"
             "git push*" = "ask"
@@ -197,9 +197,9 @@ mod tests {
         assert_eq!(dropped.len(), 2, "{dropped:?}");
         let rules = &value["ai"]["permissions"];
         assert!(rules.get("mode").is_none());
-        assert!(rules["bash"].get("*").is_none());
-        assert_eq!(rules["bash"]["rm *"].as_str(), Some("deny"));
-        assert_eq!(rules["bash"]["git push*"].as_str(), Some("ask"));
+        assert!(rules["shell"].get("*").is_none());
+        assert_eq!(rules["shell"]["rm *"].as_str(), Some("deny"));
+        assert_eq!(rules["shell"]["git push*"].as_str(), Some("ask"));
     }
 
     #[test]
@@ -210,7 +210,7 @@ mod tests {
             enabled = true
             [ai.permissions]
             mode = "all"
-            [ai.permissions.bash]
+            [ai.permissions.shell]
             "*" = "allow"
             [terminal]
             default_shell = "/bin/zsh"

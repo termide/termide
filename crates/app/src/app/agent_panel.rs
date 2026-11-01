@@ -26,7 +26,7 @@ use termide_agent_providers::{
 };
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
-    builtin_tools, BashTool, JobsTool, OwnTasks, QuestionTool, SkillTool, SubagentOutcome,
+    builtin_tools, JobsTool, OwnTasks, QuestionTool, ShellTool, SkillTool, SubagentOutcome,
     SubagentRun, SubagentTask, SuggestCommandTool, TaskTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
@@ -3235,11 +3235,11 @@ fn agent_setup(
 }
 
 /// The runner behind `!` in the agent panel's input and `[Run]` on a
-/// `suggest_command` card: the same `bash` tool the agent calls, so timeouts,
+/// `suggest_command` card: the same `shell` tool the agent calls, so timeouts,
 /// output cleaning and the full-log file behave identically either way. It is
 /// built here rather than taken from the agent's registry because a command
 /// the user ran is not governed by the tools an agent profile was given —
-/// `restrict_tools` may well have left `bash` out of those.
+/// `restrict_tools` may well have left `shell` out of those.
 /// Where the session logs of a panel working in `cwd` live: filed by that
 /// directory, under the same `ai/` directory as the agents,
 /// `<config>/ai/sessions/<path>/`.
@@ -3252,15 +3252,15 @@ fn session_dir_of(cwd: &Path) -> Option<PathBuf> {
 }
 
 fn user_shell_runner(dirs: &AgentDirs, cwd: &Path) -> ShellRunner {
-    let tool = BashTool {
+    let tool = ShellTool {
         shim_path: dirs.shims_dir(),
-        ..BashTool::default()
+        ..ShellTool::default()
     };
     let cwd = cwd.to_path_buf();
     ShellRunner::new(move |command, cancel| {
         let call = ToolCall {
             id: "user-command".into(),
-            name: "bash".into(),
+            name: "shell".into(),
             arguments: serde_json::json!({ "command": command }),
             extra_content: None,
         };
@@ -4203,7 +4203,7 @@ mod tests {
             );
             let test = call(
                 "c2",
-                "bash",
+                "shell",
                 serde_json::json!({ "command": "cargo test\n--quiet" }),
             );
             if self.long_first_turn && self.prompted.lock().unwrap().len() == 1 {
@@ -4401,7 +4401,7 @@ mod tests {
         // directory, a failed one marked; a command shows its first line.
         assert_eq!(
             progress.last().unwrap(),
-            "working\n\n· read src/main.rs\n· bash cargo test ✗\n\nthe answer"
+            "working\n\n· read src/main.rs\n· shell cargo test ✗\n\nthe answer"
         );
 
         cancel.cancel();
@@ -4694,11 +4694,11 @@ mod tests {
         let path = dir.path().join("config.toml");
         std::fs::write(&path, "[ai]\nmodel = \"m\"  # keep me\n").unwrap();
 
-        merge_permission_rule(&path, "bash", "cat *", Decision::Allow).unwrap();
+        merge_permission_rule(&path, "shell", "cat *", Decision::Allow).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        // Written under [ai.permissions.bash] (not the old [agent.…]), and the
+        // Written under [ai.permissions.shell] (not the old [agent.…]), and the
         // rest of the file is preserved.
-        assert!(text.contains("[ai.permissions.bash]"), "{text}");
+        assert!(text.contains("[ai.permissions.shell]"), "{text}");
         assert!(text.contains("\"cat *\" = \"allow\""), "{text}");
         assert!(text.contains("# keep me"), "{text}");
         assert!(!text.contains("[agent"), "{text}");
@@ -4706,18 +4706,18 @@ mod tests {
         // The document is valid and the config loader reads the rule back.
         let config = termide_config::Config::load_from(&path).unwrap();
         assert_eq!(
-            config.ai.permissions.evaluate("bash", "cat notes.txt"),
+            config.ai.permissions.evaluate("shell", "cat notes.txt"),
             Some(Decision::Allow)
         );
 
         // A second grant updates in place — no duplicate table, still valid.
-        merge_permission_rule(&path, "bash", "python3 *", Decision::Allow).unwrap();
-        merge_permission_rule(&path, "bash", "cat *", Decision::Allow).unwrap();
+        merge_permission_rule(&path, "shell", "python3 *", Decision::Allow).unwrap();
+        merge_permission_rule(&path, "shell", "cat *", Decision::Allow).unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
-        assert_eq!(text.matches("[ai.permissions.bash]").count(), 1, "{text}");
+        assert_eq!(text.matches("[ai.permissions.shell]").count(), 1, "{text}");
         let config = termide_config::Config::load_from(&path).unwrap();
         assert_eq!(
-            config.ai.permissions.evaluate("bash", "python3 x.py"),
+            config.ai.permissions.evaluate("shell", "python3 x.py"),
             Some(Decision::Allow)
         );
     }
@@ -4729,7 +4729,7 @@ mod tests {
         // Two tables of the same name: invalid TOML.
         let broken = "[ai.permissions.bash]\n\"cat *\" = \"allow\"\n[ai.permissions.bash]\n\"ls *\" = \"allow\"\n";
         std::fs::write(&path, broken).unwrap();
-        assert!(merge_permission_rule(&path, "bash", "python3 *", Decision::Allow).is_err());
+        assert!(merge_permission_rule(&path, "shell", "python3 *", Decision::Allow).is_err());
         // The file is untouched, not appended to.
         assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
     }
@@ -5668,7 +5668,7 @@ done"#;
         assert_eq!(entries[1].description, "Reviews diffs");
         let review = catalog.resolve("review").unwrap();
         assert!(review.system_prompt.starts_with("You review.\n\n- read:"));
-        assert_eq!(review.tools.names(), ["read", "bash"]);
+        assert_eq!(review.tools.names(), ["read", "shell"]);
         assert_eq!(review.model.as_deref(), Some("big"));
         assert_eq!(review.mode, Some(termide_agent_core::Mode::Auto));
 
@@ -5682,7 +5682,7 @@ done"#;
                 "read",
                 "edit",
                 "write",
-                "bash",
+                "shell",
                 "question",
                 "suggest_command",
                 "agents",
@@ -5707,7 +5707,7 @@ done"#;
         .unwrap();
         std::fs::write(global.join(DEFAULT_AGENT_FILE), "{{skills}}\n").unwrap();
         let review = catalog.resolve("review").unwrap();
-        assert_eq!(review.tools.names(), ["read", "bash", "skill"]);
+        assert_eq!(review.tools.names(), ["read", "shell", "skill"]);
 
         // A `command` makes an external agent: no tools of ours, a backend.
         let outside = global.join("agents/outside");

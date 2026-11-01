@@ -289,7 +289,7 @@ pub struct AgentPanelSetup {
     /// How a command the user ran by hand (`$` in the input) or confirmed on
     /// a card reaches the shell; `None` when there is no way to run one, and
     /// then both are refused with a notice. Built by the app over the same
-    /// `bash` tool the agent uses.
+    /// `shell` tool the agent uses.
     pub shell_run: Option<ShellRunner>,
     /// What to do when a run stops on a limit or an outage (`[ai]
     /// on_limit`); kept in step with the configuration as it changes.

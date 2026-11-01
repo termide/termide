@@ -169,7 +169,7 @@ pub struct Cost {
 }
 
 /// The call id of a command the user ran by hand. Such a command shows as a
-/// `bash` call block, though the agent never made the call; the id is what
+/// `shell` call block, though the agent never made the call; the id is what
 /// tells the two apart, and no model-issued id takes this form.
 pub(crate) const USER_COMMAND_ID: &str = "user-command";
 
@@ -254,7 +254,7 @@ pub(crate) fn peer_message_subject(item: &Item) -> Option<String> {
     }
 }
 
-/// The block of a command the user ran by hand: a `bash` call with what it
+/// The block of a command the user ran by hand: a `shell` call with what it
 /// printed, as the agent's own shell calls show. `None` for any message that
 /// is not one.
 pub(crate) fn user_command_item(
@@ -265,7 +265,7 @@ pub(crate) fn user_command_item(
     let command = user.ran.as_ref()?;
     let call = ToolCall {
         id: USER_COMMAND_ID.into(),
-        name: "bash".into(),
+        name: "shell".into(),
         arguments: serde_json::json!({ "command": command }),
         extra_content: None,
     };
@@ -1480,7 +1480,7 @@ fn fill_bg(lines: &mut [Line<'static>], width: u16, bg: ratatui::style::Color) {
 /// being a single clipped line. A `suggest_command` offer counts: `[Run]`
 /// sends it through the same shell, its output coming back as the call's.
 fn shell_command(call: &ToolCall) -> Option<String> {
-    matches!(call.name.as_str(), "bash" | "shell" | "suggest_command").then(|| {
+    matches!(call.name.as_str(), "shell" | "suggest_command").then(|| {
         call.arguments
             .get("command")
             .and_then(|v| v.as_str())
@@ -3104,13 +3104,13 @@ pub(crate) fn run_end_text(elapsed_ms: u32, at: &str) -> String {
     }
 }
 
-/// One-line description of a call's arguments: the command for `bash`, the
+/// One-line description of a call's arguments: the command for `shell`, the
 /// path for file tools, the URL or query for web tools, compact JSON
 /// otherwise.
 #[must_use]
 pub fn summarize_call(call: &ToolCall, max_chars: usize) -> String {
     let text = match call.name.as_str() {
-        "bash" => call.arguments["command"].as_str().unwrap_or("").to_string(),
+        "shell" => call.arguments["command"].as_str().unwrap_or("").to_string(),
         "read" | "edit" | "write" => call.arguments["path"].as_str().unwrap_or("").to_string(),
         "fetch" => call.arguments["url"].as_str().unwrap_or("").to_string(),
         "web_search" => call.arguments["query"].as_str().unwrap_or("").to_string(),
@@ -3373,8 +3373,8 @@ mod tests {
         // A finished tool folds to its headline; how long it took (`🕒`) and
         // its status wait under the fold.
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "cargo test" })),
-            result: Some(ToolResultMessage::text(&call("bash", json!({})), "ok")),
+            call: call("shell", json!({ "command": "cargo test" })),
+            result: Some(ToolResultMessage::text(&call("shell", json!({})), "ok")),
             live: None,
             at: "21:03:20".into(),
             duration_ms: Some(1200),
@@ -3501,10 +3501,10 @@ mod tests {
         let mut transcript = Transcript::default();
         transcript.set_fold(FoldMode::Never);
         let finished = |note: Option<PermissionNote>| {
-            let mut result = ToolResultMessage::text(&call("bash", json!({})), "ok");
+            let mut result = ToolResultMessage::text(&call("shell", json!({})), "ok");
             result.permission = note.map(Box::new);
             Item::Tool {
-                call: call("bash", json!({ "command": "make" })),
+                call: call("shell", json!({ "command": "make" })),
                 result: Some(result),
                 live: None,
                 at: "12:00".into(),
@@ -3552,9 +3552,9 @@ mod tests {
         // A long output is foldable, so autofold-off keeps it open.
         let body = (1..=8).map(|n| format!("line {n}")).collect::<Vec<_>>();
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "ls" })),
+            call: call("shell", json!({ "command": "ls" })),
             result: Some(ToolResultMessage::text(
-                &call("bash", json!({})),
+                &call("shell", json!({})),
                 body.join("\n"),
             )),
             live: None,
@@ -3572,8 +3572,8 @@ mod tests {
         let mut transcript = Transcript::default();
         // A call with no output and a one-line command has nothing to hide.
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "echo hi" })),
-            result: Some(ToolResultMessage::text(&call("bash", json!({})), "")),
+            call: call("shell", json!({ "command": "echo hi" })),
+            result: Some(ToolResultMessage::text(&call("shell", json!({})), "")),
             live: None,
             at: "12:00:00".into(),
             duration_ms: Some(300),
@@ -3607,7 +3607,7 @@ mod tests {
         let mut transcript = Transcript::default();
         let command = "cargo test --workspace --all-features -- --nocapture";
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": command })),
+            call: call("shell", json!({ "command": command })),
             result: None,
             live: None,
             at: String::new(),
@@ -3643,8 +3643,8 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": script })),
-            result: Some(ToolResultMessage::text(&call("bash", json!({})), "ok")),
+            call: call("shell", json!({ "command": script })),
+            result: Some(ToolResultMessage::text(&call("shell", json!({})), "ok")),
             live: None,
             at: String::new(),
             duration_ms: None,
@@ -3775,8 +3775,8 @@ mod tests {
         transcript.stream_thinking("a thought\nand more");
         transcript.finish_thinking("12:00:00", None);
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "ls" })),
-            result: Some(ToolResultMessage::text(&call("bash", json!({})), "a\nb")),
+            call: call("shell", json!({ "command": "ls" })),
+            result: Some(ToolResultMessage::text(&call("shell", json!({})), "a\nb")),
             live: None,
             at: "12:00:01".into(),
             duration_ms: Some(100),
@@ -3915,7 +3915,7 @@ mod tests {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "true" })),
+            call: call("shell", json!({ "command": "true" })),
             result: None,
             live: None,
             at: String::new(),
@@ -3934,8 +3934,8 @@ mod tests {
         assert_eq!(fg_of(&lines, "$ "), Some(colors.info));
         let mut transcript = Transcript::default();
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "true" })),
-            result: Some(ToolResultMessage::text(&call("bash", json!({})), "")),
+            call: call("shell", json!({ "command": "true" })),
+            result: Some(ToolResultMessage::text(&call("shell", json!({})), "")),
             live: None,
             at: "12:00:00".into(),
             duration_ms: Some(500),
@@ -3970,9 +3970,9 @@ mod tests {
         let colors = ThemeColors::default();
         let mut transcript = Transcript::default();
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "exit 1" })),
+            call: call("shell", json!({ "command": "exit 1" })),
             result: Some(ToolResultMessage::error(
-                &call("bash", json!({})),
+                &call("shell", json!({})),
                 "[exit code 1]",
             )),
             live: None,
@@ -4035,7 +4035,7 @@ mod tests {
         assert_eq!(lines.len(), 1, "{lines:?}");
         assert!(lines[0].contains("▸ the latest one"), "{lines:?}");
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "cargo build" })),
+            call: call("shell", json!({ "command": "cargo build" })),
             result: None,
             live: Some("Compiling a\nCompiling b\n".into()),
             at: String::new(),
@@ -4055,7 +4055,7 @@ mod tests {
         let mut transcript = Transcript::default();
         transcript.set_fold(FoldMode::OnFinish);
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "cargo build" })),
+            call: call("shell", json!({ "command": "cargo build" })),
             result: None,
             live: None,
             at: String::new(),
@@ -4090,7 +4090,7 @@ mod tests {
                 ..
             } = item
             {
-                *result = Some(ToolResultMessage::text(&call("bash", json!({})), &output));
+                *result = Some(ToolResultMessage::text(&call("shell", json!({})), &output));
                 *live = None;
                 *at = "12:00:00".into();
                 *duration_ms = Some(3000);
@@ -4124,7 +4124,7 @@ mod tests {
         let lines = text_of(transcript.lines(40, &colors, false));
         assert!(!lines.last().is_some_and(String::is_empty), "{lines:?}");
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "ls" })),
+            call: call("shell", json!({ "command": "ls" })),
             result: None,
             live: None,
             at: String::new(),
@@ -4543,9 +4543,9 @@ mod tests {
             kind: NoticeKind::Info,
         });
         transcript.push(Item::Tool {
-            call: call("bash", json!({ "command": "exit 1" })),
+            call: call("shell", json!({ "command": "exit 1" })),
             result: Some(ToolResultMessage::error(
-                &call("bash", json!({})),
+                &call("shell", json!({})),
                 "[exit code 1]",
             )),
             live: None,
@@ -4752,7 +4752,7 @@ mod tests {
     fn call_summaries_truncate_and_flatten() {
         let long = "x".repeat(50);
         let summary = summarize_call(
-            &call("bash", json!({ "command": format!("echo {long}\nls") })),
+            &call("shell", json!({ "command": format!("echo {long}\nls") })),
             20,
         );
         assert_eq!(summary.chars().count(), 20);

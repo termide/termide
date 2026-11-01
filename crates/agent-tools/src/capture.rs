@@ -113,7 +113,7 @@ impl Capture {
                 written: 0,
             },
             Err(error) => {
-                log::warn!("cannot save bash output to {}: {error}", path.display());
+                log::warn!("cannot save shell output to {}: {error}", path.display());
                 Spool::Failed
             }
         };
