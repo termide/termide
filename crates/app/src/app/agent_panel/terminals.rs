@@ -14,9 +14,13 @@ use std::time::Instant;
 use termide_agent_core::terminals::duration;
 use termide_agent_core::{
     TerminalEntry, TerminalOutput, TerminalRun, TerminalRunEnd, TerminalRunOutcome,
-    TerminalSessions, TerminalState,
+    TerminalScreenText, TerminalSend, TerminalSendEnd, TerminalSendOutcome, TerminalSessions,
+    TerminalState,
 };
-use termide_panel_terminal::agent_shell::{AgentShell, RunEnd, RunError, ShellStatus};
+
+use termide_panel_terminal::agent_shell::{
+    AgentShell, RunEnd, RunError, ScreenText, SendEnd, SendWait, ShellStatus,
+};
 use termide_panel_terminal::Terminal;
 
 /// Where an agent's terminal is, for a panel to show it.
@@ -200,7 +204,6 @@ impl AgentTerminals {
             })
     }
 
-    /// End every terminal of every owner: termide is quitting.
     /// Take the terminal of `owner`'s session `name` out, to show it in a
     /// panel.
     pub(crate) fn expand(&self, owner: &str, name: &str) -> Expand {
@@ -251,6 +254,14 @@ impl AgentTerminals {
                 });
             }
         });
+    }
+}
+
+fn screen_text(screen: ScreenText) -> TerminalScreenText {
+    TerminalScreenText {
+        text: screen.text,
+        alternate: screen.alternate,
+        cursor: screen.cursor,
     }
 }
 
@@ -342,6 +353,58 @@ impl TerminalSessions for AgentTerminals {
                 log: entry.shell.tap().log_path(),
             }
         })
+    }
+
+    fn send(&self, send: &TerminalSend<'_>) -> Result<TerminalSendOutcome, String> {
+        let shell = self.with_entry(send.owner, send.name, |entry| entry.shell.clone())?;
+        let until = send.until.map(|until| until as &dyn Fn(&[u8]) -> bool);
+        let wait = SendWait {
+            until,
+            quiet: send.quiet,
+            timeout: send.timeout,
+        };
+        let outcome = shell
+            .send(send.input, send.keys, &wait, &|| send.cancel.is_cancelled())
+            .map_err(|error| match error {
+                RunError::Exited => format!(
+                    "the shell of terminal session `{}` has exited; close it",
+                    send.name
+                ),
+                RunError::Input(error) => {
+                    format!("cannot type into terminal session `{}`: {error}", send.name)
+                }
+                RunError::Busy { .. } => unreachable!("input is never refused as busy"),
+            })?;
+        let chunk = shell.tap().read_since(outcome.from);
+        let dropped = chunk.from - outcome.from;
+        let state = self.with_entry(send.owner, send.name, |entry| {
+            // What came after the input is read.
+            entry.read_to = entry.read_to.max(chunk.end);
+            entry.state()
+        })?;
+        let screen = shell.screen();
+        let end = match outcome.end {
+            SendEnd::Matched => TerminalSendEnd::Matched,
+            SendEnd::Quiet => TerminalSendEnd::Quiet,
+            SendEnd::TimedOut => TerminalSendEnd::TimedOut,
+            SendEnd::Cancelled => TerminalSendEnd::Cancelled,
+            SendEnd::ShellExited => TerminalSendEnd::ShellExited,
+        };
+        Ok(TerminalSendOutcome {
+            end,
+            output: TerminalOutput {
+                data: chunk.data,
+                dropped,
+                state,
+                log: shell.tap().log_path(),
+            },
+            screen: screen.alternate.then(|| screen_text(screen)),
+        })
+    }
+
+    fn screen(&self, owner: &str, name: &str) -> Result<TerminalScreenText, String> {
+        let shell = self.with_entry(owner, name, |entry| entry.shell.clone())?;
+        Ok(screen_text(shell.screen()))
     }
 
     fn interrupt(&self, owner: &str, name: &str) -> Result<(), String> {
@@ -509,6 +572,28 @@ mod tests {
         let pid = terminal.child_pid();
         assert!(matches!(registry.expand("a", "x"), Expand::Shown(shown) if shown == pid));
         assert!(matches!(registry.expand("a", "y"), Expand::Missing));
+        // Typed into, it answers; what it answered counts as read.
+        let cancel = CancelToken::new();
+        let until = |raw: &[u8]| String::from_utf8_lossy(raw).contains("got-7");
+        let sent = registry
+            .send(&TerminalSend {
+                owner: "a",
+                name: "x",
+                input: "echo got-$((3+4))\n",
+                keys: &[],
+                until: Some(&until),
+                quiet: None,
+                timeout: Duration::from_secs(20),
+                cancel: &cancel,
+            })
+            .unwrap();
+        assert_eq!(sent.end, TerminalSendEnd::Matched);
+        assert!(String::from_utf8_lossy(&sent.output.data).contains("got-7"));
+        assert!(sent.screen.is_none());
+        let screen = registry.screen("a", "x").unwrap();
+        assert!(screen.text.contains("got-7"), "{}", screen.text);
+        let unread = registry.read("a", "x").unwrap();
+        assert!(!String::from_utf8_lossy(&unread.data).contains("got-7"));
         // The agent goes on with it while it is shown.
         let (out, _) = run(&registry, "a", "x", dir.path(), "echo $X").unwrap();
         assert_eq!(out, "7\n");

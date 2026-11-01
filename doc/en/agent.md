@@ -1103,7 +1103,8 @@ something. How many delegated tasks think at once is the
   the command runs in a terminal that stays open; see
   [Terminal sessions](#terminal-sessions).
 - **terminals** lists the agent's terminal sessions, reads what one printed
-  since the agent last looked, interrupts its command or closes it.
+  since the agent last looked, types into one and waits for its answer,
+  shows its screen, interrupts its command or closes it.
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
@@ -1176,7 +1177,19 @@ command in a terminal session instead:
 
 The **terminals** tool lists them, with what each runs and for how long;
 `read` returns what one printed since the agent last looked, `interrupt`
-sends its command `Ctrl+C`, and `close` ends it. Each terminal keeps the last
+sends its command `Ctrl+C`, and `close` ends it.
+
+`send` is how the agent drives an interactive program — a REPL, a debugger,
+a prompt asking `[y/N]`, a full-screen program: it types `input` (a line
+break is `Enter`), presses `keys` by name (`Enter`, `Tab`, `Esc`, `Up`,
+`PageDown`, `F5`, `Ctrl+C`, `Alt+b`…), and waits — until the text `wait_for`
+appears in the output, until the output stops for `quiet_ms` (half a second
+when neither is given), or `timeout` seconds at most (10 by default). It
+returns what the terminal printed after the input; while a full-screen
+program has the terminal, which redraws rather than prints, it returns the
+screen instead. `screen` returns what the terminal shows at any time, with
+where the cursor is. What the agent typed goes in the order it sent it; a
+command it runs in the terminal meanwhile waits its turn. Each terminal keeps the last
 2 MiB of its output in memory and the whole of it in a log, up to 256 MiB,
 which the agent can read. Before each request the agent is reminded which of
 its terminals are open, so it closes those it no longer needs.

@@ -85,6 +85,57 @@ pub struct TerminalOutput {
     pub log: Option<PathBuf>,
 }
 
+/// Says from a terminal's raw output whether it is what was waited for.
+pub type OutputTest = dyn Fn(&[u8]) -> bool + Sync;
+
+/// Input for a terminal, and what to wait for after it.
+pub struct TerminalSend<'a> {
+    pub owner: &'a str,
+    pub name: &'a str,
+    /// Typed as it is, a line break as `Enter`.
+    pub input: &'a str,
+    /// Keys pressed after the input, by name (`Enter`, `Ctrl+C`, `Up`…).
+    pub keys: &'a [String],
+    /// Says from the raw output since the input whether it is what was
+    /// waited for.
+    pub until: Option<&'a OutputTest>,
+    /// Output that stops for this long ends the wait.
+    pub quiet: Option<Duration>,
+    pub timeout: Duration,
+    pub cancel: &'a CancelToken,
+}
+
+/// How the wait after a [`TerminalSend`] ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalSendEnd {
+    Matched,
+    Quiet,
+    TimedOut,
+    Cancelled,
+    ShellExited,
+}
+
+/// A terminal's screen as text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalScreenText {
+    pub text: String,
+    /// A full-screen program has the alternate screen up.
+    pub alternate: bool,
+    /// The cursor's row and column, from 0.
+    pub cursor: (usize, usize),
+}
+
+/// What a [`TerminalSend`] got back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TerminalSendOutcome {
+    pub end: TerminalSendEnd,
+    /// What the terminal printed after the input; it counts as read.
+    pub output: TerminalOutput,
+    /// The screen, when a full-screen program has it: its output is no
+    /// stream to read.
+    pub screen: Option<TerminalScreenText>,
+}
+
 /// The terminals the app keeps for agent sessions. Each method takes the
 /// owner's session id; a name is only ever looked up among the owner's.
 pub trait TerminalSessions: Send + Sync {
@@ -107,6 +158,12 @@ pub trait TerminalSessions: Send + Sync {
     /// What terminal `name` printed since the agent last read it — a
     /// command's output counts as read.
     fn read(&self, owner: &str, name: &str) -> Result<TerminalOutput, String>;
+
+    /// Type into terminal `name` and wait for its answer.
+    fn send(&self, send: &TerminalSend<'_>) -> Result<TerminalSendOutcome, String>;
+
+    /// Terminal `name`'s screen as it stands.
+    fn screen(&self, owner: &str, name: &str) -> Result<TerminalScreenText, String>;
 
     /// Send `Ctrl+C` to terminal `name`.
     fn interrupt(&self, owner: &str, name: &str) -> Result<(), String>;

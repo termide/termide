@@ -262,13 +262,15 @@ impl Terminal {
             loop {
                 match reader.read(&mut buf) {
                     Ok(n) if n > 0 => {
-                        if let Some(tap) = &tap {
-                            tap.push(&buf[..n]);
-                        }
                         for byte in &buf[..n] {
                             parser.advance(&mut performer, *byte);
                         }
                         performer.flush();
+                        // After the screen took them: whoever the tap wakes
+                        // finds the screen showing what it read.
+                        if let Some(tap) = &tap {
+                            tap.push(&buf[..n]);
+                        }
                         has_new_data_clone.store(true, Ordering::Release);
                     }
                     Ok(_) => break,

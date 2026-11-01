@@ -13319,6 +13319,19 @@ impl termide_agent_core::TerminalSessions for Terminals {
     ) -> Result<termide_agent_core::TerminalOutput, String> {
         Err("not in this test".into())
     }
+    fn send(
+        &self,
+        _send: &termide_agent_core::TerminalSend<'_>,
+    ) -> Result<termide_agent_core::TerminalSendOutcome, String> {
+        Err("not in this test".into())
+    }
+    fn screen(
+        &self,
+        _owner: &str,
+        _name: &str,
+    ) -> Result<termide_agent_core::TerminalScreenText, String> {
+        Err("not in this test".into())
+    }
     fn interrupt(&self, _owner: &str, _name: &str) -> Result<(), String> {
         Ok(())
     }

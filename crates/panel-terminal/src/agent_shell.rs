@@ -159,9 +159,136 @@ pub struct AgentShell {
     tap: Arc<OutputTap>,
     child: SharedChild,
     pid: Option<u32>,
-    /// One command at a time: a caller waits here for the one before.
+    /// One command or input at a time: a caller waits here for the one
+    /// before, so the agent's writes reach the terminal in order.
     turn: Arc<Mutex<()>>,
     in_flight: Arc<Mutex<Option<InFlight>>>,
+    /// The terminal's screen, for a snapshot and the keys' encoding.
+    screen: Arc<std::sync::RwLock<crate::terminal::TerminalScreen>>,
+}
+
+/// Says from raw output whether it is what was waited for.
+pub type OutputTest = dyn Fn(&[u8]) -> bool;
+
+/// What [`AgentShell::send`] waits for once the input is sent.
+pub struct SendWait<'a> {
+    /// Says from the raw output since the input whether it is what was
+    /// waited for.
+    pub until: Option<&'a OutputTest>,
+    /// Output that stops for this long ends the wait.
+    pub quiet: Option<Duration>,
+    pub timeout: Duration,
+}
+
+/// How a [`AgentShell::send`] wait ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendEnd {
+    /// The output showed what was waited for.
+    Matched,
+    /// The output stopped for the quiet period.
+    Quiet,
+    TimedOut,
+    Cancelled,
+    ShellExited,
+}
+
+/// What a [`AgentShell::send`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SendOutcome {
+    pub end: SendEnd,
+    /// Where the output after the input starts in the tap.
+    pub from: u64,
+}
+
+/// The terminal's screen as text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScreenText {
+    /// The visible rows, trailing blanks cut, trailing empty rows left out.
+    pub text: String,
+    /// Whether a full-screen program has the alternate screen up.
+    pub alternate: bool,
+    /// The cursor's row and column, from 0.
+    pub cursor: (usize, usize),
+}
+
+/// The bytes a key sends, by its name: `Enter`, `Tab`, `Esc`, `Backspace`,
+/// `Delete`, `Up`, `Down`, `Left`, `Right`, `Home`, `End`, `PageUp`,
+/// `PageDown`, `Insert`, `Space`, `F1`–`F12`, and `Ctrl+`/`Alt+` with a
+/// letter or another key. The arrows follow the program's cursor-key mode.
+pub fn key_bytes(name: &str, application_cursor: bool) -> Option<Vec<u8>> {
+    let name = name.trim();
+    let lower = name.to_ascii_lowercase();
+    if let Some(rest) = lower
+        .strip_prefix("ctrl+")
+        .or_else(|| lower.strip_prefix("c-"))
+    {
+        let mut chars = rest.chars();
+        return match (chars.next(), chars.next()) {
+            (Some(c @ ('a'..='z' | '@' | '[' | '\\' | ']' | '^' | '_')), None) => {
+                Some(vec![(c.to_ascii_uppercase() as u8) & 0x1f])
+            }
+            (Some(' '), None) => Some(vec![0]),
+            _ if rest == "space" => Some(vec![0]),
+            _ => None,
+        };
+    }
+    if let Some(rest) = name
+        .strip_prefix("Alt+")
+        .or_else(|| name.strip_prefix("alt+"))
+        .or_else(|| name.strip_prefix("M-"))
+    {
+        let mut bytes = vec![0x1b];
+        let mut chars = rest.chars();
+        match (chars.next(), chars.next()) {
+            (Some(c), None) => bytes.extend(c.to_string().into_bytes()),
+            _ => bytes.extend(key_bytes(rest, application_cursor)?),
+        }
+        return Some(bytes);
+    }
+    let arrow = |c: u8| {
+        if application_cursor {
+            vec![0x1b, b'O', c]
+        } else {
+            vec![0x1b, b'[', c]
+        }
+    };
+    let bytes: Vec<u8> = match lower.as_str() {
+        "enter" | "return" => b"\r".to_vec(),
+        "tab" => b"\t".to_vec(),
+        "esc" | "escape" => vec![0x1b],
+        "backspace" => vec![0x7f],
+        "space" => b" ".to_vec(),
+        "delete" | "del" => b"\x1b[3~".to_vec(),
+        "insert" => b"\x1b[2~".to_vec(),
+        "up" => arrow(b'A'),
+        "down" => arrow(b'B'),
+        "right" => arrow(b'C'),
+        "left" => arrow(b'D'),
+        "home" => arrow(b'H'),
+        "end" => arrow(b'F'),
+        "pageup" => b"\x1b[5~".to_vec(),
+        "pagedown" => b"\x1b[6~".to_vec(),
+        "f1" => b"\x1bOP".to_vec(),
+        "f2" => b"\x1bOQ".to_vec(),
+        "f3" => b"\x1bOR".to_vec(),
+        "f4" => b"\x1bOS".to_vec(),
+        "f5" => b"\x1b[15~".to_vec(),
+        "f6" => b"\x1b[17~".to_vec(),
+        "f7" => b"\x1b[18~".to_vec(),
+        "f8" => b"\x1b[19~".to_vec(),
+        "f9" => b"\x1b[20~".to_vec(),
+        "f10" => b"\x1b[21~".to_vec(),
+        "f11" => b"\x1b[23~".to_vec(),
+        "f12" => b"\x1b[24~".to_vec(),
+        _ => return None,
+    };
+    Some(bytes)
+}
+
+fn read_screen(
+    screen: &std::sync::RwLock<crate::terminal::TerminalScreen>,
+) -> std::sync::RwLockReadGuard<'_, crate::terminal::TerminalScreen> {
+    screen.read().unwrap_or_else(|e| e.into_inner())
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -210,6 +337,7 @@ impl Terminal {
             pid: term.shell_pid,
             turn: Arc::new(Mutex::new(())),
             in_flight: Arc::new(Mutex::new(None)),
+            screen: Arc::clone(&term.screen),
         };
         Ok((term, shell))
     }
@@ -337,6 +465,94 @@ impl AgentShell {
         }
     }
 
+    /// Type `input` — a line break as `Enter` — then press `keys` (see
+    /// [`key_bytes`]), and wait as `wait` says: for the output to show what
+    /// it waits for, to stop for a while, or for the timeout. A command of
+    /// the agent's running there takes it as its input; so does the shell
+    /// at its prompt.
+    pub fn send(
+        &self,
+        input: &str,
+        keys: &[String],
+        wait: &SendWait<'_>,
+        cancelled: &dyn Fn() -> bool,
+    ) -> Result<SendOutcome, RunError> {
+        let application_cursor = read_screen(&self.screen).application_cursor_keys;
+        let mut bytes = input.replace("\r\n", "\r").replace('\n', "\r").into_bytes();
+        for key in keys {
+            let Some(key) = key_bytes(key, application_cursor) else {
+                return Err(RunError::Input(format!("unknown key `{key}`")));
+            };
+            bytes.extend(key);
+        }
+        let _turn = lock(&self.turn);
+        if self.tap.is_closed() {
+            return Err(RunError::Exited);
+        }
+        let from = self.tap.end();
+        if !bytes.is_empty() {
+            self.input
+                .send(bytes)
+                .map_err(|e| RunError::Input(e.to_string()))?;
+        }
+        let outcome = |end| Ok(SendOutcome { end, from });
+        let deadline = Instant::now() + wait.timeout;
+        let mut seen = from;
+        let mut last_output = Instant::now();
+        loop {
+            let end = self.tap.end();
+            if end != seen {
+                seen = end;
+                last_output = Instant::now();
+                if let Some(until) = wait.until {
+                    if until(&self.tap.read_since(from).data) {
+                        return outcome(SendEnd::Matched);
+                    }
+                }
+            } else if self.tap.is_closed() {
+                return outcome(SendEnd::ShellExited);
+            }
+            if wait
+                .quiet
+                .is_some_and(|quiet| last_output.elapsed() >= quiet)
+            {
+                return outcome(SendEnd::Quiet);
+            }
+            if cancelled() {
+                return outcome(SendEnd::Cancelled);
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return outcome(SendEnd::TimedOut);
+            }
+            self.tap.wait_past(seen, POLL.min(deadline - now));
+        }
+    }
+
+    /// The terminal's screen as it stands.
+    pub fn screen(&self) -> ScreenText {
+        let screen = read_screen(&self.screen);
+        let mut rows: Vec<String> = screen
+            .active_buffer()
+            .iter()
+            .map(|row| {
+                let mut text = String::new();
+                for cell in row {
+                    cell.push_text(&mut text);
+                }
+                text.trim_end().to_string()
+            })
+            .collect();
+        while rows.last().is_some_and(String::is_empty) {
+            rows.pop();
+        }
+        ScreenText {
+            text: rows.join("\n"),
+            alternate: screen.use_alt_screen,
+            cursor: screen.cursor,
+        }
+    }
+
     /// Send `Ctrl+C`, as a user pressing it would.
     pub fn interrupt(&self) -> Result<(), String> {
         self.input.send(vec![0x03]).map_err(|e| e.to_string())
@@ -399,6 +615,20 @@ mod tests {
         );
         assert_eq!(typed_line("printf \u{1b}x"), "eval $'printf \\x1bx'\n");
     }
+
+    #[test]
+    fn keys_are_sent_by_name() {
+        assert_eq!(key_bytes("Enter", false), Some(b"\r".to_vec()));
+        assert_eq!(key_bytes("Ctrl+C", false), Some(vec![3]));
+        assert_eq!(key_bytes("ctrl+d", false), Some(vec![4]));
+        assert_eq!(key_bytes("Up", false), Some(b"\x1b[A".to_vec()));
+        assert_eq!(key_bytes("Up", true), Some(b"\x1bOA".to_vec()));
+        assert_eq!(key_bytes("Alt+b", false), Some(b"\x1bb".to_vec()));
+        assert_eq!(key_bytes("Alt+Left", false), Some(b"\x1b\x1b[D".to_vec()));
+        assert_eq!(key_bytes("F5", false), Some(b"\x1b[15~".to_vec()));
+        assert_eq!(key_bytes("Hyper", false), None);
+        assert_eq!(key_bytes("Ctrl+Left", false), None);
+    }
 }
 
 #[cfg(all(test, unix))]
@@ -442,6 +672,53 @@ mod shell_tests {
         assert_eq!(out, "42 sub\n");
         assert_eq!(outcome.end, RunEnd::Finished(Some(1)));
         assert_eq!(shell.status(), ShellStatus::Idle);
+    }
+
+    #[test]
+    fn a_command_waiting_for_input_gets_it_and_answers() {
+        let home = tempfile::tempdir().unwrap();
+        let Some((_term, shell)) = session(home.path()) else {
+            return;
+        };
+        let (_, outcome) = run(
+            &shell,
+            "read x; echo \"got $x\"",
+            Duration::from_millis(300),
+        );
+        assert_eq!(outcome.end, RunEnd::TimedOut);
+        let until = |out: &[u8]| String::from_utf8_lossy(out).contains("got hi");
+        let wait = SendWait {
+            until: Some(&until),
+            quiet: None,
+            timeout: Duration::from_secs(20),
+        };
+        let sent = shell.send("hi\n", &[], &wait, &|| false).unwrap();
+        assert_eq!(sent.end, SendEnd::Matched);
+        let out = String::from_utf8_lossy(&shell.tap().read_since(sent.from).data).into_owned();
+        assert!(out.contains("got hi"), "{out:?}");
+        // The command is over: the next one runs.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while shell.status() != ShellStatus::Idle {
+            assert!(Instant::now() < deadline, "still running");
+            std::thread::sleep(POLL);
+        }
+        let quiet = SendWait {
+            until: None,
+            quiet: Some(Duration::from_millis(300)),
+            timeout: Duration::from_secs(20),
+        };
+        let sent = shell
+            .send("printf 'a\\nb\\n'", &["Enter".to_string()], &quiet, &|| {
+                false
+            })
+            .unwrap();
+        assert_eq!(sent.end, SendEnd::Quiet);
+        let screen = shell.screen();
+        assert!(!screen.alternate);
+        assert!(screen.text.contains("\na\nb\n"), "{:?}", screen.text);
+        assert!(shell
+            .send("", &["Hyper".to_string()], &quiet, &|| false)
+            .is_err());
     }
 
     #[test]

@@ -137,7 +137,8 @@ pub use suggest::{
 };
 pub use terminals::{
     TerminalEntry, TerminalOutput, TerminalRun, TerminalRunEnd, TerminalRunOutcome,
-    TerminalSessions, TerminalState,
+    TerminalScreenText, TerminalSend, TerminalSendEnd, TerminalSendOutcome, TerminalSessions,
+    TerminalState,
 };
 pub use tool::{
     canonical_tool_name, de_tool_name, de_tool_names, CallsBeside, LateTools, RunningCall,

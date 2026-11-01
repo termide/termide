@@ -58,7 +58,7 @@ pub fn clean_output(raw: &str, command: &str) -> Cleaned {
 
 /// Remove ANSI/VT escape sequences and stray control bytes, keeping `\t`,
 /// `\n` and `\r` (carriage returns are resolved per line afterwards).
-fn strip_escapes(text: &str) -> String {
+pub(crate) fn strip_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
     while let Some(c) = chars.next() {

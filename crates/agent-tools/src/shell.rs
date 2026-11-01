@@ -1058,6 +1058,19 @@ mod session_tests {
         fn read(&self, _owner: &str, _name: &str) -> Result<TerminalOutput, String> {
             Err("unused".into())
         }
+        fn send(
+            &self,
+            _send: &termide_agent_core::TerminalSend<'_>,
+        ) -> Result<termide_agent_core::TerminalSendOutcome, String> {
+            Err("unused".into())
+        }
+        fn screen(
+            &self,
+            _owner: &str,
+            _name: &str,
+        ) -> Result<termide_agent_core::TerminalScreenText, String> {
+            Err("unused".into())
+        }
         fn interrupt(&self, _owner: &str, _name: &str) -> Result<(), String> {
             Ok(())
         }

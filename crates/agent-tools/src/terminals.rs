@@ -1,22 +1,30 @@
 //! `terminals`: the agent's terminal sessions — list them, read what one
-//! printed since the agent last looked, interrupt or close one. `shell`
-//! opens them; see [`termide_agent_core::terminals`].
+//! printed since the agent last looked, type into one and wait for its
+//! answer, look at its screen, interrupt or close one. `shell` opens them;
+//! see [`termide_agent_core::terminals`].
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use termide_agent_core::terminals::duration;
 use termide_agent_core::{
-    CancelToken, TerminalSessions, TerminalState, Tool, ToolCall, ToolContext, ToolResultMessage,
-    ToolText, ToolUpdate,
+    CancelToken, TerminalOutput, TerminalScreenText, TerminalSend, TerminalSendEnd,
+    TerminalSessions, TerminalState, Tool, ToolCall, ToolContext, ToolResultMessage, ToolText,
+    ToolUpdate,
 };
 
-use crate::args::optional_str;
-use crate::clean::clean_output;
+use crate::args::{optional_str, optional_u64};
+use crate::clean::{clean_output, strip_escapes};
 use crate::shell::check_session_name;
 use crate::truncate::{head_tail, SHELL_MAX_BYTES};
 
 const NAME: &str = "terminals";
+/// How long `send` waits for the output to stop, when told nothing.
+const DEFAULT_QUIET: Duration = Duration::from_millis(500);
+/// How long `send` waits at most, when told nothing, and the most it may.
+const DEFAULT_SEND_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_SEND_TIMEOUT: Duration = Duration::from_secs(600);
 
 /// The `terminals` tool.
 pub struct TerminalsTool {
@@ -57,12 +65,35 @@ impl Tool for TerminalsTool {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["list", "read", "interrupt", "close"],
+                    "enum": ["list", "read", "send", "screen", "interrupt", "close"],
                     "description": "What to do; `list` when left out"
                 },
                 "session": {
                     "type": "string",
-                    "description": "read, interrupt, close: the terminal session's name"
+                    "description": "Every action but list: the terminal session's name"
+                },
+                "input": {
+                    "type": "string",
+                    "description": "send: text to type; a line break is Enter"
+                },
+                "keys": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "send: keys to press after the input, by name: Enter, Tab, Esc, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, Space, F1-F12, Ctrl+<letter>, Alt+<key>"
+                },
+                "wait_for": {
+                    "type": "string",
+                    "description": "send: text to wait for in the output after the input"
+                },
+                "quiet_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "send: wait until the output stops for this many ms (default 500 when wait_for is not given)"
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "send: seconds to wait at most (default 10, max 600)"
                 }
             }
         })
@@ -81,7 +112,7 @@ impl Tool for TerminalsTool {
         call: &ToolCall,
         ctx: &ToolContext,
         _on_update: &mut dyn FnMut(ToolUpdate),
-        _cancel: &CancelToken,
+        cancel: &CancelToken,
     ) -> ToolResultMessage {
         let Some(owner) = ctx.session.as_ref().and_then(|view| view.id.as_deref()) else {
             return ToolResultMessage::error(call, "terminal sessions are not available here");
@@ -120,6 +151,13 @@ impl Tool for TerminalsTool {
         }
         let done = match action {
             "read" => return self.read(call, owner, name),
+            "send" => return self.send(call, owner, name, cancel),
+            "screen" => {
+                return match self.terminals.screen(owner, name) {
+                    Ok(screen) => ToolResultMessage::text(call, screen_body(name, &screen)),
+                    Err(message) => ToolResultMessage::error(call, message),
+                }
+            }
             "interrupt" => self
                 .terminals
                 .interrupt(owner, name)
@@ -129,7 +167,7 @@ impl Tool for TerminalsTool {
                 .close(owner, name)
                 .map(|()| format!("Closed terminal session `{name}`.")),
             other => Err(format!(
-                "unknown action `{other}`: use list, read, interrupt or close"
+                "unknown action `{other}`: use list, read, send, screen, interrupt or close"
             )),
         };
         match done {
@@ -139,43 +177,150 @@ impl Tool for TerminalsTool {
     }
 }
 
+/// A terminal's screen for the agent: its rows, then where the cursor is.
+fn screen_body(name: &str, screen: &TerminalScreenText) -> String {
+    let program = if screen.alternate {
+        "; a full-screen program has it"
+    } else {
+        ""
+    };
+    format!(
+        "{}\n[the screen of terminal session `{name}`; cursor at row {}, column {}{program}]",
+        screen.text,
+        screen.cursor.0 + 1,
+        screen.cursor.1 + 1
+    )
+}
+
 impl TerminalsTool {
+    fn send(
+        &self,
+        call: &ToolCall,
+        owner: &str,
+        name: &str,
+        cancel: &CancelToken,
+    ) -> ToolResultMessage {
+        let input = match optional_str(call, "input") {
+            Ok(input) => input.unwrap_or(""),
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let keys: Vec<String> = match &call.arguments["keys"] {
+            serde_json::Value::Null => Vec::new(),
+            serde_json::Value::Array(keys) => {
+                match keys
+                    .iter()
+                    .map(|key| key.as_str().map(str::to_string))
+                    .collect()
+                {
+                    Some(keys) => keys,
+                    None => return ToolResultMessage::error(call, "`keys` holds key names"),
+                }
+            }
+            serde_json::Value::String(key) => vec![key.clone()],
+            _ => return ToolResultMessage::error(call, "`keys` is a list of key names"),
+        };
+        if input.is_empty() && keys.is_empty() {
+            return ToolResultMessage::error(call, "`send` needs `input` or `keys`");
+        }
+        let wait_for = match optional_str(call, "wait_for") {
+            Ok(text) => text.filter(|text| !text.is_empty()).map(str::to_string),
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let quiet = match optional_u64(call, "quiet_ms") {
+            Ok(ms) => ms.map(Duration::from_millis),
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let timeout = match optional_u64(call, "timeout") {
+            Ok(seconds) => seconds
+                .map_or(DEFAULT_SEND_TIMEOUT, Duration::from_secs)
+                .min(MAX_SEND_TIMEOUT),
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let quiet = quiet.or(wait_for.is_none().then_some(DEFAULT_QUIET));
+        let until = wait_for.clone().map(|text| {
+            move |raw: &[u8]| strip_escapes(&String::from_utf8_lossy(raw)).contains(&text)
+        });
+        let sent = self.terminals.send(&TerminalSend {
+            owner,
+            name,
+            input,
+            keys: &keys,
+            until: until
+                .as_ref()
+                .map(|until| until as &(dyn Fn(&[u8]) -> bool + Sync)),
+            quiet,
+            timeout,
+            cancel,
+        });
+        let outcome = match sent {
+            Ok(outcome) => outcome,
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        let ended = match outcome.end {
+            TerminalSendEnd::Matched => "the text waited for appeared".to_string(),
+            TerminalSendEnd::Quiet => format!(
+                "the output stopped for {} ms",
+                quiet.unwrap_or_default().as_millis()
+            ),
+            TerminalSendEnd::TimedOut => match &wait_for {
+                Some(text) => format!("`{text}` did not appear within {}", duration(timeout)),
+                None => format!("still printing after {}", duration(timeout)),
+            },
+            TerminalSendEnd::Cancelled => "stopped waiting: the call was cancelled".into(),
+            TerminalSendEnd::ShellExited => "the shell exited".into(),
+        };
+        let body = match &outcome.screen {
+            Some(screen) => format!("{}\n[{ended}]", screen_body(name, screen)),
+            None => output_body(name, &outcome.output, &ended),
+        };
+        ToolResultMessage::text(call, body)
+    }
+
     fn read(&self, call: &ToolCall, owner: &str, name: &str) -> ToolResultMessage {
         let output = match self.terminals.read(owner, name) {
             Ok(output) => output,
             Err(message) => return ToolResultMessage::error(call, message),
         };
-        let raw = String::from_utf8_lossy(&output.data);
-        let cleaned = clean_output(&raw, "");
-        let mut body = match head_tail(&cleaned.text, SHELL_MAX_BYTES) {
-            None => cleaned.text.clone(),
-            Some(cut) => format!(
-                "{}\n[... {} lines omitted ...]\n{}",
-                cut.head, cut.omitted_lines, cut.tail
-            ),
-        };
-        if body.trim().is_empty() {
-            body = "(nothing new)".into();
-        }
-        if !body.ends_with('\n') {
-            body.push('\n');
-        }
-        if output.dropped > 0 {
-            body = format!(
-                "[{} earlier bytes are no longer in memory]\n{body}",
-                output.dropped
-            );
-        }
-        body.push_str(&format!(
-            "[terminal session `{name}`: {}",
-            state(&output.state)
-        ));
-        if let Some(log) = &output.log {
-            body.push_str(&format!("; complete output in {}", log.display()));
-        }
-        body.push(']');
-        ToolResultMessage::text(call, body)
+        ToolResultMessage::text(call, output_body(name, &output, ""))
     }
+}
+
+/// What a terminal printed, for the agent: cleaned, its middle cut when
+/// long, then the terminal's state and `note`.
+fn output_body(name: &str, output: &TerminalOutput, note: &str) -> String {
+    let raw = String::from_utf8_lossy(&output.data);
+    let cleaned = clean_output(&raw, "");
+    let mut body = match head_tail(&cleaned.text, SHELL_MAX_BYTES) {
+        None => cleaned.text.clone(),
+        Some(cut) => format!(
+            "{}\n[... {} lines omitted ...]\n{}",
+            cut.head, cut.omitted_lines, cut.tail
+        ),
+    };
+    if body.trim().is_empty() {
+        body = "(nothing new)".into();
+    }
+    if !body.ends_with('\n') {
+        body.push('\n');
+    }
+    if output.dropped > 0 {
+        body = format!(
+            "[{} earlier bytes are no longer in memory]\n{body}",
+            output.dropped
+        );
+    }
+    body.push_str(&format!(
+        "[terminal session `{name}`: {}",
+        state(&output.state)
+    ));
+    if !note.is_empty() {
+        body.push_str(&format!("; {note}"));
+    }
+    if let Some(log) = &output.log {
+        body.push_str(&format!("; complete output in {}", log.display()));
+    }
+    body.push(']');
+    body
 }
 
 #[cfg(test)]
@@ -184,8 +329,8 @@ mod tests {
     use std::sync::Mutex;
     use std::time::Duration;
     use termide_agent_core::{
-        IntentLog, ModelSpec, SessionView, TerminalEntry, TerminalOutput, TerminalRun,
-        TerminalRunOutcome,
+        IntentLog, ModelSpec, SessionView, TerminalEntry, TerminalRun, TerminalRunOutcome,
+        TerminalSendOutcome,
     };
 
     struct NoProvider;
@@ -239,6 +384,40 @@ mod tests {
                 dropped: 0,
                 state: TerminalState::Idle,
                 log: None,
+            })
+        }
+        fn send(&self, send: &TerminalSend<'_>) -> Result<TerminalSendOutcome, String> {
+            self.calls.lock().unwrap().push(format!(
+                "send {} {:?} {:?} {:?} {:?}",
+                send.name, send.input, send.keys, send.quiet, send.timeout
+            ));
+            let out = b"\x1b[1m>>> \x1b[0m2\r\n>>> ";
+            let matched = send.until.is_some_and(|until| until(out));
+            let alternate = send.input == "vim";
+            Ok(TerminalSendOutcome {
+                end: if matched {
+                    TerminalSendEnd::Matched
+                } else {
+                    TerminalSendEnd::Quiet
+                },
+                output: TerminalOutput {
+                    data: out.to_vec(),
+                    dropped: 0,
+                    state: TerminalState::Idle,
+                    log: None,
+                },
+                screen: alternate.then(|| TerminalScreenText {
+                    text: "~\n~".into(),
+                    alternate: true,
+                    cursor: (0, 0),
+                }),
+            })
+        }
+        fn screen(&self, _owner: &str, _name: &str) -> Result<TerminalScreenText, String> {
+            Ok(TerminalScreenText {
+                text: "$ ls\na b".into(),
+                alternate: false,
+                cursor: (2, 2),
             })
         }
         fn interrupt(&self, _owner: &str, name: &str) -> Result<(), String> {
@@ -307,5 +486,62 @@ mod tests {
         assert!(call(&tool, json!({"action": "read"}), Some("s1")).is_error);
         assert!(call(&tool, json!({}), None).is_error);
         assert_eq!(*fake.calls.lock().unwrap(), ["read dev", "interrupt dev"]);
+    }
+
+    #[test]
+    fn sends_input_and_returns_the_answer_or_the_screen() {
+        let fake = Arc::new(Fake::default());
+        let tool = TerminalsTool::new(fake.clone());
+        let sent = call(
+            &tool,
+            json!({"action": "send", "session": "py", "input": "1+1", "keys": ["Enter"], "wait_for": ">>> "}),
+            Some("s1"),
+        );
+        assert_eq!(
+            sent.plain_text(),
+            ">>> 2\n>>> \n[terminal session `py`: idle; the text waited for appeared]"
+        );
+        let quiet = call(
+            &tool,
+            json!({"action": "send", "session": "py", "keys": "Ctrl+C"}),
+            Some("s1"),
+        );
+        assert!(
+            quiet
+                .plain_text()
+                .ends_with("the output stopped for 500 ms]"),
+            "{}",
+            quiet.plain_text()
+        );
+        // A full-screen program answers with its screen.
+        let vim = call(
+            &tool,
+            json!({"action": "send", "session": "py", "input": "vim", "timeout": 3}),
+            Some("s1"),
+        );
+        assert!(vim
+            .plain_text()
+            .starts_with("~\n~\n[the screen of terminal session `py`"));
+        let screen = call(
+            &tool,
+            json!({"action": "screen", "session": "py"}),
+            Some("s1"),
+        );
+        assert_eq!(
+            screen.plain_text(),
+            "$ ls\na b\n[the screen of terminal session `py`; cursor at row 3, column 3]"
+        );
+        assert!(
+            call(
+                &tool,
+                json!({"action": "send", "session": "py"}),
+                Some("s1")
+            )
+            .is_error
+        );
+        let calls = fake.calls.lock().unwrap();
+        assert_eq!(calls[0], "send py \"1+1\" [\"Enter\"] None 10s");
+        assert_eq!(calls[1], "send py \"\" [\"Ctrl+C\"] Some(500ms) 10s");
+        assert!(calls[2].ends_with("Some(500ms) 3s"), "{}", calls[2]);
     }
 }
