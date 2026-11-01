@@ -14,7 +14,7 @@ percent-encoding = "2"
 log = "0.4"
 
 # SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed).
-russh = "0.64"
+russh = "0.65"
 russh-sftp = "2.2"
 # Hashed known_hosts names (`|1|salt|hash`); the versions russh already uses.
 hmac = "0.13"

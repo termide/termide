@@ -968,7 +968,7 @@ K5M9Mc5iG/5ni8RBmJQYAAAAAAECAwQF
         async fn auth_publickey(
             &mut self,
             user: &str,
-            _key: &russh::keys::PublicKey,
+            _key: server::VerifiedPublicKey<'_>,
         ) -> Result<Auth, Self::Error> {
             self.0.logins.lock().unwrap().push(user.to_string());
             Ok(Auth::Accept)
