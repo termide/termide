@@ -24,6 +24,7 @@ reasoning = "high"                 # default; off | minimal | low | medium | hig
 fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
 on_limit = "ask"                   # default; ask | ask_else_wait | wait | stop — see "When a run fails"
+max_terminal_sessions = 10         # default; terminals one agent session keeps open at most — see "Terminal sessions"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -787,7 +788,11 @@ the agent moved to the background (`$ Running  cargo test`), so one whose
 block has scrolled out of view still shows it works. Each of these has a `✕`
 that stops it, after a confirmation; a click elsewhere on its row selects the
 block and brings it into view, and for a subagent opens the panel following
-it or running it (see [Subagents](#subagents)). Everything queued
+it or running it (see [Subagents](#subagents)). The session's open terminals
+follow (`$ Terminal · dev  npm run dev` with how long the command has run, or
+`$ Terminal · tests · idle`; after three, a count of the rest): a click opens
+the terminal in a panel, and its `✕` closes it, after a confirmation (see
+[Terminal sessions](#terminal-sessions)). Everything queued
 goes to the agent at once, as a single message with the pieces joined by a
 blank line — messages typed while the agent works are usually one thought
 added to — and leaves the strip then, showing up in the conversation as your
@@ -1094,7 +1099,11 @@ something. How many delegated tasks think at once is the
   termide renames it once in what it keeps itself — the global config and
   its `ai/` files, rules granted for projects, session logs. A project's own
   files are not rewritten: a `bash` left in them is reported, as any name no
-  tool goes by is, and is for you to rename.
+  tool goes by is, and is for you to rename. With `session` or `background`
+  the command runs in a terminal that stays open; see
+  [Terminal sessions](#terminal-sessions).
+- **terminals** lists the agent's terminal sessions, reads what one printed
+  since the agent last looked, interrupts its command or closes it.
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
@@ -1148,6 +1157,46 @@ rules: where plan mode is on or a `deny` rule covers the command, **Run** and
 no permission — it changes nothing by itself — so the agent can always reach you
 this way; only your confirmation reaches the shell. Like `question`, the tool
 belongs to the panel's agent alone, Claude Code included.
+
+### Terminal sessions
+
+A `shell` call runs its command in a fresh shell that ends with it. For work
+that needs more — a dev server to test against, a watcher, a REPL's state, a
+build that takes longer than the agent wants to wait — the agent runs the
+command in a terminal session instead:
+
+- `session: "dev"` runs it in the terminal named `dev`, opening it on first
+  use. The terminal keeps its state between calls: the directory, the
+  variables, what runs in its background. A command that outlives the call's
+  timeout runs on there: the call returns with what it printed so far, and
+  the next call to that terminal is told it is still busy.
+- `background: true` starts the command and returns after a second with what
+  it printed, leaving it running. Without a `session` it gets a terminal of
+  its own (`bg-1`, `bg-2`, …).
+
+The **terminals** tool lists them, with what each runs and for how long;
+`read` returns what one printed since the agent last looked, `interrupt`
+sends its command `Ctrl+C`, and `close` ends it. Each terminal keeps the last
+2 MiB of its output in memory and the whole of it in a log, up to 256 MiB,
+which the agent can read. Before each request the agent is reminded which of
+its terminals are open, so it closes those it no longer needs.
+
+A terminal belongs to the agent session that opened it, and lives as long as
+that session is open in a panel. It ends — the shell and everything started
+in it — when the panel closes, when the panel switches to another session,
+when termide quits, or, for a subagent, when its task is over. A project
+kept open in the background keeps its terminals too. A subagent's terminals
+are its own: the agent that handed the task over does not see them. One
+agent session keeps at most `max_terminal_sessions` terminals open (10 by
+default); past that the call fails with the list of open ones, and nothing
+is closed for the agent.
+
+The terminals show in the strip above the panel's input and the status bar
+counts them. A click on a terminal's row shows it in a panel, an
+ordinary terminal where you can watch it and type into it too — what you
+type there is between you and the agent. Closing that panel hands the
+terminal back to the agent, still running; a reopened project does not
+restore it. The terminals run bash.
 
 ### Web
 
@@ -2326,7 +2375,7 @@ to change how the answer is drawn or cited.
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `shell`, `question`,
 `suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`,
-`send_message`, `debug` and `jobs`, seeded
+`send_message`, `debug`, `jobs` and `terminals`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list
