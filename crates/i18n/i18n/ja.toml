@@ -1322,6 +1322,7 @@ agent_notice_slash_shadowed_fmt = "/{name} は{runs}を実行し、同名の{hid
 agent_notice_slash_skill_hint_fmt = "スキルは /skill:{name} で呼び出します"
 agent_notice_unknown_key_fmt = "{file}: `{key}` は termide が読む設定ではありません"
 agent_notice_unknown_tool_text_fmt = "{file}: この名前の組み込みツールはないため、このテキストは使われません"
+agent_notice_unknown_tool_name_fmt = "{file}: `{name}` という名前のツールはありません"
 agent_notice_empty_tool_text_fmt = "{file}: 本文が空のため、ファイル全体が無視され、同梱のテキストが使われます"
 agent_notice_loop_stopped_max_fmt = "{count} 回の繰り返し後にループを停止しました"
 agent_notice_goal_idle_paused_fmt = "{count} ターン連続でツール呼び出しがありません。目標を一時停止しました — /continue で再開、/goal stop で終了"

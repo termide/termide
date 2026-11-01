@@ -60,6 +60,33 @@ pub const SEED_TOOLS: [(&str, &str); 15] = [
     ("debug", include_str!("../assets/tools/debug.md")),
 ];
 
+/// What a rule table, a hook's `tools` or an agent's `tools:` may name
+/// besides the built-in tools: `command`, the rule table of the user's `/`
+/// scripts, and the action kinds an external agent's requests arrive as.
+const OTHER_TOOL_NAMES: [&str; 9] = [
+    "command",
+    "delete",
+    "move",
+    "search",
+    "execute",
+    "think",
+    "fetch",
+    "switch_mode",
+    "other",
+];
+
+/// Whether `name` can stand for a tool where the user names one: a built-in
+/// tool, a name from [`OTHER_TOOL_NAMES`], an MCP server's or a plugin's tool
+/// (`server__tool`), or a pattern with a wildcard. What is none of these
+/// applies to nothing.
+#[must_use]
+pub fn is_known_tool_name(name: &str) -> bool {
+    name.contains("__")
+        || name.contains(['*', '?'])
+        || OTHER_TOOL_NAMES.contains(&name)
+        || SEED_TOOLS.iter().any(|(tool, _)| *tool == name)
+}
+
 /// One tool's texts.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolText {

@@ -1093,8 +1093,8 @@ something. How many delegated tasks think at once is the
   at 256 MiB. The command runs with bash. The tool used to be called `bash`;
   termide renames it once in what it keeps itself — the global config and
   its `ai/` files, rules granted for projects, session logs. A project's own
-  files are not rewritten: a `bash` left in them still applies, through this
-  release only, and is for you to rename.
+  files are not rewritten: a `bash` left in them is reported, as any name no
+  tool goes by is, and is for you to rename.
 - **web_search** asks a search engine and returns titles, links and snippets.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
@@ -1840,7 +1840,11 @@ on). Only its first character is kept, an emoji sequence counting as one, and
 invisible marks a copy may bring along — a zero-width space, a byte order
 mark, control characters — are dropped; an icon with nothing visible left
 keeps 🤖. A key termide does not read — a typo
-such as `descripton:` — is reported under the banner when a panel opens.
+such as `descripton:` — is reported under the banner when a panel opens, and
+so is a name in `tools:`, or in a hook's `tools`, that no tool goes by; a
+config's `[ai.permissions.<tool>]` table named after no tool is reported among
+the config warnings. Names of MCP and plugin tools (`server__tool`) and
+patterns with `*` or `?` are taken as they are.
 
 An agent a project defines may start only in `plan` or `ask`, and cannot be
 an external agent (`command:`): the model can delegate to it by itself, and a

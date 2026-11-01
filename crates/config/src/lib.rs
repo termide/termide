@@ -294,6 +294,14 @@ fn overlay_file(value: &mut toml::Value, path: &Path, layer: Layer, warnings: &m
     let problem = match parsed {
         Ok(mut overlay) => {
             migrate_legacy(&mut overlay);
+            let unknown = unknown_rule_tables(&overlay);
+            if !unknown.is_empty() {
+                warnings.push(format!(
+                    "Config {}: no tool has the name in {}",
+                    path.display(),
+                    unknown.join(", ")
+                ));
+            }
             let dropped = layer_rules::restrict_layer(&mut overlay, layer);
             if !dropped.is_empty() {
                 warnings.push(format!(
@@ -322,6 +330,23 @@ fn overlay_file(value: &mut toml::Value, path: &Path, layer: Layer, warnings: &m
             path.display()
         ),
     });
+}
+
+/// The `[ai.permissions.<tool>]` tables of `overlay` named after no tool,
+/// as `ai.permissions.<tool>`: their rules apply to nothing.
+fn unknown_rule_tables(overlay: &toml::Value) -> Vec<String> {
+    let Some(permissions) = overlay
+        .get("ai")
+        .and_then(|ai| ai.get("permissions"))
+        .and_then(toml::Value::as_table)
+    else {
+        return Vec::new();
+    };
+    permissions
+        .iter()
+        .filter(|(name, rules)| rules.is_table() && !termide_agent_core::is_known_tool_name(name))
+        .map(|(name, _)| format!("ai.permissions.{name}"))
+        .collect()
 }
 
 /// Whether `text` is a TOML document without any table: the flat format
@@ -740,6 +765,36 @@ mod save_baseline_tests {
 
         let reloaded = Config::load_from(&path).unwrap();
         assert_eq!(reloaded.general.theme, "dracula");
+    }
+}
+
+#[cfg(test)]
+mod unknown_rule_table_tests {
+    use super::*;
+
+    #[test]
+    fn a_rule_table_named_after_no_tool_is_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let text = "[ai.permissions]\nmode = \"ask\"\n\n[ai.permissions.shell]\n\"ls *\" = \"allow\"\n\n\
+                    [ai.permissions.bash]\n\"ls *\" = \"allow\"\n\n[ai.permissions.mcp__docs__search]\n\"*\" = \"allow\"\n";
+        std::fs::write(&path, text).unwrap();
+        let mut value = toml::Value::try_from(Config::default()).unwrap();
+        let mut warnings = Vec::new();
+        overlay_file(&mut value, &path, Layer::Project, &mut warnings);
+        let unknown: Vec<_> = warnings
+            .iter()
+            .filter(|warning| warning.contains("no tool"))
+            .collect();
+        assert_eq!(
+            unknown,
+            [&format!(
+                "Config {}: no tool has the name in ai.permissions.bash",
+                path.display()
+            )]
+        );
+        // Reported only: a project's file is not rewritten.
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), text);
     }
 }
 

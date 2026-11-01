@@ -1102,7 +1102,7 @@ impl AgentPanel {
         }
     }
 
-    /// One warning per front-matter key or tool text nothing reads.
+    /// One warning per front-matter key, tool name or tool text nothing reads.
     pub(crate) fn notice_definition_problems(&mut self) {
         let t = termide_i18n::t();
         for problem in self.catalog.definition_problems() {
@@ -1115,6 +1115,9 @@ impl AgentPanel {
                 }
                 DefinitionProblem::EmptyToolText { file } => {
                     t.agent_notice_empty_tool_text_fmt(&file.display().to_string())
+                }
+                DefinitionProblem::UnknownToolName { file, name } => {
+                    t.agent_notice_unknown_tool_name_fmt(&file.display().to_string(), &name)
                 }
             };
             self.notice(text, NoticeKind::Warn);

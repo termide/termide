@@ -1713,6 +1713,12 @@ impl Translation for RuntimeTranslation {
     fn agent_notice_unknown_tool_text_fmt(&self, file: &str) -> String {
         self.format("agent_notice_unknown_tool_text_fmt", &[("file", file)])
     }
+    fn agent_notice_unknown_tool_name_fmt(&self, file: &str, name: &str) -> String {
+        self.format(
+            "agent_notice_unknown_tool_name_fmt",
+            &[("file", file), ("name", name)],
+        )
+    }
 
     fn agent_notice_empty_tool_text_fmt(&self, file: &str) -> String {
         self.format("agent_notice_empty_tool_text_fmt", &[("file", file)])

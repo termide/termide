@@ -139,4 +139,4 @@ pub use tool::{
     RunningCalls, Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate, LEGACY_SHELL_TOOL,
     PLUGIN_TOOL_SOURCE, SHELL_TOOL,
 };
-pub use tool_text::{apply_tool_texts, ToolText, SEED_TOOLS, TOOLS_DIR};
+pub use tool_text::{apply_tool_texts, is_known_tool_name, ToolText, SEED_TOOLS, TOOLS_DIR};

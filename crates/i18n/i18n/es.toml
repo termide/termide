@@ -1322,6 +1322,7 @@ agent_notice_slash_shadowed_fmt = "/{name} ejecuta «{runs}» y oculta «{hidden
 agent_notice_slash_skill_hint_fmt = "llame a la skill como /skill:{name}"
 agent_notice_unknown_key_fmt = "{file}: `{key}` no es un ajuste que termide lea"
 agent_notice_unknown_tool_text_fmt = "{file}: ninguna herramienta integrada tiene este nombre, así que el texto no se usa"
+agent_notice_unknown_tool_name_fmt = "{file}: ninguna herramienta se llama `{name}`"
 agent_notice_empty_tool_text_fmt = "{file}: el cuerpo está vacío, así que se omite todo el archivo y se mantienen los textos incluidos"
 agent_notice_loop_stopped_max_fmt = "bucle detenido tras {count} iteraciones"
 agent_notice_goal_idle_paused_fmt = "{count} turnos seguidos sin llamar a herramientas; el objetivo está en pausa — /continue sigue, /goal stop lo termina"

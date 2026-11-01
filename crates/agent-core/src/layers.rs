@@ -27,7 +27,7 @@ use crate::plan::{PlanPrompt, SEED_PLAN};
 use crate::recall::{RecallPrompt, SEED_RECALL};
 use crate::refusals::{Refusals, SEED_PERMISSIONS};
 use crate::tool::{canonical_tool_name, LEGACY_SHELL_TOOL, SHELL_TOOL};
-use crate::tool_text::{ToolText, SEED_TOOLS, TOOLS_DIR};
+use crate::tool_text::{is_known_tool_name, ToolText, SEED_TOOLS, TOOLS_DIR};
 
 /// The `ai` directory inside the configuration directory.
 pub const GLOBAL_AGENT_DIR: &str = "ai";
@@ -563,6 +563,22 @@ fn tool_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+/// Every name the hooks of the `hooks.toml` at `path` give in `tools`, as
+/// written; none when there is no such file or it does not parse.
+fn hook_tool_names(path: &Path) -> Vec<String> {
+    let Some(doc) = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| text.parse::<toml::Table>().ok())
+    else {
+        return Vec::new();
+    };
+    doc.values()
+        .filter_map(|hook| hook.get("tools")?.as_array())
+        .flatten()
+        .filter_map(|tool| tool.as_str().map(str::to_string))
+        .collect()
+}
+
 /// The front-matter keys an `AGENT.md` is read for, besides `env.<NAME>`.
 const AGENT_KEYS: [&str; 9] = [
     "description",
@@ -588,6 +604,9 @@ pub enum DefinitionProblem {
     /// A `tools/<name>.md` with no body: the whole file is passed over, its
     /// front matter too, and the shipped texts stay.
     EmptyToolText { file: PathBuf },
+    /// An agent's `tools:` or a hook's `tools` naming no tool, see
+    /// [`is_known_tool_name`].
+    UnknownToolName { file: PathBuf, name: String },
 }
 
 /// The front matter of `agents/<name>/AGENT.md`: what sets an agent apart
@@ -923,8 +942,8 @@ impl AgentDirs {
     }
 
     /// What the agents' `AGENT.md` files, the hooks and the tool texts say
-    /// that nothing reads: unknown front-matter keys, and tool texts named
-    /// after no tool.
+    /// that nothing reads: unknown front-matter keys, tool names no tool goes
+    /// by, and tool texts named after no tool.
     #[must_use]
     pub fn definition_problems(&self) -> Vec<DefinitionProblem> {
         let mut problems = Vec::new();
@@ -932,11 +951,34 @@ impl AgentDirs {
             let Some((file, text)) = self.agent_file(&agent) else {
                 continue;
             };
-            for key in split_front_matter(&text).0.into_keys() {
+            let fields = split_front_matter(&text).0;
+            for name in fields
+                .get("tools")
+                .map(|v| tool_list(v))
+                .unwrap_or_default()
+            {
+                if !is_known_tool_name(&name) {
+                    problems.push(DefinitionProblem::UnknownToolName {
+                        file: file.clone(),
+                        name,
+                    });
+                }
+            }
+            for key in fields.into_keys() {
                 if !AGENT_KEYS.contains(&key.as_str()) && !key.starts_with("env.") {
                     problems.push(DefinitionProblem::UnknownKey {
                         file: file.clone(),
                         key,
+                    });
+                }
+            }
+        }
+        for file in self.roots.iter().map(|root| root.join(HOOKS_FILE)) {
+            for name in hook_tool_names(&file) {
+                if !is_known_tool_name(&name) {
+                    problems.push(DefinitionProblem::UnknownToolName {
+                        file: file.clone(),
+                        name,
                     });
                 }
             }
@@ -1522,6 +1564,40 @@ mod tests {
                 },
                 DefinitionProblem::EmptyToolText {
                     file: tools.join("write.md"),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn tool_names_no_tool_goes_by_are_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let project = tmp.path().join("proj");
+        let local = project.join(PROJECT_AGENT_DIR);
+        let review = local.join("agents/review");
+        std::fs::create_dir_all(&review).unwrap();
+        std::fs::write(
+            review.join(AGENT_FILE),
+            "---\ntools: [read, \"bash\", mcp__docs__search]\n---\nYou review.\n",
+        )
+        .unwrap();
+        std::fs::write(
+            local.join(HOOKS_FILE),
+            "[guard]\nevent = \"before_tool_call\"\ntools = [\"shell\", \"edti\", \"wr*\", \"command\"]\ncommand = \"guard.sh\"\n",
+        )
+        .unwrap();
+
+        let dirs = AgentDirs::new(&project, None, None);
+        assert_eq!(
+            dirs.definition_problems(),
+            [
+                DefinitionProblem::UnknownToolName {
+                    file: review.join(AGENT_FILE),
+                    name: "bash".into(),
+                },
+                DefinitionProblem::UnknownToolName {
+                    file: local.join(HOOKS_FILE),
+                    name: "edti".into(),
                 },
             ]
         );
