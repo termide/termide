@@ -98,6 +98,8 @@ readline bash/zsh, `Shift+Home` / `Shift+End` выделяют до границ
 default_shell = "/usr/bin/fish"
 ```
 
+В этой же оболочке выполняет команды и агент, если это bash, zsh или fish, а иначе — в bash.
+
 ### Рабочий каталог в Windows
 
 В Windows нет вызова, который сообщил бы одной программе, в каком каталоге

@@ -290,13 +290,20 @@ pub fn run_judged_call(
 /// kind: it changes nothing on this machine — a read, a search, a web page,
 /// a look-only shell command — or hands work to a subagent, and it asks the
 /// user nothing. A call that may change something runs alone, so the model's
-/// order holds between a change and what reads it.
+/// order holds between a change and what reads it. A command is read in
+/// the language of the shell its tool runs it in, from `tools`.
 #[must_use]
-pub fn runs_alongside(call: &ToolCall) -> bool {
+pub fn runs_alongside(call: &ToolCall, tools: &ToolRegistry) -> bool {
     match call.name.as_str() {
         "task" => true,
         "question" | "suggest_command" => false,
-        _ => crate::permissions::is_read_only_call(call),
+        _ => {
+            let shell = tools
+                .get(&call.name)
+                .map(|tool| tool.traits().shell)
+                .unwrap_or_default();
+            crate::permissions::is_read_only_call(call, shell)
+        }
     }
 }
 
@@ -1172,7 +1179,7 @@ impl Agent {
             }
             let together = calls[start..]
                 .iter()
-                .take_while(|call| runs_alongside(call))
+                .take_while(|call| runs_alongside(call, &self.tools))
                 .count();
             let end = start + together.max(1);
             let results = if together > 1 {
@@ -2534,6 +2541,7 @@ mod tests {
                 crate::ToolTraits {
                     mcp: true,
                     read_only: true,
+                    ..Default::default()
                 }
             }
             fn execute(
@@ -2571,6 +2579,7 @@ mod tests {
         let marked = crate::ToolTraits {
             mcp: true,
             read_only: true,
+            ..Default::default()
         };
         assert_eq!(seen.0, [marked, crate::ToolTraits::default()]);
     }
@@ -3192,6 +3201,7 @@ OK let me just start implementing and see what happens.\n";
 
     #[test]
     fn what_runs_alongside_is_what_changes_nothing_and_asks_nothing() {
+        let tools = ToolRegistry::new();
         let call = |name: &str, arguments| ToolCall {
             id: "c".into(),
             name: name.into(),
@@ -3204,7 +3214,7 @@ OK let me just start implementing and see what happens.\n";
             call("task", json!({ "agent": "a", "prompt": "p" })),
             call("shell", json!({ "command": "rg foo src" })),
         ] {
-            assert!(runs_alongside(&together), "{}", together.name);
+            assert!(runs_alongside(&together, &tools), "{}", together.name);
         }
         for alone in [
             call("edit", json!({})),
@@ -3213,7 +3223,7 @@ OK let me just start implementing and see what happens.\n";
             call("shell", json!({ "command": "cargo build" })),
             call("mcp_tool", json!({})),
         ] {
-            assert!(!runs_alongside(&alone), "{}", alone.name);
+            assert!(!runs_alongside(&alone, &tools), "{}", alone.name);
         }
     }
 

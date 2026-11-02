@@ -39,7 +39,7 @@ pub use jobs::{JobsTool, OwnTasks};
 pub use peers::{AgentsTool, PeerInfo, PeerList, PeerSend, SendMessageTool};
 pub use question::QuestionTool;
 pub use read::ReadTool;
-pub use shell::ShellTool;
+pub use shell::{ShellProgram, ShellTool};
 pub use skill::SkillTool;
 pub use suggest::SuggestCommandTool;
 /// How `jobs` words a line, for the sources that fill it.

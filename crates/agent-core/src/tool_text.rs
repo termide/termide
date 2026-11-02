@@ -186,6 +186,10 @@ impl Tool for Retexted {
         self.inner.render_description(template)
     }
 
+    fn traits(&self) -> crate::ToolTraits {
+        self.inner.traits()
+    }
+
     fn check(&self, call: &ToolCall, ctx: &ToolContext) -> Result<(), String> {
         self.inner.check(call, ctx)
     }
@@ -250,6 +254,12 @@ mod tests {
         fn render_description(&self, template: &str) -> String {
             template.replace("{{who}}", "echo")
         }
+        fn traits(&self) -> crate::ToolTraits {
+            crate::ToolTraits {
+                shell: crate::ShellSyntax::Fish,
+                ..crate::ToolTraits::default()
+            }
+        }
         fn execute(
             &self,
             call: &ToolCall,
@@ -270,6 +280,7 @@ mod tests {
         assert_eq!(recall.guidelines.len(), 2);
         assert!(recall.guidelines[0].starts_with("Use `recall` before"));
         assert!(ToolText::seed("task").description.contains("{{agents}}"));
+        assert!(ToolText::seed("shell").description.contains("{{shell}}"));
         assert!(ToolText::seed("nothing").description.is_empty());
     }
 
@@ -307,6 +318,8 @@ mod tests {
         assert_eq!(tool.description(), "Read, by echo.");
         assert_eq!(tool.prompt_snippet(), Some("look"));
         assert_eq!(tool.prompt_guidelines(), ["Be brief."]);
+        // What the permission checks weigh stays the tool's own.
+        assert_eq!(tool.traits().shell, crate::ShellSyntax::Fish);
         let call = ToolCall {
             id: "c".into(),
             name: "read".into(),

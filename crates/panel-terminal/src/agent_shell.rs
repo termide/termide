@@ -1,4 +1,4 @@
-//! The agent's shell session: an interactive bash in a terminal of its own,
+//! The agent's shell session: an interactive shell in a terminal of its own,
 //! which the agent runs commands in one after another — the directory, the
 //! variables and what runs in the background carry over from one to the
 //! next — and the user can watch, or type into, as a terminal panel.
@@ -6,9 +6,10 @@
 //! The terminal is an ordinary [`Terminal`], kept out of the layout until
 //! the user opens it; [`AgentShell`] is the agent's handle on it, usable
 //! from any thread. Where a command's output starts and ends comes from the
-//! shell itself: an init script, run after the user's `~/.bashrc`, marks
-//! both with OSC 133 `C` and `D`, which the screen ignores and the output
-//! tap notes (see [`OutputTap`]).
+//! shell itself: an init script, run after the user's own (`~/.bashrc`,
+//! `.zshrc`, fish's `config.fish`), marks both with OSC 133 `C` and `D`,
+//! which the screen ignores and the output tap notes (see [`OutputTap`]).
+//! bash, zsh and fish can be told to; see [`SessionShell`].
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -29,15 +30,36 @@ const POLL: Duration = Duration::from_millis(50);
 /// How long the shell has to exit after `SIGHUP` before it is killed.
 const HANGUP_GRACE: Duration = Duration::from_secs(2);
 
+/// The shells a session runs in, each told to mark where a command starts
+/// and ends in its own way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionShell {
+    Bash,
+    Zsh,
+    Fish,
+}
+
+impl SessionShell {
+    /// The kind of shell `program` starts; bash for any other.
+    pub fn of(program: &str) -> Self {
+        match crate::shell_utils::shell_name(program).as_str() {
+            "zsh" => Self::Zsh,
+            "fish" => Self::Fish,
+            _ => Self::Bash,
+        }
+    }
+}
+
 /// Run after the user's `~/.bashrc`. Job control is off so that every
 /// command stays in the shell's process group, which ending the session
 /// signals — turned off again at each prompt, as bash turns it on for an
-/// interactive shell only after the startup files; history expansion is off so that a `!` in a command is taken as
-/// typed; pagers and editors that would wait for keys nobody presses are
-/// turned off. The `DEBUG` trap marks the start of the first command after
-/// a prompt (bash 3.2, the one macOS ships, has no `PS0`), and the first
-/// entry of `PROMPT_COMMAND` its end, with its exit code.
-const INIT_SCRIPT: &str = r#"# termide: the agent's shell session.
+/// interactive shell only after the startup files; history expansion is
+/// off so that a `!` in a command is taken as typed; the history file is
+/// left alone; pagers and editors that would wait for keys nobody presses
+/// are turned off. The `DEBUG` trap marks the start of the first command
+/// after a prompt (bash 3.2, the one macOS ships, has no `PS0`), and the
+/// first entry of `PROMPT_COMMAND` its end, with its exit code.
+const BASH_INIT: &str = r#"# termide: the agent's shell session.
 if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
 set +m +H
 unset HISTFILE
@@ -66,23 +88,125 @@ else
 fi
 "#;
 
-/// The init script's file, written once per process.
-fn init_script() -> std::io::Result<&'static Path> {
-    static PATH: OnceLock<PathBuf> = OnceLock::new();
-    if let Some(path) = PATH.get() {
-        return Ok(path);
+/// zsh reads it in place of the user's `.zshenv`, which it reads itself
+/// from where the user's `ZDOTDIR` points (`TERMIDE_USER_ZDOTDIR`, the home
+/// by default) — the user's own may move it — and then points `ZDOTDIR`
+/// back here, so that zsh reads [`ZSH_RC`] next.
+const ZSH_ENV: &str = r#"# termide: the agent's shell session.
+__termide_dotdir=$ZDOTDIR
+ZDOTDIR=${TERMIDE_USER_ZDOTDIR:-$HOME}
+[[ -f $ZDOTDIR/.zshenv ]] && . $ZDOTDIR/.zshenv
+TERMIDE_USER_ZDOTDIR=$ZDOTDIR
+ZDOTDIR=$__termide_dotdir
+unset __termide_dotdir
+"#;
+
+/// zsh reads it in place of the user's `.zshrc`, which it reads first, with
+/// `ZDOTDIR` the user's again. Then, as for bash: job control off, at each
+/// prompt too; `!` taken as typed; no history file; no pagers; no mark of a
+/// last line left open, which zsh prints ahead of the end mark. `preexec`
+/// marks a command's start, the first `precmd` its end — zsh gives each of
+/// them the command's exit code. Pasting, which is how a command is typed
+/// here, is bound to zsh's own widget, under a name no plugin wraps: a
+/// plugin that quotes URLs or pairs brackets must not change the command.
+const ZSH_RC: &str = r#"# termide: the agent's shell session.
+ZDOTDIR=$TERMIDE_USER_ZDOTDIR
+[[ -f $ZDOTDIR/.zshrc ]] && . $ZDOTDIR/.zshrc
+unsetopt monitor bang_hist prompt_sp
+unset HISTFILE
+export PAGER=cat GIT_PAGER=cat MANPAGER=cat SYSTEMD_PAGER= GIT_EDITOR=true
+__termide_ran=
+__termide_preexec() {
+  __termide_ran=1
+  printf '\033]133;C\007'
+}
+__termide_precmd() {
+  local code=$?
+  unsetopt monitor
+  if [[ -n $__termide_ran ]]; then printf '\033]133;D;%s\007' $code; fi
+  __termide_ran=
+}
+preexec_functions+=(__termide_preexec)
+precmd_functions=(__termide_precmd $precmd_functions)
+__termide_paste() { zle .bracketed-paste }
+zle -N __termide_paste
+for __termide_keymap in emacs viins vicmd; do
+  bindkey -M $__termide_keymap '^[[200~' __termide_paste
+done
+unset __termide_keymap
+"#;
+
+/// fish runs it after the user's `config.fish`. As for bash: job control
+/// off; no history file; no pagers; and no greeting. The `fish_preexec`
+/// event marks a command's start, `fish_postexec` its end with its exit
+/// code.
+const FISH_INIT: &str = r#"# termide: the agent's shell session.
+status job-control none
+set -g fish_history ''
+set -gx PAGER cat
+set -gx GIT_PAGER cat
+set -gx MANPAGER cat
+set -gx SYSTEMD_PAGER ''
+set -gx GIT_EDITOR true
+set -g fish_greeting ''
+function __termide_preexec --on-event fish_preexec
+  set -g __termide_ran 1
+  printf '\e]133;C\a'
+end
+function __termide_postexec --on-event fish_postexec
+  set -l code $status
+  status job-control none
+  if set -q __termide_ran
+    set -e __termide_ran
+    printf '\e]133;D;%s\a' $code
+  end
+end
+"#;
+
+/// The directory of the init scripts, written once per process: one of a
+/// name no one can guess, that only the user can write to, since a shell
+/// runs what is in it.
+fn init_dir() -> std::io::Result<&'static Path> {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    if let Some(dir) = DIR.get() {
+        return Ok(dir);
     }
-    let path =
-        std::env::temp_dir().join(format!("termide-agent-shell-{}.bash", std::process::id()));
-    std::fs::write(&path, INIT_SCRIPT)?;
-    Ok(PATH.get_or_init(|| path))
+    let dir = tempfile::Builder::new()
+        .prefix("termide-agent-shell-")
+        .tempdir()?
+        .keep();
+    for (name, text) in [
+        ("init.bash", BASH_INIT),
+        (".zshenv", ZSH_ENV),
+        (".zshrc", ZSH_RC),
+        ("init.fish", FISH_INIT),
+    ] {
+        std::fs::write(dir.join(name), text)?;
+    }
+    Ok(DIR.get_or_init(|| dir))
 }
 
-/// The line typed into the shell for `command`: always `eval $'…'`, a
-/// simple command, so that the shell reads it as one command with one start
-/// and one end — the start mark comes from the `DEBUG` trap, which bash runs
-/// before a simple command and not before a subshell such as `( … ) &` —
-/// and a line break or another control character in it is typed safely.
+/// What is typed into `shell` for `command`: one `eval` of it, so that the
+/// shell reads it as one command with one start and one end, however many
+/// lines it has, and a control character in it is typed as an escape. zsh
+/// and fish get it pasted, so that a key binding, an abbreviation or a
+/// plugin of the user's line editor does not change it, then `Enter`.
+fn typed(shell: SessionShell, command: &str) -> Vec<u8> {
+    let line = match shell {
+        SessionShell::Bash => return typed_line(command).into_bytes(),
+        SessionShell::Zsh => typed_line(command),
+        SessionShell::Fish => fish_line(command),
+    };
+    let mut bytes = b"\x1b[200~".to_vec();
+    bytes.extend(line.trim_end_matches('\n').as_bytes());
+    bytes.extend(b"\x1b[201~\r");
+    bytes
+}
+
+/// The line typed into bash or zsh for `command`: always `eval $'…'`, a
+/// simple command — the start mark comes from bash's `DEBUG` trap, which
+/// bash runs before a simple command and not before a subshell such as
+/// `( … ) &`.
 fn typed_line(command: &str) -> String {
     let command = command.trim_end_matches(['\n', '\r']);
     let mut line = String::from("eval $'");
@@ -95,6 +219,26 @@ fn typed_line(command: &str) -> String {
             c if c.is_control() && (c as u32) < 0x100 => {
                 line.push_str(&format!("\\x{:02x}", c as u32));
             }
+            c => line.push(c),
+        }
+    }
+    line.push_str("'\n");
+    line
+}
+
+/// The line typed into fish for `command`: `eval` of it in single quotes,
+/// with `\'` and `\\` escaped in them, and a control character written
+/// outside them as fish's escape for it.
+fn fish_line(command: &str) -> String {
+    let command = command.trim_end_matches(['\n', '\r']);
+    let mut line = String::from("eval '");
+    for c in command.chars() {
+        match c {
+            '\\' => line.push_str("\\\\"),
+            '\'' => line.push_str("\\'"),
+            '\n' => line.push_str("'\\n'"),
+            '\t' => line.push_str("'\\t'"),
+            c if c.is_control() => line.push_str(&format!("'\\u{:04x}'", c as u32)),
             c => line.push(c),
         }
     }
@@ -155,6 +299,7 @@ struct InFlight {
 /// any thread. The terminal itself goes to the UI.
 #[derive(Clone)]
 pub struct AgentShell {
+    kind: SessionShell,
     input: InputSender,
     tap: Arc<OutputTap>,
     child: SharedChild,
@@ -296,23 +441,56 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 impl Terminal {
-    /// An agent's shell session in `cwd`: bash, run with the init script,
-    /// with `env` added (a `PATH` with the command shims first, say), its
-    /// output logged to `log`. The terminal is titled `title`.
+    /// An agent's shell session in `cwd`: `program`, which is bash, zsh or
+    /// fish (bash for any other), run with its init script, with `env`
+    /// added (a `PATH` with the command shims first, say), its output logged
+    /// to `log`. The terminal is titled `title`.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_agent_shell(
         rows: u16,
         cols: u16,
+        program: &str,
         cwd: &Path,
         env: &[(String, String)],
         log: Option<&Path>,
         title: &str,
     ) -> anyhow::Result<(Self, AgentShell)> {
-        let mut cmd = CommandBuilder::new("bash");
-        cmd.arg("--rcfile");
-        cmd.arg(init_script()?);
-        cmd.arg("-i");
+        let kind = SessionShell::of(program);
+        let program = match kind {
+            SessionShell::Bash if crate::shell_utils::shell_name(program) != "bash" => "bash",
+            _ => program,
+        };
+        let dir = init_dir()?;
+        let mut cmd = CommandBuilder::new(program);
         let mut env = env.to_vec();
-        env.push(("BASH_SILENCE_DEPRECATION_WARNING".into(), "1".into()));
+        match kind {
+            SessionShell::Bash => {
+                cmd.arg("--rcfile");
+                cmd.arg(dir.join("init.bash"));
+                env.push(("BASH_SILENCE_DEPRECATION_WARNING".into(), "1".into()));
+            }
+            SessionShell::Zsh => {
+                let given = |name: &str| {
+                    env.iter()
+                        .rev()
+                        .find(|(key, _)| key == name)
+                        .map(|(_, value)| value.clone())
+                        .or_else(|| std::env::var(name).ok())
+                };
+                let user = given("ZDOTDIR")
+                    .or_else(|| given("HOME"))
+                    .unwrap_or_default();
+                env.push(("TERMIDE_USER_ZDOTDIR".into(), user));
+                env.push(("ZDOTDIR".into(), dir.display().to_string()));
+            }
+            SessionShell::Fish => {
+                let init = crate::shell_utils::ShellKind::Fish
+                    .quote(&dir.join("init.fish").to_string_lossy());
+                cmd.arg("--init-command");
+                cmd.arg(format!("source {init}"));
+            }
+        }
+        cmd.arg("-i");
         env.push(("TERMIDE_AGENT_SHELL".into(), "1".into()));
         let tap = Arc::new(OutputTap::new(
             KEEP_BYTES,
@@ -327,10 +505,11 @@ impl Terminal {
             title.to_string(),
             Some(Arc::clone(&tap)),
         )?;
-        term.shell_kind = crate::shell_utils::ShellKind::from_shell_path("bash");
-        term.shell_name = "bash".into();
+        term.shell_kind = crate::shell_utils::ShellKind::from_shell_path(program);
+        term.shell_name = crate::shell_utils::shell_name(program);
         term.agent_shell = true;
         let shell = AgentShell {
+            kind,
             input: term.input.sender(),
             tap,
             child: Arc::clone(&term.child),
@@ -400,7 +579,7 @@ impl AgentShell {
         }
         let sent = self.tap.end();
         self.input
-            .send(typed_line(command).into_bytes())
+            .send(typed(self.kind, command))
             .map_err(|e| RunError::Input(e.to_string()))?;
         let since = Instant::now();
         *lock(&self.in_flight) = Some(InFlight {
@@ -614,6 +793,26 @@ mod tests {
             "eval $'cd /tmp\\necho \\'a\\\\b\\'\\tc'\n"
         );
         assert_eq!(typed_line("printf \u{1b}x"), "eval $'printf \\x1bx'\n");
+        assert_eq!(
+            fish_line("cd /tmp\necho 'a\\b'\tc\u{1b}"),
+            "eval 'cd /tmp'\\n'echo \\'a\\\\b\\''\\t'c'\\u001b''\n"
+        );
+        // zsh and fish get the line pasted, and `Enter` after it.
+        assert_eq!(typed(SessionShell::Bash, "ls"), b"eval $'ls'\n");
+        assert_eq!(
+            typed(SessionShell::Zsh, "ls"),
+            b"\x1b[200~eval $'ls'\x1b[201~\r"
+        );
+        assert_eq!(
+            typed(SessionShell::Fish, "ls"),
+            b"\x1b[200~eval 'ls'\x1b[201~\r"
+        );
+        assert_eq!(
+            SessionShell::of("/opt/homebrew/bin/fish"),
+            SessionShell::Fish
+        );
+        assert_eq!(SessionShell::of("zsh"), SessionShell::Zsh);
+        assert_eq!(SessionShell::of("/usr/bin/nu"), SessionShell::Bash);
     }
 
     #[test]
@@ -635,9 +834,15 @@ mod tests {
 mod shell_tests {
     use super::*;
 
-    /// A session in a scratch home, so the user's `~/.bashrc` stays out.
+    /// A bash session in a scratch home, so the user's `~/.bashrc` stays out.
     fn session(home: &Path) -> Option<(Terminal, AgentShell)> {
-        if std::process::Command::new("bash")
+        session_in("bash", home)
+    }
+
+    /// A session of `program` in a scratch home, its startup files there;
+    /// `None` when the shell is not installed.
+    fn session_in(program: &str, home: &Path) -> Option<(Terminal, AgentShell)> {
+        if std::process::Command::new(program)
             .arg("-c")
             .arg("true")
             .status()
@@ -645,8 +850,64 @@ mod shell_tests {
         {
             return None;
         }
-        let env = [("HOME".to_string(), home.display().to_string())];
-        Terminal::new_agent_shell(24, 120, home, &env, None, "test").ok()
+        let home = home.display().to_string();
+        let env = [
+            ("HOME".to_string(), home.clone()),
+            ("ZDOTDIR".to_string(), home.clone()),
+            ("XDG_CONFIG_HOME".to_string(), format!("{home}/.config")),
+            ("XDG_DATA_HOME".to_string(), format!("{home}/.local/share")),
+        ];
+        Terminal::new_agent_shell(24, 120, program, Path::new(&home), &env, None, "test").ok()
+    }
+
+    /// The same commands in bash, zsh and fish, each after a startup file
+    /// of the user's; a shell that is not installed is left out.
+    #[test]
+    fn every_shell_marks_its_commands_and_keeps_its_state() {
+        for (program, rc, user, set) in [
+            ("bash", ".bashrc", "RC=ran\n", "X=42"),
+            // A widget wrapping pasting must not change the command.
+            (
+                "zsh",
+                ".zshrc",
+                "shout() { zle .bracketed-paste; BUFFER=${BUFFER:u} }\n\
+                 zle -N bracketed-paste shout\n\
+                 RC=ran\n",
+                "X=42",
+            ),
+            // Nor must an abbreviation.
+            (
+                "fish",
+                ".config/fish/config.fish",
+                "set -g RC ran\nabbr -a eval 'echo ABBR'\n",
+                "set X 42",
+            ),
+        ] {
+            let home = tempfile::tempdir().unwrap();
+            let rc = home.path().join(rc);
+            std::fs::create_dir_all(rc.parent().unwrap()).unwrap();
+            std::fs::write(&rc, user).unwrap();
+            let Some((_term, shell)) = session_in(program, home.path()) else {
+                continue;
+            };
+            let long = Duration::from_secs(20);
+            let (out, outcome) = run(&shell, &format!("mkdir sub && cd sub && {set}"), long);
+            assert_eq!(
+                (out.as_str(), outcome.end),
+                ("", RunEnd::Finished(Some(0))),
+                "{program}"
+            );
+            let (out, outcome) = run(
+                &shell,
+                "echo \"$X $RC $(basename \"$PWD\")\"\nprintf '%s|\\n' 'a  b' \"c'd\"\nfalse",
+                long,
+            );
+            assert_eq!(out, "42 ran sub\na  b|\nc'd|\n", "{program}");
+            assert_eq!(outcome.end, RunEnd::Finished(Some(1)), "{program}");
+            let (_, outcome) = run(&shell, "sh -c 'exit 7'", long);
+            assert_eq!(outcome.end, RunEnd::Finished(Some(7)), "{program}");
+            assert_eq!(shell.status(), ShellStatus::Idle, "{program}");
+        }
     }
 
     fn run(shell: &AgentShell, command: &str, timeout: Duration) -> (String, RunOutcome) {

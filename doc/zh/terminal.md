@@ -88,6 +88,8 @@ xterm 的终端都是如此。对于 bash，可在 `~/.inputrc` 中绑定这些�
 default_shell = "/usr/bin/fish"
 ```
 
+编码代理也在这个 shell 中运行命令（若它是 bash、zsh 或 fish），否则使用 bash。
+
 ### Windows 上的工作目录
 
 Windows 没有让一个程序得知另一个程序工作目录的调用，因此终端通过以下两种方式之一获知 shell 的目录：

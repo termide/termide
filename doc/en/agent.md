@@ -1095,7 +1095,12 @@ something. How many delegated tasks think at once is the
   Long output keeps its beginning and end, and the complete log is written to
   a file the agent can read. Only the two ends stay in memory, so a command
   that prints without end until its timeout cannot exhaust it; the log stops
-  at 256 MiB. The command runs with bash. The tool used to be called `bash`;
+  at 256 MiB. The command runs with the shell terminal panels use —
+  `terminal.default_shell`, or the one found on the system — when that is
+  bash, zsh or fish, and with bash otherwise (sh, PowerShell, cmd and the
+  like); the tool's description names the shell to the model, and the
+  permission rules read the command in its syntax (see
+  [Permissions](#permissions)). The tool used to be called `bash`;
   termide renames it once in what it keeps itself — the global config and
   its `ai/` files, rules granted for projects, session logs. A project's own
   files are not rewritten: a `bash` left in them is reported, as any name no
@@ -1209,7 +1214,10 @@ counts them. A click on a terminal's row shows it in a panel, an
 ordinary terminal where you can watch it and type into it too — what you
 type there is between you and the agent. Closing that panel hands the
 terminal back to the agent, still running; a reopened project does not
-restore it. The terminals run bash.
+restore it. The terminals run the shell `shell` runs, after your startup
+file for it (`~/.bashrc`, `.zshrc`, fish's `config.fish`), with job control,
+history and pagers off; a terminal already open keeps its shell when the
+setting changes.
 
 ### Web
 
@@ -1488,6 +1496,15 @@ not about the parts beside it, so `cd x && ls && echo $(date)` asks about the
 line no further. An inline script is one command, not the
 commands its lines would be: a quoted script (escaped quotes included) and
 the body of a here-document (`python3 - <<'EOF'`) are the command's data.
+
+A command is read in the syntax of the shell that runs it. In zsh an unquoted
+`(` inside a word — a glob qualifier such as `*(e:'cmd':)` runs code — and a
+`${(…)` expansion flag count as substitution. In fish `(…)` is a command
+substitution as `$(…)` is, and `and`, `or`, `not`, `begin … end`, `if`,
+`while` and `for` are read as their POSIX counterparts. A fish command that
+cannot be read as a whole — `switch` or `function`, an escape such as `\x41`,
+a here-document, an unbalanced quote, parenthesis or `end` — is one part that
+is never allowed automatically and gets no rule.
 
 A command's parts are judged in the directory they run in: termide follows
 `cd`, `pushd` and `popd` through the line, and a program named by a path is

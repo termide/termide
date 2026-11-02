@@ -56,6 +56,7 @@ impl App {
     /// project's settings. Callers have already set it in `state.config`, so
     /// newly-spawned terminals see the new default shell without a restart.
     pub(super) fn save_shell_preference(&mut self, shell_path: &str) -> Result<()> {
+        super::agent_panel::publish_shell(Some(shell_path));
         let mut global = (*self.state.global_baseline).clone();
         global.terminal.default_shell = Some(shell_path.to_string());
         global.save_global()?;

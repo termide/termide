@@ -127,6 +127,38 @@ pub struct ToolTraits {
     /// The tool's author declares that it changes nothing (MCP's
     /// `readOnlyHint`). A claim of the server's, not a check of termide's.
     pub read_only: bool,
+    /// The language of the commands the tool runs, for a tool that runs
+    /// them: what the permission checks read a command as.
+    pub shell: ShellSyntax,
+}
+
+/// The command language of a shell, as the permission checks read it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ShellSyntax {
+    /// bash and the other POSIX shells.
+    #[default]
+    Posix,
+    /// zsh: POSIX, where parentheses inside a word may also run code — a
+    /// glob qualifier `*(e:…:)`, an expansion flag `${(e)…}`, `=(…)`.
+    Zsh,
+    /// fish: `(…)` substitutes a command, its single quotes take escapes,
+    /// and its blocks end with `end`.
+    Fish,
+}
+
+impl ShellSyntax {
+    /// The syntax of the shell named `name`, among those the agent can run
+    /// its commands in: bash, zsh and fish, each of which can mark where a
+    /// command in a terminal session starts and ends.
+    #[must_use]
+    pub fn of(name: &str) -> Option<Self> {
+        match name {
+            "bash" => Some(Self::Posix),
+            "zsh" => Some(Self::Zsh),
+            "fish" => Some(Self::Fish),
+            _ => None,
+        }
+    }
 }
 
 impl ToolContext {

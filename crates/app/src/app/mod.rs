@@ -165,6 +165,7 @@ impl App {
     pub fn new() -> Self {
         let mut state = AppState::new();
         state.detach_available = Self::detect_detach_available();
+        agent_panel::publish_shell(state.config.terminal.default_shell.as_deref());
 
         // Get project root from current working directory
         let project_root = std::env::current_dir().unwrap_or_else(|_| {
@@ -724,6 +725,9 @@ impl App {
         // project does not reset what the agents read for nothing.
         if config.ai_differs_from(&old) {
             agent_panel::publish_ai_settings(&config.ai);
+        }
+        if config.terminal.default_shell != old.terminal.default_shell {
+            agent_panel::publish_shell(config.terminal.default_shell.as_deref());
         }
         if config.plugins != old.plugins {
             self.plugins.mark_dirty();

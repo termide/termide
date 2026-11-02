@@ -653,6 +653,7 @@ fn main() -> Result<()> {
         };
         let code = termide_app::run_agent_headless(
             &config.ai,
+            config.terminal.default_shell.as_deref(),
             &cwd,
             &project_root,
             cli.agent.as_deref(),

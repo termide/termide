@@ -8,7 +8,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use termide_agent_core::{CancelToken, Tool, ToolCall, ToolContext, ToolResultMessage, ToolUpdate};
+use termide_agent_core::{
+    CancelToken, ShellSyntax, Tool, ToolCall, ToolContext, ToolResultMessage, ToolTraits,
+    ToolUpdate,
+};
 use termide_agent_core::{TerminalRun, TerminalRunEnd, TerminalSessions, ToolText, SHELL_TOOL};
 
 use crate::args::{optional_bool, optional_str, optional_u64, required_str};
@@ -37,7 +40,53 @@ const BACKGROUND_WAIT: Duration = Duration::from_secs(1);
 /// The longest name of a terminal session.
 const MAX_SESSION_NAME: usize = 40;
 
+/// The shell the agent's commands run in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ShellProgram {
+    /// What to start: a name found on `PATH` or a path.
+    pub program: String,
+    /// What the model is told it writes for: `bash`, `zsh`, `fish`.
+    pub name: String,
+    pub syntax: ShellSyntax,
+    /// The tool's description, which names the shell.
+    description: String,
+}
+
+impl ShellProgram {
+    /// The shell at `program`, when it is one the agent can run its commands
+    /// in (see [`ShellSyntax::of`]).
+    #[must_use]
+    pub fn new(program: &str) -> Option<Self> {
+        let file = Path::new(program).file_name()?.to_str()?;
+        let name = file
+            .strip_suffix(".exe")
+            .unwrap_or(file)
+            .to_ascii_lowercase();
+        let syntax = ShellSyntax::of(&name)?;
+        let description = render_description(&ToolText::seed(SHELL_TOOL).description, &name);
+        Some(Self {
+            program: program.to_string(),
+            name,
+            syntax,
+            description,
+        })
+    }
+
+    /// bash, found on `PATH`.
+    #[must_use]
+    pub fn bash() -> Self {
+        Self::new("bash").expect("bash is a shell the agent runs in")
+    }
+}
+
+/// `{{shell}}` in `template` takes the shell's name.
+fn render_description(template: &str, shell: &str) -> String {
+    template.replace("{{shell}}", shell)
+}
+
 pub struct ShellTool {
+    /// The shell a command runs in: one apart (`-c`) or a terminal session.
+    pub shell: ShellProgram,
     pub default_timeout: Duration,
     pub max_timeout: Duration,
     pub max_output_bytes: usize,
@@ -62,6 +111,7 @@ pub struct ShellTool {
 impl Default for ShellTool {
     fn default() -> Self {
         Self {
+            shell: ShellProgram::bash(),
             default_timeout: Duration::from_secs(120),
             max_timeout: Duration::from_secs(600),
             max_output_bytes: SHELL_MAX_BYTES,
@@ -81,14 +131,27 @@ impl Tool for ShellTool {
     }
 
     fn description(&self) -> &str {
-        &ToolText::seed(SHELL_TOOL).description
+        &self.shell.description
+    }
+
+    /// `{{shell}}` takes the name of the shell commands run in.
+    fn render_description(&self, template: &str) -> String {
+        render_description(template, &self.shell.name)
+    }
+
+    fn traits(&self) -> ToolTraits {
+        ToolTraits {
+            shell: self.shell.syntax,
+            ..ToolTraits::default()
+        }
     }
 
     fn parameters(&self) -> Value {
+        let command = format!("The command line to run with {} -c", self.shell.name);
         json!({
             "type": "object",
             "properties": {
-                "command": { "type": "string", "description": "The command line to run with bash -c" },
+                "command": { "type": "string", "description": command },
                 "timeout": { "type": "integer", "minimum": 1, "description": "Seconds before the command is killed (default 120, max 600); in a terminal session, seconds to wait for it, after which it runs on" },
                 "session": { "type": "string", "description": "Run in the terminal session of this name, opened on first use: the directory, variables and background jobs carry over from one command to the next (letters, digits, `.`, `_`, `-`)" },
                 "background": { "type": "boolean", "description": "Start the command and return at once, leaving it running in a terminal session (`session`, or a new one); read its output later with `terminals`" }
@@ -170,7 +233,7 @@ impl ShellTool {
         on_update: &mut dyn FnMut(ToolUpdate),
         cancel: &CancelToken,
     ) -> Result<Run, String> {
-        let mut child = spawn(command, ctx, self.shim_path.as_deref())?;
+        let mut child = spawn(&self.shell, command, ctx, self.shim_path.as_deref())?;
         let started = Instant::now();
         let output = Arc::new(Mutex::new(Capture::new(
             self.capture_bytes,
@@ -573,8 +636,13 @@ fn omission_marker(omitted_lines: usize, log: Option<&Path>, skipped: u64) -> St
     }
 }
 
-fn spawn(command: &str, ctx: &ToolContext, shim_path: Option<&Path>) -> Result<Child, String> {
-    let mut cmd = Command::new("bash");
+fn spawn(
+    shell: &ShellProgram,
+    command: &str,
+    ctx: &ToolContext,
+    shim_path: Option<&Path>,
+) -> Result<Child, String> {
+    let mut cmd = Command::new(&shell.program);
     cmd.arg("-c")
         .arg(command)
         .current_dir(&ctx.cwd)
@@ -607,8 +675,13 @@ fn spawn(command: &str, ctx: &ToolContext, shim_path: Option<&Path>) -> Result<C
             });
         }
     }
-    cmd.spawn()
-        .map_err(|error| format!("cannot start bash in {}: {error}", ctx.cwd.display()))
+    cmd.spawn().map_err(|error| {
+        format!(
+            "cannot start {} in {}: {error}",
+            shell.name,
+            ctx.cwd.display()
+        )
+    })
 }
 
 fn kill_group(child: &mut Child) {
@@ -709,6 +782,44 @@ mod tests {
 
     fn run(dir: &std::path::Path, args: Value) -> ToolResultMessage {
         run_with(&tool(dir), dir, args, &CancelToken::new()).0
+    }
+
+    #[test]
+    fn the_shell_is_the_one_chosen_and_named_to_the_model() {
+        assert!(ShellProgram::new("/usr/local/bin/nu").is_none());
+        assert!(ShellProgram::new("pwsh.exe").is_none());
+        let fish = ShellProgram::new("/opt/homebrew/bin/fish").unwrap();
+        assert_eq!(
+            (fish.name.as_str(), fish.syntax),
+            ("fish", ShellSyntax::Fish)
+        );
+        let bash = ShellTool::default();
+        assert!(bash.description().contains("Run a command with bash in"));
+        assert_eq!(bash.traits().shell, ShellSyntax::Posix);
+
+        if Command::new("zsh").arg("-c").arg("true").status().is_err() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let zsh = ShellTool {
+            shell: ShellProgram::new("zsh").unwrap(),
+            ..tool(dir.path())
+        };
+        assert!(zsh.description().contains("Run a command with zsh in"));
+        assert!(!zsh.description().contains("{{"));
+        assert!(zsh.parameters().to_string().contains("run with zsh -c"));
+        assert_eq!(zsh.traits().shell, ShellSyntax::Zsh);
+        let (result, _) = run_with(
+            &zsh,
+            dir.path(),
+            json!({ "command": "echo ${ZSH_VERSION:+zsh}" }),
+            &CancelToken::new(),
+        );
+        assert!(
+            result.plain_text().starts_with("zsh"),
+            "{}",
+            result.plain_text()
+        );
     }
 
     /// A command must not reach termide's own terminal: a debugger, `stty` or

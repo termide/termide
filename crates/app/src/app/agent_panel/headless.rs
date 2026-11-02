@@ -39,6 +39,7 @@ pub enum HeadlessOutput {
 /// Returns the process exit code.
 pub fn run_agent_headless(
     settings: &AiSettings,
+    shell: Option<&str>,
     cwd: &Path,
     project_root: &Path,
     agent_name: Option<&str>,
@@ -75,6 +76,7 @@ pub fn run_agent_headless(
         return 2;
     }
 
+    super::publish_shell(shell);
     let web = shared_web(&settings.web, &dirs);
     let recall = recall_tool(settings, &dirs, project_root, cwd);
     let mut tools = base_tools(&dirs, Some(&web), Some(&recall));

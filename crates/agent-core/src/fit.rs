@@ -33,6 +33,7 @@ use crate::compaction::message_chars;
 use crate::message::{AssistantContent, Message, ToolCall, ToolResultContent, Usage, UserMessage};
 use crate::permissions::is_read_only_call;
 use crate::prune::{prune_by, KEPT_TOOLS};
+use crate::tool::ShellSyntax;
 
 /// Characters a token is taken to hold when a budget in tokens is turned
 /// into one in characters, as a ratio (`5 / 2` = 2.5). Lower than the usual
@@ -315,7 +316,11 @@ fn shorten(message: &mut Message, step: FitStep, calls: &HashMap<String, ToolCal
         (FitStep::ReadOutputs, Message::ToolResult(result)) => {
             let reads = calls
                 .get(&result.tool_call_id)
-                .is_some_and(|call| !kept(&call.name) && is_read_only_call(call));
+                // Read as POSIX whatever shell ran it: a call misread as
+                // look-only only has its output left out sooner.
+                .is_some_and(|call| {
+                    !kept(&call.name) && is_read_only_call(call, ShellSyntax::Posix)
+                });
             let size = result_chars(&result.content);
             if reads && size > SHORT_OUTPUT {
                 result.content = vec![ToolResultContent::Text {

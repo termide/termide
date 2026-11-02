@@ -768,6 +768,7 @@ fn base_tools(
     let sessions: Arc<dyn termide_agent_core::TerminalSessions> =
         Arc::clone(terminals::agent_terminals()) as _;
     tools.insert(Arc::new(ShellTool {
+        shell: terminals::agent_terminals().shell(),
         shim_path: dirs.shims_dir(),
         terminals: Some(Arc::clone(&sessions)),
         ..ShellTool::default()
@@ -897,6 +898,12 @@ type ActiveSlot = Arc<std::sync::RwLock<Active>>;
 /// settings change after startup. Global because panels restored from a
 /// layout are built away from the `App`.
 static APPLIED_AI: std::sync::RwLock<Option<AiSettings>> = std::sync::RwLock::new(None);
+
+/// Run the agent's commands in the shell picked for terminals, `configured`
+/// (`terminal.default_shell`), or the one found when none is.
+pub(crate) fn publish_shell(configured: Option<&str>) {
+    terminals::agent_terminals().set_shell(configured);
+}
 
 /// Record `settings` as the applied `[ai]` settings for open panels.
 pub(crate) fn publish_ai_settings(settings: &AiSettings) {
@@ -3283,6 +3290,7 @@ fn session_dir_of(cwd: &Path) -> Option<PathBuf> {
 
 fn user_shell_runner(dirs: &AgentDirs, cwd: &Path) -> ShellRunner {
     let tool = ShellTool {
+        shell: terminals::agent_terminals().shell(),
         shim_path: dirs.shims_dir(),
         ..ShellTool::default()
     };

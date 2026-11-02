@@ -15,7 +15,13 @@
 //! must be allowed for the whole to pass, while a `deny` or `ask` on any part
 //! applies to the whole. Command substitution (`$(...)`, backticks) is never
 //! auto-allowed by an `allow` rule.
+//!
+//! A command is read in the language of the shell that runs it
+//! ([`ShellSyntax`]): a fish command as the POSIX one it means, and one the
+//! checks cannot read that way as a substitution, which nothing allows
+//! without asking.
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 
@@ -31,7 +37,7 @@ use crate::cancel::CancelToken;
 use crate::classifier::{Classifier, Verdict};
 use crate::message::ToolCall;
 use crate::refusals::Refusals;
-use crate::tool::{canonical_tool_name, ToolContext, SHELL_TOOL};
+use crate::tool::{canonical_tool_name, ShellSyntax, ToolContext, SHELL_TOOL};
 
 /// Which rules count and what happens to calls none covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -150,16 +156,17 @@ pub enum Lasting {
 }
 
 /// Whether a call can change nothing: a read, a skill, or a shell command
-/// made only of read-only parts without substitution.
+/// made only of read-only parts without substitution, read as `shell` reads
+/// it.
 #[must_use]
-pub fn is_read_only_call(call: &ToolCall) -> bool {
-    not_read_only(call).is_none()
+pub fn is_read_only_call(call: &ToolCall, shell: ShellSyntax) -> bool {
+    not_read_only(call, shell).is_none()
 }
 
 /// Why a call could change something, or `None` when it cannot: for a shell
 /// command, what in it is not look-only, so a refusal can name it; empty for
 /// any other tool.
-fn not_read_only(call: &ToolCall) -> Option<String> {
+fn not_read_only(call: &ToolCall, shell: ShellSyntax) -> Option<String> {
     match call.name.as_str() {
         // The web tools read the web; nothing on this machine changes. A
         // question to the user changes nothing either, nor does `recall`,
@@ -172,7 +179,11 @@ fn not_read_only(call: &ToolCall) -> Option<String> {
         // or stops the program.
         "debug" if call.arguments["action"] == "state" => None,
         SHELL_TOOL => {
-            let parsed = split_shell(call.arguments["command"].as_str().unwrap_or(""));
+            let Some((_, parsed)) =
+                parse_in(call.arguments["command"].as_str().unwrap_or(""), shell)
+            else {
+                return Some("a command that cannot be read as a whole".to_string());
+            };
             if parsed.has_substitution {
                 return Some("a command substitution".to_string());
             }
@@ -253,7 +264,7 @@ impl Hooks for PlanGuard {
         {
             return ToolDecision::Allow;
         }
-        let Some(what) = not_read_only(call) else {
+        let Some(what) = not_read_only(call, ctx.tool.shell) else {
             return ToolDecision::Allow;
         };
         self.refused = true;
@@ -976,7 +987,7 @@ impl PermissionHooks {
     /// loosen it, since each part must earn its own allow.
     fn judge_command(&self, command: &str, ctx: &ToolContext) -> CommandVerdict {
         let mode = self.mode.get();
-        let parts = shell_parts(command, &ctx.cwd);
+        let parts = shell_parts_in(command, ctx.tool.shell, &ctx.cwd);
         let mut verdict = Decision::Allow;
         let mut forced = false;
         if parts.len() > 1 {
@@ -1500,11 +1511,33 @@ struct ParsedShell {
     open_loops: Vec<usize>,
 }
 
+/// `command` as the POSIX reading takes it — the text itself, or the POSIX a
+/// fish command means — and what that reading made of it; `None` for a fish
+/// command that cannot be read that way.
+fn parse_in(command: &str, shell: ShellSyntax) -> Option<(Cow<'_, str>, ParsedShell)> {
+    match shell {
+        ShellSyntax::Posix => Some((Cow::Borrowed(command), split_posix(command, false))),
+        ShellSyntax::Zsh => Some((Cow::Borrowed(command), split_posix(command, true))),
+        ShellSyntax::Fish => {
+            let posix = crate::fish::as_posix(command)?;
+            let parsed = split_posix(&posix, false);
+            Some((Cow::Owned(posix), parsed))
+        }
+    }
+}
+
+/// [`split_posix`] for bash and the POSIX shells.
+fn split_shell(command: &str) -> ParsedShell {
+    split_posix(command, false)
+}
+
 /// Split a command line into its simple commands, honouring quotes,
 /// backslash escapes and here-documents: the text of a `<<EOF` body is data
 /// for the command before it, not commands of its own, so it is skipped —
-/// though an unquoted delimiter's body still expands substitutions.
-fn split_shell(command: &str) -> ParsedShell {
+/// though an unquoted delimiter's body still expands substitutions. With
+/// `zsh`, a parenthesis inside a command's words expands too: zsh runs code
+/// from a glob qualifier `*(e:…:)`, an expansion flag `${(e)…}` and `=(…)`.
+fn split_posix(command: &str, zsh: bool) -> ParsedShell {
     let mut parsed = ParsedShell::default();
     let mut current = String::new();
     // Whether the command being read expands; carried to the part it becomes,
@@ -1520,6 +1553,7 @@ fn split_shell(command: &str) -> ParsedShell {
     // are stripped (`<<-`), whether the body expands (unquoted delimiter).
     let mut heredocs: Vec<(String, bool, bool)> = Vec::new();
     let chars: Vec<char> = command.chars().collect();
+    let flags = if zsh { "${(" } else { "" };
     let mut i = 0;
     while i < chars.len() {
         let c = chars[i];
@@ -1533,7 +1567,11 @@ fn split_shell(command: &str) -> ParsedShell {
             }
             if c == q {
                 quote = None;
-            } else if q == '"' && (c == '`' || (c == '$' && opens_substitution(&chars, i))) {
+            } else if q == '"'
+                && (c == '`'
+                    || (c == '$' && opens_substitution(&chars, i))
+                    || (zsh && c == '$' && chars.get(i + 1..i + 3) == Some(&['{', '('])))
+            {
                 // Double quotes still expand substitutions.
                 expands = true;
             }
@@ -1577,6 +1615,12 @@ fn split_shell(command: &str) -> ParsedShell {
                 open.pop();
                 current.push(c);
             }
+            // A subshell opens a command; a parenthesis later in it is zsh's.
+            '(' if zsh && !current.trim().is_empty() => {
+                expands = true;
+                open.push('(');
+                current.push(c);
+            }
             '<' if chars.get(i + 1) == Some(&'<') && chars.get(i + 2) != Some(&'<') => {
                 let (heredoc, end) = heredoc_at(&chars, i);
                 current.extend(&chars[i..end]);
@@ -1607,7 +1651,7 @@ fn split_shell(command: &str) -> ParsedShell {
             '\n' if !heredocs.is_empty() => {
                 // The bodies feed the command just ended, so they are read
                 // while its segment is still open and mark it when they expand.
-                i = skip_heredocs(&chars, i + 1, &mut heredocs, &mut expands);
+                i = skip_heredocs(&chars, i + 1, &mut heredocs, flags, &mut expands);
                 expands = !push_part(&mut parsed, &mut current, expands) && expands;
                 continue;
             }
@@ -1690,6 +1734,7 @@ fn skip_heredocs(
     chars: &[char],
     start: usize,
     heredocs: &mut Vec<(String, bool, bool)>,
+    flags: &str,
     expands: &mut bool,
 ) -> usize {
     let mut i = start;
@@ -1714,7 +1759,8 @@ fn skip_heredocs(
                 .iter()
                 .enumerate()
                 .any(|(at, c)| *c == '`' || (*c == '$' && opens_substitution(&line_chars, at)));
-            if body_expands && substitutes {
+            let flagged = !flags.is_empty() && line.contains(flags);
+            if body_expands && (substitutes || flagged) {
                 *expands = true;
             }
         }
@@ -1751,15 +1797,34 @@ pub struct ShellPart {
     pub loop_values: Vec<(String, Vec<ShellWord>)>,
 }
 
-/// Split `command` into its parts, following `cd`, `pushd` and `popd` from
-/// `cwd` so each part's program resolves against the directory it runs in.
-/// A `cd` that cannot be followed (a variable, `-`, a substitution, a
-/// subshell) leaves the directory unknown for the parts after it.
+/// [`shell_parts_in`] for bash and the POSIX shells.
 #[must_use]
 pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
+    shell_parts_in(command, ShellSyntax::Posix, cwd)
+}
+
+/// Split `command`, in the language of `shell`, into its parts, following
+/// `cd`, `pushd` and `popd` from `cwd` so each part's program resolves
+/// against the directory it runs in. A `cd` that cannot be followed (a
+/// variable, `-`, a substitution, a subshell) leaves the directory unknown
+/// for the parts after it. A fish command's parts are those of the POSIX it
+/// means, in POSIX words; one that cannot be read that way is one part, a
+/// substitution no rule can stand for.
+#[must_use]
+pub fn shell_parts_in(command: &str, shell: ShellSyntax, cwd: &Path) -> Vec<ShellPart> {
+    let Some((command, parsed)) = parse_in(command, shell) else {
+        return vec![ShellPart {
+            text: command.to_string(),
+            resolved: command.to_string(),
+            savable: false,
+            substituted: true,
+            dir: None,
+            loop_values: Vec::new(),
+        }];
+    };
+    let command = command.as_ref();
     let mut dir = Some(normalize(cwd));
     let mut stack: Vec<Option<std::path::PathBuf>> = Vec::new();
-    let parsed = split_shell(command);
     let bindings = loop_bindings(command, &parsed);
     let moving = moving_loops(&parsed);
     parsed
@@ -3670,6 +3735,81 @@ mod tests {
         assert_eq!(decide("grep 'a[0-9]' src/x"), Decision::Allow);
     }
 
+    fn ctx_in(shell: ShellSyntax) -> ToolContext {
+        ToolContext {
+            tool: crate::ToolTraits {
+                shell,
+                ..crate::ToolTraits::default()
+            },
+            ..ctx()
+        }
+    }
+
+    #[test]
+    fn a_fish_command_is_judged_as_fish_runs_it() {
+        let mut rules = PermissionRules::default();
+        rules.add("shell", "ls *", Decision::Allow);
+        rules.add("shell", "echo *", Decision::Allow);
+        rules.add("shell", "rm *", Decision::Deny);
+        let (hooks, _) = hooks(rules, vec![]);
+        let fish = ctx_in(ShellSyntax::Fish);
+        let decide = |cmd: &str| hooks.decide(&bash(cmd), &fish);
+        for command in [
+            // `(…)` substitutes in fish: no `allow` vouches for it.
+            "ls (touch x)",
+            "ls a(touch x)b",
+            "cat (ls)",
+            // `\'` keeps a fish string open past what POSIX takes for its end.
+            r"echo 'a\' b' ; touch x",
+            // An escape standing for another character.
+            r"find . \x2ddelete",
+            // What the reading cannot vouch for.
+            "switch $x; case a; touch a; end",
+            "cat <<EOF",
+        ] {
+            assert_eq!(decide(command), Decision::Ask, "{command}");
+        }
+        for command in [
+            "ls -la",
+            "git status; and git log -1",
+            "test -f Cargo.toml; or echo missing",
+            "for f in src/*.rs; wc -l $f; end",
+            "begin; ls; echo done; end",
+            "if test -d target; ls target; else; echo none; end",
+            "echo `ls` '(x)'",
+        ] {
+            assert_eq!(decide(command), Decision::Allow, "{command}");
+        }
+        assert_eq!(decide("ls; and rm -r x"), Decision::Deny);
+        assert_eq!(
+            hooks.decide(&bash("ls (touch x)"), &ctx()),
+            Decision::Allow,
+            "POSIX reads the parenthesis as text"
+        );
+        assert!(!is_read_only_call(&bash("ls (touch x)"), ShellSyntax::Fish));
+        assert!(!is_read_only_call(&bash("ls; end"), ShellSyntax::Fish));
+        assert!(is_read_only_call(&bash("ls; and pwd"), ShellSyntax::Fish));
+    }
+
+    #[test]
+    fn a_zsh_parenthesis_inside_a_command_may_run_code() {
+        let (hooks, _) = hooks(PermissionRules::default(), vec![]);
+        let zsh = ctx_in(ShellSyntax::Zsh);
+        let decide = |cmd: &str| hooks.decide(&bash(cmd), &zsh);
+        for command in [
+            "ls *(e:'touch x':)",
+            "ls (e:'touch x':)",
+            "echo =(touch x)",
+            "echo ${(e)x}",
+            "echo \"${(e)x}\"",
+            "cat <<EOF\n${(e)x}\nEOF",
+        ] {
+            assert_eq!(decide(command), Decision::Ask, "{command}");
+        }
+        assert_eq!(decide("ls src | wc -l"), Decision::Allow);
+        assert_eq!(decide("echo \"${HOME}\""), Decision::Allow);
+    }
+
     #[test]
     fn parts_resolve_their_program_from_the_directory_cd_left() {
         let resolved = |command: &str| -> Vec<(String, bool)> {
@@ -4229,7 +4369,10 @@ mod tests {
                     "{mode:?} {command}"
                 );
                 // Still look-only: plan mode lets it reach the question.
-                assert!(is_read_only_call(&bash(command)), "{command}");
+                assert!(
+                    is_read_only_call(&bash(command), ShellSyntax::Posix),
+                    "{command}"
+                );
             }
             for command in inside {
                 assert_eq!(
@@ -5114,8 +5257,8 @@ mod tests {
         assert_eq!(subject_of(&fetch, &ctx()), "https://docs.rs/a");
         let search = call("web_search", json!({ "query": "rust tui", "limit": 3 }));
         assert_eq!(subject_of(&search, &ctx()), "rust tui");
-        assert!(is_read_only_call(&fetch));
-        assert!(is_read_only_call(&search));
+        assert!(is_read_only_call(&fetch, ShellSyntax::Posix));
+        assert!(is_read_only_call(&search, ShellSyntax::Posix));
     }
 
     /// A symlink in the project does not carry a file tool past its edge: the
@@ -5370,12 +5513,12 @@ mod tests {
             json!({ "questions": [{ "question": "Which?" }] }),
         );
         assert_eq!(hooks.decide(&question, &ctx()), Decision::Allow);
-        assert!(is_read_only_call(&question));
+        assert!(is_read_only_call(&question, ShellSyntax::Posix));
     }
     #[test]
     fn recall_never_asks_and_passes_plan_mode() {
         let recall = call("recall", json!({ "queries": ["why no tokio"] }));
-        assert!(is_read_only_call(&recall));
+        assert!(is_read_only_call(&recall, ShellSyntax::Posix));
         for mode in Mode::ALL {
             let hooks = PermissionHooks::new(
                 PermissionRules {
@@ -5427,6 +5570,7 @@ mod tests {
             tool: crate::ToolTraits {
                 mcp: true,
                 read_only,
+                ..Default::default()
             },
             ..ctx()
         }

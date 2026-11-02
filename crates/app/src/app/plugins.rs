@@ -1139,6 +1139,7 @@ impl Tool for PluginTool {
         ToolTraits {
             mcp: true,
             read_only: self.info.read_only,
+            ..Default::default()
         }
     }
 

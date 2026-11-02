@@ -96,6 +96,8 @@ You can also set the default shell in `config.toml`:
 default_shell = "/usr/bin/fish"
 ```
 
+The coding agent runs its commands in this shell too when it is bash, zsh or fish, and in bash otherwise.
+
 ### Working directory on Windows
 
 Windows has no call that tells one program where another is working, so the

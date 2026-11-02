@@ -31,6 +31,7 @@ pub mod compaction;
 pub mod conflicts;
 pub mod context;
 pub mod failure;
+mod fish;
 pub mod fit;
 pub mod goal;
 pub mod handoff;
@@ -107,10 +108,11 @@ pub use message::{
     SUBAGENT_SESSION_KEY,
 };
 pub use permissions::{
-    is_read_only_call, permission_channel, shell_parts, subject_of, AskedPart, AutoDenyPrompter,
-    ChannelPrompter, DecidedBy, Decision, Lasting, Mode, ModeHandle, PermissionAnswer,
-    PermissionEnvelope, PermissionHooks, PermissionNote, PermissionPrompter, PermissionRequest,
-    PermissionRules, PersistRule, PersistScope, PlanGuard, RuleTables, ShellPart,
+    is_read_only_call, permission_channel, shell_parts, shell_parts_in, subject_of, AskedPart,
+    AutoDenyPrompter, ChannelPrompter, DecidedBy, Decision, Lasting, Mode, ModeHandle,
+    PermissionAnswer, PermissionEnvelope, PermissionHooks, PermissionNote, PermissionPrompter,
+    PermissionRequest, PermissionRules, PersistRule, PersistScope, PlanGuard, RuleTables,
+    ShellPart,
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{
@@ -142,7 +144,7 @@ pub use terminals::{
 };
 pub use tool::{
     canonical_tool_name, de_tool_name, de_tool_names, CallsBeside, LateTools, RunningCall,
-    RunningCalls, Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate, LEGACY_SHELL_TOOL,
-    PLUGIN_TOOL_SOURCE, SHELL_TOOL,
+    RunningCalls, ShellSyntax, Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate,
+    LEGACY_SHELL_TOOL, PLUGIN_TOOL_SOURCE, SHELL_TOOL,
 };
 pub use tool_text::{apply_tool_texts, is_known_tool_name, ToolText, SEED_TOOLS, TOOLS_DIR};

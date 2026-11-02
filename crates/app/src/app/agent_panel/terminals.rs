@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, RwLock};
 use std::time::Instant;
 
 use termide_agent_core::terminals::duration;
@@ -18,6 +18,7 @@ use termide_agent_core::{
     TerminalState,
 };
 
+use termide_agent_tools::ShellProgram;
 use termide_panel_terminal::agent_shell::{
     AgentShell, RunEnd, RunError, ScreenText, SendEnd, SendWait, ShellStatus,
 };
@@ -73,6 +74,8 @@ impl Entry {
 pub(crate) struct AgentTerminals {
     owners: Mutex<HashMap<String, Vec<Entry>>>,
     limit: AtomicUsize,
+    /// The shell the agent runs its commands in, here and apart.
+    shell: RwLock<ShellProgram>,
     /// Where the output logs go, by owner; the system temp dir when none.
     log_root: Option<PathBuf>,
 }
@@ -108,6 +111,7 @@ impl AgentTerminals {
         Self {
             owners: Mutex::new(HashMap::new()),
             limit: AtomicUsize::new(termide_config::AiSettings::default().max_terminal_sessions),
+            shell: RwLock::new(ShellProgram::bash()),
             log_root,
         }
     }
@@ -119,6 +123,26 @@ impl AgentTerminals {
     /// How many terminals an agent session may have open at once.
     pub(crate) fn set_limit(&self, limit: usize) {
         self.limit.store(limit.max(1), Ordering::Relaxed);
+    }
+
+    /// Run the agent's commands in the shell picked for terminals —
+    /// `configured` (`terminal.default_shell`), else the one found on the
+    /// system — when it is bash, zsh or fish, and in bash otherwise. A
+    /// terminal already open keeps its shell.
+    pub(crate) fn set_shell(&self, configured: Option<&str>) {
+        let program = configured
+            .map(str::to_string)
+            .unwrap_or_else(termide_panel_terminal::shell_utils::detect_shell);
+        let shell = ShellProgram::new(&program).unwrap_or_else(ShellProgram::bash);
+        *self.shell.write().unwrap_or_else(PoisonError::into_inner) = shell;
+    }
+
+    /// The shell the agent runs its commands in.
+    pub(crate) fn shell(&self) -> ShellProgram {
+        self.shell
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
     }
 
     fn log_path(&self, owner: &str, name: &str) -> PathBuf {
@@ -175,8 +199,10 @@ impl AgentTerminals {
             }
         }
         let log = self.log_path(owner, name);
-        let (terminal, shell) = Terminal::new_agent_shell(ROWS, COLS, cwd, &env, Some(&log), name)
-            .map_err(|error| format!("cannot open a terminal session: {error}"))?;
+        let program = self.shell().program;
+        let (terminal, shell) =
+            Terminal::new_agent_shell(ROWS, COLS, &program, cwd, &env, Some(&log), name)
+                .map_err(|error| format!("cannot open a terminal session: {error}"))?;
         entries.push(Entry {
             name: name.to_string(),
             shell: shell.clone(),
