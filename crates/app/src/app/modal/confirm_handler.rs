@@ -93,9 +93,12 @@ impl App {
     ) -> Result<()> {
         if let Some(confirmed) = value.downcast_ref::<bool>() {
             if *confirmed {
-                // Terminate processes in active panel (for terminal)
+                // Terminate processes in active panel (for terminal); an
+                // agent's terminal is handed back to the agent, not killed.
                 if let Some(panel) = self.layout_manager.active_panel_mut() {
-                    panel.kill_processes();
+                    if crate::app::agent_panel::terminals::ends_on_close(&**panel) {
+                        panel.kill_processes();
+                    }
                 }
                 // Close active panel
                 self.close_panel_at_index();

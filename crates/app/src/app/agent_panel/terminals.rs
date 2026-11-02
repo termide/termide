@@ -518,6 +518,16 @@ impl crate::app::App {
     }
 }
 
+/// Whether closing a panel ends what runs in it. An agent's terminal is only
+/// shown in a panel — closing that one hands it back to the agent, still
+/// running — so a close that kills the panel's processes must skip it.
+pub(crate) fn ends_on_close(panel: &dyn termide_core::Panel) -> bool {
+    !panel
+        .as_any()
+        .downcast_ref::<Terminal>()
+        .is_some_and(Terminal::is_agent_shell)
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -582,6 +592,43 @@ mod tests {
         assert_eq!(registry.list("b").len(), 1);
         registry.release_all();
         assert!(registry.list("b").is_empty());
+    }
+
+    /// Closing the panel that shows an agent's terminal hands it back: the
+    /// shell is not the panel's to end. A killed one could not be shown
+    /// again — its panel would open and auto-close at once.
+    #[test]
+    fn closing_the_panel_of_an_agent_terminal_neither_ends_it_nor_hides_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry = AgentTerminals::new(None);
+        let Ok(_) = run(&registry, "a", "x", dir.path(), "X=7") else {
+            return; // No bash or no PTY here.
+        };
+        let Expand::Here(terminal) = registry.expand("a", "x") else {
+            panic!("the terminal is here");
+        };
+        assert!(
+            !ends_on_close(&*terminal),
+            "the confirm dialog must not kill an agent's shell"
+        );
+        assert!(registry.collapse(*terminal).is_none(), "handed back");
+        // It answers, and a second click shows it again.
+        let cancel = CancelToken::new();
+        let until = |raw: &[u8]| String::from_utf8_lossy(raw).contains("got-7");
+        let sent = registry
+            .send(&TerminalSend {
+                owner: "a",
+                name: "x",
+                input: "echo got-$((3+4))\r",
+                keys: &[],
+                until: Some(&until),
+                quiet: None,
+                timeout: Duration::from_secs(20),
+                cancel: &cancel,
+            })
+            .unwrap();
+        assert_eq!(sent.end, TerminalSendEnd::Matched);
+        assert!(matches!(registry.expand("a", "x"), Expand::Here(_)));
     }
 
     #[test]

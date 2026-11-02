@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Three ways to slip a command past the look-only check are closed.** The agent's commands that only look ran without asking, and a few that run something passed for them: bash 5.3's `${ cmd; }` and `${|cmd; }`, which run a command as `$(…)` does; an array subscript in `test -v`, `[ -v ]` or a `[[ … -eq … ]]` comparison, which bash evaluates and substitutes in even within single quotes (`test -v 'a[$(cmd)]'`); and an option of `find`, `sort`, `rg` and the like written with quotes or a backslash inside it (`find . -del''ete`). Each of them now asks.
 - **A variable's value is not run as code without asking.** bash evaluates some values as arithmetic or a prompt and runs the substitutions in them — an operand of `[ … -eq … ]` and the like that is not a number, the variable of `test -v`, `${!x}`, `${x@P}`, a subscript or substring offset given by a name (`${a[i]}`, `${s:i}`) — and a terminal session keeps the values an earlier command set. These now ask, so `[ "$n" -gt 3 ]` asks too.
 
+### Fixed
+- **Closing an agent's terminal panel ended the terminal.** Closing the panel showing one of the agent's terminals hands it back to the agent, still running. Closing it with `Esc` went through the confirm dialog, which ends the processes of the panel it closes — so the shell died, the row in the strip said the terminal was over, and clicking the row again opened nothing, a panel of an exited terminal closing at once. The dialog now leaves an agent's shell alone.
+
 ## [0.48.0] - 2026-10-31
 
 [0.48.0]: https://github.com/termide/termide/releases/tag/0.48.0
