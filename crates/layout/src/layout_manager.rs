@@ -146,6 +146,32 @@ impl LayoutManager {
         Some(panel)
     }
 
+    /// Remove every panel for which `ended` holds, and return them in the
+    /// order they stood, for a caller to hand back or drop. They are taken
+    /// from the last to the first, so removing one never moves a match still
+    /// to come; a group left empty goes with its last panel.
+    pub fn remove_panels_where(
+        &mut self,
+        ended: impl Fn(&dyn Panel) -> bool,
+        available_width: u16,
+    ) -> Vec<Box<dyn Panel>> {
+        let mut positions: Vec<usize> = Vec::new();
+        let mut before = 0;
+        for group in self.panel_groups.iter() {
+            for panel in group.panels() {
+                if ended(panel.as_ref()) {
+                    positions.push(before);
+                }
+                before += 1;
+            }
+        }
+        positions
+            .into_iter()
+            .rev()
+            .filter_map(|position| self.remove_panel_at(position, available_width))
+            .collect()
+    }
+
     /// Find panel by name, expand it in its group, return mutable reference.
     /// Does NOT change focus. Used for reusing existing panels.
     pub fn find_and_expand_panel_by_name(&mut self, name: &str) -> Option<&mut Box<dyn Panel>> {
@@ -1028,6 +1054,36 @@ mod tests {
     fn test_active_panel_with_no_panels() {
         let lm = LayoutManager::new();
         assert!(lm.active_panel().is_none());
+    }
+
+    /// Every panel a predicate names comes down, in every group, and taking
+    /// them from the last to the first never skips one standing next to it.
+    #[test]
+    fn remove_panels_where_takes_every_match_wherever_it_stands() {
+        let mut lm = LayoutManager::new();
+        let config = make_config(200);
+        // Two stacked in one group, then two of their own.
+        lm.add_panel(panel("gone"), &config, 100);
+        lm.add_panel(panel("kept"), &config, 100);
+        lm.add_panel(panel("gone too"), &config, 400);
+        lm.add_panel(panel("kept too"), &config, 400);
+        assert_eq!((lm.group_count(), lm.panel_count()), (2, 4));
+        let taken: Vec<String> = lm
+            .remove_panels_where(|p| p.name().starts_with("gone"), 100)
+            .into_iter()
+            .map(|panel| panel.name().to_string())
+            .collect();
+        assert_eq!(taken, ["gone too", "gone"]);
+        assert_eq!(lm.panel_count(), 2);
+        let names: Vec<String> = lm
+            .iter_all_panels_mut()
+            .map(|p| p.name().to_string())
+            .collect();
+        assert_eq!(names, ["kept", "kept too"]);
+        // Nothing left to take: the layout is untouched.
+        assert!(lm
+            .remove_panels_where(|p| p.name().starts_with("gone"), 100)
+            .is_empty());
     }
 
     #[test]

@@ -1336,6 +1336,14 @@ impl App {
 
     /// Check and close panels that should auto-close
     fn check_auto_close_panels(&mut self) -> Result<()> {
+        // An agent's terminal panel is a borrowed view of the agent's: when
+        // its terminal is gone it comes down wherever it stands, not only
+        // once it is the active one.
+        if self.close_ended_agent_terminals() {
+            self.auto_save_layout();
+            return Ok(());
+        }
+
         // Check if active panel should auto-close
         let should_close = {
             if let Some(panel) = self.layout_manager.active_panel_mut() {

@@ -1223,7 +1223,9 @@ terminal back to the agent, still running; a reopened project does not
 restore it. The terminals run the shell `shell` runs, after your startup
 file for it (`~/.bashrc`, `.zshrc`, fish's `config.fish`), with job control,
 history and pagers off; a terminal already open keeps its shell when the
-setting changes.
+setting changes. When a terminal ends — the agent closed it, its session
+ended, or you quit the shell in its panel — that panel comes down with it at
+once, wherever it stands, as the strip no longer lists the terminal.
 
 ### Web
 

@@ -529,6 +529,38 @@ pub(crate) fn ends_on_close(panel: &dyn termide_core::Panel) -> bool {
         .is_some_and(Terminal::is_agent_shell)
 }
 
+impl crate::app::App {
+    /// Take down the panels showing an agent's terminal whose terminal is
+    /// gone: the agent closed it, its session ended, or the shell exited in
+    /// the panel. The strip no longer lists the terminal, so its panel has
+    /// nothing left to show; waiting for the panel to be focused leaves one
+    /// of a dead terminal on screen that vanishes the moment it is chosen.
+    /// Whether any came down comes back with it.
+    pub(in crate::app) fn close_ended_agent_terminals(&mut self) -> bool {
+        let ended = self.layout_manager.remove_panels_where(
+            |panel| {
+                panel
+                    .as_any()
+                    .downcast_ref::<Terminal>()
+                    .is_some_and(|terminal| terminal.is_agent_shell() && !terminal.is_alive())
+            },
+            self.state.terminal.width,
+        );
+        if ended.is_empty() {
+            return false;
+        }
+        for panel in ended {
+            let panel: Box<dyn std::any::Any> = panel;
+            if let Ok(terminal) = panel.downcast::<Terminal>() {
+                // One whose session ended meanwhile is dropped here.
+                drop(agent_terminals().collapse(*terminal));
+            }
+        }
+        self.state.needs_redraw = true;
+        true
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
