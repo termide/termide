@@ -1606,6 +1606,12 @@ substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or 
 `sort -o` and `sort --compress-program`, `uniq` with an output file,
 `tree -o`/`-R`, `rg --pre`, `--pre-glob` and `--hostname-bin`, and
 `git diff --output` ask, abbreviated long options (`--out=`) included.
+A variable's value that bash takes as code asks too, since it runs the
+substitutions in it and a terminal session keeps what an earlier command
+set: an operand of a test's arithmetic comparison that is not a number
+(`[ "$n" -gt 3 ]`), the variable `-v` asks about when a value names it or it
+has a subscript, `${!x}`, `${x@P}`, and an array subscript or a substring
+offset that is not a number (`${a[i]}`, `${s:i}`).
 
 A look-only command that reads outside the project asks where reading a file
 there does: a path argument or an input redirection (`< file`) that leads out

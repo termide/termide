@@ -2467,6 +2467,9 @@ pub fn is_read_only_command(part: &str) -> bool {
     if part.contains('[') && (part.contains("$(") || part.contains('`')) {
         return false;
     }
+    if evaluates_a_value(&part) {
+        return false;
+    }
     // Quotes and backslashes only join a word for the program: `-del''ete`
     // reaches `find` as `-delete`. Without them an option is seen as the
     // program gets it; a quoted space splitting a word in two can only make
@@ -2486,6 +2489,9 @@ pub fn is_read_only_command(part: &str) -> bool {
         "stat", "du", "cut", "tr", "basename", "dirname", "realpath", "printenv", "whoami",
         "uname", "true", "false", "cd", "pushd", "popd", "[", "[[", "test",
     ];
+    if matches!(head, "[" | "[[" | "test") && evaluates_an_operand(args) {
+        return false;
+    }
     if PLAIN.contains(&head) {
         return true;
     }
@@ -2520,6 +2526,73 @@ pub fn is_read_only_command(part: &str) -> bool {
         "sed" => shell_words(&part).is_some_and(|words| is_print_only_sed(&words[1..])),
         _ => false,
     }
+}
+
+/// Whether a `${…}` in `part` takes a variable's value as code: bash
+/// evaluates the value of a name in arithmetic — an array subscript
+/// (`${a[i]}`) or a substring's offset and length (`${s:i:n}`) — as an
+/// expression, running the substitutions in it, and runs them in what
+/// `${!x}` names and in the prompt `${x@P}` expands. A session keeps the
+/// variables an earlier command set, so the value cannot be told from the
+/// command alone. Quotes are not looked at: asking about a `${…}` single
+/// quotes keep literal costs little.
+fn evaluates_a_value(part: &str) -> bool {
+    let mut rest = part;
+    while let Some(at) = rest.find("${") {
+        rest = &rest[at + 2..];
+        let body = &rest[..rest.find('}').unwrap_or(rest.len())];
+        if body.starts_with('!') {
+            return true;
+        }
+        let name = body.strip_prefix('#').unwrap_or(body);
+        let name_end = name
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(name.len());
+        let mut after = &name[name_end..];
+        if let Some(index) = after.strip_prefix('[') {
+            let end = index.find(']').unwrap_or(index.len());
+            let index_is_code = !(index[..end] == *"@"
+                || index[..end] == *"*"
+                || index[..end].chars().all(|c| c.is_ascii_digit()));
+            if index_is_code {
+                return true;
+            }
+            after = index.get(end + 1..).unwrap_or("");
+        }
+        let offset_is_code = after.strip_prefix(':').is_some_and(|offset| {
+            !offset.starts_with(['-', '=', '?', '+'])
+                && !offset
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || matches!(c, ':' | ' ' | '-'))
+        });
+        if after.starts_with('@') || offset_is_code {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether a test (`[`, `[[`, `test`) evaluates an operand as code: one
+/// beside an arithmetic comparison that is not a number, which bash takes
+/// as an expression — a name's value included, and the substitutions in
+/// it — or the variable `-v` asks about, given by a value or with a
+/// subscript.
+fn evaluates_an_operand(args: &[&str]) -> bool {
+    let number = |word: &str| {
+        let digits = word.strip_prefix(['-', '+']).unwrap_or(word);
+        !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+    };
+    args.iter().enumerate().any(|(i, word)| match *word {
+        "-eq" | "-ne" | "-lt" | "-le" | "-gt" | "-ge" => {
+            let before = i.checked_sub(1).and_then(|i| args.get(i));
+            let after = args.get(i + 1);
+            !before.is_some_and(|w| number(w)) || !after.is_some_and(|w| number(w))
+        }
+        "-v" => args
+            .get(i + 1)
+            .is_some_and(|name| name.contains(['$', '[', '`'])),
+        _ => false,
+    })
 }
 
 /// The words of a simple command with their quotes taken off, or `None`
@@ -3729,6 +3802,35 @@ mod tests {
             "rg --'pre'=sh x",
         ] {
             assert_eq!(decide(command), Decision::Ask, "{command}");
+        }
+        // A value set by an earlier command of a session, taken as code.
+        for command in [
+            "[[ $x -eq 0 ]]",
+            "[[ x -gt 3 ]]",
+            "[ \"$n\" -lt 2 ]",
+            "test 1 -ne \"$n\"",
+            "test -v \"$x\"",
+            "[[ -v $x ]]",
+            "[ -v 'a[i]' ]",
+            "echo ${x@P}",
+            "echo ${a[@]@P}",
+            "echo \"${!x}\"",
+            "echo ${a[i]}",
+            "echo ${a[$i]}",
+            "echo ${s:i}",
+            "echo ${s:0:n}",
+        ] {
+            assert_eq!(decide(command), Decision::Ask, "{command}");
+        }
+        for command in [
+            "[ 1 -eq 1 ]",
+            "[[ -10 -lt +3 ]]",
+            "[ -v HOME ]",
+            "[ -z \"$x\" ] && ls",
+            "echo ${a[0]} ${a[@]} ${a[*]} ${#a[@]}",
+            "echo ${s:1:2} ${s:-x} ${s:=y} ${s:+z}",
+        ] {
+            assert_eq!(decide(command), Decision::Allow, "{command}");
         }
         assert_eq!(decide("echo ${HOME} \"${PWD}\""), Decision::Allow);
         assert_eq!(decide("[ -n \"${PWD}\" ] && ls"), Decision::Allow);
