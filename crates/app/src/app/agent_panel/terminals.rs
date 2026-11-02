@@ -411,6 +411,7 @@ impl TerminalSessions for AgentTerminals {
         let screen = shell.screen();
         let end = match outcome.end {
             SendEnd::Matched => TerminalSendEnd::Matched,
+            SendEnd::Finished(code) => TerminalSendEnd::Finished(code),
             SendEnd::Quiet => TerminalSendEnd::Quiet,
             SendEnd::TimedOut => TerminalSendEnd::TimedOut,
             SendEnd::Cancelled => TerminalSendEnd::Cancelled,

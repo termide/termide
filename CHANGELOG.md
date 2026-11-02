@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The state strip keeps fresh launches in sight.** Above the input, the running subagents, the commands moved to the background and the agent's terminals each listed the oldest first and showed three, so whatever was just started was the first folded into `+N`. They now list the newest first and show five before folding the oldest away; the queued messages still run in the order the agent takes them.
 - **A tool name no tool goes by is reported.** A name in an agent's `tools:` or a hook's `tools`, and a config's `[ai.permissions.<tool>]` table, that names no tool used to apply to nothing in silence; it is now reported under the agent's banner or among the config warnings. MCP and plugin tool names and wildcard patterns are taken as they are.
 
+- **A terminal answers for itself when its command is over.** `send` now also ends its wait when the shell finishes a line typed at its prompt, returning the command's exit code; the timeout is left as a backstop for programs that report nothing of their own, like REPLs. A build or a test typed into a terminal no longer needs a timeout guessed for it.
+
 - **The agent runs commands in your shell.** `shell` and the agent's terminals use the shell terminal panels do — `terminal.default_shell`, or the one found on the system — when it is bash, zsh or fish, and bash otherwise; the tool's description names the shell to the model, and a terminal reads your startup file for it (`.bashrc`, `.zshrc`, `config.fish`). On Windows that is Git Bash where it is found.
 
 ### Security

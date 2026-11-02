@@ -109,6 +109,8 @@ pub struct TerminalSend<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TerminalSendEnd {
     Matched,
+    /// The shell finished the command the input started, with its exit code.
+    Finished(Option<i32>),
     Quiet,
     TimedOut,
     Cancelled,

@@ -335,6 +335,9 @@ pub struct SendWait<'a> {
 pub enum SendEnd {
     /// The output showed what was waited for.
     Matched,
+    /// The shell finished a command: its end mark came, with its exit code.
+    /// What was typed was a line at the prompt, and the terminal said so.
+    Finished(Option<i32>),
     /// The output stopped for the quiet period.
     Quiet,
     TimedOut,
@@ -672,7 +675,8 @@ impl AgentShell {
 
     /// Type `input` — a line break as `Enter` — then press `keys` (see
     /// [`key_bytes`]), and wait as `wait` says: for the output to show what
-    /// it waits for, to stop for a while, or for the timeout. A command of
+    /// it waits for, for the shell to finish the command the input started,
+    /// for the output to stop for a while, or for the timeout. A command of
     /// the agent's running there takes it as its input; so does the shell
     /// at its prompt.
     pub fn send(
@@ -709,10 +713,19 @@ impl AgentShell {
             if end != seen {
                 seen = end;
                 last_output = Instant::now();
+                // What was typed may have been a line at the prompt: the
+                // shell's own mark says when that command is over, and waits
+                // no longer depend on a timeout guessed for it. An explicit
+                // text still comes first — it can arrive while the command
+                // runs, which is why one asks for it — and inside a REPL the
+                // shell runs one command throughout, so no mark comes at all.
                 if let Some(until) = wait.until {
                     if until(&self.tap.read_since(from).data) {
                         return outcome(SendEnd::Matched);
                     }
+                }
+                if let Some(code) = ended_after(&self.tap, from) {
+                    return outcome(SendEnd::Finished(code));
                 }
             } else if self.tap.is_closed() {
                 return outcome(SendEnd::ShellExited);
@@ -1029,13 +1042,47 @@ mod shell_tests {
                 false
             })
             .unwrap();
-        assert_eq!(sent.end, SendEnd::Quiet);
+        // A line at the prompt ends with the shell's own mark, before any
+        // quiet period.
+        assert_eq!(sent.end, SendEnd::Finished(Some(0)));
         let screen = shell.screen();
         assert!(!screen.alternate);
-        assert!(screen.text.contains("\na\nb\n"), "{:?}", screen.text);
+        // The mark comes before the next prompt is drawn, so the screen ends
+        // with the command's own output.
+        assert!(screen.text.contains("\na\nb"), "{:?}", screen.text);
         assert!(shell
             .send("", &["Hyper".to_string()], &quiet, &|| false)
             .is_err());
+    }
+
+    /// A line typed at the prompt is over when the shell says so: with
+    /// nothing to wait for and no quiet period, its end mark ends the wait
+    /// and carries its exit code, so no timeout has to be guessed for it.
+    #[test]
+    fn a_line_at_the_prompt_ends_with_the_shells_own_mark() {
+        let home = tempfile::tempdir().unwrap();
+        let Some((_term, shell)) = session(home.path()) else {
+            return;
+        };
+        let wait = SendWait {
+            until: None,
+            quiet: None,
+            timeout: Duration::from_secs(20),
+        };
+        let sent = shell
+            .send("sleep 1; echo done", &["Enter".to_string()], &wait, &|| {
+                false
+            })
+            .unwrap();
+        assert_eq!(sent.end, SendEnd::Finished(Some(0)));
+        let chunk = shell.tap().read_since(sent.from);
+        let out = String::from_utf8_lossy(&chunk.data);
+        assert!(out.contains("done"), "{out:?}");
+
+        let sent = shell
+            .send("sh -c 'exit 7'", &["Enter".to_string()], &wait, &|| false)
+            .unwrap();
+        assert_eq!(sent.end, SendEnd::Finished(Some(7)));
     }
 
     #[test]

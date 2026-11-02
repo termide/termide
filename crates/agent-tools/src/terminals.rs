@@ -256,6 +256,10 @@ impl TerminalsTool {
         };
         let ended = match outcome.end {
             TerminalSendEnd::Matched => "the text waited for appeared".to_string(),
+            TerminalSendEnd::Finished(code) => match code {
+                Some(0) | None => "the command finished".into(),
+                Some(code) => format!("the command finished with exit code {code}"),
+            },
             TerminalSendEnd::Quiet => format!(
                 "the output stopped for {} ms",
                 quiet.unwrap_or_default().as_millis()
