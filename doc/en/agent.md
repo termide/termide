@@ -1186,7 +1186,9 @@ sends its command `Ctrl+C`, and `close` ends it.
 
 `send` is how the agent drives an interactive program — a REPL, a debugger,
 a prompt asking `[y/N]`, a full-screen program: it types `input` (a line
-break is `Enter`), presses `keys` by name (`Enter`, `Tab`, `Esc`, `Up`,
+break is `Enter`; to submit a line press `Enter` in `keys`, since a line
+break at the very end of `input` may not reach the terminal), presses
+`keys` by name (`Enter`, `Tab`, `Esc`, `Up`,
 `PageDown`, `F5`, `Ctrl+C`, `Alt+b`…), and waits — until the text `wait_for`
 appears in the output, until the output stops for `quiet_ms` (half a second
 when neither is given), or `timeout` seconds at most (10 by default). It

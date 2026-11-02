@@ -74,7 +74,7 @@ impl Tool for TerminalsTool {
                 },
                 "input": {
                     "type": "string",
-                    "description": "send: text to type; a line break is Enter"
+                    "description": "send: text to type; a line break inside it is Enter — to submit the line, press Enter in `keys`"
                 },
                 "keys": {
                     "type": "array",
