@@ -9685,12 +9685,13 @@ fn a_reset_already_past_offers_no_wait() {
 }
 
 /// A running subagent keeps a row in the state strip — its agent, task,
-/// latest progress and clock — and past three the rest fold into `+N`.
+/// latest progress and clock — newest first, and past five the oldest fold
+/// into `+N`.
 #[test]
 fn running_subagents_show_in_the_state_strip() {
     let colors = ThemeColors::default();
     let mut panel = panel(vec![]);
-    for n in 1..=5 {
+    for n in 1..=7 {
         panel.transcript.push(Item::Tool {
             call: ToolCall {
                 id: format!("call-{n}"),
@@ -9714,10 +9715,11 @@ fn running_subagents_show_in_the_state_strip() {
     };
     let rows = panel.strip_rows(80);
     let lines = crate::strip::strip_lines(&rows, 80, &colors);
-    assert_eq!(lines.len(), 4);
+    assert_eq!(lines.len(), 6);
+    // Newest first: the oldest are the ones folded away.
     let first = text(&lines[0]);
     let head = format!(
-        "& {} · search  find thing 1",
+        "& {} · search  find thing 7",
         termide_i18n::t().agent_tool_task()
     );
     assert!(first.starts_with(&head), "{first}");
@@ -9726,7 +9728,8 @@ fn running_subagents_show_in_the_state_strip() {
     let unit = termide_i18n::t().time_unit_secs();
     assert!(first.trim_end().ends_with(unit), "{first}");
     assert!(termide_ui::str_display_width(&first) <= 80, "{first}");
-    assert_eq!(text(&lines[3]).trim_end(), "& +2");
+    assert!(text(&lines[4]).contains("find thing 3"));
+    assert_eq!(text(&lines[5]).trim_end(), "& +2");
 }
 
 /// A session log in `dir` holding one request, as the panel would have left
@@ -11571,14 +11574,14 @@ fn a_parked_delegate_asks_nothing_when_the_policy_waits() {
     crate::live::clear_parked_of(id);
 }
 
-/// Past three running subagents the strip counts the rest; a click on the
+/// Past five running subagents the strip counts the oldest; a click on the
 /// count shows them all, and the row after them folds them back.
 #[test]
 fn the_strip_count_of_subagents_unfolds_and_folds_back() {
     let mut panel = panel(vec![]);
     let id = panel.panel_id();
-    let calls: Vec<String> = (0..5).map(|n| format!("more-{n}")).collect();
-    let tasks: Vec<String> = (0..5).map(|n| format!("task number {n}")).collect();
+    let calls: Vec<String> = (0..7).map(|n| format!("more-{n}")).collect();
+    let tasks: Vec<String> = (0..7).map(|n| format!("task number {n}")).collect();
     let registrations: Vec<_> = calls
         .iter()
         .zip(&tasks)
@@ -11597,12 +11600,12 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
     let (width, height) = (80, 40);
     let shown = |panel: &mut AgentPanel| {
         let rows = render_text(panel, width, height);
-        (0..5)
+        (0..7)
             .filter(|n| {
                 rows.iter()
                     .any(|line| line.contains(&format!("task number {n}")))
             })
-            .count()
+            .collect::<Vec<_>>()
     };
     let click = |panel: &mut AgentPanel| {
         let row = strip_row(panel, crate::strip::StripTarget::MoreTasks);
@@ -11617,7 +11620,8 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
         );
         row
     };
-    assert_eq!(shown(&mut panel), 3);
+    // Folded, the newest stay in sight.
+    assert_eq!(shown(&mut panel), [2, 3, 4, 5, 6]);
     let rows = render_text(&mut panel, width, height);
     let row = strip_row(&panel, crate::strip::StripTarget::MoreTasks);
     assert!(
@@ -11626,7 +11630,7 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
         rows[row as usize]
     );
     click(&mut panel);
-    assert_eq!(shown(&mut panel), 5);
+    assert_eq!(shown(&mut panel).len(), 7);
     let rows = render_text(&mut panel, width, height);
     let row = strip_row(&panel, crate::strip::StripTarget::MoreTasks);
     assert!(
@@ -11635,7 +11639,7 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
         rows[row as usize]
     );
     click(&mut panel);
-    assert_eq!(shown(&mut panel), 3);
+    assert_eq!(shown(&mut panel).len(), 5);
     drop(registrations);
 }
 
@@ -13389,25 +13393,26 @@ fn the_sessions_terminals_show_in_the_strip_and_end_with_it() {
         .iter()
         .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
         .collect();
+    // Newest first.
+    assert!(text[0].starts_with("$ Terminal · tests · idle"), "{text:?}");
     assert!(
-        text[0].starts_with("$ Terminal · dev  npm run dev"),
+        text[1].starts_with("$ Terminal · dev  npm run dev"),
         "{text:?}"
     );
-    assert!(text[0].trim_end().ends_with("✕"), "{text:?}");
-    assert!(text[1].starts_with("$ Terminal · tests · idle"), "{text:?}");
+    assert!(text[1].trim_end().ends_with("✕"), "{text:?}");
     assert_eq!(rows.len(), 2, "another session's terminal is not shown");
     let status: String = panel.segments().iter().map(|s| s.text.as_str()).collect();
     assert!(status.contains("terminals: 2"), "{status}");
 
     // The row opens its terminal in a panel.
-    let events = panel.click_strip(rows[0].target, false);
+    let events = panel.click_strip(rows[1].target, false);
     assert!(
         matches!(&events[..], [PanelEvent::OpenAgentTerminal { session, name }]
             if *session == owner && name == "dev"),
         "{events:?}"
     );
     // `✕` asks first, then closes it.
-    let events = panel.click_strip(rows[1].target, true);
+    let events = panel.click_strip(rows[0].target, true);
     let Some(PanelEvent::ShowConfirm {
         on_confirm: termide_core::ConfirmAction::Custom(action),
         ..
