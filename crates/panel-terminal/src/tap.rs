@@ -3,8 +3,8 @@
 //! session from here. The latest bytes stay in memory, each reader keeping
 //! its own place by offset; all of them go to a log file, up to a cap.
 //!
-//! The tap also notes where the shell marks a command's start and end
-//! (OSC 133 `C` and `D`), as the bytes arrive: a mark is found even when the
+//! The tap also notes where the shell marks its prompt and a command's start
+//! and end (OSC 133 `A`, `C` and `D`), as the bytes arrive: a mark is found even when the
 //! bytes around it are long gone from memory.
 
 use std::collections::VecDeque;
@@ -31,6 +31,8 @@ pub struct TapChunk {
 /// A shell's mark of where a command's output starts or ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkKind {
+    /// OSC 133 `A`: the shell shows its prompt, ready for a command.
+    Prompt,
     /// OSC 133 `C`: the command starts; its output follows.
     Start,
     /// OSC 133 `D`: the command is over, with its exit code when given.
@@ -106,6 +108,8 @@ impl Scanner {
 fn parse_mark(body: &[u8]) -> Option<MarkKind> {
     let rest = body.strip_prefix(b"\x1b]133;")?;
     match rest {
+        b"A" => Some(MarkKind::Prompt),
+        [b'A', b';', ..] => Some(MarkKind::Prompt),
         b"C" => Some(MarkKind::Start),
         [b'D', code @ ..] => {
             let code = code
@@ -315,6 +319,14 @@ mod tests {
         tap.close();
         assert!(tap.read_since(8).closed);
         assert_eq!(std::fs::read(&path).unwrap(), b"abcdef");
+    }
+
+    #[test]
+    fn a_prompt_is_marked_with_or_without_options() {
+        let tap = OutputTap::new(64, None);
+        tap.push(b"\x1b]133;A\x07$ \x1b]133;A;click_events=1\x1b\\> \x1b]133;B\x07\x1b]133;C;cmdline_url=ls\x07");
+        let kinds: Vec<_> = tap.marks_since(0).iter().map(|mark| mark.kind).collect();
+        assert_eq!(kinds, [MarkKind::Prompt, MarkKind::Prompt]);
     }
 
     #[test]

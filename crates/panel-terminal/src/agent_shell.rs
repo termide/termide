@@ -139,7 +139,9 @@ unset __termide_keymap
 /// fish runs it after the user's `config.fish`. As for bash: job control
 /// off; no history file; no pagers; and no greeting. The `fish_preexec`
 /// event marks a command's start, `fish_postexec` its end with its exit
-/// code.
+/// code, and `fish_prompt` the prompt: fish drops what is typed while it
+/// waits for the terminal's answers to its queries, at start, so a command
+/// is typed only at a prompt. (fish 4 marks all three itself too.)
 const FISH_INIT: &str = r#"# termide: the agent's shell session.
 status job-control none
 set -g fish_history ''
@@ -152,6 +154,9 @@ set -g fish_greeting ''
 function __termide_preexec --on-event fish_preexec
   set -g __termide_ran 1
   printf '\e]133;C\a'
+end
+function __termide_prompt --on-event fish_prompt
+  printf '\e]133;A\a'
 end
 function __termide_postexec --on-event fish_postexec
   set -l code $status
@@ -577,17 +582,20 @@ impl AgentShell {
         if self.tap.is_closed() {
             return Err(RunError::Exited);
         }
+        let since = Instant::now();
+        let deadline = since + timeout;
+        if self.kind == SessionShell::Fish {
+            self.await_prompt(deadline);
+        }
         let sent = self.tap.end();
         self.input
             .send(typed(self.kind, command))
             .map_err(|e| RunError::Input(e.to_string()))?;
-        let since = Instant::now();
         *lock(&self.in_flight) = Some(InFlight {
             command: command.to_string(),
             since,
             sent,
         });
-        let deadline = since + timeout;
         let mut read_to: Option<u64> = None;
         let mut dropped = 0;
         loop {
@@ -641,6 +649,24 @@ impl AgentShell {
                 });
             }
             self.tap.wait_past(seen, POLL);
+        }
+    }
+
+    /// Wait, until `deadline` at most, for the shell to show its prompt: the
+    /// latest mark is one of a prompt.
+    fn await_prompt(&self, deadline: Instant) {
+        loop {
+            let seen = self.tap.end();
+            let at_prompt = self
+                .tap
+                .marks_since(0)
+                .last()
+                .is_some_and(|mark| mark.kind == MarkKind::Prompt);
+            let left = deadline.saturating_duration_since(Instant::now());
+            if at_prompt || self.tap.is_closed() || left.is_zero() {
+                return;
+            }
+            self.tap.wait_past(seen, POLL.min(left));
         }
     }
 
@@ -839,6 +865,36 @@ mod shell_tests {
         session_in("bash", home)
     }
 
+    /// `out` without escape sequences and carriage returns: fish sets the
+    /// title and reports the directory while a command runs, which the
+    /// `shell` tool cleans away.
+    fn plain(out: &str) -> String {
+        let mut text = String::new();
+        let mut chars = out.chars().peekable();
+        while let Some(c) = chars.next() {
+            match (c, chars.peek()) {
+                ('\x1b', Some(']')) => {
+                    while let Some(c) = chars.next() {
+                        if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                }
+                ('\x1b', Some('[')) => {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if ('\x40'..='\x7e').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                ('\r', _) => {}
+                _ => text.push(c),
+            }
+        }
+        text
+    }
+
     /// A session of `program` in a scratch home, its startup files there;
     /// `None` when the shell is not installed.
     fn session_in(program: &str, home: &Path) -> Option<(Terminal, AgentShell)> {
@@ -893,7 +949,7 @@ mod shell_tests {
             let long = Duration::from_secs(20);
             let (out, outcome) = run(&shell, &format!("mkdir sub && cd sub && {set}"), long);
             assert_eq!(
-                (out.as_str(), outcome.end),
+                (plain(&out).as_str(), outcome.end),
                 ("", RunEnd::Finished(Some(0))),
                 "{program}"
             );
@@ -902,7 +958,7 @@ mod shell_tests {
                 "echo \"$X $RC $(basename \"$PWD\")\"\nprintf '%s|\\n' 'a  b' \"c'd\"\nfalse",
                 long,
             );
-            assert_eq!(out, "42 ran sub\na  b|\nc'd|\n", "{program}");
+            assert_eq!(plain(&out), "42 ran sub\na  b|\nc'd|\n", "{program}");
             assert_eq!(outcome.end, RunEnd::Finished(Some(1)), "{program}");
             let (_, outcome) = run(&shell, "sh -c 'exit 7'", long);
             assert_eq!(outcome.end, RunEnd::Finished(Some(7)), "{program}");
