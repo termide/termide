@@ -2,14 +2,14 @@
 //!
 //! A shell run under a real terminal, or a chatty build tool, produces output
 //! that is mostly noise to a language model: colour and cursor escapes,
-//! progress bars redrawn with carriage returns, spinner frames, and long runs
+//! progress bars and REPL lines redrawn under the cursor, spinner frames, and long runs
 //! of near-identical "Compiling …" lines. The user still sees the raw stream
 //! live in the panel and the full log stays on disk; this is only what the
 //! model reads, so trimming the noise cuts tokens without losing signal.
 //!
 //! The passes are deliberately conservative — they never drop a line that
 //! could be a warning or an error — and are ordered so each feeds the next:
-//! escapes and carriage-return redraws first, then duplicate and blank-line
+//! the screen resolved to what it shows first, then duplicate and blank-line
 //! collapsing, then a few command-aware rules. Inspired by rtk
 //! (`rtk-ai/rtk`), which proxies noisy CLIs to save tokens.
 
@@ -41,8 +41,7 @@ impl Cleaned {
 #[must_use]
 pub fn clean_output(raw: &str, command: &str) -> Cleaned {
     let original_bytes = raw.len();
-    let stripped = strip_escapes(raw);
-    let lines: Vec<String> = stripped.lines().map(apply_carriage_returns).collect();
+    let lines = resolve_screen(raw);
     let lines = compact_command(command, lines);
     let lines = compact_test_output(command, lines);
     let lines = collapse_duplicates(&lines);
@@ -53,6 +52,117 @@ pub fn clean_output(raw: &str, command: &str) -> Cleaned {
         original_bytes,
         original_chars: raw.chars().count(),
         text,
+    }
+}
+
+/// The lines a stream of raw output leaves on the screen.
+///
+/// A program that redraws — readline repainting the line you type into a
+/// REPL, a progress bar filling — does not print a new line each time: it
+/// moves the cursor back (`\r`, `ESC [ n D`) or forward (`ESC [ n C`), up
+/// and down (`ESC [ A`, `ESC [ B`) and writes over what it printed before.
+/// Dropping the escapes without that leaves every frame glued together
+/// (`>>> p>>> pr>>> print`), which is what the agent then reads. So each
+/// character lands at the column the cursor is at, overwriting what stood
+/// there, and only the last state of each line survives. Colour, titles and
+/// other escapes are gone; a tab counts as the spaces it skips, so text
+/// written over one lands where the screen puts it.
+fn resolve_screen(raw: &str) -> Vec<String> {
+    let mut rows: Vec<Vec<char>> = vec![Vec::new()];
+    let mut row = 0usize;
+    let mut col = 0usize;
+    // Whether the cursor sits on a row nothing has been written to since it
+    // was opened by a newline.
+    let mut fresh = false;
+    let mut chars = raw.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\n' => {
+                row += 1;
+                while rows.len() <= row {
+                    rows.push(Vec::new());
+                }
+                col = 0;
+                fresh = true;
+            }
+            '\r' => col = 0,
+            '\t' => {
+                // The tab's own cells, so text written over it lands where
+                // the screen puts it.
+                pad(&mut rows[row], col / 8 * 8 + 8);
+                col = rows[row].len();
+                fresh = false;
+            }
+            '\x1b' => match chars.peek() {
+                // CSI: parameters up to a final byte, of which only the four
+                // that move the cursor matter here.
+                Some('[') => {
+                    chars.next();
+                    let mut digits = String::new();
+                    let final_byte = loop {
+                        match chars.next() {
+                            Some(c) if ('\x40'..='\x7e').contains(&c) => break c,
+                            Some(c) => digits.extend(c.is_ascii_digit().then_some(c)),
+                            None => break '\0',
+                        }
+                    };
+                    let n = digits.parse().unwrap_or(1);
+                    // Only the four that move the cursor land anything on a row.
+                    match final_byte {
+                        'C' => col += n,
+                        'D' => col = col.saturating_sub(n),
+                        'A' => row = row.saturating_sub(n),
+                        'B' => {
+                            while rows.len() <= row + 1 {
+                                rows.push(Vec::new());
+                            }
+                            row += 1;
+                        }
+                        _ => continue,
+                    }
+                    fresh = false;
+                }
+                // OSC, DCS and friends run to a BEL or `ESC \`.
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    chars.next();
+                    while let Some(c) = chars.next() {
+                        if c == '\x07' || (c == '\x1b' && chars.next_if_eq(&'\\').is_some()) {
+                            break;
+                        }
+                    }
+                }
+                Some(_) => {
+                    chars.next();
+                }
+                None => {}
+            },
+            c if (c as u32) < 0x20 => {}
+            c => {
+                pad(&mut rows[row], col);
+                if col == rows[row].len() {
+                    rows[row].push(c);
+                } else {
+                    rows[row][col] = c;
+                }
+                col += 1;
+                fresh = false;
+            }
+        }
+    }
+    // A stream that ends on a newline leaves no empty line after it — also
+    // when an escape follows the newline, which writes nothing.
+    if fresh && rows.last().is_some_and(|row| row.is_empty()) {
+        rows.pop();
+    }
+    rows.into_iter()
+        .map(|row| row.into_iter().collect())
+        .collect()
+}
+
+/// Spaces up to the cursor, which has been moved past what was written.
+fn pad(row: &mut Vec<char>, col: usize) {
+    while row.len() < col {
+        row.push(' ');
     }
 }
 
@@ -86,6 +196,17 @@ pub(crate) fn strip_escapes(text: &str) -> String {
                         }
                     }
                 }
+                // DCS and its kinds (ESC P X ^ _): fish's XTGETTCAP queries
+                // are these, and their payload is text a matcher would match.
+                Some('P' | 'X' | '^' | '_') => {
+                    chars.next();
+                    while let Some(p) = chars.next() {
+                        if p == '\x1b' {
+                            chars.next();
+                            break;
+                        }
+                    }
+                }
                 // Other two-byte escapes (ESC ( B, ESC =, …): drop the next.
                 Some(_) => {
                     chars.next();
@@ -100,17 +221,6 @@ pub(crate) fn strip_escapes(text: &str) -> String {
         }
     }
     out
-}
-
-/// Resolve carriage-return redraws within one line: a progress bar rewrites
-/// the line after each `\r`, so only the text after the last non-trailing
-/// `\r` survives. A trailing `\r` (from a `\r\n` split) is dropped.
-fn apply_carriage_returns(line: &str) -> String {
-    let line = line.strip_suffix('\r').unwrap_or(line);
-    match line.rsplit('\r').next() {
-        Some(last) => last.to_string(),
-        None => line.to_string(),
-    }
 }
 
 /// Replace three or more consecutive identical lines with one plus a `(×N)`
@@ -336,6 +446,47 @@ mod tests {
         let raw = "\x1b]0;my title\x07hello\x08\x07 world\n";
         let cleaned = clean_output(raw, "");
         assert_eq!(cleaned.text, "hello world\n");
+    }
+
+    /// A REPL repaints the line as you type, moving back with `ESC [ n D`
+    /// and forward with `ESC [ n C`; the agent must read the line, not every
+    /// frame of it.
+    #[test]
+    fn collapses_a_repl_redraw_to_the_line_it_leaves() {
+        // readline's frames, as they come: back to the first column, repaint
+        // the whole line, back again, forward to where the cursor was.
+        let mut raw = String::new();
+        for text in ["", "p", "pr", "print(\"hi\")"] {
+            let line = format!(">>> {text}");
+            raw.push_str(&format!("\x1b[{}D", line.len()));
+            raw.push_str("\x1b[35m>>> \x1b[0m");
+            raw.push_str(text);
+            raw.push_str(&format!(
+                "\x1b[{}D\x1b[?12l\x1b[?25h\x1b[{}C",
+                line.len(),
+                line.len()
+            ));
+        }
+        raw.push_str("\n\rhi\r\n\x1b[?2004h");
+        let cleaned = clean_output(&raw, "");
+        assert_eq!(cleaned.text, ">>> print(\"hi\")\nhi\n");
+    }
+
+    /// A program that redraws a block of lines with cursor-up leaves the
+    /// block's last state, not its frames.
+    #[test]
+    fn a_block_redrawn_with_cursor_up_keeps_its_last_state() {
+        let raw = "step 1\nstep 2\n\x1b[2Aover 1\nover 2\n";
+        let cleaned = clean_output(raw, "");
+        assert_eq!(cleaned.text, "over 1\nover 2\n");
+    }
+
+    #[test]
+    fn drops_dcs_queries_and_their_payload() {
+        let raw = "\x1bP+q696e646e\x1b\\ready\n";
+        let cleaned = clean_output(raw, "");
+        assert_eq!(cleaned.text, "ready\n");
+        assert_eq!(strip_escapes(raw), "ready\n");
     }
 
     #[test]

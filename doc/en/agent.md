@@ -1192,11 +1192,13 @@ break at the very end of `input` may not reach the terminal), presses
 `PageDown`, `F5`, `Ctrl+C`, `Alt+b`…), and waits — until the text `wait_for`
 appears in the output, until the output stops for `quiet_ms` (half a second
 when neither is given), or `timeout` seconds at most (10 by default). It
-returns what the terminal printed after the input; while a full-screen
-program has the terminal, which redraws rather than prints, it returns the
-screen instead. `screen` returns what the terminal shows at any time, with
-where the cursor is. What the agent typed goes in the order it sent it; a
-command it runs in the terminal meanwhile waits its turn. Each terminal keeps the last
+returns what the terminal printed after the input, with a line a program
+redrew — readline repainting what you type, a progress bar — collapsed to
+what the screen shows of it; while a full-screen program has the terminal,
+which redraws rather than prints, it returns the screen instead. `screen`
+returns what the terminal shows at any time, with where the cursor is. What
+the agent typed goes in the order it sent it; a command it runs in the
+terminal meanwhile waits its turn. Each terminal keeps the last
 2 MiB of its output in memory and the whole of it in a log, up to 256 MiB,
 which the agent can read. Before each request the agent is reminded which of
 its terminals are open, so it closes those it no longer needs.
