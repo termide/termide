@@ -2131,6 +2131,37 @@ fn tool_headline(
             "" => action("&", t.agent_tool_jobs(), String::new()),
             id => action("&", t.agent_tool_jobs_stop(), id.to_string()),
         },
+        // The session's terminals, by their name; what was typed into one is
+        // its first line, as a shell command shows its first.
+        "terminals" => {
+            let name = arg("session");
+            match arg("action").as_str() {
+                "read" => action("$", t.agent_tool_terminals_read(), name),
+                "screen" => action("$", t.agent_tool_terminals_screen(), name),
+                "interrupt" => action("$", t.agent_tool_terminals_interrupt(), name),
+                "close" => action("$", t.agent_tool_terminals_close(), name),
+                "send" => {
+                    let typed: String = arg("input").chars().take(60).collect();
+                    let keys = match &call.arguments["keys"] {
+                        Value::Array(keys) => keys
+                            .iter()
+                            .filter_map(|key| key.as_str())
+                            .collect::<Vec<_>>()
+                            .join("+"),
+                        _ => String::new(),
+                    };
+                    let subject = match (typed.trim(), keys.as_str()) {
+                        ("", "") => name,
+                        ("", keys) => format!("{name} · {keys}"),
+                        (typed, "") => format!("{name} · {typed}"),
+                        (typed, keys) => format!("{name} · {typed} · {keys}"),
+                    };
+                    action("$", t.agent_tool_terminals_send(), subject)
+                }
+                // `list`, and an action the tool names differently: listed.
+                _ => action("$", t.agent_tool_terminals(), String::new()),
+            }
+        }
         // The debugger, in the editor gutter's marks: `●` for a breakpoint,
         // `→` for whatever moves the program or reads where it is.
         "debug" => {
@@ -4746,6 +4777,46 @@ mod tests {
             )),
             None
         );
+    }
+
+    /// `terminals` heads with a `$` and a localized verb per action, never
+    /// its raw arguments.
+    #[test]
+    fn terminal_calls_head_with_their_action() {
+        let colors = ThemeColors::default();
+        let text = |args: Value| -> String {
+            tool_headline(&call("terminals", args), None, 80, colors.info, &colors)
+                .iter()
+                .map(|span| span.content.as_ref())
+                .collect()
+        };
+        let t = termide_i18n::t();
+        assert_eq!(text(json!({})), format!("$ {} ", t.agent_tool_terminals()));
+        assert_eq!(
+            text(json!({ "action": "list" })),
+            format!("$ {} ", t.agent_tool_terminals())
+        );
+        assert_eq!(
+            text(json!({ "action": "read", "session": "py" })),
+            format!("$ {} py", t.agent_tool_terminals_read())
+        );
+        assert_eq!(
+            text(json!({ "action": "send", "session": "py", "input": "1+1", "keys": ["Enter"] })),
+            format!("$ {} py · 1+1 · Enter", t.agent_tool_terminals_send())
+        );
+        assert_eq!(
+            text(json!({ "action": "send", "session": "py", "keys": ["Ctrl+C"] })),
+            format!("$ {} py · Ctrl+C", t.agent_tool_terminals_send())
+        );
+        assert_eq!(
+            text(json!({ "action": "interrupt", "session": "build" })),
+            format!("$ {} build", t.agent_tool_terminals_interrupt())
+        );
+        assert_eq!(
+            text(json!({ "action": "close", "session": "build" })),
+            format!("$ {} build", t.agent_tool_terminals_close())
+        );
+        assert!(!text(json!({ "action": "screen", "session": "py" })).contains('{'));
     }
 
     #[test]

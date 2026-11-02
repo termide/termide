@@ -1233,6 +1233,24 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: the action words for a `jobs` call stopping one of
     /// them, before its id.
     fn agent_tool_jobs_stop(&self) -> &str;
+    /// Agent transcript: the action words for a `terminals` call listing the
+    /// session's terminals.
+    fn agent_tool_terminals(&self) -> &str;
+    /// Agent transcript: the action words for a `terminals` call reading one,
+    /// before its name.
+    fn agent_tool_terminals_read(&self) -> &str;
+    /// Agent transcript: the action words for a `terminals` call typing into
+    /// one, before its name and what was typed.
+    fn agent_tool_terminals_send(&self) -> &str;
+    /// Agent transcript: the action words for a `terminals` call looking at
+    /// one's screen, before its name.
+    fn agent_tool_terminals_screen(&self) -> &str;
+    /// Agent transcript: the action words for a `terminals` call sending one
+    /// Ctrl+C, before its name.
+    fn agent_tool_terminals_interrupt(&self) -> &str;
+    /// Agent transcript: the action words for a `terminals` call closing one,
+    /// before its name.
+    fn agent_tool_terminals_close(&self) -> &str;
     /// Agent transcript: the action words for an MCP server's tool call.
     fn agent_tool_mcp(&self) -> &str;
     /// Agent transcript: the action words for a `question` call.
