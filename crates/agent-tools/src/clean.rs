@@ -67,7 +67,7 @@ pub fn clean_output(raw: &str, command: &str) -> Cleaned {
 /// there, and only the last state of each line survives. Colour, titles and
 /// other escapes are gone; a tab counts as the spaces it skips, so text
 /// written over one lands where the screen puts it.
-fn resolve_screen(raw: &str) -> Vec<String> {
+pub(crate) fn resolve_screen(raw: &str) -> Vec<String> {
     let mut rows: Vec<Vec<char>> = vec![Vec::new()];
     let mut row = 0usize;
     let mut col = 0usize;
@@ -164,63 +164,6 @@ fn pad(row: &mut Vec<char>, col: usize) {
     while row.len() < col {
         row.push(' ');
     }
-}
-
-/// Remove ANSI/VT escape sequences and stray control bytes, keeping `\t`,
-/// `\n` and `\r` (carriage returns are resolved per line afterwards).
-pub(crate) fn strip_escapes(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    let mut chars = text.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\x1b' => match chars.peek() {
-                // CSI: ESC [ … final-byte in 0x40..=0x7e
-                Some('[') => {
-                    chars.next();
-                    for p in chars.by_ref() {
-                        if ('\x40'..='\x7e').contains(&p) {
-                            break;
-                        }
-                    }
-                }
-                // OSC: ESC ] … terminated by BEL or ST (ESC \)
-                Some(']') => {
-                    chars.next();
-                    while let Some(p) = chars.next() {
-                        if p == '\x07' {
-                            break;
-                        }
-                        if p == '\x1b' && chars.peek() == Some(&'\\') {
-                            chars.next();
-                            break;
-                        }
-                    }
-                }
-                // DCS and its kinds (ESC P X ^ _): fish's XTGETTCAP queries
-                // are these, and their payload is text a matcher would match.
-                Some('P' | 'X' | '^' | '_') => {
-                    chars.next();
-                    while let Some(p) = chars.next() {
-                        if p == '\x1b' {
-                            chars.next();
-                            break;
-                        }
-                    }
-                }
-                // Other two-byte escapes (ESC ( B, ESC =, …): drop the next.
-                Some(_) => {
-                    chars.next();
-                }
-                None => {}
-            },
-            // Keep the useful whitespace controls.
-            '\t' | '\n' | '\r' => out.push(c),
-            // Drop other C0 controls (BEL, backspace, form feed, …).
-            c if (c as u32) < 0x20 => {}
-            c => out.push(c),
-        }
-    }
-    out
 }
 
 /// Replace three or more consecutive identical lines with one plus a `(×N)`
@@ -486,7 +429,6 @@ mod tests {
         let raw = "\x1bP+q696e646e\x1b\\ready\n";
         let cleaned = clean_output(raw, "");
         assert_eq!(cleaned.text, "ready\n");
-        assert_eq!(strip_escapes(raw), "ready\n");
     }
 
     #[test]

@@ -15,7 +15,7 @@ use termide_agent_core::{
 };
 
 use crate::args::{optional_str, optional_u64};
-use crate::clean::{clean_output, strip_escapes};
+use crate::clean::{clean_output, resolve_screen};
 use crate::shell::check_session_name;
 use crate::truncate::{head_tail, SHELL_MAX_BYTES};
 
@@ -237,9 +237,7 @@ impl TerminalsTool {
             Err(message) => return ToolResultMessage::error(call, message),
         };
         let quiet = quiet.or(wait_for.is_none().then_some(DEFAULT_QUIET));
-        let until = wait_for.clone().map(|text| {
-            move |raw: &[u8]| strip_escapes(&String::from_utf8_lossy(raw)).contains(&text)
-        });
+        let until = wait_for.clone().map(|text| waits_for(input, text));
         let sent = self.terminals.send(&TerminalSend {
             owner,
             name,
@@ -282,6 +280,27 @@ impl TerminalsTool {
             Err(message) => return ToolResultMessage::error(call, message),
         };
         ToolResultMessage::text(call, output_body(name, &output, ""))
+    }
+}
+
+/// The matcher for `wait_for`: the delta is resolved to what the screen
+/// shows, and the match starts after the line echoing what was typed — the
+/// echo carries the prompt too, so waiting for the prompt would otherwise
+/// report the answer before the program gave one. A program that does not
+/// echo has nothing to skip and is matched whole.
+fn waits_for(input: &str, text: String) -> impl Fn(&[u8]) -> bool + Sync {
+    let echo = input
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(str::to_string);
+    move |raw: &[u8]| {
+        let screen = resolve_screen(&String::from_utf8_lossy(raw));
+        let after = echo
+            .as_ref()
+            .and_then(|echo| screen.iter().position(|line| line.contains(echo)))
+            .map_or(0, |at| at + 1);
+        screen[after..].iter().any(|line| line.contains(&text))
     }
 }
 
@@ -486,6 +505,27 @@ mod tests {
         assert!(call(&tool, json!({"action": "read"}), Some("s1")).is_error);
         assert!(call(&tool, json!({}), None).is_error);
         assert_eq!(*fake.calls.lock().unwrap(), ["read dev", "interrupt dev"]);
+    }
+
+    /// The echo of what was typed carries the prompt, so waiting for the
+    /// prompt must not report the answer before the program gave one.
+    #[test]
+    fn waiting_for_text_starts_after_the_echo_of_what_was_typed() {
+        let typed = "print(\"sum\", 6*7)";
+        let mut echo = String::new();
+        for len in 1..=typed.len() {
+            let line = format!(">>> {}", &typed[..len]);
+            echo.push_str(&format!("\x1b[{}D>>> {}", line.len(), &typed[..len]));
+            echo.push_str(&format!("\x1b[{}D", line.len()));
+        }
+        let waiting = waits_for(typed, ">>> ".into());
+        assert!(!waiting(echo.as_bytes()), "the echo alone is not an answer");
+        let answered = format!("{echo}\r\nsum 42\r\n>>> ");
+        assert!(waiting(answered.as_bytes()), "the prompt after the answer");
+
+        // A program that does not echo is matched whole.
+        let waiting = waits_for("", "ready".into());
+        assert!(waiting(b"starting\nready\n"));
     }
 
     #[test]
