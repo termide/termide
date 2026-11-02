@@ -15,6 +15,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The state strip keeps fresh launches in sight.** Above the input, the running subagents, the commands moved to the background and the agent's terminals each listed the oldest first and showed three, so whatever was just started was the first folded into `+N`. They now list the newest first and show five before folding the oldest away; the queued messages still run in the order the agent takes them.
 - **A tool name no tool goes by is reported.** A name in an agent's `tools:` or a hook's `tools`, and a config's `[ai.permissions.<tool>]` table, that names no tool used to apply to nothing in silence; it is now reported under the agent's banner or among the config warnings. MCP and plugin tool names and wildcard patterns are taken as they are.
 
+### Security
+- **Three ways to slip a command past the look-only check are closed.** The agent's commands that only look ran without asking, and a few that run something passed for them: bash 5.3's `${ cmd; }` and `${|cmd; }`, which run a command as `$(…)` does; an array subscript in `test -v`, `[ -v ]` or a `[[ … -eq … ]]` comparison, which bash evaluates and substitutes in even within single quotes (`test -v 'a[$(cmd)]'`); and an option of `find`, `sort`, `rg` and the like written with quotes or a backslash inside it (`find . -del''ete`). Each of them now asks.
+
 ## [0.48.0] - 2026-10-31
 
 [0.48.0]: https://github.com/termide/termide/releases/tag/0.48.0

@@ -1533,7 +1533,7 @@ fn split_shell(command: &str) -> ParsedShell {
             }
             if c == q {
                 quote = None;
-            } else if q == '"' && (c == '`' || (c == '$' && chars.get(i + 1) == Some(&'('))) {
+            } else if q == '"' && (c == '`' || (c == '$' && opens_substitution(&chars, i))) {
                 // Double quotes still expand substitutions.
                 expands = true;
             }
@@ -1564,12 +1564,16 @@ fn split_shell(command: &str) -> ParsedShell {
                 }
                 current.push(c);
             }
-            '$' if chars.get(i + 1) == Some(&'(') => {
+            '$' if opens_substitution(&chars, i) => {
                 expands = true;
-                open.push('(');
+                open.push(if chars[i + 1] == '(' { '(' } else { '{' });
                 current.push(c);
             }
             ')' if open.last() == Some(&'(') => {
+                open.pop();
+                current.push(c);
+            }
+            '}' if open.last() == Some(&'{') => {
                 open.pop();
                 current.push(c);
             }
@@ -1621,6 +1625,19 @@ fn split_shell(command: &str) -> ParsedShell {
     }
     parsed.has_substitution = parsed.substituted.iter().any(|e| *e);
     parsed
+}
+
+/// Whether the `$` at `at` starts a command substitution: `$(…)`, or the
+/// `${ …; }` and `${|…; }` forms of bash 5.3, ksh93 and mksh, which run the
+/// command in the shell itself. `${NAME}` is a parameter.
+fn opens_substitution(chars: &[char], at: usize) -> bool {
+    match chars.get(at + 1) {
+        Some('(') => true,
+        Some('{') => chars
+            .get(at + 2)
+            .is_some_and(|c| c.is_whitespace() || *c == '|'),
+        _ => false,
+    }
 }
 
 /// The here-document `<<` at `start` opens, and where its operator and
@@ -1692,7 +1709,12 @@ fn skip_heredocs(
             if line == delimiter {
                 break;
             }
-            if body_expands && (line.contains("$(") || line.contains('`')) {
+            let line_chars: Vec<char> = line.chars().collect();
+            let substitutes = line_chars
+                .iter()
+                .enumerate()
+                .any(|(at, c)| *c == '`' || (*c == '$' && opens_substitution(&line_chars, at)));
+            if body_expands && substitutes {
                 *expands = true;
             }
         }
@@ -2375,7 +2397,20 @@ pub fn is_read_only_command(part: &str) -> bool {
     if part.contains('>') || part.contains("<(") {
         return false;
     }
-    let words: Vec<&str> = part.split_whitespace().collect();
+    // An array subscript is arithmetic in bash, and arithmetic runs the
+    // substitutions in it however they were quoted: `test -v 'a[$(rm x)]'`.
+    if part.contains('[') && (part.contains("$(") || part.contains('`')) {
+        return false;
+    }
+    // Quotes and backslashes only join a word for the program: `-del''ete`
+    // reaches `find` as `-delete`. Without them an option is seen as the
+    // program gets it; a quoted space splitting a word in two can only make
+    // a command look less read-only.
+    let bare: String = part
+        .chars()
+        .filter(|c| !matches!(c, '\'' | '"' | '\\'))
+        .collect();
+    let words: Vec<&str> = bare.split_whitespace().collect();
     let Some((&head, args)) = words.split_first() else {
         return false;
     };
@@ -2414,7 +2449,7 @@ pub fn is_read_only_command(part: &str) -> bool {
         "file" => !args.iter().any(|a| *a == "-C" || *a == "--compile"),
         "find" => !["-delete", "-exec", "-ok", "-fprint", "-fls"]
             .iter()
-            .any(|action| part.contains(action)),
+            .any(|action| bare.contains(action)),
         "git" => is_read_only_git(args),
         "gh" | "glab" | "tea" => is_read_only_forge(head, args),
         "sed" => shell_words(&part).is_some_and(|words| is_print_only_sed(&words[1..])),
@@ -3604,6 +3639,35 @@ mod tests {
             Decision::Ask,
             "substitution in a loop header"
         );
+    }
+
+    #[test]
+    fn commands_run_through_a_back_door_are_not_look_only() {
+        let (hooks, _) = hooks(PermissionRules::default(), vec![]);
+        let decide = |cmd: &str| hooks.decide(&bash(cmd), &ctx());
+        for command in [
+            // bash 5.3, ksh93 and mksh run a command in `${ …; }`.
+            "echo ${ touch x; }",
+            "echo \"${ touch x; }\"",
+            "echo ${|touch x; }",
+            "cat <<EOF\n${ touch x; }\nEOF",
+            // An array subscript is arithmetic, which substitutes even what
+            // single quotes kept from the shell.
+            "test -v 'a[$(touch x)]'",
+            "[ -v 'a[$(touch x)]' ]",
+            "[[ 'a[$(touch x)]' -eq 0 ]]",
+            // Quotes and backslashes join an option back together.
+            "find . -del''ete",
+            "find . -de\\lete",
+            "find . '-exec' rm {} +",
+            "sort -'o' out in",
+            "rg --'pre'=sh x",
+        ] {
+            assert_eq!(decide(command), Decision::Ask, "{command}");
+        }
+        assert_eq!(decide("echo ${HOME} \"${PWD}\""), Decision::Allow);
+        assert_eq!(decide("[ -n \"${PWD}\" ] && ls"), Decision::Allow);
+        assert_eq!(decide("grep 'a[0-9]' src/x"), Decision::Allow);
     }
 
     #[test]
