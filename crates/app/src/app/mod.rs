@@ -276,6 +276,7 @@ impl App {
         state.runtime_overrides = runtime_overrides;
         state.update_terminal_size(width, height);
         state.detach_available = Self::detect_detach_available();
+        agent_panel::publish_shell(state.config.terminal.default_shell.as_deref());
 
         // Get project root from current working directory
         let project_root = std::env::current_dir()
