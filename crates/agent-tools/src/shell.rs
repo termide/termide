@@ -820,6 +820,25 @@ mod tests {
             "{}",
             result.plain_text()
         );
+
+        if Command::new("fish").arg("-c").arg("true").status().is_err() {
+            return;
+        }
+        let fish = ShellTool {
+            shell: ShellProgram::new("fish").unwrap(),
+            ..tool(dir.path())
+        };
+        let (result, _) = run_with(
+            &fish,
+            dir.path(),
+            json!({ "command": "set x (string join - a b); and echo $x" }),
+            &CancelToken::new(),
+        );
+        assert!(
+            result.plain_text().starts_with("a-b"),
+            "{}",
+            result.plain_text()
+        );
     }
 
     /// A command must not reach termide's own terminal: a debugger, `stty` or
