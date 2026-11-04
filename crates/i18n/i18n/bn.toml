@@ -910,6 +910,7 @@ settings_ai_connection_default = "ডিফল্ট হিসেবে ব্�
 settings_ai_connection_subagents = "সাবএজেন্ট"
 settings_ai_connection_subagents_own = "এই সংযোগ"
 settings_ai_connection_max_requests = "একসাথে অনুরোধ"
+settings_ai_connection_attribution = "Termide হিসেবে পরিচিত দিন"
 settings_ai_connection_name_taken = "প্রতিটি সংযোগের আলাদা নাম প্রয়োজন"
 settings_web_backend = "ওয়েব ব্যাকএন্ড"
 menu_ai_show_browser = "ব্রাউজার উইন্ডো দেখান"

@@ -1373,6 +1373,9 @@ pub trait Translation: Send + Sync {
     fn settings_ai_connection_context_limit(&self) -> &str;
     /// Settings modal: how many requests a connection serves at once.
     fn settings_ai_connection_max_requests(&self) -> &str;
+    /// Settings modal: the switch that identifies termide to an endpoint that
+    /// files usage by the app that sent it.
+    fn settings_ai_connection_attribution(&self) -> &str;
     /// Settings modal: a connection left without a name, or with another's.
     fn settings_ai_connection_name_taken(&self) -> &str;
     /// Settings modal: the permission mode new agent sessions start in.

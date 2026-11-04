@@ -11,10 +11,11 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use termide_agent_core::{
-    now_millis, AssistantContent, AssistantMessage, CancelToken, Message, ModelInfo, Provider,
-    Request, StopReason, StreamEvent, ThinkingLevel, ToolCall, Usage,
+    now_millis, AssistantContent, AssistantMessage, Attribution, CancelToken, Message, ModelInfo,
+    Provider, Request, StopReason, StreamEvent, ThinkingLevel, ToolCall, Usage,
 };
 
+use crate::attribution;
 use crate::retry::{with_retries, Failure, RetryPolicy};
 
 /// The Messages API version pinned in the request header.
@@ -26,6 +27,9 @@ pub struct AnthropicProvider {
     name: String,
     base_url: String,
     api_key: Option<String>,
+    /// How to identify termide to this endpoint, when it files usage by app
+    /// and the user asked for it; `None` sends no such header.
+    attribution: Option<Attribution>,
     pub retry: RetryPolicy,
     pub read_timeout: Duration,
     pub connect_timeout: Duration,
@@ -56,6 +60,7 @@ impl AnthropicProvider {
                 base
             },
             api_key: None,
+            attribution: None,
             retry: RetryPolicy::default(),
             read_timeout,
             connect_timeout,
@@ -66,6 +71,14 @@ impl AnthropicProvider {
     #[must_use]
     pub fn with_api_key(mut self, key: Option<String>) -> Self {
         self.api_key = key.filter(|k| !k.is_empty());
+        self
+    }
+
+    /// Identify termide to the endpoint with `attribution`'s headers; `None`
+    /// leaves the request unattributed, as Anthropic's own API sees it.
+    #[must_use]
+    pub fn with_attribution(mut self, attribution: Option<Attribution>) -> Self {
+        self.attribution = attribution;
         self
     }
 
@@ -152,6 +165,7 @@ impl AnthropicProvider {
         if let Some(key) = &self.api_key {
             http = http.set("x-api-key", key);
         }
+        let http = attribution::apply(http, self.attribution);
         let response = match http.send_string(body) {
             Ok(response) => response,
             Err(ureq::Error::Status(code, response)) => {
@@ -243,6 +257,7 @@ impl Provider for AnthropicProvider {
         if let Some(key) = &self.api_key {
             http = http.set("x-api-key", key);
         }
+        let http = attribution::apply(http, self.attribution);
         let body = match http.call() {
             Ok(response) => response
                 .into_string()

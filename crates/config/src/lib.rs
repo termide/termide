@@ -38,6 +38,7 @@ pub use placeholders::{
     CONTEXT_PLACEHOLDERS,
 };
 pub use plugins::{builtin_plugin_enabled, plugin_enabled, PluginMode, PluginSettings};
+pub use settings::{attribution_of, url_host, ATTRIBUTION_HOSTS};
 pub use settings::{builtin_web_engines, WEB_BACKENDS, WEB_DISPLAYS};
 pub use settings::{is_cli_provider, permission_modes};
 pub use settings::{

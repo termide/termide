@@ -7,10 +7,11 @@ use std::time::Duration;
 
 use serde_json::{json, Map, Value};
 use termide_agent_core::{
-    AssistantContent, AssistantMessage, CancelToken, Message, ModelInfo, Provider, Request,
-    StopReason, StreamEvent, ThinkingLevel,
+    AssistantContent, AssistantMessage, Attribution, CancelToken, Message, ModelInfo, Provider,
+    Request, StopReason, StreamEvent, ThinkingLevel,
 };
 
+use crate::attribution;
 use crate::retry::{with_retries, Failure, RetryPolicy};
 use crate::sse::Accumulator;
 
@@ -80,6 +81,9 @@ pub struct OpenAiCompatProvider {
     /// Base URL including the API prefix, e.g. `http://127.0.0.1:10000/v1`.
     base_url: String,
     api_key: Option<String>,
+    /// How to identify termide to this endpoint, when it files usage by app
+    /// and the user asked for it; `None` sends no such header.
+    attribution: Option<Attribution>,
     pub compat: Compat,
     pub retry: RetryPolicy,
     /// Idle limit between two SSE reads; a stalled server fails the request.
@@ -102,6 +106,7 @@ impl OpenAiCompatProvider {
             refused: refusals_of(&base_url),
             base_url,
             api_key: None,
+            attribution: None,
             compat: Compat::default(),
             retry: RetryPolicy::default(),
             read_timeout,
@@ -113,6 +118,15 @@ impl OpenAiCompatProvider {
     #[must_use]
     pub fn with_api_key(mut self, key: Option<String>) -> Self {
         self.api_key = key.filter(|k| !k.is_empty());
+        self
+    }
+
+    /// Identify termide to the endpoint with `attribution`'s headers; `None`
+    /// leaves the request unattributed, as any server that has no per-app
+    /// notion sees it.
+    #[must_use]
+    pub fn with_attribution(mut self, attribution: Option<Attribution>) -> Self {
+        self.attribution = attribution;
         self
     }
 
@@ -354,6 +368,7 @@ impl OpenAiCompatProvider {
         if let Some(key) = &self.api_key {
             http = http.set("Authorization", &format!("Bearer {key}"));
         }
+        let http = attribution::apply(http, self.attribution);
 
         let response = match http.send_string(body) {
             Ok(response) => response,
@@ -458,6 +473,7 @@ impl Provider for OpenAiCompatProvider {
         if let Some(key) = &self.api_key {
             http = http.set("Authorization", &format!("Bearer {key}"));
         }
+        let http = attribution::apply(http, self.attribution);
         let body = match http.call() {
             Ok(response) => response
                 .into_string()
@@ -779,6 +795,15 @@ mod tests {
     /// One-shot HTTP responder: each entry answers one request in order and
     /// records the request bodies.
     fn serve(responses: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
+        serve_recording(responses, false)
+    }
+
+    /// The same, recording whole requests so their headers can be asserted.
+    fn serve_raw(responses: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
+        serve_recording(responses, true)
+    }
+
+    fn serve_recording(responses: Vec<String>, whole: bool) -> (String, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let bodies = Arc::new(Mutex::new(Vec::new()));
@@ -788,8 +813,10 @@ mod tests {
                 let Ok((mut stream, _)) = listener.accept() else {
                     return;
                 };
-                let body = read_request(&mut stream);
-                seen.lock().unwrap().push(body);
+                let raw = read_request(&mut stream);
+                seen.lock()
+                    .unwrap()
+                    .push(if whole { raw.clone() } else { body_of(&raw) });
                 let _ = stream.write_all(response.as_bytes());
                 let _ = stream.flush();
             }
@@ -797,6 +824,13 @@ mod tests {
         (url, bodies)
     }
 
+    /// The body of a raw HTTP request: what follows its blank line.
+    fn body_of(raw: &str) -> String {
+        raw.find("\r\n\r\n")
+            .map_or_else(String::new, |end| raw[end + 4..].to_string())
+    }
+
+    /// The whole request, headers included: the caller takes its body.
     fn read_request(stream: &mut TcpStream) -> String {
         let mut raw = Vec::new();
         let mut buffer = [0u8; 4096];
@@ -817,7 +851,7 @@ mod tests {
             let n = stream.read(&mut buffer).unwrap();
             raw.extend_from_slice(&buffer[..n]);
         }
-        String::from_utf8_lossy(&raw[header_end..header_end + content_length]).into_owned()
+        String::from_utf8_lossy(&raw).into_owned()
     }
 
     fn sse(body: &str) -> String {
@@ -1240,6 +1274,67 @@ data: [DONE]\n";
         let body: Value = serde_json::from_str(&bodies.lock().unwrap()[0]).unwrap();
         assert_eq!(body["messages"][0]["content"], "read x");
         assert!(body.get("tools").is_none());
+    }
+
+    /// The identification headers go where the connection was switched on to
+    /// send them and nowhere else; the endpoint's own headers are untouched.
+    #[test]
+    fn a_connection_asked_to_identify_names_termide_and_another_does_not() {
+        let transcript = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n\
+data: [DONE]\n";
+        let ask = |attribution: Option<Attribution>| {
+            let (url, seen) = serve_raw(vec![sse(transcript)]);
+            let provider = provider(&url).with_attribution(attribution);
+            let messages = vec![Message::User(UserMessage::text("hi"))];
+            let request = Request {
+                model: &model(),
+                system_prompt: "",
+                messages: &messages,
+                tools: &[],
+                thinking: ThinkingLevel::Off,
+            };
+            let message = provider.stream(&request, &mut |_| {}, &CancelToken::new());
+            assert_eq!(message.plain_text(), "ok");
+            let raw = seen.lock().unwrap()[0].clone();
+            (raw.clone(), raw.to_ascii_lowercase())
+        };
+
+        let (identified, identified_ci) = ask(Some(Attribution {
+            referer: "https://github.com/termide/termide",
+            title: "Termide",
+            categories: "cli-agent,programming-app",
+        }));
+        // As the service spells them, so its own parsing finds them.
+        assert!(
+            identified.contains("HTTP-Referer: https://github.com/termide/termide"),
+            "{identified}"
+        );
+        assert!(
+            identified.contains("X-OpenRouter-Title: Termide"),
+            "{identified}"
+        );
+        assert!(
+            identified.contains("X-OpenRouter-Categories: cli-agent,programming-app"),
+            "{identified}"
+        );
+        assert!(
+            identified_ci.contains("authorization: bearer secret"),
+            "{identified_ci}"
+        );
+
+        let (_, unattributed_ci) = ask(None);
+        assert!(
+            !unattributed_ci.contains("http-referer"),
+            "{unattributed_ci}"
+        );
+        assert!(
+            !unattributed_ci.contains("x-openrouter"),
+            "{unattributed_ci}"
+        );
+        assert!(
+            unattributed_ci.contains("authorization: bearer secret"),
+            "{unattributed_ci}"
+        );
     }
 
     #[test]

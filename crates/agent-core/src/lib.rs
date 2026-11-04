@@ -116,8 +116,8 @@ pub use permissions::{
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{
-    one_shot, one_shot_spent, ModelInfo, ModelSpec, Provider, Request, StreamEvent, ThinkingLevel,
-    ToolSpec,
+    one_shot, one_shot_spent, Attribution, ModelInfo, ModelSpec, Provider, Request, StreamEvent,
+    ThinkingLevel, ToolSpec,
 };
 pub use prune::{prune_by, prune_to_decisions};
 pub use recall::{RecallPrompt, SEED_RECALL};

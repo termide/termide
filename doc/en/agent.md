@@ -34,6 +34,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # context_window_fallback = 32000  # used only when the server does not report a window
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
 # reviewer = "small"               # the connection whose model reviews in `auto`; default: [ai.auto_reviewer]
+# app_attribution = false          # not to identify termide to the endpoint; default on, and only where it is tracked
 
 [ai.connections.cloud]
 provider = "anthropic_compatible"
@@ -47,8 +48,8 @@ provider = "codex"                 # a CLI agent needs nothing else
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
-`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests`;
-what it leaves out takes that field's default.
+`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and
+`app_attribution`; what it leaves out takes that field's default.
 `max_concurrent_requests` caps how many requests the connection serves at
 once across the whole termide process — the agents of every panel, their
 subagents, the `auto` reviewer and the other side calls on it; the rest wait
@@ -62,7 +63,24 @@ processes do not share it. A CLI agent sends its requests itself, so it has
 none.
 Every server but the hosted APIs is asked for its prompt-processing progress
 (`return_progress`), which llama.cpp reports and others ignore; one that
-refuses the field is asked again without it. Everything else in `[ai]` — the output limit, reasoning,
+refuses the field is asked again without it.
+`app_attribution` identifies termide to an endpoint that keeps a breakdown of
+usage by the app that sent it — OpenRouter today, which files the requests of
+an app that sends no such headers under `Unknown`. Termide names itself there:
+its name and address as the app, and the categories it belongs to. It is **on
+by default**, because termide already sends its name in `User-Agent` to every
+endpoint it talks to — the headers only let an endpoint that tracks this file
+what it already sees under a name instead of `Unknown`. The switch appears on
+the connection's page only for an endpoint that tracks this — it shows up as
+soon as you leave the base URL field on a host that does, without waiting for
+the settings to be saved, and goes away when the URL points elsewhere. A local
+llama.cpp, vLLM or Ollama has no per-app notion and ignores the headers, so
+there is nothing to switch there. Where it does apply, the app's page at the
+service is the one everyone sending that address shares and its usage shows in
+the open; turn the switch off to stay unattributed. The headers come from the
+endpoint's own entry, so an endpoint changed under a switch left on sends
+nothing — the switch alone never names termide anywhere.
+Everything else in `[ai]` — the output limit, reasoning,
 permissions, compaction and the rest — applies whichever connection a session
 runs on.
 
@@ -103,7 +121,8 @@ The settings modal (the gear, or the command palette) has all of it under
 **AI**. **Connections** comes first: each row names a connection with its
 provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
-key, API key variable, model, context window (for a CLI agent, **Context window
+key, API key variable, **Identify as Termide** (only for an endpoint that keeps
+a breakdown of usage by app, see `app_attribution` above), model, context window (for a CLI agent, **Context window
 limit**, see below), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and

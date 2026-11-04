@@ -10,6 +10,7 @@
 //! lines.
 
 mod anthropic;
+mod attribution;
 mod openai;
 mod retry;
 mod slots;

@@ -910,6 +910,7 @@ settings_ai_connection_default = "ใช้เป็นค่าเริ่ม�
 settings_ai_connection_subagents = "เอเจนต์ย่อย"
 settings_ai_connection_subagents_own = "การเชื่อมต่อนี้"
 settings_ai_connection_max_requests = "คำขอพร้อมกัน"
+settings_ai_connection_attribution = "ระบุตัวตนเป็น Termide"
 settings_ai_connection_name_taken = "การเชื่อมต่อแต่ละรายการต้องมีชื่อไม่ซ้ำกัน"
 settings_web_backend = "แบ็กเอนด์เว็บ"
 menu_ai_show_browser = "แสดงหน้าต่างเบราว์เซอร์"

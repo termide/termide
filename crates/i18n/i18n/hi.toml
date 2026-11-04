@@ -910,6 +910,7 @@ settings_ai_connection_default = "डिफ़ॉल्ट रूप से उ�
 settings_ai_connection_subagents = "सब-एजेंट"
 settings_ai_connection_subagents_own = "यही कनेक्शन"
 settings_ai_connection_max_requests = "एक साथ अनुरोध"
+settings_ai_connection_attribution = "Termide के रूप में पहचानें"
 settings_ai_connection_name_taken = "हर कनेक्शन का अपना अलग नाम होना चाहिए"
 settings_web_backend = "वेब बैकएंड"
 menu_ai_show_browser = "ब्राउज़र विंडो दिखाएँ"

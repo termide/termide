@@ -30,6 +30,9 @@ pub(super) const CONTEXT_LIMIT: usize = 10;
 /// The key kept in the password vault: a dropdown of what can be done
 /// with it, never its value.
 pub(super) const API_KEY: usize = 11;
+/// Whether to identify termide to the endpoint. On the page only for an
+/// endpoint that files usage by app, where the switch means something.
+pub(super) const APP_ATTRIBUTION: usize = 12;
 
 /// The API key dropdown's entries besides the current state, stored as an
 /// empty value.
@@ -130,6 +133,10 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
             label: t.settings_agent_api_key(),
             field_type: FieldType::Enum,
         },
+        FieldDescriptor {
+            label: t.settings_ai_connection_attribution(),
+            field_type: FieldType::Bool,
+        },
     ]
 }
 
@@ -213,6 +220,18 @@ impl SettingsModal {
         ];
         if !cli {
             rows.extend([Field(BASE_URL), Field(API_KEY), Field(API_KEY_ENV)]);
+            // The switch is shown only where it means something: an endpoint
+            // that files usage by the app that sent it. Anywhere else there is
+            // nothing to switch, so there is no row — and as the row goes, so
+            // does what it was switched on for. It follows the URL the page
+            // holds, so it is there once its field is left, without waiting
+            // for the settings to be saved.
+            if self
+                .edited()
+                .is_some_and(|c| termide_config::attribution_of(&c.base_url).is_some())
+            {
+                rows.push(Field(APP_ATTRIBUTION));
+            }
         }
         rows.push(Field(MODEL));
         if !cli {
@@ -425,6 +444,7 @@ impl SettingsModal {
             }
             MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
             REVIEWER => self.reviewer_label(&connection.reviewer),
+            APP_ATTRIBUTION => bool_str(connection.app_attribution),
             _ => String::new(),
         }
     }
@@ -469,17 +489,27 @@ impl SettingsModal {
         }
     }
 
-    /// Toggle the page's switch of whether new sessions start on this
-    /// connection. Exactly one is the default: turned
-    /// off, the default moves to the first other connection by name; the
-    /// only one stays on.
+    /// Toggle one of the page's two switches.
+    ///
+    /// [`APP_ATTRIBUTION`] is the connection's own. [`DEFAULT`] picks which
+    /// connection new sessions start on: exactly one is the default, so turned
+    /// off it moves to the first other connection by name, and the only one
+    /// stays on.
     pub(super) fn toggle_connection_field(&mut self, index: usize) {
-        if index != DEFAULT {
-            return;
-        }
         let Some(name) = self.open_connection_name().map(str::to_string) else {
             return;
         };
+        if index == APP_ATTRIBUTION {
+            let Some(connection) = self.config.ai.connections.get_mut(&name) else {
+                return;
+            };
+            connection.app_attribution = !connection.app_attribution;
+            self.mark_dirty();
+            return;
+        }
+        if index != DEFAULT {
+            return;
+        }
         if self.config.ai.default_connection() != Some(name.as_str()) {
             self.config.ai.connection = name;
         } else if let Some(other) = self.config.ai.connections.keys().find(|n| **n != name) {
@@ -1096,6 +1126,70 @@ mod tests {
         assert!(modal.connection_edit.is_none());
     }
 
+    /// The identification switch is on the page only for an endpoint that
+    /// files usage by the app that sent it, and it belongs to the connection.
+    #[test]
+    fn the_identification_switch_shows_only_where_it_means_something() {
+        let mut modal = ai_modal(Config::default());
+        focus(&mut modal, ContentRow::ConnectionAdd);
+        press(&mut modal, KeyCode::Enter);
+        // A local server keeps no such breakdown, so there is nothing to ask.
+        edit(&mut modal, BASE_URL, "http://127.0.0.1:10000/v1");
+        assert!(
+            !modal
+                .content_rows()
+                .contains(&ContentRow::Field(APP_ATTRIBUTION)),
+            "{:?}",
+            modal.content_rows()
+        );
+
+        // OpenRouter files usage by app: the row appears, and on — termide
+        // identifies itself there unless told not to. It follows the URL the
+        // page holds, so it is there as its field is left, while nothing is
+        // saved yet: no Apply, no reload. While the field is still open the
+        // page shows the URL it had.
+        focus(&mut modal, ContentRow::Field(BASE_URL));
+        press(&mut modal, KeyCode::Enter);
+        modal.edit_input.set_text("");
+        type_text(&mut modal, "https://openrouter.ai/api/v1");
+        assert!(!modal
+            .content_rows()
+            .contains(&ContentRow::Field(APP_ATTRIBUTION)));
+        press(&mut modal, KeyCode::Enter);
+        assert!(modal.save_pending, "the URL is set, not saved");
+        assert!(modal
+            .content_rows()
+            .contains(&ContentRow::Field(APP_ATTRIBUTION)));
+        assert_eq!(modal.connection_value(APP_ATTRIBUTION), "true");
+        modal.toggle_connection_field(APP_ATTRIBUTION);
+        assert_eq!(modal.connection_value(APP_ATTRIBUTION), "false");
+        assert!(!modal.config.ai.connections["openai"].app_attribution);
+        modal.toggle_connection_field(APP_ATTRIBUTION);
+        assert!(modal.config.ai.connections["openai"].app_attribution);
+
+        // A URL edit cancelled leaves the page as it was, row and all.
+        focus(&mut modal, ContentRow::Field(BASE_URL));
+        press(&mut modal, KeyCode::Enter);
+        modal.edit_input.set_text("");
+        type_text(&mut modal, "http://127.0.0.1:10000/v1");
+        press(&mut modal, KeyCode::Esc);
+        assert_eq!(
+            modal.config.ai.connections["openai"].base_url,
+            "https://openrouter.ai/api/v1"
+        );
+        assert!(modal
+            .content_rows()
+            .contains(&ContentRow::Field(APP_ATTRIBUTION)));
+
+        // The endpoint changed back under a switch left on: the row goes, and
+        // what is left configured sends nothing.
+        edit(&mut modal, BASE_URL, "http://127.0.0.1:10000/v1");
+        assert!(!modal
+            .content_rows()
+            .contains(&ContentRow::Field(APP_ATTRIBUTION)));
+        assert_eq!(modal.config.ai.connections["openai"].attribution(), None);
+    }
+
     #[test]
     fn a_name_that_is_empty_or_taken_is_refused() {
         let mut config = with_local();
@@ -1602,8 +1696,12 @@ mod tests {
         let mut modal = ai_modal(with_local());
         modal.open_connection("local".into());
         let rows = modal.content_rows();
-        // But a CLI agent's window limit.
-        for index in (0..connection_fields().len()).filter(|i| *i != CONTEXT_LIMIT) {
+        // But a CLI agent's window limit, and the identification switch: that
+        // one shows only for an endpoint that files usage by app, and `local`
+        // keeps no such breakdown (see the switch's own test).
+        for index in
+            (0..connection_fields().len()).filter(|i| *i != CONTEXT_LIMIT && *i != APP_ATTRIBUTION)
+        {
             assert!(rows.contains(&ContentRow::Field(index)), "field {index}");
         }
         // The sidebar leaves the page.

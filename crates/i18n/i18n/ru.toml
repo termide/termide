@@ -436,6 +436,7 @@ settings_ai_connection_default = "Использовать по умолчани
 settings_ai_connection_subagents = "Подагенты"
 settings_ai_connection_subagents_own = "это подключение"
 settings_ai_connection_max_requests = "Запросов одновременно"
+settings_ai_connection_attribution = "Представляться как Termide"
 settings_ai_connection_name_taken = "У каждого подключения должно быть своё имя"
 settings_web_backend = "Доступ к вебу"
 menu_ai_show_browser = "Показать окно браузера"

@@ -129,6 +129,23 @@ pub struct Request<'a> {
     pub thinking: ThinkingLevel,
 }
 
+/// How a hosted service attributes a request to the app that sent it.
+///
+/// A fact about the service, not a guess from its address: a server with no
+/// per-app notion ignores these headers. termide therefore offers them only
+/// for the endpoints listed in `Connection::attribution` (termide-config),
+/// and only on a connection the user switched them on for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Attribution {
+    /// The app's identifier at the service: its URL. Without it the service
+    /// files the usage as unattributed.
+    pub referer: &'static str,
+    /// The name the service shows for the app.
+    pub title: &'static str,
+    /// Comma-separated marketplace categories, at most two per request.
+    pub categories: &'static str,
+}
+
 /// Incremental piece of an assistant message, for live rendering only.
 ///
 /// Consumers must not rebuild the message from deltas; the provider returns

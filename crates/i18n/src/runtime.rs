@@ -876,6 +876,7 @@ impl Translation for RuntimeTranslation {
         settings_ai_connection_subagents_own,
         settings_ai_connection_context_limit,
         settings_ai_connection_max_requests,
+        settings_ai_connection_attribution,
         settings_ai_connection_name_taken,
         settings_web_backend,
         menu_ai_show_browser,

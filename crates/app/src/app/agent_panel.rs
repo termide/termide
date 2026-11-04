@@ -3556,6 +3556,7 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
                 AnthropicProvider::with_base_url("agent", settings.base_url.clone())
             };
             anthropic = anthropic.with_api_key(api_key);
+            anthropic = anthropic.with_attribution(settings.attribution());
             Arc::new(anthropic)
         }
         other => {
@@ -3569,6 +3570,7 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
             Arc::new(
                 OpenAiCompatProvider::new("agent", settings.base_url.clone())
                     .with_api_key(api_key)
+                    .with_attribution(settings.attribution())
                     .with_compat({
                         let reasoning = reasoning_param(settings);
                         Compat {
@@ -3614,7 +3616,7 @@ fn prefill_progress(connection: &Connection) -> bool {
 
 /// Whether `url` is one of the hosted APIs known to take `reasoning_effort`.
 fn is_hosted_api(url: &str) -> bool {
-    let host = url_host(url);
+    let host = termide_config::url_host(url);
     [
         "api.openai.com",
         "openrouter.ai",
@@ -3622,21 +3624,6 @@ fn is_hosted_api(url: &str) -> bool {
     ]
     .iter()
     .any(|known| host == *known || host.ends_with(&format!(".{known}")))
-}
-
-/// The lowercased host of `url`, without its port or an IPv6 address's
-/// brackets.
-fn url_host(url: &str) -> String {
-    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let authority = rest.split('/').next().unwrap_or("");
-    let authority = authority
-        .rsplit_once('@')
-        .map_or(authority, |(_, host)| host);
-    let host = match authority.strip_prefix('[') {
-        Some(v6) => v6.split(']').next().unwrap_or(""),
-        None => authority.split(':').next().unwrap_or(""),
-    };
-    host.to_ascii_lowercase()
 }
 
 /// The shipped default base URL, used to tell "left at default" from "set on

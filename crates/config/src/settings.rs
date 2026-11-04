@@ -232,6 +232,16 @@ pub struct Connection {
     /// sessions in `auto` mode; empty leaves it to `[ai.auto_reviewer]`.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub reviewer: String,
+    /// Whether to identify termide to the endpoint, so its usage is filed
+    /// under termide there rather than as unattributed. On by default, and
+    /// offered only for the endpoints that keep such a breakdown
+    /// ([`Connection::attribution`]); left on for one that stops taking them,
+    /// it sends nothing.
+    #[serde(
+        default = "agent_defaults::app_attribution",
+        skip_serializing_if = "agent_defaults::is_app_attribution"
+    )]
+    pub app_attribution: bool,
 }
 
 fn is_zero(n: &u32) -> bool {
@@ -269,8 +279,52 @@ impl Default for Connection {
             subagents: String::new(),
             max_concurrent_requests: 0,
             reviewer: String::new(),
+            app_attribution: agent_defaults::app_attribution(),
         }
     }
+}
+
+/// The endpoints that keep a breakdown of usage by the app that sent it,
+/// and what each expects an app to identify itself with. A fact about the
+/// service, not a guess from its address: any other server — llama.cpp,
+/// vLLM, Ollama, a self-hosted gateway — ignores these headers, so termide
+/// offers the switch only for the hosts listed here.
+///
+/// The referer is the app's identifier at the service, so every user sending
+/// it is filed under one shared app page with usage open to the public.
+pub const ATTRIBUTION_HOSTS: &[(&str, termide_agent_core::Attribution)] = &[(
+    "openrouter.ai",
+    termide_agent_core::Attribution {
+        referer: "https://github.com/termide/termide",
+        title: "Termide",
+        categories: "cli-agent,programming-app",
+    },
+)];
+
+/// The attribution `url`'s host takes: a listed host, or one under it.
+#[must_use]
+pub fn attribution_of(url: &str) -> Option<termide_agent_core::Attribution> {
+    let host = url_host(url);
+    ATTRIBUTION_HOSTS
+        .iter()
+        .find(|(known, _)| host == *known || host.ends_with(&format!(".{known}")))
+        .map(|(_, attribution)| *attribution)
+}
+
+/// The lowercased host of `url`, without its port or an IPv6 address's
+/// brackets.
+#[must_use]
+pub fn url_host(url: &str) -> String {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split('/').next().unwrap_or("");
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = match authority.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(""),
+        None => authority.split(':').next().unwrap_or(""),
+    };
+    host.to_ascii_lowercase()
 }
 
 impl Connection {
@@ -301,6 +355,18 @@ impl Connection {
     #[must_use]
     pub fn takes_context_limit(&self) -> bool {
         matches!(self.provider.as_str(), "claude_code" | "codex")
+    }
+
+    /// The headers that identify termide to this connection's endpoint, when
+    /// it files usage by the app that sent it ([`ATTRIBUTION_HOSTS`]) and
+    /// [`Connection::app_attribution`] is on, as it is by default. Neither
+    /// alone is enough: the switch on an endpoint that has no such notion,
+    /// and the headers of a listed endpoint the switch is off for, both send
+    /// nothing — so an endpoint changed under a left-on switch leaks nothing.
+    #[must_use]
+    pub fn attribution(&self) -> Option<termide_agent_core::Attribution> {
+        self.app_attribution
+            .then(|| attribution_of(&self.base_url))?
     }
 
     /// The smallest context window limit the agent takes, if any.
@@ -1036,6 +1102,15 @@ mod agent_defaults {
     pub fn max_terminal_sessions() -> usize {
         10
     }
+    /// On: termide names itself to an endpoint that files usage by app, since
+    /// it already sends its name in `User-Agent` to every endpoint. See
+    /// [`Connection::app_attribution`].
+    pub fn app_attribution() -> bool {
+        true
+    }
+    pub fn is_app_attribution(value: &bool) -> bool {
+        *value
+    }
 }
 
 fn default_language() -> String {
@@ -1648,6 +1723,49 @@ mod ai_settings_tests {
         );
         let text = toml::to_string(&settings.connections["local"]).unwrap();
         assert!(text.contains("reviewer = \"claude\""), "{text}");
+    }
+
+    /// The identification comes from the endpoint and the switch together:
+    /// neither alone sends anything.
+    #[test]
+    fn a_connection_identifies_termide_only_where_the_endpoint_files_by_app() {
+        // A listed host, and one under it; port and path aside.
+        assert!(attribution_of("https://openrouter.ai/api/v1").is_some());
+        assert!(attribution_of("https://eu.openrouter.ai/api/v1").is_some());
+        // A server with no such notion, and a host that only holds the name:
+        // neither is offered the switch.
+        assert!(attribution_of("http://127.0.0.1:10000/v1").is_none());
+        assert!(attribution_of("https://openrouter.ai.example/v1").is_none());
+
+        let mut connection = Connection {
+            base_url: "https://openrouter.ai/api/v1".into(),
+            ..Connection::default()
+        };
+        // On by default, so a listed endpoint is identified at once.
+        let named = connection.attribution().unwrap();
+        assert_eq!(named.title, "Termide");
+        assert_eq!(named.referer, "https://github.com/termide/termide");
+        assert_eq!(named.categories, "cli-agent,programming-app");
+        // Turned off, nothing goes, though the endpoint would take it.
+        connection.app_attribution = false;
+        assert_eq!(connection.attribution(), None);
+        // The endpoint changed under a switch left on: inert again.
+        connection.app_attribution = true;
+        connection.base_url = "http://127.0.0.1:8080/v1".into();
+        assert_eq!(connection.attribution(), None);
+
+        // Written only when turned off, the default being on, and read back.
+        assert!(!toml::to_string(&Connection::default())
+            .unwrap()
+            .contains("app_attribution"));
+        let text = toml::to_string(&Connection {
+            app_attribution: false,
+            ..Connection::default()
+        })
+        .unwrap();
+        assert!(text.contains("app_attribution = false"), "{text}");
+        assert!(!toml::from_str::<Connection>(&text).unwrap().app_attribution);
+        assert!(toml::from_str::<Connection>("").unwrap().app_attribution);
     }
 
     #[test]
