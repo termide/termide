@@ -2685,7 +2685,22 @@ impl Shared {
         {
             return selected(pick(&["allow_once", "allow_always"]));
         }
-        let call = permission_call(&params["toolCall"]);
+        // Codex asks about a call it has already announced by its id alone,
+        // with no kind: what the request leaves out is the announced call's.
+        let mut tool_call = params["toolCall"].clone();
+        if let Some(announced) = self
+            .announced
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(id)
+        {
+            for (key, value) in announced.as_object().into_iter().flatten() {
+                if tool_call.get(key).is_none_or(Value::is_null) {
+                    tool_call[key] = value.clone();
+                }
+            }
+        }
+        let call = permission_call(&tool_call);
         let ctx = ToolContext {
             session: Some(self.session_view()),
             ..ToolContext::new(self.cwd.clone())
@@ -3385,16 +3400,55 @@ fn tool_call_of(update: &Value) -> ToolCall {
     let name = if kind == "other" && !title.is_empty() {
         title
     } else {
+        fill_own_call(update, kind, &title, &mut arguments);
         if !title.is_empty() {
             arguments["title"] = json!(title);
         }
-        kind.to_string()
+        match kind {
+            "execute" => SHELL_TOOL.to_string(),
+            kind => kind.to_string(),
+        }
     };
     ToolCall {
         id: update["toolCallId"].as_str().unwrap_or("").to_string(),
         name,
         arguments,
         extra_content: None,
+    }
+}
+
+/// Give an agent's own command, read or edit of ACP `kind` the arguments
+/// termide's tool of the kind takes, where its raw input `arguments` lacks
+/// them: Codex gives a command as `command` words, or only as the call's
+/// `title`, and the file of a read or an edit only in the call's locations or
+/// its diff.
+fn fill_own_call(call: &Value, kind: &str, title: &str, arguments: &mut Value) {
+    match kind {
+        "execute" if arguments["command"].as_str().is_none() => {
+            let command = match &arguments["command"] {
+                Value::Array(words) => words
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                _ => title.to_string(),
+            };
+            arguments["command"] = json!(command);
+        }
+        "read" | "edit" if arguments["path"].as_str().is_none() => {
+            let path = call["locations"][0]["path"].as_str().or_else(|| {
+                call["content"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .find(|block| block["type"] == "diff")
+                    .and_then(|diff| diff["path"].as_str())
+            });
+            if let Some(path) = path {
+                arguments["path"] = json!(path);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -3694,11 +3748,10 @@ fn permission_call(tool_call: &Value) -> ToolCall {
         .filter(|v| v.is_object())
         .cloned()
         .unwrap_or_else(|| json!({}));
-    // `shell` rules match on the command line; if the agent gave none in the
-    // raw input, the title is the best stand-in for a read-only check.
-    if name == SHELL_TOOL && arguments.get("command").and_then(Value::as_str).is_none() {
-        arguments["command"] = json!(title);
-    }
+    // `shell` rules match on the command line and `edit` ones on the path;
+    // if the agent gave neither in the raw input, they are read off the rest
+    // of the call — for a command, its title is the best stand-in.
+    fill_own_call(tool_call, kind, &title, &mut arguments);
     if !title.is_empty() {
         arguments["title"] = json!(title);
     }
@@ -4799,6 +4852,36 @@ mod tests {
         }));
         assert_eq!(call.name, "read");
         assert_eq!(call.arguments["title"], "Reading x.rs");
+        // Codex's own calls: a command by its raw input or its title, the
+        // file of a read in its locations, of an edit in its diff.
+        let call = tool_call_of(&json!({
+            "toolCallId": "t4", "title": "cargo test", "kind": "execute",
+            "rawInput": { "command": ["cargo", "test"], "cwd": "/p" }
+        }));
+        assert_eq!(
+            (call.name.as_str(), &call.arguments["command"]),
+            ("shell", &json!("cargo test"))
+        );
+        let call = tool_call_of(&json!({
+            "toolCallId": "t5", "title": "ls -la", "kind": "execute"
+        }));
+        assert_eq!(call.arguments["command"], "ls -la");
+        let call = tool_call_of(&json!({
+            "toolCallId": "t6", "title": "Read file 'src/x.rs'", "kind": "read",
+            "locations": [{ "path": "src/x.rs" }]
+        }));
+        assert_eq!(
+            (call.name.as_str(), &call.arguments["path"]),
+            ("read", &json!("src/x.rs"))
+        );
+        let call = tool_call_of(&json!({
+            "toolCallId": "t7", "title": "Editing files", "kind": "edit",
+            "content": [{ "type": "diff", "path": "/p/src/x.rs", "oldText": "a", "newText": "b" }]
+        }));
+        assert_eq!(
+            (call.name.as_str(), &call.arguments["path"]),
+            ("edit", &json!("/p/src/x.rs"))
+        );
     }
 
     /// Prompt `text` and wait for the turn to end; the text blocks the agent
@@ -5315,6 +5398,36 @@ mod tests {
         );
         // Ended, it is a call like any other again.
         assert!(shared.host_calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn codex_asking_about_an_announced_edit_by_its_id_is_judged_as_that_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.py");
+        let (runtime, _seen) = recording_agent_with(
+            dir.path().to_path_buf(),
+            AcpFlavor::Codex,
+            None,
+            ModeHandle::new(Mode::Edit),
+            false,
+        );
+        let shared = &runtime.shared;
+        // As Codex sends them: the file change is announced with its diff and
+        // no raw input, and the request that follows names its id and paths.
+        shared.on_update(&json!({
+            "sessionUpdate": "tool_call", "toolCallId": "p1", "kind": "edit",
+            "status": "pending", "title": "Editing files",
+            "content": [{ "type": "diff", "path": path, "oldText": "a\n", "newText": "b\n" }],
+        }));
+        let answer = shared.ask_permission(&json!({
+            "toolCall": { "toolCallId": "p1", "title": "Editing files", "locations": [{ "path": path }] },
+            "options": [
+                { "kind": "allow_once", "optionId": "approved" },
+                { "kind": "reject_once", "optionId": "abort" },
+            ],
+        }));
+        // An edit inside the project passes in `edit` mode without a card.
+        assert_eq!(answer["outcome"]["optionId"], "approved");
     }
 
     #[test]
