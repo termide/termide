@@ -12,6 +12,7 @@
 !tools/screenshots/env/
 !tools/screenshots/fixtures/
 !tools/screenshots/mock-llm/
+!tools/screenshots/mock-acp/
 !tools/screenshots/tapes/
 !tools/screenshots/vendor/
 **/target

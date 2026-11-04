@@ -1,0 +1,15 @@
+#!/bin/sh
+# `npx` for the recordings: Claude Code's ACP adapter is the stand-in beside
+# this file; anything else npx would fetch is not there, as offline.
+for arg in "$@"; do
+    case "$arg" in
+        --version) version=1 ;;
+        @agentclientprotocol/claude-agent-acp*) adapter=1 ;;
+    esac
+done
+if [ -n "$adapter" ]; then
+    [ -n "$version" ] && { echo 0.0.0-demo; exit 0; }
+    exec python3 /opt/shots/mock-acp/claude-agent-acp.py
+fi
+echo "npx: offline in the recordings: $*" >&2
+exit 1

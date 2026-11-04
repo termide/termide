@@ -39,6 +39,7 @@ for tape in "$@"; do
         -v "$here/env:/opt/shots/env:ro" \
         -v "$here/fixtures:/opt/shots/fixtures:ro" \
         -v "$here/mock-llm:/opt/shots/mock-llm:ro" \
+        -v "$here/mock-acp:/opt/shots/mock-acp:ro" \
         -v "$here/tapes:/opt/shots/tapes:ro" \
         "$image" "$tape_file" || { failed+=("$tape"); continue; }
     # Key badges: a tape with `# hint:` lines gets them laid over its GIF

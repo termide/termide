@@ -40,6 +40,11 @@ Nothing from the machine running the recording can reach an image:
   (read-only) and `out/`, nothing else. `/tmp` is a private tmpfs.
 - **No network.** Recordings run with `--network none`; the agent talks to a
   mock model on loopback (`mock-llm/server.py`) that replays a fixed script.
+  A Claude Code connection gets a mock ACP agent instead
+  (`mock-acp/claude-agent-acp.py`, started by the `npx` shim beside it): it
+  plays the same task through termide's MCP tools and answers any later
+  request with a session limit. `env/claude-scene.sh` makes it the default
+  connection of a tape.
 - **Invented identity.** User `demo`, host `demo`, prompt
   `demo@demo:/tmp/demo/inventory$`, git author `Demo User <demo@example.com>`,
   `TZ=UTC`, `LANG=en_US.UTF-8`, a fresh termide configuration

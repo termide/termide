@@ -33,6 +33,7 @@ COPY --from=builder /termide /usr/local/bin/termide
 COPY tools/screenshots/env/ /opt/shots/env/
 COPY tools/screenshots/fixtures/ /opt/shots/fixtures/
 COPY tools/screenshots/mock-llm/ /opt/shots/mock-llm/
+COPY tools/screenshots/mock-acp/ /opt/shots/mock-acp/
 COPY tools/screenshots/tapes/ /opt/shots/tapes/
 # Perforce for its tapes, when vendor/p4 holds it (see vendor/README.md): x86_64
 # builds only, so an arm64 image gets the amd64 loader to run them, and
