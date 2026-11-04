@@ -904,7 +904,8 @@ impl Panel for FileManager {
             | PanelCommand::ChecklistDone { .. }
             | PanelCommand::ChecklistButton { .. }
             | PanelCommand::InputSubmitted { .. }
-            | PanelCommand::Confirmed { .. } => CommandResult::None,
+            | PanelCommand::Confirmed { .. }
+            | PanelCommand::RefreshAiConnection => CommandResult::None,
         }
     }
 

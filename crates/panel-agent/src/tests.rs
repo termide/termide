@@ -223,6 +223,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         provider_backend: None,
         connections: None,
         connection: "local".into(),
+        connection_settings: termide_config::Connection::default(),
         provider,
         provider_kind: "openai_compatible".into(),
         model: ModelSpec {
@@ -5457,8 +5458,144 @@ impl ConnectionCatalog for Connections {
                 },
                 ..ReviewerSetup::default()
             },
+            settings: termide_config::Connection::default(),
         })
     }
+}
+
+/// An endpoint that answers nothing, named by the build that made it, so a
+/// test sees a panel take a new one or keep the one it has.
+struct Endpoint {
+    tag: String,
+}
+
+impl Provider for Endpoint {
+    fn name(&self) -> &str {
+        &self.tag
+    }
+    fn stream(
+        &self,
+        _request: &Request<'_>,
+        _on_event: &mut dyn FnMut(StreamEvent),
+        _cancel: &CancelToken,
+    ) -> AssistantMessage {
+        AssistantMessage::failed(&self.tag, "m", StopReason::Error, "never asked")
+    }
+}
+
+/// The `local` connection, its settings moved by the test; each build hands
+/// out an endpoint named by its number, so a rebuild is visible.
+struct Moving {
+    settings: std::sync::Mutex<termide_config::Connection>,
+    builds: std::sync::atomic::AtomicUsize,
+}
+
+impl Moving {
+    fn new() -> Self {
+        Self {
+            settings: std::sync::Mutex::new(termide_config::Connection {
+                base_url: "http://127.0.0.1:10000/v1".into(),
+                ..termide_config::Connection::default()
+            }),
+            builds: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    fn settings(&self) -> termide_config::Connection {
+        self.settings.lock().unwrap().clone()
+    }
+
+    fn move_to(&self, url: &str) {
+        self.settings.lock().unwrap().base_url = url.into();
+    }
+
+    fn panel(self: &Arc<Self>, dir: &std::path::Path) -> AgentPanel {
+        let catalog = Arc::clone(self);
+        let built = catalog.settings();
+        AgentPanel::new(AgentPanelSetup {
+            session_dir: Some(dir.to_path_buf()),
+            connections: Some(catalog),
+            connection: "local".into(),
+            connection_settings: built,
+            provider: Arc::new(Endpoint { tag: "ep0".into() }),
+            ..setup(vec![])
+        })
+    }
+}
+
+impl ConnectionCatalog for Moving {
+    fn list(&self) -> Vec<ConnectionEntry> {
+        vec![ConnectionEntry {
+            name: "local".into(),
+            kind: "openai_compatible".into(),
+            model: "m".into(),
+        }]
+    }
+
+    fn build(&self, name: &str, _agent: &str) -> Option<ConnectionChoice> {
+        (name == "local").then(|| ConnectionChoice {
+            name: name.into(),
+            kind: "openai_compatible".into(),
+            provider: Arc::new(Endpoint {
+                tag: format!(
+                    "ep{}",
+                    self.builds
+                        .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+                        + 1
+                ),
+            }),
+            model: "m".into(),
+            context_window: 200_000,
+            backend: None,
+            reviewer: ReviewerSetup::default(),
+            settings: self.settings(),
+        })
+    }
+}
+
+/// A connection edited in the settings reaches the panel already open on it,
+/// without a reopen — and asks for nothing while a run is going on, which
+/// keeps the endpoint it started on and takes the settings when it is over.
+#[test]
+fn an_edited_connection_reaches_the_panels_already_open_on_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let catalog = Arc::new(Moving::new());
+    let mut panel = catalog.panel(dir.path());
+
+    // Nothing moved: the panel keeps its endpoint and asks for no redraw. It
+    // does read the connection to know that, which builds one it then drops;
+    // that happens only on a settings change, which is what this follows.
+    assert!(!panel
+        .handle_command(PanelCommand::RefreshAiConnection)
+        .needs_redraw());
+    assert_eq!(panel.provider.name(), "ep0");
+
+    // The run going on keeps its endpoint; the ask waits for it.
+    catalog.move_to("https://openrouter.ai/api/v1");
+    panel.busy = true;
+    assert!(!panel
+        .handle_command(PanelCommand::RefreshAiConnection)
+        .needs_redraw());
+    assert_eq!(panel.provider.name(), "ep0");
+    assert!(panel.connection_refresh, "kept for the run's end");
+
+    // The run is over: the panel takes an endpoint other than the one it
+    // started on, and the settings the connection now names.
+    panel.apply(AgentEvent::AgentEnd);
+    assert_ne!(panel.provider.name(), "ep0", "a new endpoint");
+    assert_eq!(panel.connection, "local");
+    assert_eq!(
+        panel.connection_settings.base_url,
+        "https://openrouter.ai/api/v1"
+    );
+    assert!(!panel.connection_refresh);
+
+    // Asked again with nothing changed, it keeps the endpoint it took.
+    let taken = panel.provider.name().to_string();
+    assert!(!panel
+        .handle_command(PanelCommand::RefreshAiConnection)
+        .needs_redraw());
+    assert_eq!(panel.provider.name(), taken);
 }
 
 fn connected_panel(dir: &std::path::Path) -> AgentPanel {
@@ -10717,6 +10854,7 @@ impl ConnectionCatalog for Switchable {
             context_window: 200_000,
             backend,
             reviewer: ReviewerSetup::default(),
+            settings: termide_config::Connection::default(),
         })
     }
 }

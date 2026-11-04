@@ -1588,7 +1588,9 @@ impl Panel for Terminal {
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
             | PanelCommand::UpdateRepoPaths { .. }
-            | PanelCommand::ShowGitLog { .. } => CommandResult::None,
+            | PanelCommand::ShowGitLog { .. }
+            // An agent's connection is none of a terminal's business.
+            | PanelCommand::RefreshAiConnection => CommandResult::None,
 
             PanelCommand::ProvideCredentials { .. } | PanelCommand::CancelCredentials { .. } => {
                 CommandResult::Handled(false)

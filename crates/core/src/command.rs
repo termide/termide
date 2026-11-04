@@ -243,6 +243,15 @@ pub enum PanelCommand<'a> {
     /// The user declined to give a password for `url`.
     /// Response: `CommandResult::Handled(bool)`
     CancelCredentials { url: &'a str },
+
+    // === AI connection ===
+    /// The `[ai]` settings changed: an agent panel takes the current settings
+    /// of the connection it runs on, so a connection edited in the settings
+    /// reaches the panels already open rather than only new ones. Broadcast;
+    /// a panel that runs no connection, or one whose run is going on, does
+    /// nothing but keep the ask for when it is free.
+    /// Response: `CommandResult::NeedsRedraw(bool)`
+    RefreshAiConnection,
 }
 
 /// Result of handling a panel command.

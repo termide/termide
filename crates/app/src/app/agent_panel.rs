@@ -967,6 +967,7 @@ impl ConnectionCatalog for AiConnections {
             context_window: connection.effective_context_window(),
             backend: cli_provider_backend(connection, agent),
             reviewer: reviewer_setup(&settings, &self.dirs, name),
+            settings: connection.clone(),
         })
     }
 
@@ -3243,6 +3244,7 @@ fn agent_setup(
             active,
         })),
         connection: connection_name,
+        connection_settings: connection.clone(),
         provider,
         provider_kind,
         model,

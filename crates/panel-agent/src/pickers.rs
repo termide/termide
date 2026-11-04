@@ -596,6 +596,86 @@ impl AgentPanel {
         true
     }
 
+    /// Take the current settings of the connection the panel runs on, so a
+    /// connection edited in the settings reaches a panel already open. The
+    /// conversation is kept: only who answers it, on what endpoint and with
+    /// what window, follows the settings.
+    ///
+    /// A run going on keeps the endpoint it started on and the ask waits for
+    /// the run's end; a connection that no longer exists leaves the panel on
+    /// the one it has, as a reopen would find none either; and a panel
+    /// watching another agent's task is left alone, its parent owning where
+    /// it runs. Nothing is rebuilt when the connection did not move: no new
+    /// runtime, no probe of the endpoint.
+    pub(crate) fn refresh_connection(&mut self) -> bool {
+        if self.is_delegate() {
+            return false;
+        }
+        if self.is_busy() {
+            self.connection_refresh = true;
+            return false;
+        }
+        let name = self.connection.clone();
+        let Some(choice) = self
+            .connections
+            .clone()
+            .and_then(|connections| connections.build(&name, &self.agent))
+        else {
+            return false;
+        };
+        if choice.settings == self.connection_settings {
+            return false;
+        }
+        // The model and its window follow the connection only when the
+        // connection's own settings moved them: a panel that picked a model of
+        // the endpoint by hand keeps it across an unrelated edit.
+        let model = ModelSpec {
+            id: choice.model.clone(),
+            context_window: choice.context_window,
+            ..self.model.clone()
+        };
+        let changed_model =
+            model.id != self.model.id || model.context_window != self.model.context_window;
+        self.connection_settings = choice.settings.clone();
+        self.connection_refresh = false;
+        if let Some(connections) = self.connections.as_ref() {
+            connections.activate(&choice);
+        }
+        self.provider = Arc::clone(&choice.provider);
+        self.provider_kind = choice.kind.clone();
+        self.provider_backend = choice.backend.clone();
+        // The meter stays the panel's, as on a switch.
+        self.reviewer = ReviewerSetup {
+            spent: self.reviewer.spent.clone(),
+            ..choice.reviewer.clone()
+        };
+        if changed_model {
+            self.configured_model = model.clone();
+            self.model = model;
+            self.model_choices.clear();
+        }
+        self.backend = self.provider_backend.clone().or_else(|| {
+            self.catalog
+                .resolve(&self.agent)
+                .and_then(|profile| profile.backend)
+        });
+        if changed_model {
+            if let Some(session) = &mut self.session {
+                if let Err(error) = session.append_model_change(
+                    &choice.kind,
+                    &self.model.id,
+                    Some(self.model.context_window),
+                ) {
+                    log::warn!("agent session write failed: {error}");
+                }
+            }
+        }
+        self.rebuild_keeping_prompt();
+        // The silent window probe asks the endpoint the settings now name.
+        self.context_probe = (!self.external).then(|| spawn_model_list(Arc::clone(&self.provider)));
+        true
+    }
+
     /// Continue the session on another model of the same endpoint. The
     /// context window follows the endpoint's figure when it gave one and
     /// stays as configured otherwise; the token limit is always the

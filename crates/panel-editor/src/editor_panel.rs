@@ -685,7 +685,8 @@ impl Panel for Editor {
             | PanelCommand::InputSubmitted { .. }
             | PanelCommand::Confirmed { .. }
             | PanelCommand::UpdateRepoPaths { .. }
-            | PanelCommand::ShowGitLog { .. } => CommandResult::None,
+            | PanelCommand::ShowGitLog { .. }
+            | PanelCommand::RefreshAiConnection => CommandResult::None,
         }
     }
 

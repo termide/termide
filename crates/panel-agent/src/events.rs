@@ -122,6 +122,11 @@ impl AgentPanel {
                 });
                 self.busy = false;
                 self.activity = None;
+                // A settings change asked for during the run is taken now that
+                // the turn is over: the run kept the endpoint it started on.
+                if self.connection_refresh {
+                    self.refresh_connection();
+                }
                 self.log_run_end();
                 // A failure is acted on unless the user stopped the run.
                 let failure = self

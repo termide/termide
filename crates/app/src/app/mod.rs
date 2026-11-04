@@ -726,6 +726,17 @@ impl App {
         // project does not reset what the agents read for nothing.
         if config.ai_differs_from(&old) {
             agent_panel::publish_ai_settings(&config.ai);
+            // And to the panels already open: each takes the settings of the
+            // connection it runs on, so an edited connection needs no reopen.
+            // A panel mid-run keeps its endpoint until the run is over.
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if panel
+                    .handle_command(PanelCommand::RefreshAiConnection)
+                    .needs_redraw()
+                {
+                    self.state.needs_redraw = true;
+                }
+            }
         }
         if config.terminal.default_shell != old.terminal.default_shell {
             agent_panel::publish_shell(config.terminal.default_shell.as_deref());

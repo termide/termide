@@ -252,6 +252,9 @@ pub struct AgentPanelSetup {
     pub connections: Option<Arc<dyn ConnectionCatalog>>,
     /// The connection in use.
     pub connection: String,
+    /// That connection as the settings give it, the provider built from; the
+    /// panel compares a later change against it.
+    pub connection_settings: termide_config::Connection,
     pub provider: Arc<dyn Provider>,
     /// The provider's wire-protocol type (e.g. `openai_compatible`), recorded
     /// in the session log so a resume can rebuild the right provider.
@@ -336,6 +339,9 @@ pub struct ConnectionChoice {
     pub backend: Option<BackendFactory>,
     /// Who reviews its sessions' calls in `auto` mode.
     pub reviewer: ReviewerSetup,
+    /// The connection as the settings give it, built from: what the panel
+    /// keeps to tell a later change of it from the same one.
+    pub settings: termide_config::Connection,
 }
 
 /// The app's connections (`[ai.connections.<name>]`); the
@@ -890,6 +896,12 @@ pub struct AgentPanel {
     connections: Option<Arc<dyn ConnectionCatalog>>,
     /// The connection in use.
     connection: String,
+    /// That connection as the settings gave it when `provider` was built: a
+    /// later change of it is told from the same one by comparing against this.
+    connection_settings: termide_config::Connection,
+    /// A change asked for while a run was going on, kept for when it is over:
+    /// a turn is never switched to another endpoint mid-flight.
+    connection_refresh: bool,
     /// The connections the picker last offered, in its order.
     connection_choices: Vec<ConnectionEntry>,
     provider: Arc<dyn Provider>,
@@ -1374,6 +1386,8 @@ impl AgentPanel {
             provider_backend: setup.provider_backend.clone(),
             connections: setup.connections.clone(),
             connection: setup.connection.clone(),
+            connection_settings: setup.connection_settings.clone(),
+            connection_refresh: false,
             connection_choices: Vec::new(),
             provider: setup.provider,
             provider_kind: setup.provider_kind,
@@ -2057,6 +2071,12 @@ impl Panel for AgentPanel {
             return result;
         }
         match cmd {
+            // The settings moved the connection this panel runs on: take them,
+            // or wait for the run to end. Redraw only when something moved, so
+            // a panel on an untouched connection stays put.
+            PanelCommand::RefreshAiConnection => {
+                CommandResult::NeedsRedraw(self.refresh_connection())
+            }
             // The session search's query takes a paste as plain text, on one
             // line, and the list follows it.
             PanelCommand::Paste if self.session_search_on() => {
