@@ -58,6 +58,7 @@ impl AgentPanel {
                 0,
                 ModelInfo {
                     id: self.model.id.clone(),
+                    name: None,
                     context_window: None,
                 },
             );

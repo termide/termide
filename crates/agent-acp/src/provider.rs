@@ -199,6 +199,7 @@ impl Provider for AcpProvider {
         Ok(models
             .into_iter()
             .map(|model| ModelInfo {
+                name: (model.name != model.id).then_some(model.name),
                 id: model.id,
                 context_window: None,
             })
@@ -712,6 +713,9 @@ mod tests {
         let models = provider.list_models().unwrap();
         let ids: Vec<&str> = models.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, ["default", "claude-haiku-4-5"]);
+        // With the names the agent gives them, for the settings to show.
+        let names: Vec<Option<&str>> = models.iter().map(|m| m.name.as_deref()).collect();
+        assert_eq!(names, [Some("Default"), Some("Haiku")]);
         let seen = seen.lock().unwrap();
         let methods: Vec<&str> = seen.iter().filter_map(|m| m["method"].as_str()).collect();
         // Opened without tools or settings, read, closed; nothing is asked.

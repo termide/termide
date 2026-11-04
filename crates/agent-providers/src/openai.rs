@@ -690,6 +690,7 @@ fn parse_model_list(body: &str) -> Result<Vec<ModelInfo>, String> {
                 .or_else(|| item.as_str())?;
             Some(ModelInfo {
                 id: id.to_string(),
+                name: None,
                 context_window: item
                     .get("max_model_len")
                     .and_then(Value::as_u64)
@@ -1589,10 +1590,12 @@ data: [DONE]\n";
             vec![
                 ModelInfo {
                     id: "llama".into(),
+                    name: None,
                     context_window: None
                 },
                 ModelInfo {
                     id: "qwen".into(),
+                    name: None,
                     context_window: Some(32_000)
                 },
             ]

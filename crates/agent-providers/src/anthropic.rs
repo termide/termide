@@ -790,6 +790,7 @@ fn parse_model_list(body: &str) -> Result<Vec<ModelInfo>, String> {
             let id = item.get("id").and_then(Value::as_str)?;
             Some(ModelInfo {
                 id: id.to_string(),
+                name: None,
                 context_window: None,
             })
         })

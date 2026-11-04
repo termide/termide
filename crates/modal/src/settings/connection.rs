@@ -417,7 +417,11 @@ impl SettingsModal {
                 let model = if connection.model.is_empty() {
                     i18n::t().settings_ai_model_auto().to_string()
                 } else {
-                    connection.model.clone()
+                    // The listed model's name, as its dropdown shows it.
+                    self.model_options
+                        .iter()
+                        .find(|(id, _)| *id == connection.model)
+                        .map_or_else(|| connection.model.clone(), |(_, name)| name.clone())
                 };
                 if self.models_loading {
                     format!("{} {model}", termide_config::constants::spinner_frame())
@@ -993,15 +997,16 @@ impl SettingsModal {
 /// current value kept present), then a "type an id" escape that opens inline
 /// editing. With no fetched models — a CLI provider, or an endpoint that
 /// cannot list — only auto, the current value and the escape show, so typing
-/// still works.
-pub(super) fn model_enum_options(current: &str, model_options: &[String]) -> EnumOptions {
-    let mut values: Vec<String> = model_options.to_vec();
+/// still works. A model shows its name, as the agent panel's picker does.
+pub(super) fn model_enum_options(current: &str, model_options: &[(String, String)]) -> EnumOptions {
+    let mut values: Vec<String> = model_options.iter().map(|(id, _)| id.clone()).collect();
+    let mut labels: Vec<String> = model_options.iter().map(|(_, name)| name.clone()).collect();
     if !current.is_empty() && !values.iter().any(|v| v == current) {
         values.insert(0, current.to_string());
+        labels.insert(0, current.to_string());
     }
     values.insert(0, String::new());
-    let mut labels: Vec<String> = values.clone();
-    labels[0] = i18n::t().settings_ai_model_auto().to_string();
+    labels.insert(0, i18n::t().settings_ai_model_auto().to_string());
     values.push(MODEL_TYPE_SENTINEL.to_string());
     labels.push(i18n::t().agent_model_other().to_string());
     let current_index = values.iter().position(|v| v == current);
@@ -1305,10 +1310,16 @@ mod tests {
         let options = modal.connection_enum_options(MODEL).unwrap();
         assert_eq!(options.values, ["", "qwen", MODEL_TYPE_SENTINEL]);
         assert_eq!(options.labels[0], i18n::t().settings_ai_model_auto());
-        modal.set_model_options(vec!["a".into(), "qwen".into()]);
+        modal.set_model_options(vec![
+            ("a".into(), "a".into()),
+            ("qwen".into(), "Qwen 3".into()),
+        ]);
         let options = modal.connection_enum_options(MODEL).unwrap();
         assert_eq!(options.values, ["", "a", "qwen", MODEL_TYPE_SENTINEL]);
+        // A model shows its name, the field as well as its dropdown.
+        assert_eq!(options.labels[1..3], ["a", "Qwen 3"]);
         assert_eq!(options.current, Some(2));
+        assert_eq!(modal.connection_value(MODEL), "Qwen 3");
         modal.apply_connection_enum(MODEL, "");
         assert!(modal.config.ai.connections["local"].model.is_empty());
         assert_eq!(

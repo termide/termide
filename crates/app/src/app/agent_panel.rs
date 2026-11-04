@@ -4849,6 +4849,7 @@ mod tests {
                 .iter()
                 .map(|id| termide_agent_core::ModelInfo {
                     id: (*id).to_string(),
+                    name: None,
                     context_window: None,
                 })
                 .collect())
@@ -4882,6 +4883,7 @@ mod tests {
             self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             Ok(vec![termide_agent_core::ModelInfo {
                 id: "first".into(),
+                name: None,
                 context_window: None,
             }])
         }

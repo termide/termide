@@ -79,8 +79,10 @@ impl SettingsModal {
 
     /// Provide the open connection's model list (fetched off-thread by the
     /// app), so the model field's dropdown lists them; an empty list ends
-    /// the wait with none (the endpoint or agent could not list them).
-    pub fn set_model_options(&mut self, models: Vec<String>) {
+    /// the wait with none (the endpoint or agent could not list them). Each
+    /// model is its id and the name to show for it, the id itself when the
+    /// provider gives none.
+    pub fn set_model_options(&mut self, models: Vec<(String, String)>) {
         self.model_options = models;
         self.models_loading = false;
     }

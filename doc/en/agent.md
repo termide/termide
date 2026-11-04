@@ -134,8 +134,8 @@ connection is named after its provider until you name it. The model is a
 dropdown: **Auto — the provider's choice** first, then the connection's
 models, fetched in the background when its page opens (a spinner turns in the
 field meanwhile; a CLI agent is started for it and lists the models of its
-sign-in), and last "Enter a model
-id…" to type one by hand when the endpoint cannot list them. Auto, a
+sign-in, shown by the names it gives them while the id is what is stored),
+and last "Enter a model id…" to type one by hand when the endpoint cannot list them. Auto, a
 connection's model left empty, runs on the first model the provider lists (a
 CLI agent on its own default); a request sent before that list arrives waits
 in the input with a notice. Text fields edit like every input in termide: the

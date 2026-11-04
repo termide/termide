@@ -105,6 +105,9 @@ pub struct ModelSpec {
 pub struct ModelInfo {
     /// Model id as the provider expects it.
     pub id: String,
+    /// Name to show for it, when the provider gives one other than the id
+    /// (an ACP agent's `name`: "Opus (1M context)" for `opus[1m]`).
+    pub name: Option<String>,
     /// Context window in tokens when the endpoint reports it (vLLM and omlx
     /// do as `max_model_len`; Ollama and llama.cpp do not).
     pub context_window: Option<u64>,

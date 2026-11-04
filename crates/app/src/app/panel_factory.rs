@@ -255,14 +255,20 @@ impl App {
             return;
         };
         self.settings_model_fetch = None;
-        let ids = match result {
-            Ok(models) => models.into_iter().map(|m| m.id).collect(),
+        let models = match result {
+            Ok(models) => models
+                .into_iter()
+                .map(|m| {
+                    let name = m.name.unwrap_or_else(|| m.id.clone());
+                    (m.id, name)
+                })
+                .collect(),
             Err(error) => {
                 log::warn!("cannot list the connection's models: {error}");
                 Vec::new()
             }
         };
-        modal.set_model_options(ids);
+        modal.set_model_options(models);
     }
 
     /// Open or refresh the References panel with LSP find-references results.

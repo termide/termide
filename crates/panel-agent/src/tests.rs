@@ -46,10 +46,12 @@ impl Scripted {
             models: Ok(vec![
                 ModelInfo {
                     id: "big".into(),
+                    name: None,
                     context_window: Some(64_000),
                 },
                 ModelInfo {
                     id: "m".into(),
+                    name: None,
                     context_window: None,
                 },
             ]),
@@ -1138,6 +1140,7 @@ fn the_context_window_is_learned_from_the_provider() {
     // adopts it, overriding the fallback.
     let models = vec![ModelInfo {
         id: panel.model.id.clone(),
+        name: None,
         context_window: Some(48_000),
     }];
     assert!(panel.adopt_listed_models(&models));
@@ -1163,10 +1166,12 @@ fn a_model_left_to_the_provider_is_its_first_listed() {
     let models = vec![
         ModelInfo {
             id: "first".into(),
+            name: None,
             context_window: Some(64_000),
         },
         ModelInfo {
             id: "second".into(),
+            name: None,
             context_window: None,
         },
     ];
@@ -1184,6 +1189,7 @@ fn a_model_without_a_reported_window_keeps_the_fallback() {
     let mut panel = panel(vec![reply("ok")]);
     let models = vec![ModelInfo {
         id: panel.model.id.clone(),
+        name: None,
         context_window: None,
     }];
     assert!(!panel.adopt_listed_models(&models));

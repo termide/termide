@@ -348,8 +348,8 @@ pub struct SettingsModal {
     /// The open connection's models, fetched off-thread by the app and
     /// pushed in with [`SettingsModal::set_model_options`]; empty until they
     /// arrive (or when the endpoint cannot list them), when the model field
-    /// falls back to typing an id.
-    pub(super) model_options: Vec<String>,
+    /// falls back to typing an id. Each is its id and the name it shows.
+    pub(super) model_options: Vec<(String, String)>,
     /// Whether the open connection's models are on their way: asked for and
     /// not yet in, while the model field shows a spinner.
     pub(super) models_loading: bool,
