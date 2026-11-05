@@ -53,6 +53,11 @@ ignore = [
     # path. Re-evaluate when portable-pty drops the dep or moves
     # to a maintained alternative.
     "RUSTSEC-2017-0008",
+    # RUSTSEC-2026-0441 — `pin-utils` unmaintained (repository archived),
+    # no vulnerability. Path: `pin-utils` ← `nix 0.25` ← `portable-pty 0.8`
+    # ← termide-panel-terminal and termide-detach. It only provides pinning
+    # macros. Re-evaluate when portable-pty moves to a `nix` without it.
+    "RUSTSEC-2026-0441",
 ]
 
 [licenses]
