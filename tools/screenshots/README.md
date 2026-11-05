@@ -48,11 +48,15 @@ Nothing from the machine running the recording can reach an image:
   permission card — and answers any later request with a used-up limit.
   `source /opt/shots/env/cli-agent-scene.sh claude_code` (or `codex`, or
   `gemini_cli`) makes one the default connection of a tape. The mock model
-  also stands in for a local server: `source
-  /opt/shots/env/local-server-scene.sh llamacpp` (or `omlx`) starts it on
-  that server's port, reporting no window and its prefill progress as
-  llama-server does, or several models with their windows as omlx does, and
-  makes a connection to it the tape's only one.
+  also stands in for a model server: `source
+  /opt/shots/env/local-server-scene.sh llamacpp` (or `omlx`, or
+  `openrouter`) starts it on that server's port, reporting no window and its
+  prefill progress as llama-server does, several models with their windows as
+  omlx does, or a gateway's models with their names as OpenRouter does, and
+  makes a connection to it the tape's only one. OpenRouter is told by its
+  host, so its tapes add `# docker: --add-host openrouter.ai:127.0.0.1`; the
+  mock answers it on port 80 over plain HTTP, since termide trusts only its
+  built-in TLS roots.
 - **Invented identity.** User `demo`, host `demo`, prompt
   `demo@demo:/tmp/demo/inventory$`, git author `Demo User <demo@example.com>`,
   `TZ=UTC`, `LANG=en_US.UTF-8`, a fresh termide configuration

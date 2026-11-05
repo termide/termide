@@ -10,7 +10,11 @@ The second argument picks the server it stands in for (`server.py PORT
 FLAVOR`): the default reports its window as vLLM does; `llamacpp` reports
 none, names its one model by its `--alias`, and streams its prompt-processing
 progress when asked (`return_progress`), its cache growing turn by turn;
-`omlx` lists several models with their windows and streams the progress too.
+`omlx` lists several models with their windows and streams the progress too;
+`openrouter` lists a gateway's models with their names and windows
+(`context_length`), streams the reasoning as `reasoning`, and has no progress
+to give. OpenRouter is reached by name, so its recordings map `openrouter.ai`
+to loopback and serve it on port 80 (see env/local-server-scene.sh).
 """
 
 import json
@@ -42,6 +46,23 @@ MODELS = {
             "Qwen3.8-27B-oQ6",
             "GLM-5.2-Air-oQ4",
             "gemma-4-31b-it-oQ4",
+        )
+    ],
+    "openrouter": [
+        {"id": i, "name": n, "context_length": w}
+        for i, n, w in (
+            ("anthropic/claude-haiku-5", "Anthropic: Claude Haiku 5", 200000),
+            ("anthropic/claude-opus-5.5", "Anthropic: Claude Opus 5.5", 1000000),
+            ("anthropic/claude-sonnet-5", "Anthropic: Claude Sonnet 5", 1000000),
+            ("deepseek/deepseek-v4", "DeepSeek: DeepSeek V4", 163840),
+            ("google/gemini-3.5-flash", "Google: Gemini 3.5 Flash", 1048576),
+            ("google/gemini-4-pro-preview", "Google: Gemini 4 Pro Preview", 1048576),
+            ("moonshotai/kimi-k3", "MoonshotAI: Kimi K3", 262144),
+            ("openai/gpt-6-luna", "OpenAI: GPT-6 Luna", 400000),
+            ("openai/gpt-6.1-sol", "OpenAI: GPT-6.1 Sol", 400000),
+            ("qwen/qwen3.6-35b-a3b", "Qwen: Qwen3.6 35B A3B", 262144),
+            ("qwen/qwen3.8-coder-plus", "Qwen: Qwen3.8 Coder Plus", 1000000),
+            ("z-ai/glm-5.2", "Z.ai: GLM 5.2", 202752),
         )
     ],
 }
@@ -188,6 +209,8 @@ class Handler(BaseHTTPRequestHandler):
         if FLAVOR == "default":
             prompt, cache = 2400 + 180 * len(messages), 0
             time.sleep(PREFILL_DELAY)
+        elif FLAVOR == "openrouter":
+            time.sleep(PREFILL_DELAY)
         else:
             started = time.monotonic()
             processed = cache
@@ -207,8 +230,9 @@ class Handler(BaseHTTPRequestHandler):
                     )
         produced = 0
         self.chunk({"role": "assistant", "content": ""})
+        reasoning = "reasoning" if FLAVOR == "openrouter" else "reasoning_content"
         for piece in words(step["reasoning"]):
-            self.chunk({"reasoning_content": piece})
+            self.chunk({reasoning: piece})
             produced += 1
             time.sleep(CHUNK_DELAY)
         for piece in words(step["text"]):
@@ -247,7 +271,7 @@ def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 10000
     FLAVOR = sys.argv[2] if len(sys.argv) > 2 else "default"
     if FLAVOR not in MODELS:
-        sys.exit("mock-llm: flavor default, llamacpp or omlx, not %r" % FLAVOR)
+        sys.exit("mock-llm: flavor default, llamacpp, omlx or openrouter, not %r" % FLAVOR)
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
 
 
