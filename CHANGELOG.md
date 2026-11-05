@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Codex's commands and edits came through half-described.** Codex sends a command as its title or a word list, names the file of a read or an edit only in its locations or diff, and asks permission for an announced call by its id alone; such calls showed without their command or path, and `auto` judged the permission requests blind. They now carry what they run and touch, and are judged as the edit or command they are.
 - **Gemini CLI's spending was miscounted.** Its cached input was counted twice and its thoughts left out of the output; the session's totals now count them as for the other agents.
 - **A Codex or Gemini CLI thought showed its subject with asterisks.** The bold subject that heads each thought, folded headline included, now shows without its marks.
+- **A streamed tool call kept one identity only when its id came first.** From an endpoint that sends a tool call's name before its id, the call's start went out under a stand-in id while its arguments and its end carried the real one. All three now carry the same id, and the message keeps the server's.
 
 ## [0.48.0] - 2026-10-31
 
