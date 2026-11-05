@@ -1,12 +1,13 @@
 # Sourced after setup.sh by the tapes of a CLI agent, with its provider:
-# `source cli-agent-scene.sh claude_code` or `… codex`. Adds a connection of
-# that provider, named `claude` or `codex`, that new sessions start on,
+# `source cli-agent-scene.sh claude_code`, `… codex` or `… gemini_cli`. Adds a
+# connection of that provider, named `claude`, `codex` or `gemini`, that new sessions start on,
 # served by the stand-in adapters in mock-acp/ (whose `npx` comes first on
 # PATH). No network, no sign-in.
 case "$1" in
     claude_code) name=claude ;;
     codex) name=codex ;;
-    *) echo "cli-agent-scene.sh: claude_code or codex, not '$1'" >&2; return 1 ;;
+    gemini_cli) name=gemini ;;
+    *) echo "cli-agent-scene.sh: claude_code, codex or gemini_cli, not '$1'" >&2; return 1 ;;
 esac
 export PATH=/opt/shots/mock-acp:$PATH
 config=$HOME/.config/termide/config.toml

@@ -1,12 +1,13 @@
 #!/bin/sh
-# `npx` for the recordings: Claude Code's and Codex's ACP adapters are the
-# stand-ins beside this file; anything else npx would fetch is not there, as
+# `npx` for the recordings: Claude Code's and Codex's ACP adapters and Gemini
+# CLI are the stand-ins beside this file; anything else npx would fetch is not there, as
 # offline.
 for arg in "$@"; do
     case "$arg" in
         --version) version=1 ;;
         @agentclientprotocol/claude-agent-acp*) adapter=claude-agent-acp ;;
         @agentclientprotocol/codex-acp*) adapter=codex-acp ;;
+        @google/gemini-cli*) adapter=gemini-cli ;;
     esac
 done
 if [ -n "$adapter" ]; then

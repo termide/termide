@@ -40,13 +40,14 @@ Nothing from the machine running the recording can reach an image:
   (read-only) and `out/`, nothing else. `/tmp` is a private tmpfs.
 - **No network.** Recordings run with `--network none`; the agent talks to a
   mock model on loopback (`mock-llm/server.py`) that replays a fixed script.
-  A Claude Code or Codex connection gets a mock ACP agent instead
-  (`mock-acp/claude-agent-acp.py`, `mock-acp/codex-acp.py`, started by the
-  `npx` shim beside them): each plays the same task as its real adapter
-  would — Claude Code through termide's MCP tools, Codex with its own and
-  termide's permission card — and answers any later request with a used-up
-  limit. `source /opt/shots/env/cli-agent-scene.sh claude_code` (or `codex`)
-  makes one the default connection of a tape.
+  A Claude Code, Codex or Gemini CLI connection gets a mock ACP agent instead
+  (`mock-acp/claude-agent-acp.py`, `mock-acp/codex-acp.py`,
+  `mock-acp/gemini-cli.py`, started by the `npx` shim beside them): each
+  plays the same task as the real agent would — Claude Code through
+  termide's MCP tools, Codex and Gemini CLI with their own and termide's
+  permission card — and answers any later request with a used-up limit.
+  `source /opt/shots/env/cli-agent-scene.sh claude_code` (or `codex`, or
+  `gemini_cli`) makes one the default connection of a tape.
 - **Invented identity.** User `demo`, host `demo`, prompt
   `demo@demo:/tmp/demo/inventory$`, git author `Demo User <demo@example.com>`,
   `TZ=UTC`, `LANG=en_US.UTF-8`, a fresh termide configuration
