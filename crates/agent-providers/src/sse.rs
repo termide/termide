@@ -15,7 +15,10 @@ struct PartialCall {
     name: String,
     arguments: String,
     extra_content: Option<Value>,
-    announced: bool,
+    /// The id the live events carry, fixed at `ToolCallStart`: the server's
+    /// id when it came with the name, else `call_{index}` even if the real id
+    /// arrives later, so start, delta and end always agree.
+    event_id: Option<String>,
 }
 
 /// Builds the assistant message from a chunk stream.
@@ -120,15 +123,17 @@ impl Accumulator {
                 partial.name = name.to_string();
             }
         }
-        if !partial.announced && !partial.name.is_empty() {
-            if partial.id.is_empty() {
-                partial.id = format!("call_{index}");
-            }
-            partial.announced = true;
+        if partial.event_id.is_none() && !partial.name.is_empty() {
+            let id = if partial.id.is_empty() {
+                format!("call_{index}")
+            } else {
+                partial.id.clone()
+            };
             on_event(StreamEvent::ToolCallStart {
-                id: partial.id.clone(),
+                id: id.clone(),
                 name: partial.name.clone(),
             });
+            partial.event_id = Some(id);
         }
         if let Some(fragment) = function
             .and_then(|f| f.get("arguments"))
@@ -136,9 +141,9 @@ impl Accumulator {
         {
             if !fragment.is_empty() {
                 partial.arguments.push_str(fragment);
-                if partial.announced {
+                if let Some(id) = &partial.event_id {
                     on_event(StreamEvent::ToolCallDelta {
-                        id: partial.id.clone(),
+                        id: id.clone(),
                         arguments: fragment.to_string(),
                     });
                 }
@@ -167,12 +172,16 @@ impl Accumulator {
                 continue;
             }
             has_calls = true;
+            let fallback = || format!("call_{index}");
+            let event_id = partial.event_id.unwrap_or_else(fallback);
+            on_event(StreamEvent::ToolCallEnd { id: event_id });
+            // The message carries the server's id, wherever in the stream it
+            // came: it is what the server expects back with the result.
             let id = if partial.id.is_empty() {
-                format!("call_{index}")
+                fallback()
             } else {
                 partial.id
             };
-            on_event(StreamEvent::ToolCallEnd { id: id.clone() });
             content.push(AssistantContent::ToolCall(ToolCall {
                 id,
                 name: partial.name,
@@ -402,6 +411,39 @@ data: [DONE]
         assert!(events
             .iter()
             .any(|e| matches!(e, StreamEvent::ToolCallStart { id, .. } if id == "call_1")));
+    }
+
+    #[test]
+    fn a_late_id_keeps_the_events_on_the_announced_id() {
+        // The name and the first arguments come before the server's id; a
+        // second, ordinary call carries its id from the start.
+        let transcript = r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"name":"read","arguments":"{\"path\":"}}]}}]}
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_late","function":{"arguments":" \"a.rs\"}"}}]}}]}
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"call_b","function":{"name":"read","arguments":"{\"path\":\"b.rs\"}"}}]},"finish_reason":"tool_calls"}]}
+data: [DONE]
+"#;
+        let (message, events) = replay(transcript);
+        let first: Vec<_> = events
+            .iter()
+            .filter_map(|e| match e {
+                StreamEvent::ToolCallStart { id, .. }
+                | StreamEvent::ToolCallDelta { id, .. }
+                | StreamEvent::ToolCallEnd { id } => Some(id.as_str()),
+                _ => None,
+            })
+            .filter(|id| *id != "call_b")
+            .collect();
+        assert_eq!(first, ["call_0", "call_0", "call_0", "call_0"]);
+        assert!(events.contains(&StreamEvent::ToolCallEnd {
+            id: "call_b".into()
+        }));
+
+        let calls: Vec<_> = message.tool_calls().collect();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].id, "call_late");
+        assert_eq!(calls[0].arguments["path"], "a.rs");
+        assert_eq!(calls[1].id, "call_b");
+        assert_eq!(calls[1].arguments["path"], "b.rs");
     }
 
     #[test]
