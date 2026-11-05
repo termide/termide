@@ -1019,8 +1019,8 @@ waits for the current task, like switching sessions.
 report `max_model_len`), the panel always adopts it — at startup and on every
 model switch — so `Context:` matches what the server actually allows. The
 configured `context_window_fallback` is only a **fallback**, used when the endpoint
-reports no window; left unset it shows `(auto)` in the settings modal and the
-built-in default stands in until (or unless) the provider is known.
+reports no window; left unset, the built-in 32,000 stands in, and the settings
+modal shows it as `(default 32000)`.
 
 The **Permissions** chip offers the six modes described below. `Shift+Tab` cycles
 through them without the picker. A change applies at the agent's next tool
