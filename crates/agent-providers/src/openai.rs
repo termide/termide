@@ -19,10 +19,11 @@ use crate::sse::Accumulator;
 /// of which a server may refuse: the top-level ones and, on assistant
 /// messages, the reasoning sent back. A server that names one in a 400 or
 /// 422 gets the request again without it, and never again after.
-const OPTIONAL_FIELDS: [&str; 5] = [
+const OPTIONAL_FIELDS: [&str; 6] = [
     "chat_template_kwargs",
     "reasoning_effort",
     "return_progress",
+    "cache_control",
     "reasoning_content",
     "reasoning",
 ];
@@ -46,6 +47,12 @@ pub struct Compat {
     /// `return_progress`). Off by default: OpenAI rejects unknown fields;
     /// the app turns it on for every server but the hosted APIs.
     pub prefill_progress: bool,
+    /// Ask a gateway to cache the prompt of the models that cache only on
+    /// request — Anthropic's, as OpenRouter serves them — with a top-level
+    /// `cache_control`, which caches the conversation up to its last message
+    /// and moves along as it grows. Off by default: other servers cache by
+    /// themselves or not at all; the app turns it on for OpenRouter.
+    pub prompt_cache: bool,
     /// Merged into every request body last; the escape hatch for anything
     /// not modelled here (`chat_template_kwargs`, `temperature`, ...).
     pub extra_body: Map<String, Value>,
@@ -58,6 +65,7 @@ impl Default for Compat {
             reasoning: ReasoningParam::None,
             send_reasoning: false,
             prefill_progress: false,
+            prompt_cache: false,
             extra_body: Map::new(),
         }
     }
@@ -187,6 +195,9 @@ impl OpenAiCompatProvider {
         body.insert("stream_options".into(), json!({ "include_usage": true }));
         if self.compat.prefill_progress {
             body.insert("return_progress".into(), json!(true));
+        }
+        if self.compat.prompt_cache && caches_on_request(&request.model.id) {
+            body.insert("cache_control".into(), json!({ "type": "ephemeral" }));
         }
         // No limit configured: leave the reply's length to the model.
         if let Some(max_tokens) = request.model.max_tokens {
@@ -540,13 +551,13 @@ impl OpenAiCompatProvider {
 }
 
 /// The fields a server refused, by the providers that talk to it.
-type Refusals = Arc<Mutex<BTreeSet<&'static str>>>;
+pub(crate) type Refusals = Arc<Mutex<BTreeSet<&'static str>>>;
 
 /// The refusals of the server at `base_url`, shared across the process: each
 /// session and side call builds its own provider, and a field one of them
 /// learned the server refuses is not tried again by the next. They live as
 /// long as the process, so an upgraded server is asked again after a restart.
-fn refusals_of(base_url: &str) -> Refusals {
+pub(crate) fn refusals_of(base_url: &str) -> Refusals {
     static SHARED: Mutex<Option<HashMap<String, Refusals>>> = Mutex::new(None);
     let mut shared = SHARED.lock().unwrap_or_else(PoisonError::into_inner);
     Arc::clone(
@@ -582,7 +593,7 @@ fn refused_in(failure: &Failure, body: &Value) -> Vec<&'static str> {
 }
 
 /// Whether `text` names `field` as a word of its own.
-fn names_field(text: &str, field: &str) -> bool {
+pub(crate) fn names_field(text: &str, field: &str) -> bool {
     let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
     text.match_indices(field).any(|(at, _)| {
         let before = text[..at].chars().next_back();
@@ -629,6 +640,17 @@ fn build_agent(connect: Duration, read: Duration) -> ureq::Agent {
         .timeout_read(read)
         .user_agent(concat!("termide-agent/", env!("CARGO_PKG_VERSION")))
         .build()
+}
+
+/// Whether a gateway's `model` caches its prompt only when asked: Anthropic's
+/// models (`anthropic/…`, or `~anthropic/…`, OpenRouter's latest-of-a-family
+/// alias). The others a gateway serves cache by themselves (OpenAI, DeepSeek,
+/// Gemini, Grok, Moonshot) or take breakpoints on message parts only.
+fn caches_on_request(model: &str) -> bool {
+    model
+        .trim_start_matches('~')
+        .to_ascii_lowercase()
+        .starts_with("anthropic/")
 }
 
 /// The `reasoning_effort` values `model` takes, as levels: OpenAI's own
@@ -728,7 +750,7 @@ fn error_text(body: &str) -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Mutex};
@@ -802,7 +824,7 @@ mod tests {
 
     /// One-shot HTTP responder: each entry answers one request in order and
     /// records the request bodies.
-    fn serve(responses: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
+    pub(crate) fn serve(responses: Vec<String>) -> (String, Arc<Mutex<Vec<String>>>) {
         serve_recording(responses, false)
     }
 
@@ -862,13 +884,13 @@ mod tests {
         String::from_utf8_lossy(&raw).into_owned()
     }
 
-    fn sse(body: &str) -> String {
+    pub(crate) fn sse(body: &str) -> String {
         format!(
             "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n{body}"
         )
     }
 
-    fn status(code: u16, body: &str) -> String {
+    pub(crate) fn status(code: u16, body: &str) -> String {
         format!(
             "HTTP/1.1 {code} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
@@ -976,6 +998,47 @@ mod tests {
         assert!(plain.get("return_progress").is_none());
         assert!(plain.get("reasoning_effort").is_none());
         assert!(plain["messages"][2].get("reasoning_content").is_none());
+    }
+
+    #[test]
+    fn a_gateway_is_asked_to_cache_the_models_that_cache_only_on_request() {
+        let gateway =
+            OpenAiCompatProvider::new("p", "https://openrouter.ai/api/v1").with_compat(Compat {
+                prompt_cache: true,
+                ..Compat::default()
+            });
+        let messages = vec![Message::User(UserMessage::text("hi"))];
+        let body = |provider: &OpenAiCompatProvider, id: &str| {
+            let model = ModelSpec {
+                id: id.into(),
+                ..model()
+            };
+            provider.build_body(&Request {
+                model: &model,
+                system_prompt: "s",
+                messages: &messages,
+                tools: &[],
+                thinking: ThinkingLevel::Off,
+            })
+        };
+        for id in [
+            "anthropic/claude-sonnet-5",
+            "~anthropic/claude-sonnet-latest",
+        ] {
+            assert_eq!(
+                body(&gateway, id)["cache_control"],
+                json!({ "type": "ephemeral" }),
+                "{id}"
+            );
+        }
+        // Models that cache by themselves, and servers not asked to.
+        assert!(body(&gateway, "openai/gpt-6-luna")
+            .get("cache_control")
+            .is_none());
+        let plain = OpenAiCompatProvider::new("p", "http://x/v1");
+        assert!(body(&plain, "anthropic/claude-sonnet-5")
+            .get("cache_control")
+            .is_none());
     }
 
     #[test]

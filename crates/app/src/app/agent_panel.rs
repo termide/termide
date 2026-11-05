@@ -3579,6 +3579,7 @@ fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn P
                             reasoning,
                             send_reasoning: sends_reasoning(settings),
                             prefill_progress: prefill_progress(settings),
+                            prompt_cache: asks_for_prompt_cache(settings),
                             ..Compat::default()
                         }
                     }),
@@ -3614,6 +3615,15 @@ fn sends_reasoning(connection: &Connection) -> bool {
 /// asked again without it; others ignore it.
 fn prefill_progress(connection: &Connection) -> bool {
     !is_hosted_api(&connection.base_url)
+}
+
+/// Whether a connection asks its gateway to cache the prompt of the models
+/// that cache only on request (see `Compat::prompt_cache`): OpenRouter, a
+/// known service whose Anthropic models need it. Elsewhere a model caches
+/// by itself, or the server is not one to ask.
+fn asks_for_prompt_cache(connection: &Connection) -> bool {
+    let host = termide_config::url_host(&connection.base_url);
+    host == "openrouter.ai" || host.ends_with(".openrouter.ai")
 }
 
 /// Whether `url` is one of the hosted APIs known to take `reasoning_effort`.
@@ -4065,6 +4075,21 @@ mod tests {
                 "{server}"
             );
         }
+    }
+
+    #[test]
+    fn only_openrouter_is_asked_to_cache_the_prompt() {
+        let asks = |base_url: &str| {
+            asks_for_prompt_cache(&Connection {
+                base_url: base_url.into(),
+                ..Connection::default()
+            })
+        };
+        assert!(asks("https://openrouter.ai/api/v1"));
+        assert!(asks("https://eu.openrouter.ai/api/v1"));
+        assert!(!asks("https://openrouter.ai.example/api/v1"));
+        assert!(!asks("https://api.openai.com/v1"));
+        assert!(!asks("http://127.0.0.1:8080/v1"));
     }
 
     /// The applied `[ai]` settings are one per process: the tests that read

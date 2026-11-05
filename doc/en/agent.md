@@ -208,6 +208,14 @@ built in; set it only for a gateway) and point `api_key_env` at your
 `ANTHROPIC_API_KEY`; the reasoning level then asks the model to think. The
 **Model** chip lists the endpoint's models for each.
 
+Claude caches a prompt only when asked, so an Anthropic connection asks for
+automatic prompt caching (a top-level `cache_control`), and so does an
+OpenRouter connection for Anthropic's models (`anthropic/…`): each step of a
+run reads the conversation before it from the cache, at a fraction of the input
+price, and the status bar counts those tokens under `↻`. The other hosted
+models cache by themselves. A gateway that refuses the field is asked again
+without it, and not again until termide restarts.
+
 `provider = "claude_code"`, `provider = "codex"` and `provider = "gemini_cli"`
 are different in kind: instead of the built-in loop talking to a model
 endpoint, the panel drives that tool's own CLI as an
