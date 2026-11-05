@@ -1,0 +1,22 @@
+[package]
+name = "termide-panel-csv"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+crossterm.workspace = true
+csv = "1.4"
+ratatui.workspace = true
+unicode-width.workspace = true
+
+# Workspace crates
+termide-core = { path = "../core" }
+termide-i18n = { path = "../i18n" }
+termide-ui = { path = "../ui" }
+
+[dev-dependencies]
+tempfile.workspace = true

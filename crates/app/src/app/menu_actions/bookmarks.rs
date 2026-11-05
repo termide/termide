@@ -541,7 +541,7 @@ impl App {
 
     /// Open a bookmark based on its type
     /// Open a local path in the rendered viewer when its type is one the
-    /// viewers handle (HTML / Markdown / Mermaid / image). Returns `false` for
+    /// viewers handle (HTML / Markdown / Mermaid / CSV / image). Returns `false` for
     /// other types so the caller can fall back (editor, external opener).
     fn open_in_viewer_by_ext(&mut self, path: &str) -> bool {
         let p = PathBuf::from(path);
@@ -554,6 +554,7 @@ impl App {
             "html" | "htm" => self.event_view_html(p).is_ok(),
             "md" | "markdown" => self.event_view_markdown(p).is_ok(),
             "mmd" | "mermaid" => self.event_view_mermaid(p).is_ok(),
+            "csv" | "tsv" => self.event_view_csv(p).is_ok(),
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" | "tif" => {
                 self.event_preview_media(p).is_ok()
             }

@@ -113,6 +113,14 @@ impl App {
                 self.event_swap_active_to_mermaid(path)?;
             }
 
+            PanelEvent::ViewCsv(path) => {
+                self.event_view_csv(path)?;
+            }
+
+            PanelEvent::SwapActiveToCsv(path) => {
+                self.event_swap_active_to_csv(path)?;
+            }
+
             PanelEvent::SaveContentAs {
                 content,
                 default_name,

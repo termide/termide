@@ -183,7 +183,7 @@ impl App {
         // markdown/mermaid preview (switching to source is always for editing).
         let from_preview = matches!(
             self.layout_manager.active_panel().map(|p| p.name()),
-            Some("markdown") | Some("mermaid") | Some("html")
+            Some("markdown") | Some("mermaid") | Some("html") | Some("csv")
         );
         let editable = from_preview
             || self
@@ -272,6 +272,27 @@ impl App {
             }
             Err(e) => self.show_error_modal(format!("Failed to open diagram file: {e}")),
         }
+        Ok(())
+    }
+
+    /// Open a CSV/TSV file in the table viewer (read-only).
+    pub(in crate::app) fn event_view_csv(&mut self, file_path: PathBuf) -> Result<()> {
+        // Each open creates its own focused viewer; reuse-in-place is
+        // image-only (see event_view_markdown). Reading errors show in the
+        // panel itself, so opening cannot fail here.
+        self.close_help_panels();
+        let panel = termide_panel_csv::CsvPanel::new(file_path);
+        self.add_panel(Box::new(panel));
+        self.auto_save_layout();
+        Ok(())
+    }
+
+    /// Swap the active panel in place for the table view.
+    pub(super) fn event_swap_active_to_csv(&mut self, file_path: PathBuf) -> Result<()> {
+        let panel = termide_panel_csv::CsvPanel::new(file_path);
+        self.layout_manager.replace_active_panel(Box::new(panel));
+        self.state.needs_redraw = true;
+        self.auto_save_layout();
         Ok(())
     }
 

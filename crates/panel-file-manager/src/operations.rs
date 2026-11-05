@@ -83,6 +83,11 @@ pub(super) fn determine_file_open_event(
                 return Some(PanelEvent::ViewMermaid(file_path.to_path_buf()));
             }
 
+            // 4a. CSV / TSV → table viewer
+            if is_delimited_table(&entry.name) {
+                return Some(PanelEvent::ViewCsv(file_path.to_path_buf()));
+            }
+
             // 5. HTML → rendered preview
             if is_html(&entry.name) {
                 return Some(PanelEvent::ViewHtml(file_path.to_path_buf()));
@@ -174,6 +179,10 @@ fn is_markdown(filename: &str) -> bool {
 
 fn is_mermaid(filename: &str) -> bool {
     matches!(get_extension(filename).as_str(), "mmd" | "mermaid")
+}
+
+fn is_delimited_table(filename: &str) -> bool {
+    matches!(get_extension(filename).as_str(), "csv" | "tsv")
 }
 
 /// Whether `filename` is an SQLite database the database viewer opens.

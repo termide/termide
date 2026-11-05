@@ -70,7 +70,7 @@ impl Editor {
     }
 
     /// The swap event when this editor holds a previewable source file
-    /// (Markdown or Mermaid). Used to make the view/edit toggle (Ctrl+E / Edit
+    /// (Markdown, Mermaid, HTML or CSV). Used to make the view/edit toggle (Ctrl+E / Edit
     /// chip) swap to the rendered view instead of flipping read-only.
     fn preview_swap_event(&self) -> Option<PanelEvent> {
         let path = self.file_path()?;
@@ -82,6 +82,7 @@ impl Editor {
             "md" | "markdown" => Some(PanelEvent::SwapActiveToMarkdown(path.to_path_buf())),
             "mmd" | "mermaid" => Some(PanelEvent::SwapActiveToMermaid(path.to_path_buf())),
             "html" | "htm" => Some(PanelEvent::SwapActiveToHtml(path.to_path_buf())),
+            "csv" | "tsv" => Some(PanelEvent::SwapActiveToCsv(path.to_path_buf())),
             _ => None,
         }
     }

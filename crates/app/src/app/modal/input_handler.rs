@@ -84,6 +84,7 @@ impl App {
             "html" | "htm" => self.event_view_html(path),
             "md" | "markdown" => self.event_view_markdown(path),
             "mmd" | "mermaid" => self.event_view_mermaid(path),
+            "csv" | "tsv" => self.event_view_csv(path),
             "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" | "tif" => {
                 self.event_preview_media(path)
             }

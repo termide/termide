@@ -114,6 +114,12 @@ pub enum PanelState {
         /// Path to the `.mmd` file
         path: PathBuf,
     },
+    /// Table viewer for a delimited text file (CSV, TSV)
+    #[serde(rename = "csv")]
+    Csv {
+        /// Path to the delimited file
+        path: PathBuf,
+    },
     /// Rendered HTML viewer panel
     #[serde(rename = "html")]
     Html {

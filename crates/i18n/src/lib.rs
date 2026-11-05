@@ -1926,6 +1926,14 @@ pub trait Translation: Send + Sync {
     fn db_copy_tsv(&self) -> &str;
     fn db_copy_json(&self) -> &str;
     fn db_copy_insert(&self) -> &str;
+
+    // CSV table viewer
+    fn csv_loading(&self) -> &str;
+    fn csv_copied_cell(&self) -> &str;
+    fn csv_copied_row(&self) -> &str;
+    fn csv_menu_copy_row(&self) -> &str;
+    fn csv_menu_change_delimiter(&self) -> &str;
+    fn csv_menu_toggle_header(&self) -> &str;
     fn db_filter_operator(&self) -> &str;
     fn db_filter_value(&self) -> &str;
     fn db_filter_hint(&self) -> &str;

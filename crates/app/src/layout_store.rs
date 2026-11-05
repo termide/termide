@@ -367,6 +367,7 @@ fn construct_panel(
         PanelState::Mermaid { path } => termide_panel_mermaid::MermaidPanel::new(path)
             .ok()
             .map(|p| Box::new(p) as Box<dyn Panel + Send>),
+        PanelState::Csv { path } => Some(Box::new(termide_panel_csv::CsvPanel::new(path))),
         PanelState::Html { path } => termide_panel_html::HtmlPanel::new(path)
             .ok()
             .map(|p| Box::new(p) as Box<dyn Panel + Send>),

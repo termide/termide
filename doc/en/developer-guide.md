@@ -142,6 +142,7 @@ termide/
 │   ├── modal/                # Modal dialog system
 │   ├── panel-agent/          # Coding agent panel (transcript, input, permission prompts)
 │   ├── panel-binary/         # Binary file viewer/editor panel (hex/ASCII)
+│   ├── panel-csv/            # CSV/TSV table viewer panel
 │   ├── panel-db/             # Database viewer panel
 │   ├── panel-diagnostics/    # LSP diagnostics panel
 │   ├── panel-editor/         # Text editor panel

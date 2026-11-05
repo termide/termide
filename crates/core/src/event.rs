@@ -637,6 +637,12 @@ pub enum PanelEvent {
     /// Swap the active panel in place for the Mermaid diagram view of `path`
     SwapActiveToMermaid(PathBuf),
 
+    /// Open a delimited text file (CSV, TSV) in the table viewer (read-only)
+    ViewCsv(PathBuf),
+
+    /// Swap the active panel in place for the table view of `path`
+    SwapActiveToCsv(PathBuf),
+
     /// Request a "Save As" dialog to write in-memory text `content` to a
     /// user-chosen path, seeded with `default_name`. Used by read-only viewers
     /// (e.g. the diagram panel) to export their source to a permanent file.

@@ -18,6 +18,7 @@ Welcome to the Termide documentation! This guide covers installation, usage, and
 - [Text Editor](editor.md) - Editing files with syntax highlighting
 - [Markdown Preview](markdown.md) - Rendered `.md` preview with `Ctrl+E` source toggle
 - [Mermaid Diagrams](mermaid.md) - `.mmd` diagram viewer and embedded ```mermaid``` blocks
+- [CSV Table Viewer](csv.md) - `.csv` / `.tsv` files as a sortable table
 - [HTML Preview](html.md) - Rendered `.html` preview and embedded HTML in Markdown
 - [Coding Agent](agent.md) - Built-in AI agent: tools, permissions, project instructions
 - [Themes](themes.md) - Customizing appearance with themes
