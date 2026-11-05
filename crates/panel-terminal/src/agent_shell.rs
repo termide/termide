@@ -603,17 +603,17 @@ impl AgentShell {
         let mut dropped = 0;
         loop {
             let seen = self.tap.end();
-            let marks = self.tap.marks_since(sent);
-            let start = marks.iter().find(|m| m.kind == MarkKind::Start);
-            let end = start.and_then(|start| {
-                marks
-                    .iter()
-                    .find(|m| m.at >= start.after && matches!(m.kind, MarkKind::End(_)))
-            });
+            let start =
+                (self.tap.marks_since(sent).into_iter()).find(|m| m.kind == MarkKind::Start);
+            let mut end = None;
             if let Some(start) = start {
                 let from = read_to.unwrap_or(start.after);
-                let chunk = self.tap.read_since(from);
-                let limit = end.map_or(chunk.end, |end| end.at);
+                // The bytes and the end mark as of one moment, and no further
+                // than an escape still arriving, which may be that mark.
+                let read = self.tap.read_marked(from, start.after);
+                end = (read.marks.into_iter()).find(|m| matches!(m.kind, MarkKind::End(_)));
+                let chunk = read.chunk;
+                let limit = end.map_or(read.settled, |end| end.at);
                 dropped += chunk.from - from;
                 if limit > chunk.from {
                     let len = usize::try_from(limit - chunk.from).unwrap_or(usize::MAX);

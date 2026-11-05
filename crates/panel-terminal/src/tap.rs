@@ -28,6 +28,19 @@ pub struct TapChunk {
     pub closed: bool,
 }
 
+/// What [`OutputTap::read_marked`] found, all of it as of one moment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MarkedChunk {
+    pub chunk: TapChunk,
+    /// The marks at or past the offset asked for, oldest first: every mark
+    /// that ends within `chunk`.
+    pub marks: Vec<Mark>,
+    /// Where the bytes of `chunk` stop being settled: the first byte of an
+    /// escape sequence still arriving, which may yet turn out a mark, or
+    /// `chunk.end` when none is.
+    pub settled: u64,
+}
+
 /// A shell's mark of where a command's output starts or ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkKind {
@@ -144,6 +157,19 @@ impl State {
     fn end(&self) -> u64 {
         self.start + self.ring.len() as u64
     }
+
+    /// The bytes from offset `from` on, as far as memory still holds them.
+    fn chunk(&self, from: u64) -> TapChunk {
+        let end = self.end();
+        let from = from.clamp(self.start, end);
+        let skip = usize::try_from(from - self.start).unwrap_or(usize::MAX);
+        TapChunk {
+            data: self.ring.iter().skip(skip).copied().collect(),
+            from,
+            end,
+            closed: self.closed,
+        }
+    }
 }
 
 /// The tap; shared by the terminal's reader thread, which fills it, and
@@ -245,16 +271,7 @@ impl OutputTap {
 
     /// The bytes from offset `from` on, as far as memory still holds them.
     pub fn read_since(&self, from: u64) -> TapChunk {
-        let state = self.lock();
-        let end = state.end();
-        let from = from.clamp(state.start, end);
-        let skip = usize::try_from(from - state.start).unwrap_or(usize::MAX);
-        TapChunk {
-            data: state.ring.iter().skip(skip).copied().collect(),
-            from,
-            end,
-            closed: state.closed,
-        }
+        self.lock().chunk(from)
     }
 
     /// The marks at or past offset `from`, oldest first.
@@ -265,6 +282,24 @@ impl OutputTap {
             .filter(|mark| mark.at >= from)
             .copied()
             .collect()
+    }
+
+    /// The bytes from offset `from` on with the marks at or past
+    /// `marks_from`, taken together: read one after the other, a mark could
+    /// arrive between the two and its bytes pass for output.
+    pub fn read_marked(&self, from: u64, marks_from: u64) -> MarkedChunk {
+        let state = self.lock();
+        let chunk = state.chunk(from);
+        MarkedChunk {
+            settled: (state.scanner.pending.as_ref()).map_or(chunk.end, |(at, _)| *at),
+            chunk,
+            marks: state
+                .marks
+                .iter()
+                .filter(|mark| mark.at >= marks_from)
+                .copied()
+                .collect(),
+        }
     }
 
     /// Wait until bytes past `from` come or the tap closes, `timeout` at
@@ -366,6 +401,27 @@ mod tests {
             ]
         );
         assert_eq!(tap.marks_since(19).len(), 2);
+    }
+
+    #[test]
+    fn a_mark_still_arriving_is_not_settled_output() {
+        let tap = OutputTap::new(64, None);
+        tap.push(b"1\r\n\x1b]133;D");
+        let read = tap.read_marked(0, 0);
+        assert_eq!((read.chunk.end, read.settled), (10, 3));
+        assert!(read.marks.is_empty());
+
+        tap.push(b";0\x07");
+        let read = tap.read_marked(0, 0);
+        assert_eq!(read.settled, read.chunk.end);
+        assert_eq!(
+            read.marks,
+            [Mark {
+                kind: MarkKind::End(Some(0)),
+                at: 3,
+                after: 13
+            }]
+        );
     }
 
     #[test]
