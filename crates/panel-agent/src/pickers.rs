@@ -65,7 +65,13 @@ impl AgentPanel {
         }
         let mut options: Vec<String> = models
             .iter()
-            .map(|m| format!("{}{}", current_mark(m.id == self.model.id), m.id))
+            .map(|m| {
+                let mark = current_mark(m.id == self.model.id);
+                match &m.name {
+                    Some(name) => format!("{mark}{name} · {}", m.id),
+                    None => format!("{mark}{}", m.id),
+                }
+            })
             .collect();
         options.push(format!("  {}", t.agent_model_other()));
         self.model_choices = models;

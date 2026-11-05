@@ -1006,7 +1006,8 @@ pasted pictures, the model has to read images: a text-only model's server
 refuses the request.
 
 **Model** asks the endpoint for the models it serves and lists them, the
-current one marked `●`; the last entry lets you type an id instead, which is
+current one marked `●` and each by the name the endpoint gives it beside its
+id (OpenRouter's `Anthropic: Claude Sonnet 5 · anthropic/claude-sonnet-5`); the last entry lets you type an id instead, which is
 also what you get when the endpoint cannot list its models. The switch takes
 effect on your next request and stays with the session: it is written to the
 session log — with the provider it runs on — so reopening that session brings
@@ -1016,7 +1017,7 @@ model call in progress finishes on the old model. Switching the connection
 waits for the current task, like switching sessions.
 
 **Context window.** When the endpoint reports a model's window (vLLM and omlx
-report `max_model_len`), the panel always adopts it — at startup and on every
+report `max_model_len`, OpenRouter `context_length`), the panel always adopts it — at startup and on every
 model switch — so `Context:` matches what the server actually allows. The
 configured `context_window_fallback` is only a **fallback**, used when the endpoint
 reports no window; left unset, the built-in 32,000 stands in, and the settings

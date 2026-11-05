@@ -1234,7 +1234,8 @@ endpoint's own `GET /models` (every OpenAI-compatible server answers it),
 fetched on a helper thread and shown when it arrives, with a typed-id entry
 last and as the whole picker when the endpoint cannot list; a config-side
 model list would be a second place to keep in sync with the server. vLLM and
-omlx put `max_model_len` on each entry, and the panel takes it as the context
+omlx put `max_model_len` on each entry (OpenRouter `context_length`, with a
+`name` the picker shows beside the id), and the panel takes it as the context
 window of the model it switches to, since the configured figure belongs to
 the configured model. The mode
 is a `ModeHandle` — an atomic shared with the hooks on the agent thread, the

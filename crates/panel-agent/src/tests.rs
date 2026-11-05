@@ -46,7 +46,7 @@ impl Scripted {
             models: Ok(vec![
                 ModelInfo {
                     id: "big".into(),
-                    name: None,
+                    name: Some("Big Model".into()),
                     context_window: Some(64_000),
                 },
                 ModelInfo {
@@ -6170,7 +6170,8 @@ fn model_switches_are_recorded_and_followed_on_resume() {
     assert_eq!(chip(&panel, MODEL_ACTION), "m");
 
     // The chip fetches the list off-thread; the picker marks the current
-    // model and ends with the typed-id entry.
+    // model, names a model by the name the endpoint gives it beside its id,
+    // and ends with the typed-id entry.
     let events = panel.handle_status_action(MODEL_ACTION);
     assert!(matches!(
         events.first(),
@@ -6180,7 +6181,10 @@ fn model_switches_are_recorded_and_followed_on_resume() {
     let PanelEvent::ShowSelect { options, .. } = &picker else {
         unreachable!()
     };
-    assert_eq!(options, &["  big", "● m", "  Enter a model id…"]);
+    assert_eq!(
+        options,
+        &["  Big Model · big", "● m", "  Enter a model id…"]
+    );
     select(&mut panel, &picker, 0);
     assert_eq!(chip(&panel, MODEL_ACTION), "big");
     // The endpoint's context window comes along with the id.

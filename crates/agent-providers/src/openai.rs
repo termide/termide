@@ -671,8 +671,10 @@ fn effort_levels(model: &str) -> Vec<ThinkingLevel> {
 
 /// Models from a `GET /models` body: OpenAI's `{"data": [{"id": …}]}`, or a
 /// bare array of objects or strings as some servers return. Sorted by id,
-/// duplicates dropped. `max_model_len` (vLLM, omlx) becomes the context
-/// window when present.
+/// duplicates dropped. `max_model_len` (vLLM, omlx) or `context_length`
+/// (OpenRouter and other gateways) becomes the context window when present,
+/// and a `name` other than the id (OpenRouter's "Anthropic: Claude …") the
+/// name shown for the model.
 fn parse_model_list(body: &str) -> Result<Vec<ModelInfo>, String> {
     let value: Value =
         serde_json::from_str(body).map_err(|error| format!("model list is not JSON: {error}"))?;
@@ -690,10 +692,15 @@ fn parse_model_list(body: &str) -> Result<Vec<ModelInfo>, String> {
                 .or_else(|| item.as_str())?;
             Some(ModelInfo {
                 id: id.to_string(),
-                name: None,
-                context_window: item
-                    .get("max_model_len")
-                    .and_then(Value::as_u64)
+                name: item
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty() && *name != id)
+                    .map(str::to_string),
+                context_window: ["max_model_len", "context_length"]
+                    .iter()
+                    .find_map(|field| item.get(*field).and_then(Value::as_u64))
                     .filter(|len| *len > 0),
             })
         })
@@ -1621,6 +1628,33 @@ data: [DONE]\n";
             .unwrap_err()
             .contains("no `data` array"));
         assert!(parse_model_list("<html>").unwrap_err().contains("not JSON"));
+    }
+
+    #[test]
+    fn model_list_takes_a_gateways_names_and_windows() {
+        // OpenRouter's shape: `name` and `context_length` beside the id.
+        let models = parse_model_list(
+            r#"{"data":[
+                {"id":"anthropic/claude-sonnet-5","name":"Anthropic: Claude Sonnet 5","context_length":1000000},
+                {"id":"qwen","name":"qwen","context_length":0}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            models,
+            vec![
+                ModelInfo {
+                    id: "anthropic/claude-sonnet-5".into(),
+                    name: Some("Anthropic: Claude Sonnet 5".into()),
+                    context_window: Some(1_000_000)
+                },
+                ModelInfo {
+                    id: "qwen".into(),
+                    name: None,
+                    context_window: None
+                },
+            ]
+        );
     }
     #[test]
     fn the_endpoint_is_the_host_of_the_base_url() {
