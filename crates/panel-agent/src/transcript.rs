@@ -1403,6 +1403,33 @@ pub(crate) fn fmt_speed(tokens: u64, ms: u32) -> String {
     )
 }
 
+/// Reasoning with the `**` taken off a line that is bold as a whole: Codex
+/// and Gemini CLI head each thought with its subject so (`**Reading the
+/// report**`), which the plain reasoning block would otherwise show as typed.
+fn without_heading_marks(text: &str) -> std::borrow::Cow<'_, str> {
+    let heading = |line: &str| {
+        let line = line.trim();
+        line.len() > 4
+            && line.starts_with("**")
+            && line.ends_with("**")
+            && !line[2..line.len() - 2].contains("**")
+    };
+    if !text.lines().any(heading) {
+        return text.into();
+    }
+    text.lines()
+        .map(|line| {
+            if heading(line) {
+                line.trim().trim_start_matches("**").trim_end_matches("**")
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+        .into()
+}
+
 /// Wrap plain text to `width` with a single style, using the rich-text builder
 /// so long lines fold instead of being clipped at draw time. Each line of
 /// `text` starts a row of its own and a blank line stays blank, so the text
@@ -2632,7 +2659,8 @@ fn render_body(
             } else {
                 colors.disabled
             });
-            let reasoning = text.trim();
+            let reasoning = without_heading_marks(text.trim());
+            let reasoning = reasoning.as_ref();
             if reasoning.is_empty() {
                 return Vec::new();
             }
@@ -3772,6 +3800,32 @@ mod tests {
         );
         assert!(lines.iter().any(|l| l.contains("second one")));
         assert!(lines.iter().any(|l| l.contains("↑512")));
+    }
+
+    /// Codex and Gemini CLI head a thought with its subject in bold; the
+    /// block shows the subject without the marks, and leaves bold inside a
+    /// line as it is.
+    #[test]
+    fn a_thoughts_bold_subject_shows_without_its_marks() {
+        let colors = ThemeColors::default();
+        let mut transcript = Transcript::default();
+        transcript.set_fold(FoldMode::OnFinish);
+        transcript.stream_thinking("**Reading the report**\nIt has **four** columns.");
+        let lines = text_of(transcript.lines(60, &colors, false));
+        let lines: Vec<&str> = lines.iter().map(|l| l.trim_end()).collect();
+        assert_eq!(
+            lines,
+            vec![
+                "@ Thinking Reading the report",
+                "           It has **four** columns."
+            ]
+        );
+        assert!(transcript.finish_thinking("12:00:00", None));
+        let lines = text_of(transcript.lines(60, &colors, false));
+        assert!(
+            lines[0].starts_with("@ Thinking ▸ Reading the report"),
+            "{lines:?}"
+        );
     }
 
     #[test]
