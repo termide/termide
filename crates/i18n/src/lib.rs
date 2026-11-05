@@ -1929,6 +1929,7 @@ pub trait Translation: Send + Sync {
 
     // CSV table viewer
     fn csv_loading(&self) -> &str;
+    fn csv_sorting(&self) -> &str;
     fn csv_copied_cell(&self) -> &str;
     fn csv_copied_row(&self) -> &str;
     fn csv_menu_copy_row(&self) -> &str;

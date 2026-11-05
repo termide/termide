@@ -1,6 +1,6 @@
-//! Reading a delimited text file into records, and guessing how it is laid
-//! out: which delimiter separates the fields, and whether the first record
-//! names the columns.
+//! How a delimited text file is laid out — which delimiter separates the
+//! fields, whether the first record names the columns — and how its fields
+//! show and sort.
 
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -14,63 +14,24 @@ pub const DELIMITERS: [u8; 4] = [b',', b';', b'\t', b'|'];
 /// Records read from the sample when guessing the delimiter.
 const SNIFF_RECORDS: usize = 50;
 /// Bytes read from the start of the file when guessing the delimiter.
-const SNIFF_BYTES: usize = 64 * 1024;
+pub const SNIFF_BYTES: usize = 64 * 1024;
 
-/// A file read into memory, every record as it stands — the first one too,
-/// whether or not it names the columns.
-#[derive(Debug, Default)]
-pub struct Table {
-    pub records: Vec<StringRecord>,
-    pub delimiter: u8,
-    /// Whether the first record looks like column names.
-    pub header_guess: bool,
-    /// Fields in the widest record.
-    pub width: usize,
-}
-
-/// Read and parse `path`. `delimiter` overrides the guess.
-pub fn load(path: &Path, delimiter: Option<u8>) -> Result<Table, String> {
-    let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
-    parse(
-        &bytes,
-        delimiter.unwrap_or_else(|| guess_delimiter(path, &bytes)),
-    )
-}
-
-/// Parse `bytes` with `delimiter`. Text that is not UTF-8 is read lossily
-/// rather than refused: a stray byte should not hide the whole table.
-pub fn parse(bytes: &[u8], delimiter: u8) -> Result<Table, String> {
-    let bytes = bytes.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(bytes);
-    let text = String::from_utf8_lossy(bytes);
-    let mut reader = reader(delimiter, text.as_bytes());
-    let mut records = Vec::new();
-    for record in reader.records() {
-        records.push(record.map_err(|e| e.to_string())?);
-    }
-    let width = records.iter().map(StringRecord::len).max().unwrap_or(0);
-    let header_guess = guess_header(&records);
-    Ok(Table {
-        records,
-        delimiter,
-        header_guess,
-        width,
-    })
-}
-
-fn reader(delimiter: u8, bytes: &[u8]) -> csv::Reader<&[u8]> {
+/// A reader of `source` split by `delimiter`, every record taken as data.
+pub fn reader<R: std::io::Read>(delimiter: u8, source: R) -> csv::Reader<R> {
     ReaderBuilder::new()
         .delimiter(delimiter)
         .has_headers(false)
         // Rows of different lengths are common in hand-made files; show them
         // rather than stop at the first one.
         .flexible(true)
-        .from_reader(bytes)
+        .from_reader(source)
 }
 
 /// The delimiter of a file: tab for `.tsv`/`.tab`; otherwise the candidate
 /// that splits the first records into the same number of fields, more than
-/// one, most often — and among equals, into the most fields.
-pub fn guess_delimiter(path: &Path, bytes: &[u8]) -> u8 {
+/// one, most often — and among equals, into the most fields. `sample` is the
+/// start of the file, `whole` whether it is all of it.
+pub fn guess_delimiter(path: &Path, sample: &[u8], whole: bool) -> u8 {
     let ext = path
         .extension()
         .and_then(|e| e.to_str())
@@ -78,10 +39,10 @@ pub fn guess_delimiter(path: &Path, bytes: &[u8]) -> u8 {
     if matches!(ext.as_deref(), Some("tsv" | "tab")) {
         return b'\t';
     }
-    let sample = &bytes[..bytes.len().min(SNIFF_BYTES)];
+    let sample = &sample[..sample.len().min(SNIFF_BYTES)];
     // Cut at the last line break so a half-read record does not count.
     let sample = match sample.iter().rposition(|&b| b == b'\n') {
-        Some(end) if sample.len() < bytes.len() => &sample[..end],
+        Some(end) if !whole => &sample[..end],
         _ => sample,
     };
     let mut best = (b',', 0usize, 0usize);
@@ -118,13 +79,11 @@ fn mode(values: &[usize]) -> Option<(usize, usize)> {
 
 /// Column names are text: a first record with an empty or numeric field is
 /// taken for data.
-fn guess_header(records: &[StringRecord]) -> bool {
-    let Some(first) = records.first() else {
-        return false;
-    };
-    first
-        .iter()
-        .all(|f| !f.trim().is_empty() && f.trim().parse::<f64>().is_err())
+pub fn guess_header(first: &StringRecord) -> bool {
+    !first.is_empty()
+        && first
+            .iter()
+            .all(|f| !f.trim().is_empty() && f.trim().parse::<f64>().is_err())
 }
 
 /// Spreadsheet-style name of column `index`: A … Z, AA, AB, ….
@@ -171,21 +130,42 @@ pub fn one_line(field: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
-/// Order two fields for sorting: numbers by value before text, text by its
-/// characters, and empty fields last.
-pub fn compare_fields(a: &str, b: &str) -> Ordering {
-    let (a, b) = (a.trim(), b.trim());
-    match (a.is_empty(), b.is_empty()) {
-        (true, true) => return Ordering::Equal,
-        (true, false) => return Ordering::Greater,
-        (false, true) => return Ordering::Less,
-        _ => {}
+/// A field as it sorts: numbers by value before text, text by its
+/// characters, and empty fields last. Worked out once per row, so a sort of
+/// millions does not parse each field at every comparison.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SortKey {
+    Number(f64),
+    Text(Box<str>),
+    Empty,
+}
+
+impl SortKey {
+    pub fn of(field: &str) -> Self {
+        let field = field.trim();
+        if field.is_empty() {
+            Self::Empty
+        } else if let Ok(n) = field.parse::<f64>() {
+            Self::Number(n)
+        } else {
+            Self::Text(field.into())
+        }
     }
-    match (a.parse::<f64>(), b.parse::<f64>()) {
-        (Ok(x), Ok(y)) => x.total_cmp(&y),
-        (Ok(_), Err(_)) => Ordering::Less,
-        (Err(_), Ok(_)) => Ordering::Greater,
-        _ => a.cmp(b),
+
+    pub fn compare(&self, other: &Self) -> Ordering {
+        match (self, other) {
+            (Self::Number(a), Self::Number(b)) => a.total_cmp(b),
+            (Self::Text(a), Self::Text(b)) => a.cmp(b),
+            _ => self.rank().cmp(&other.rank()),
+        }
+    }
+
+    fn rank(&self) -> u8 {
+        match self {
+            Self::Number(_) => 0,
+            Self::Text(_) => 1,
+            Self::Empty => 2,
+        }
     }
 }
 
@@ -211,7 +191,7 @@ mod tests {
     use super::*;
 
     fn guess(name: &str, text: &str) -> u8 {
-        guess_delimiter(Path::new(name), text.as_bytes())
+        guess_delimiter(Path::new(name), text.as_bytes(), true)
     }
 
     #[test]
@@ -230,34 +210,19 @@ mod tests {
     }
 
     #[test]
-    fn quoted_fields_keep_their_delimiters_and_line_breaks() {
-        let table = parse(b"a,b\n\"x, y\",\"two\nlines\"\n", b',').unwrap();
-        assert_eq!(table.records.len(), 2);
-        assert_eq!(&table.records[1][0], "x, y");
-        assert_eq!(&table.records[1][1], "two\nlines");
-        assert_eq!(one_line(&table.records[1][1]), "two↵lines");
-    }
-
-    #[test]
-    fn ragged_rows_and_a_bom_are_read() {
-        let table = parse(b"\xEF\xBB\xBFa,b\n1\n1,2,3\n", b',').unwrap();
-        assert_eq!(&table.records[0][0], "a");
-        assert_eq!(table.width, 3);
-        assert_eq!(table.records[1].len(), 1);
-    }
-
-    #[test]
-    fn invalid_utf8_is_read_lossily() {
-        let table = parse(b"a,b\n\xFF,2\n", b',').unwrap();
-        assert_eq!(&table.records[1][0], "\u{FFFD}");
+    fn a_cut_sample_drops_its_half_read_record() {
+        // Cut inside the third record: whole, `,` would split it unevenly.
+        let sample = b"a;b\n1;2\nx,y,z,";
+        assert_eq!(guess_delimiter(Path::new("a.csv"), sample, false), b';');
     }
 
     #[test]
     fn a_first_record_of_names_is_a_header() {
-        assert!(parse(b"id,name\n1,x\n", b',').unwrap().header_guess);
-        assert!(!parse(b"1,x\n2,y\n", b',').unwrap().header_guess);
-        assert!(!parse(b"id,\n1,x\n", b',').unwrap().header_guess);
-        assert!(!parse(b"", b',').unwrap().header_guess);
+        let header = |fields: Vec<&str>| guess_header(&StringRecord::from(fields));
+        assert!(header(vec!["id", "name"]));
+        assert!(!header(vec!["1", "x"]));
+        assert!(!header(vec!["id", ""]));
+        assert!(!header(vec![]));
     }
 
     #[test]
@@ -274,9 +239,9 @@ mod tests {
 
     #[test]
     fn numbers_sort_by_value_before_text_and_blanks_last() {
-        let mut v = vec!["10", "", "b", "9", "a", "-1.5"];
-        v.sort_by(|a, b| compare_fields(a, b));
-        assert_eq!(v, vec!["-1.5", "9", "10", "a", "b", ""]);
+        let mut v = vec!["10", "", "b", "9", " a", "-1.5"];
+        v.sort_by(|a, b| SortKey::of(a).compare(&SortKey::of(b)));
+        assert_eq!(v, vec!["-1.5", "9", "10", " a", "b", ""]);
     }
 
     #[test]

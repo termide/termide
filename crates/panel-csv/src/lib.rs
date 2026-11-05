@@ -2,20 +2,28 @@
 //!
 //! Opened by View (`F3`) on such a file; the toggle-view key (or the `Edit`
 //! status chip) swaps it in place for the source in the editor, and back. The
-//! file is read and parsed on a background thread and held in memory; the
 //! grid itself is [`termide_ui::Grid`].
+//!
+//! The file is never held in memory: a background pass indexes where its
+//! records start (see [`index`]), and only the window of rows around the
+//! screen is read from disk. Rows show as soon as the first ones are
+//! indexed; the count grows while the rest are.
 //!
 //! The delimiter and whether the first record names the columns are guessed
 //! (see [`table`]) and can be switched from the status bar or the panel menu.
 //! A click on a column header, or `s`, cycles the sort by that column —
-//! ascending, descending, file order. `y` or Copy copies the cell under the
-//! cursor; the panel menu copies the whole row. `Ctrl+R` re-reads the file.
+//! ascending, descending, file order; a sort reads the column once more in
+//! the background and keeps the file order on screen until it is done. `y`
+//! or Copy copies the cell under the cursor; the panel menu copies the whole
+//! row. `Ctrl+R` re-reads the file.
 
+mod index;
 mod table;
 
 use std::any::Any;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::Receiver;
+use std::sync::mpsc::{Receiver, TryRecvError};
 use std::sync::Arc;
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -29,9 +37,9 @@ use termide_core::{
     CommandResult, Config, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent, PanelState,
     RenderContext, ScrollAxis, SegmentKind, StatusSegment, Theme, ThemeColors, WidthPreference,
 };
-use termide_ui::{ColumnSort, Grid, GridCell, GridHit, GridRows, GridState};
+use termide_ui::{ColumnSort, Grid, GridCell, GridHit, GridRows, GridState, GridWindow};
 
-use crate::table::Table;
+use crate::index::{Index, SortJob, SortSpec, Update};
 
 /// Rows moved per mouse wheel notch.
 const WHEEL_ROWS: usize = 3;
@@ -46,14 +54,23 @@ pub struct CsvPanel {
     /// Header choice by the user; `None` follows the guess.
     header: Option<bool>,
 
-    /// The file being read, while it is.
-    loading: Option<Receiver<Result<Table, String>>>,
-    table: Table,
+    /// The indexer, while it runs.
+    indexing: Option<Receiver<Update>>,
+    index: Index,
     error: Option<String>,
 
-    /// Data rows (indices into the records past the header) in display order.
-    order: Vec<usize>,
+    /// The sort asked for.
     sort: Option<(usize, ColumnSort)>,
+    /// The sort being worked out, while it is.
+    sorting: Option<SortJob>,
+    /// The sort on screen: the record offsets of the data rows in its order.
+    sorted: Option<Sorted>,
+
+    /// Cursor row and first row on screen, among all data rows.
+    cursor: usize,
+    top: usize,
+    /// Data rows read from disk around the screen.
+    window: Window,
     grid: GridState,
 
     colors: ThemeColors,
@@ -61,25 +78,34 @@ pub struct CsvPanel {
     last_config_ptr: usize,
 }
 
-/// The data rows in display order, as the grid reads them.
-struct Rows<'a> {
-    records: &'a [StringRecord],
-    order: &'a [usize],
+struct Sorted {
+    by: (usize, ColumnSort),
+    offsets: Vec<u64>,
 }
+
+/// Data rows read from disk: the `span` asked for, and the records it held
+/// (fewer when the file ended earlier than the index said).
+#[derive(Default)]
+struct Window {
+    span: Range<usize>,
+    records: Vec<StringRecord>,
+}
+
+/// The rows on screen, as the grid reads them.
+struct Rows<'a>(&'a [StringRecord]);
 
 impl GridRows for Rows<'_> {
     fn row_count(&self) -> usize {
-        self.order.len()
+        self.0.len()
     }
 
     fn cell(&self, row: usize, col: usize) -> Option<GridCell<'_>> {
-        let record = self.records.get(*self.order.get(row)?)?;
-        Some(GridCell::new(table::one_line(record.get(col)?)))
+        Some(GridCell::new(table::one_line(self.0.get(row)?.get(col)?)))
     }
 }
 
 impl CsvPanel {
-    /// Open `path` in the table viewer; reading starts at once, in the
+    /// Open `path` in the table viewer; indexing starts at once, in the
     /// background.
     pub fn new(path: PathBuf) -> Self {
         let title = path
@@ -92,96 +118,165 @@ impl CsvPanel {
             title,
             delimiter: None,
             header: None,
-            loading: None,
-            table: Table::default(),
+            indexing: None,
+            index: Index::default(),
             error: None,
-            order: Vec::new(),
             sort: None,
+            sorting: None,
+            sorted: None,
+            cursor: 0,
+            top: 0,
+            window: Window::default(),
             grid: GridState::default(),
             colors: ThemeColors::default(),
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
         };
-        panel.start_loading();
+        panel.start_indexing();
         panel
     }
 
-    /// (Re)read the file on a background thread with the current delimiter.
-    fn start_loading(&mut self) {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let path = self.path.clone();
-        let delimiter = self.delimiter;
-        let spawned = std::thread::Builder::new()
-            .name("termide-csv-load".into())
-            .spawn(move || {
-                let _ = tx.send(table::load(&path, delimiter));
-            });
-        match spawned {
-            Ok(_) => self.loading = Some(rx),
+    /// (Re)index the file with the current delimiter, and redo the sort on
+    /// it: the offsets of the old pass may no longer hold.
+    fn start_indexing(&mut self) {
+        self.index = Index::default();
+        self.window = Window::default();
+        self.sorted = None;
+        self.error = None;
+        match index::spawn_index(self.path.clone(), self.delimiter) {
+            Ok(rx) => self.indexing = Some(rx),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+        self.start_sort();
+    }
+
+    /// Work out the sort asked for in the background, or drop the one on
+    /// screen when none is.
+    fn start_sort(&mut self) {
+        self.sorting = None;
+        let Some((column, dir)) = self.sort else {
+            if self.sorted.take().is_some() {
+                self.window = Window::default();
+            }
+            return;
+        };
+        let spec = SortSpec {
+            delimiter: self.delimiter.unwrap_or(self.index.delimiter),
+            skip_first: self.has_header(),
+            column,
+            descending: dir == ColumnSort::Descending,
+        };
+        match index::spawn_sort(self.path.clone(), spec) {
+            Ok(job) => self.sorting = Some(job),
             Err(e) => self.error = Some(e.to_string()),
         }
     }
 
-    /// Take the read table if it is ready; true when something changed.
-    fn poll_loading(&mut self) -> bool {
-        let Some(rx) = &self.loading else {
-            return false;
-        };
-        let result = match rx.try_recv() {
-            Ok(result) => result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return false,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                Err("the reading thread stopped".to_string())
+    /// Take in what the indexer and the sort have done; true when something
+    /// changed.
+    fn poll(&mut self) -> bool {
+        let mut changed = false;
+        while let Some(rx) = &self.indexing {
+            let update = match rx.try_recv() {
+                Ok(update) => update,
+                Err(TryRecvError::Empty) => break,
+                Err(TryRecvError::Disconnected) => Update::Failed("the indexer stopped".into()),
+            };
+            changed = true;
+            match update {
+                Update::Done => self.indexing = None,
+                Update::Failed(e) => {
+                    self.indexing = None;
+                    self.error = Some(e);
+                }
+                update => {
+                    self.index.apply(update);
+                }
             }
-        };
-        self.loading = None;
-        match result {
-            Ok(table) => {
-                self.table = table;
-                self.error = None;
-                self.rebuild_order();
-            }
-            Err(e) => self.error = Some(e),
         }
-        true
+        if let Some(job) = &self.sorting {
+            let result = match job.result.try_recv() {
+                Ok(result) => Some(result),
+                Err(TryRecvError::Empty) => None,
+                Err(TryRecvError::Disconnected) => Some(Err("the sort stopped".into())),
+            };
+            if let Some(result) = result {
+                changed = true;
+                self.sorting = None;
+                match (result, self.sort) {
+                    (Ok(offsets), Some(by)) => {
+                        self.sorted = Some(Sorted { by, offsets });
+                        self.window = Window::default();
+                    }
+                    (Ok(_), None) => {}
+                    (Err(e), _) => self.error = Some(e),
+                }
+            }
+        }
+        changed
     }
 
     /// Whether the first record names the columns.
     fn has_header(&self) -> bool {
-        self.header.unwrap_or(self.table.header_guess)
+        self.header
+            .unwrap_or_else(|| self.index.first.as_ref().is_some_and(table::guess_header))
     }
 
-    /// Records holding data: all but the header.
-    fn data(&self) -> &[StringRecord] {
-        data_records(&self.table, self.has_header())
+    /// Data rows: in the sort on screen, or all records but the header.
+    fn row_count(&self) -> usize {
+        match &self.sorted {
+            Some(sorted) => sorted.offsets.len(),
+            None => self
+                .index
+                .records
+                .saturating_sub(usize::from(self.has_header())),
+        }
     }
 
     fn column_names(&self) -> Vec<String> {
         let header = self
             .has_header()
-            .then(|| self.table.records.first())
+            .then_some(self.index.first.as_ref())
             .flatten();
-        table::column_names(header, self.table.width)
+        table::column_names(header, self.index.width)
     }
 
-    /// Recompute the display order for the current sort, keeping the cursor
-    /// on the window position it had.
-    fn rebuild_order(&mut self) {
-        let data = self.data();
-        let mut order: Vec<usize> = (0..data.len()).collect();
-        if let Some((col, dir)) = self.sort {
-            let field = |i: usize| data[i].get(col).unwrap_or("");
-            // Stable, so equal values keep their file order either way.
-            order.sort_by(|&a, &b| {
-                let ord = table::compare_fields(field(a), field(b));
-                match dir {
-                    ColumnSort::Ascending => ord,
-                    ColumnSort::Descending => ord.reverse(),
-                }
-            });
+    /// Have data rows `rows` read, with as many again on either side so
+    /// that scrolling a little reads nothing. A window that holds them
+    /// already is kept.
+    fn load_window(&mut self, rows: Range<usize>) {
+        let total = self.row_count();
+        let rows = rows.start.min(total)..rows.end.min(total);
+        let span = &self.window.span;
+        if span.start <= rows.start && rows.end <= span.end {
+            return;
         }
-        self.order = order;
-        self.grid.clamp(self.order.len(), self.table.width);
+        let margin = rows.len().max(1);
+        let span = rows.start.saturating_sub(margin)..(rows.end + margin).min(total);
+        let read = match &self.sorted {
+            Some(sorted) => index::read_at(
+                &self.path,
+                self.index.delimiter,
+                &sorted.offsets[span.clone()],
+            ),
+            None => {
+                let skip = usize::from(self.has_header());
+                self.index.read(&self.path, span.start + skip, span.len())
+            }
+        };
+        match read {
+            Ok(records) => self.window = Window { span, records },
+            Err(e) => self.error = Some(e),
+        }
+    }
+
+    /// Data row `row`, read in if it is not in the window.
+    fn record(&mut self, row: usize) -> Option<StringRecord> {
+        self.load_window(row..row + 1);
+        self.window
+            .records
+            .get(row.checked_sub(self.window.span.start)?)
+            .cloned()
     }
 
     /// Cycle the sort of column `col`: ascending, descending, file order.
@@ -191,54 +286,50 @@ impl CsvPanel {
             Some((c, ColumnSort::Descending)) if c == col => None,
             _ => Some((col, ColumnSort::Ascending)),
         };
-        self.rebuild_order();
+        self.start_sort();
     }
 
     fn toggle_header(&mut self) {
         self.header = Some(!self.has_header());
-        if self.sort.is_some_and(|(c, _)| c >= self.table.width) {
-            self.sort = None;
-        }
-        self.rebuild_order();
+        self.window = Window::default();
+        // The header leaves the data rows or joins them: sort them again.
+        self.sorted = None;
+        self.start_sort();
     }
 
     /// Re-read the file split by the next delimiter.
     fn cycle_delimiter(&mut self) {
-        let current = self.delimiter.unwrap_or(self.table.delimiter);
+        let current = self.delimiter.unwrap_or(self.index.delimiter);
         self.delimiter = Some(table::next_delimiter(current));
         // The columns change with the delimiter: a sort by one would land on
         // whatever falls in its place.
         self.sort = None;
+        self.cursor = 0;
+        self.top = 0;
         self.grid.reset();
-        self.start_loading();
+        self.start_indexing();
     }
 
     /// Re-read the file, keeping the delimiter, the sort and the cursor.
     fn refresh(&mut self) {
-        self.error = None;
-        self.start_loading();
+        self.start_indexing();
     }
 
-    /// The record under the cursor.
-    fn current_record(&self) -> Option<&StringRecord> {
-        let index = *self.order.get(self.grid.cursor_row)?;
-        self.data().get(index)
-    }
-
-    fn copy_cell(&self) -> Vec<PanelEvent> {
+    fn copy_cell(&mut self) -> Vec<PanelEvent> {
+        let col = self.grid.cursor_col;
         let Some(text) = self
-            .current_record()
-            .and_then(|r| r.get(self.grid.cursor_col))
+            .record(self.cursor)
+            .and_then(|r| r.get(col).map(str::to_string))
         else {
             return vec![];
         };
-        copied(text.to_string(), termide_i18n::t().csv_copied_cell())
+        copied(text, termide_i18n::t().csv_copied_cell())
     }
 
     /// The row under the cursor, tab-separated, ready to paste into a
     /// spreadsheet.
-    fn copy_row(&self) -> Vec<PanelEvent> {
-        let Some(record) = self.current_record() else {
+    fn copy_row(&mut self) -> Vec<PanelEvent> {
+        let Some(record) = self.record(self.cursor) else {
             return vec![];
         };
         let text = record
@@ -250,11 +341,26 @@ impl CsvPanel {
     }
 
     fn move_rows(&mut self, delta: isize) -> bool {
-        let last = self.order.len().saturating_sub(1);
-        let row = self.grid.cursor_row.saturating_add_signed(delta).min(last);
-        let moved = row != self.grid.cursor_row;
-        self.grid.cursor_row = row;
+        let last = self.row_count().saturating_sub(1);
+        let row = self.cursor.saturating_add_signed(delta).min(last);
+        let moved = row != self.cursor;
+        self.cursor = row;
         moved
+    }
+
+    /// Keep the cursor among the `page` rows on screen from `top`; once the
+    /// count is final, keep both within it.
+    fn follow_cursor(&mut self, page: usize) {
+        let total = self.row_count();
+        if self.indexing.is_none() {
+            self.cursor = self.cursor.min(total.saturating_sub(1));
+            self.top = self.top.min(total.saturating_sub(page));
+        }
+        if self.cursor < self.top {
+            self.top = self.cursor;
+        } else if self.cursor >= self.top + page {
+            self.top = self.cursor + 1 - page;
+        }
     }
 
     fn redraw() -> Vec<PanelEvent> {
@@ -267,12 +373,6 @@ impl CsvPanel {
         let x = area.x + (area.width.saturating_sub(w as u16)) / 2;
         buf.set_stringn(x, y, msg, area.width as usize, style);
     }
-}
-
-/// The records of `table` holding data: all but the header, when it has one.
-fn data_records(table: &Table, header: bool) -> &[StringRecord] {
-    let skip = usize::from(header).min(table.records.len());
-    &table.records[skip..]
 }
 
 fn copied(text: String, message: &str) -> Vec<PanelEvent> {
@@ -317,6 +417,21 @@ impl Panel for CsvPanel {
         let base = Style::default().fg(self.colors.fg).bg(self.colors.bg);
         buf.set_style(area, base);
 
+        // Rows on screen: as many as the last frame had room for, or at most
+        // the area below the header before the first one.
+        let page = match self.grid.visible_rows() {
+            0 => area.height.saturating_sub(1) as usize,
+            rows => rows,
+        }
+        .max(1);
+        // Ask for the whole area, not just the rows the last frame showed:
+        // a frame grown taller still finds its rows.
+        let height = area.height as usize;
+        if self.error.is_none() {
+            self.follow_cursor(page);
+            self.load_window(self.top..self.top + height);
+        }
+
         if let Some(err) = &self.error {
             let msg = format!(" Cannot open: {err}");
             buf.set_stringn(
@@ -329,27 +444,45 @@ impl Panel for CsvPanel {
             return;
         }
         let t = termide_i18n::t();
-        if self.table.records.is_empty() {
-            if self.loading.is_some() {
+        let total = self.row_count();
+        if self.index.records == 0 {
+            if self.indexing.is_some() {
                 self.center_message(buf, area, t.csv_loading(), base.fg(self.colors.info));
             }
             return;
         }
 
+        let skip = self.top.saturating_sub(self.window.span.start);
+        let records = &self.window.records;
+        let shown = &records[skip.min(records.len())..(skip + height).min(records.len())];
+
+        // The grid sees the screen's rows as its window, the cursor in it.
+        self.grid.cursor_row = self.cursor - self.top;
+        self.grid.row_scroll = 0;
         let names = self.column_names();
-        let rows = Rows {
-            records: data_records(&self.table, self.has_header()),
-            order: &self.order,
-        };
-        Grid::new(&names, &rows)
-            .sort(self.sort)
+        Grid::new(&names, &Rows(shown))
+            .window(GridWindow {
+                offset: self.top,
+                total: Some(total),
+            })
+            .sort(self.sorted.as_ref().map(|s| s.by))
             .show_cursor(ctx.is_focused)
             .borders(ctx.border_right_x, ctx.border_bottom_y)
             .render(area, buf, &mut self.grid, &self.colors, ctx.is_focused);
+        // Fewer rows fitted than were assumed: the grid scrolled to keep
+        // the cursor in view; take that scroll as the new top.
+        self.top += self.grid.row_scroll;
+        self.grid.row_scroll = 0;
 
-        // A re-read keeps the old table on screen until the new one lands.
-        if self.loading.is_some() {
-            let label = format!(" {} ", t.csv_loading());
+        let busy = if self.indexing.is_some() {
+            Some(t.csv_loading())
+        } else if self.sorting.is_some() {
+            Some(t.csv_sorting())
+        } else {
+            None
+        };
+        if let Some(busy) = busy {
+            let label = format!(" {busy} ");
             buf.set_stringn(
                 area.x,
                 area.y,
@@ -361,7 +494,7 @@ impl Panel for CsvPanel {
     }
 
     fn tick(&mut self) -> Vec<PanelEvent> {
-        if self.poll_loading() {
+        if self.poll() {
             Self::redraw()
         } else {
             vec![]
@@ -393,14 +526,14 @@ impl Panel for CsvPanel {
             KeyCode::PageUp => self.move_rows(-page),
             KeyCode::PageDown => self.move_rows(page),
             KeyCode::Home => {
-                let moved = (self.grid.cursor_row, self.grid.cursor_col) != (0, 0);
-                self.grid.cursor_row = 0;
+                let moved = (self.cursor, self.grid.cursor_col) != (0, 0);
+                self.cursor = 0;
                 self.grid.cursor_col = 0;
                 moved
             }
             KeyCode::End => self.move_rows(isize::MAX),
             KeyCode::Left => self.grid.move_left(),
-            KeyCode::Right => self.grid.move_right(self.table.width),
+            KeyCode::Right => self.grid.move_right(self.index.width),
             KeyCode::Char('s') => {
                 self.cycle_sort(self.grid.cursor_col);
                 true
@@ -427,7 +560,7 @@ impl Panel for CsvPanel {
         let changed = match event.kind {
             MouseEventKind::ScrollDown => self.move_rows(WHEEL_ROWS as isize),
             MouseEventKind::ScrollUp => self.move_rows(-(WHEEL_ROWS as isize)),
-            MouseEventKind::ScrollRight => self.grid.move_right(self.table.width),
+            MouseEventKind::ScrollRight => self.grid.move_right(self.index.width),
             MouseEventKind::ScrollLeft => self.grid.move_left(),
             MouseEventKind::Down(MouseButton::Left) => {
                 match self.grid.hit(event.column, event.row) {
@@ -437,7 +570,7 @@ impl Panel for CsvPanel {
                         true
                     }
                     Some(GridHit::Cell { row, col }) => {
-                        self.grid.cursor_row = row;
+                        self.cursor = self.top + row;
                         if let Some(col) = col {
                             self.grid.cursor_col = col;
                         }
@@ -458,11 +591,11 @@ impl Panel for CsvPanel {
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
             PanelCommand::Copy => {
-                if let Some(text) = self
-                    .current_record()
-                    .and_then(|r| r.get(self.grid.cursor_col))
-                {
-                    let _ = termide_ui::clipboard::copy(text);
+                let col = self.grid.cursor_col;
+                if let Some(record) = self.record(self.cursor) {
+                    if let Some(text) = record.get(col) {
+                        let _ = termide_ui::clipboard::copy(text);
+                    }
                 }
                 CommandResult::Handled(true)
             }
@@ -472,11 +605,11 @@ impl Panel for CsvPanel {
             PanelCommand::SetScrollOffset { axis, offset } => {
                 match axis {
                     ScrollAxis::Vertical => {
-                        self.grid.cursor_row = offset.min(self.order.len().saturating_sub(1));
-                        self.grid.row_scroll = self.grid.cursor_row;
+                        self.cursor = offset.min(self.row_count().saturating_sub(1));
+                        self.top = self.cursor;
                     }
                     ScrollAxis::Horizontal => {
-                        self.grid.cursor_col = offset.min(self.table.width.saturating_sub(1));
+                        self.grid.cursor_col = offset.min(self.index.width.saturating_sub(1));
                         self.grid.col_scroll = self.grid.cursor_col;
                     }
                 }
@@ -492,13 +625,11 @@ impl Panel for CsvPanel {
             return vec![];
         }
         let sep = || StatusSegment::new(" │ ", SegmentKind::Label);
-        let delimiter = self.delimiter.unwrap_or(self.table.delimiter);
-        let rows = self.order.len();
-        let row = if rows == 0 {
-            0
-        } else {
-            self.grid.cursor_row + 1
-        };
+        let delimiter = self.delimiter.unwrap_or(self.index.delimiter);
+        let rows = self.row_count();
+        let row = if rows == 0 { 0 } else { self.cursor + 1 };
+        // More rows are on their way while the file is being indexed.
+        let more = if self.indexing.is_some() { "…" } else { "" };
         // Same field order as the editor and the other viewers: View, Edit.
         vec![
             StatusSegment::new(" ", SegmentKind::Label),
@@ -523,7 +654,7 @@ impl Panel for CsvPanel {
             ),
             sep(),
             StatusSegment::new("Row: ", SegmentKind::Label),
-            StatusSegment::new(format!("{row}/{rows}"), SegmentKind::Value),
+            StatusSegment::new(format!("{row}/{rows}{more}"), SegmentKind::Value),
         ]
     }
 
@@ -600,9 +731,9 @@ mod tests {
     }
 
     fn settle(panel: &mut CsvPanel) {
-        for _ in 0..200 {
-            panel.poll_loading();
-            if panel.loading.is_none() {
+        for _ in 0..400 {
+            panel.poll();
+            if panel.indexing.is_none() && panel.sorting.is_none() {
                 return;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
@@ -610,26 +741,42 @@ mod tests {
         panic!("the file was not read");
     }
 
+    fn render(panel: &mut CsvPanel, area: Rect, buf: &mut Buffer) {
+        let colors = ThemeColors::default();
+        let ctx = RenderContext {
+            theme: &colors,
+            config: &termide_core::PanelConfig {
+                tab_size: 4,
+                word_wrap: false,
+                show_line_numbers: false,
+                show_hidden_files: false,
+            },
+            is_focused: true,
+            panel_index: 0,
+            terminal_width: area.width,
+            terminal_height: area.height,
+            border_right_x: None,
+            border_bottom_y: None,
+        };
+        panel.render(area, buf, &ctx);
+    }
+
     fn press(panel: &mut CsvPanel, code: KeyCode) -> Vec<PanelEvent> {
         panel.handle_key(KeyChord::identity(KeyEvent::from(code)))
     }
 
-    fn column(panel: &CsvPanel, col: usize) -> Vec<String> {
-        let rows = Rows {
-            records: panel.data(),
-            order: &panel.order,
-        };
-        (0..rows.row_count())
-            .map(|r| rows.cell(r, col).unwrap().text.into_owned())
+    fn column(panel: &mut CsvPanel, col: usize) -> Vec<String> {
+        (0..panel.row_count())
+            .map(|r| panel.record(r).unwrap()[col].to_string())
             .collect()
     }
 
     #[test]
     fn a_file_with_a_header_names_its_columns() {
-        let (_dir, panel) = open("id;name\n2;b\n1;a\n", "t.csv");
+        let (_dir, mut panel) = open("id;name\n2;b\n1;a\n", "t.csv");
         assert_eq!(panel.column_names(), vec!["id", "name"]);
-        assert_eq!(column(&panel, 1), vec!["b", "a"]);
-        assert_eq!(table::delimiter_label(panel.table.delimiter), ";");
+        assert_eq!(column(&mut panel, 1), vec!["b", "a"]);
+        assert_eq!(table::delimiter_label(panel.index.delimiter), ";");
     }
 
     #[test]
@@ -637,7 +784,7 @@ mod tests {
         let (_dir, mut panel) = open("id,name\n1,a\n", "t.csv");
         panel.handle_status_action("toggle_header");
         assert_eq!(panel.column_names(), vec!["A", "B"]);
-        assert_eq!(column(&panel, 0), vec!["id", "1"]);
+        assert_eq!(column(&mut panel, 0), vec!["id", "1"]);
     }
 
     #[test]
@@ -645,11 +792,15 @@ mod tests {
         // `""` is an empty field; a blank line would be no record at all.
         let (_dir, mut panel) = open("n\n10\n9\n\"\"\n100\n", "t.csv");
         press(&mut panel, KeyCode::Char('s'));
-        assert_eq!(column(&panel, 0), vec!["9", "10", "100", ""]);
+        settle(&mut panel);
+        assert_eq!(column(&mut panel, 0), vec!["9", "10", "100", ""]);
         press(&mut panel, KeyCode::Char('s'));
-        assert_eq!(column(&panel, 0), vec!["", "100", "10", "9"]);
+        settle(&mut panel);
+        assert_eq!(column(&mut panel, 0), vec!["", "100", "10", "9"]);
         press(&mut panel, KeyCode::Char('s'));
-        assert_eq!(column(&panel, 0), vec!["10", "9", "", "100"]);
+        settle(&mut panel);
+        assert_eq!(column(&mut panel, 0), vec!["10", "9", "", "100"]);
+        assert!(panel.sorted.is_none());
     }
 
     #[test]
@@ -671,18 +822,18 @@ mod tests {
     #[test]
     fn the_delimiter_switch_rereads_the_file_split_differently() {
         let (_dir, mut panel) = open("a;b;c\n1;2;3,5\n", "t.csv");
-        assert_eq!(panel.table.width, 3);
+        assert_eq!(panel.index.width, 3);
         panel.handle_status_action("cycle_delimiter");
         settle(&mut panel);
         // `;` was guessed; the next one is Tab, which splits nothing.
-        assert_eq!(panel.table.delimiter, b'\t');
-        assert_eq!(panel.table.width, 1);
+        assert_eq!(panel.index.delimiter, b'\t');
+        assert_eq!(panel.index.width, 1);
         panel.handle_status_action("cycle_delimiter");
         settle(&mut panel);
-        assert_eq!(panel.table.delimiter, b'|');
+        assert_eq!(panel.index.delimiter, b'|');
         panel.handle_status_action("cycle_delimiter");
         settle(&mut panel);
-        assert_eq!(panel.table.delimiter, b',');
+        assert_eq!(panel.index.delimiter, b',');
         assert_eq!(panel.column_names(), vec!["a;b;c", "B"]);
     }
 
@@ -690,14 +841,14 @@ mod tests {
     fn navigation_stays_within_the_table() {
         let (_dir, mut panel) = open("a,b\n1,2\n3,4\n5,6\n", "t.csv");
         press(&mut panel, KeyCode::End);
-        assert_eq!(panel.grid.cursor_row, 2);
+        assert_eq!(panel.cursor, 2);
         press(&mut panel, KeyCode::Down);
-        assert_eq!(panel.grid.cursor_row, 2);
+        assert_eq!(panel.cursor, 2);
         press(&mut panel, KeyCode::Right);
         press(&mut panel, KeyCode::Right);
         assert_eq!(panel.grid.cursor_col, 1);
         press(&mut panel, KeyCode::Home);
-        assert_eq!((panel.grid.cursor_row, panel.grid.cursor_col), (0, 0));
+        assert_eq!((panel.cursor, panel.grid.cursor_col), (0, 0));
     }
 
     #[test]
@@ -731,23 +882,7 @@ mod tests {
         let (_dir, mut panel) = open("id,name\n1,alpha\n2,beta\n", "t.csv");
         let area = Rect::new(0, 0, 30, 6);
         let mut buf = Buffer::empty(area);
-        let colors = ThemeColors::default();
-        let ctx = RenderContext {
-            theme: &colors,
-            config: &termide_core::PanelConfig {
-                tab_size: 4,
-                word_wrap: false,
-                show_line_numbers: false,
-                show_hidden_files: false,
-            },
-            is_focused: true,
-            panel_index: 0,
-            terminal_width: 30,
-            terminal_height: 6,
-            border_right_x: None,
-            border_bottom_y: None,
-        };
-        panel.render(area, &mut buf, &ctx);
+        render(&mut panel, area, &mut buf);
         let line: String = (0..30).map(|x| buf[(x, 1)].symbol()).collect();
         assert!(line.starts_with(" 1   │ alpha │"), "{line:?}");
 
@@ -758,8 +893,56 @@ mod tests {
             modifiers: KeyModifiers::NONE,
         };
         panel.handle_mouse(click(8, 2), area);
-        assert_eq!((panel.grid.cursor_row, panel.grid.cursor_col), (1, 1));
+        assert_eq!((panel.cursor, panel.grid.cursor_col), (1, 1));
         panel.handle_mouse(click(8, 0), area);
         assert_eq!(panel.sort, Some((1, ColumnSort::Ascending)));
+    }
+
+    #[test]
+    fn only_the_rows_around_the_screen_are_read() {
+        let text: String = std::iter::once("n,sq\n".to_string())
+            .chain((0..5000).map(|i| format!("{i},{}\n", i * i)))
+            .collect();
+        let (_dir, mut panel) = open(&text, "t.csv");
+        assert_eq!(panel.row_count(), 5000);
+        let area = Rect::new(0, 0, 30, 11);
+        let mut buf = Buffer::empty(area);
+        render(&mut panel, area, &mut buf);
+        assert_eq!(panel.window.span, 0..22, "the screen and a screen past it");
+
+        press(&mut panel, KeyCode::End);
+        render(&mut panel, area, &mut buf);
+        assert_eq!(panel.cursor, 4999);
+        assert_eq!(panel.top, 4999 + 1 - panel.grid.visible_rows());
+        assert!(panel.window.records.len() <= 40);
+        let last: String = (0..30).map(|x| buf[(x, 10)].symbol()).collect();
+        assert!(last.starts_with(" 4999 │ 24990001 │"), "{last:?}");
+
+        // A drag of the scrollbar thumb lands the cursor mid-file.
+        panel.handle_command(PanelCommand::SetScrollOffset {
+            axis: ScrollAxis::Vertical,
+            offset: 2500,
+        });
+        render(&mut panel, area, &mut buf);
+        let first: String = (0..30).map(|x| buf[(x, 1)].symbol()).collect();
+        assert!(first.starts_with(" 2500 │ 6250000 │"), "{first:?}");
+    }
+
+    #[test]
+    fn a_sorted_view_reads_its_rows_in_the_sorted_order() {
+        let text: String = std::iter::once("n\n".to_string())
+            .chain((0..1000).map(|i| format!("{}\n", (i * 7919) % 1000)))
+            .collect();
+        let (_dir, mut panel) = open(&text, "t.csv");
+        press(&mut panel, KeyCode::Char('s'));
+        press(&mut panel, KeyCode::Char('s'));
+        settle(&mut panel);
+        assert_eq!(
+            panel.sorted.as_ref().unwrap().by,
+            (0, ColumnSort::Descending)
+        );
+        press(&mut panel, KeyCode::End);
+        assert_eq!(&panel.record(panel.cursor).unwrap()[0], "0");
+        assert_eq!(&panel.record(0).unwrap()[0], "999");
     }
 }

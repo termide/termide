@@ -12,8 +12,11 @@ is read-only; edit the file as text in the editor.
 - Open… (`Ctrl+G`), a bookmark or a followed link to such a file opens the
   table too.
 
-The file is read in the background; a large one shows `Loading…` until it is
-in. The whole file is held in memory.
+The file is not loaded into memory. A background pass finds where its rows
+start, and only the rows around the screen are read from disk, so a file of
+any size opens at once. The first rows show as soon as they are found. While
+the pass runs, `Loading…` shows in the corner and the row count in the status
+bar ends in `…`.
 
 ## Table ↔ Source
 
@@ -56,5 +59,7 @@ that is not valid UTF-8 is read with the bad bytes replaced.
 
 A click on a cell moves the cursor there; a click on a column header sorts by
 it, as `s` does. Numbers sort by value and before text; empty cells sort last.
+A sort reads the column through once more in the background: the table keeps
+its current order, with `Sorting…` in the corner, until the sort is ready.
 The panel `[≡]` menu also copies the whole row, tab-separated, ready to paste
 into a spreadsheet.

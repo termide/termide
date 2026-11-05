@@ -1257,6 +1257,7 @@ impl Translation for RuntimeTranslation {
         db_copy_json,
         db_copy_insert,
         csv_loading,
+        csv_sorting,
         csv_copied_cell,
         csv_copied_row,
         csv_menu_copy_row,
