@@ -138,6 +138,7 @@ termide/
 │   ├── modal/                # 模态对话框系统
 │   ├── panel-agent/          # 编程智能体面板（对话记录、输入、权限提示）
 │   ├── panel-binary/         # 二进制文件查看/编辑面板（hex/ASCII）
+│   ├── panel-csv/            # CSV/TSV 表格查看面板
 │   ├── panel-db/             # 数据库查看面板
 │   ├── panel-diagnostics/    # LSP 诊断面板
 │   ├── panel-editor/         # 文本编辑器面板

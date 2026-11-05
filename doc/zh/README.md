@@ -19,6 +19,7 @@
 - [Markdown 预览](markdown.md) - 渲染 `.md` 预览，`Ctrl+E` 切换源码
 - [Mermaid 图表](mermaid.md) - `.mmd` 图表查看器及嵌入的 ```mermaid``` 块
 - [HTML 预览](html.md) - 渲染 `.html` 预览，及 Markdown 中嵌入的 HTML
+- [CSV 表格查看器](csv.md) - 以可排序表格显示 `.csv` / `.tsv` 文件
 - [编码代理](agent.md) - 内置 AI 代理：工具、权限、项目指令
 - [主题](themes.md) - 使用主题自定义外观
 - [自定义命令](actions.md) - 在命令菜单中运行 `commands.toml` 中的 shell 命令

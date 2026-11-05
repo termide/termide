@@ -143,6 +143,12 @@ in the input with a notice. Text fields edit like every input in termide: the
 cursor moves by character and word, `Shift` or a mouse drag selects, and
 `Ctrl+C`/`Ctrl+X`/`Ctrl+V`, `Ctrl+A` and undo work.
 
+A saved change to a connection reaches the agent panels already open on it:
+each keeps its conversation and goes on with the new endpoint, model and
+window from its next request. A run going on finishes on the endpoint it
+started on and moves when the turn ends; a panel whose connection was deleted
+stays where it is.
+
 The configuration file never holds an API key. A connection finds its key in
 two places, in this order:
 

@@ -87,6 +87,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 - **Remote filesystems** - SFTP, FTP and FTPS in pure Rust, with copying between local and remote panels; `smb://` and `nfs://` through the OS mount
 - **Background operations** - Copy, move, upload and download with progress, pause, resume and cancel
 - **Database viewer** - SQLite, PostgreSQL and MySQL from a bookmark URL: server-side sort, per-column filters, cell editing, rows as TSV, JSON or INSERT
+- **CSV and TSV tables** - Delimited files as a sortable table with the delimiter and header guessed; read from disk in windows, so a file of any size opens at once
 - **Password vault** - Passwords of remote hosts, databases and git in an encrypted vault under a master password
 - **Bookmarks and directory switcher** - Saved locations and quick switching with `Ctrl+\`
 
