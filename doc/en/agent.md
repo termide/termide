@@ -62,7 +62,8 @@ name, so two connections to one server keep separate counts, and two termide
 processes do not share it. A CLI agent sends its requests itself, so it has
 none.
 Every server but the hosted APIs is asked for its prompt-processing progress
-(`return_progress`), which llama.cpp reports and others ignore; one that
+(`return_progress`), which llama.cpp and omlx (0.7.1 and later) report and
+others ignore; one that
 refuses the field is asked again without it.
 `app_attribution` identifies termide to an endpoint that keeps a breakdown of
 usage by the app that sent it — OpenRouter today, which files the requests of
@@ -840,7 +841,7 @@ reasoning shows those on the answer instead.
 While a turn is still running, the same right-aligned meta zone shows the live
 figures: until the first token, a `⏫` prefill line with how long the model has
 been reading the prompt and an estimate of its size (`⏫ 14s (↑~48k)`), or, from
-a server that reports its progress (llama.cpp), a bar with the tokens
+a server that reports its progress (llama.cpp, omlx), a bar with the tokens
 read so far and the speed over those not served from its cache
 (`⏫ 14s ▰▰▰▰▱▱▱▱ (↑24k/48k, 1k tok/s)`), and before that, while the request
 waits for a slot of its connection (`max_concurrent_requests`), a `⏳` line
