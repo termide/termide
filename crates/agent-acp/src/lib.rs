@@ -1823,7 +1823,10 @@ impl Shared {
             }
             class
         });
-        let usage = result.as_ref().map(usage_of).unwrap_or_default();
+        let usage = result
+            .as_ref()
+            .map(|value| usage_of(value, self.flavor))
+            .unwrap_or_default();
         if let Ok(value) = &result {
             for (model, beyond) in usage_beyond(value, &usage, &self.model_name()) {
                 self.report_spent_on(Spender::AgentInternal, model, beyond);
@@ -1988,7 +1991,7 @@ impl Shared {
             Ok(reply) => reply,
             Err(error) => return (Err(error), Usage::default()),
         };
-        let usage = usage_of(&reply);
+        let usage = usage_of(&reply, self.flavor);
         match reply["stopReason"].as_str() {
             Some(stop @ ("cancelled" | "refusal")) => {
                 (Err(format!("the agent stopped: {stop}")), usage)
@@ -3594,10 +3597,10 @@ fn mcp_result_text(result: &Value) -> String {
 }
 
 /// The token usage a `session/prompt` result reports, when it does.
-fn usage_of(result: &Value) -> Usage {
+fn usage_of(result: &Value, flavor: AcpFlavor) -> Usage {
     let usage = &result["usage"];
     let count = |key: &str| usage[key].as_u64().unwrap_or(0);
-    Usage {
+    let mut usage = Usage {
         input: count("inputTokens"),
         output: count("outputTokens"),
         cache_read: count("cachedReadTokens"),
@@ -3605,7 +3608,14 @@ fn usage_of(result: &Value) -> Usage {
         // Codex's reasoning, within its output; Claude Code never counts
         // its thinking apart.
         thinking: count("thoughtTokens"),
+    };
+    // Gemini CLI passes on the Gemini API's counts as they are: the prompt
+    // with its cached part in it, and the output without the thoughts.
+    if flavor == AcpFlavor::GeminiCli {
+        usage.input = usage.input.saturating_sub(usage.cache_read);
+        usage.output += usage.thinking;
     }
+    usage
 }
 
 /// What a `session/prompt` result's `_meta.quota.model_usage` counts beyond
@@ -5167,9 +5177,12 @@ mod tests {
 
     #[test]
     fn a_turns_reported_usage_is_read() {
-        let usage = usage_of(&json!({ "stopReason": "end_turn", "usage": {
+        let usage = usage_of(
+            &json!({ "stopReason": "end_turn", "usage": {
             "inputTokens": 4, "outputTokens": 63, "cachedReadTokens": 919,
-            "cachedWriteTokens": 1009, "totalTokens": 1995 } }));
+            "cachedWriteTokens": 1009, "totalTokens": 1995 } }),
+            AcpFlavor::ClaudeCode,
+        );
         assert_eq!(
             (
                 usage.input,
@@ -5180,8 +5193,25 @@ mod tests {
             (4, 63, 919, 1009)
         );
         assert_eq!(
-            usage_of(&json!({ "stopReason": "end_turn" })),
+            usage_of(&json!({ "stopReason": "end_turn" }), AcpFlavor::Codex),
             Usage::default()
+        );
+    }
+
+    /// Gemini CLI reports the Gemini API's counts: its prompt holds the
+    /// cached part, and its output leaves the thoughts out.
+    #[test]
+    fn gemini_clis_usage_is_read_as_the_others() {
+        let usage = usage_of(
+            &json!({ "stopReason": "end_turn", "usage": {
+                "inputTokens": 56_200, "outputTokens": 1_870,
+                "cachedReadTokens": 41_300, "thoughtTokens": 980,
+                "totalTokens": 58_070 } }),
+            AcpFlavor::GeminiCli,
+        );
+        assert_eq!(
+            (usage.input, usage.output, usage.cache_read, usage.thinking),
+            (14_900, 2_850, 41_300, 980)
         );
     }
 

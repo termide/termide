@@ -915,8 +915,8 @@ The session info (`F3`) breaks them down: **Spent by** the conversation,
 subagents, the reviewer, recall, summaries, the goal judge and handoff, and
 **By model**, each with a bar and its share, largest first; **Cache hits**,
 the share of prompt tokens the cache served; and **Reasoning**, the output
-spent thinking, when the provider counts it apart (Codex and OpenAI-compatible
-servers do; Claude Code counts it within its output and never apart). A share
+spent thinking, when the provider counts it apart (Codex, Gemini CLI and
+OpenAI-compatible servers do; Claude Code counts it within its output and never apart). A share
 counts tokens as they are, every kind as one — uncached input, cache writes
 and reads, output — and each part shows its `↑ ↻ ↓` beside it: what they cost
 on your model and plan is yours to weigh. A Claude Code or Codex reviewer is credited to the model it ran on, the
