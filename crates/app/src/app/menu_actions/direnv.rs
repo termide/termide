@@ -166,10 +166,14 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(10));
             answer = lookup(dir.path());
         }
-        // No `.envrc` there: nothing to apply.
-        assert_eq!(answer, Lookup::Ready(None));
+        // No `.envrc` there: nothing to apply — unless the tests run in a
+        // shell where direnv has loaded one, which direnv then unloads.
+        if std::env::var_os("DIRENV_DIFF").is_none() {
+            assert_eq!(answer, Lookup::Ready(None));
+        }
+        assert_ne!(answer, Lookup::Pending);
         // Fresh now: answered from the cache.
-        assert_eq!(lookup(dir.path()), Lookup::Ready(None));
+        assert_eq!(lookup(dir.path()), answer);
     }
 
     #[test]
