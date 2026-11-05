@@ -885,6 +885,9 @@ impl SettingsModal {
 
         let visible = ENUM_PICKER_MAX_VISIBLE.min(options.labels.len());
         let height = visible as u16 + 2; // borders
+
+        // The longest label whole: the borders, " ● " before it and a space
+        // after it to match.
         let width = options
             .labels
             .iter()
@@ -892,7 +895,7 @@ impl SettingsModal {
             .max()
             .unwrap_or(10)
             .max(12) as u16
-            + 4;
+            + 6;
         let width = width.min(inner.width.max(12));
 
         // Below the field if it fits, above it otherwise.

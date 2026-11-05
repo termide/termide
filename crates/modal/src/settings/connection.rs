@@ -1353,6 +1353,26 @@ mod tests {
     }
 
     #[test]
+    fn the_model_dropdown_shows_its_longest_name_whole() {
+        let mut modal = ai_modal(with_local());
+        modal.open_connection("local".into());
+        modal.set_model_options(vec![
+            ("qwen".into(), "Qwen 3".into()),
+            ("g".into(), "Google: Gemini 4 Pro Preview".into()),
+        ]);
+        focus(&mut modal, ContentRow::Field(MODEL));
+        modal.open_enum_picker(MODEL);
+        let rows = screen(&mut modal);
+        let row = rows
+            .iter()
+            .find(|row| row.contains("Google: Gemini"))
+            .expect("the dropdown is drawn");
+        assert!(row.contains("Google: Gemini 4 Pro Preview │"), "{row}");
+        let auto = i18n::t().settings_ai_model_auto();
+        assert!(rows.iter().any(|row| row.contains(auto)), "{rows:#?}");
+    }
+
+    #[test]
     fn the_model_field_spins_until_the_models_are_in() {
         let mut modal = ai_modal(with_local());
         modal.open_connection("local".into());
