@@ -12,8 +12,9 @@ none, names its one model by its `--alias`, and streams its prompt-processing
 progress when asked (`return_progress`), its cache growing turn by turn;
 `omlx` lists several models with their windows and streams the progress too;
 `openrouter` lists a gateway's models with their names and windows
-(`context_length`), streams the reasoning as `reasoning`, and has no progress
-to give. OpenRouter is reached by name, so its recordings map `openrouter.ai`
+(`context_length`), streams the reasoning as `reasoning`, has no progress to
+give, and caches Anthropic's models only when the request asks
+(`cache_control`), as OpenRouter does. OpenRouter is reached by name, so its recordings map `openrouter.ai`
 to loopback and serve it on port 80 (see env/local-server-scene.sh).
 """
 
@@ -179,6 +180,11 @@ class Handler(BaseHTTPRequestHandler):
         if kwargs.get("enable_thinking") is False:
             step = dict(step, reasoning="")
         self.model = request.get("model") or MODELS[FLAVOR][0]["id"]
+        self.caches = not (
+            FLAVOR == "openrouter"
+            and self.model.startswith("anthropic/")
+            and "cache_control" not in request
+        )
         self.stream(step, messages, request.get("return_progress") is True)
 
     def chunk(self, delta=None, finish=None, usage=None, progress=None):
@@ -206,6 +212,8 @@ class Handler(BaseHTTPRequestHandler):
         # What the previous request of the conversation left in the cache: all
         # of it but the messages added since.
         cache = PROMPT_BASE + 180 * max(len(messages) - 2, 0) if len(messages) > 2 else 0
+        if not self.caches:
+            cache = 0
         if FLAVOR == "default":
             prompt, cache = 2400 + 180 * len(messages), 0
             time.sleep(PREFILL_DELAY)
