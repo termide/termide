@@ -8,6 +8,7 @@ use termide_modal::{
     DbRowEditResult,
 };
 use termide_state::PendingAction;
+use termide_ui::GridHit;
 
 use crate::dropdown::DropdownKey;
 use crate::filter::{label_for, op_from_label, operators_for, parse_value};
@@ -174,8 +175,8 @@ impl DbPanel {
         let changed = match key.code {
             KeyCode::Up => self.grid_up(),
             KeyCode::Down => self.grid_down(),
-            KeyCode::Left => self.grid_left(),
-            KeyCode::Right => self.grid_right(),
+            KeyCode::Left => self.grid.move_left(),
+            KeyCode::Right => self.grid.move_right(self.col_count()),
             KeyCode::PageDown => self.grid_page(true),
             KeyCode::PageUp => self.grid_page(false),
             KeyCode::Home => self.grid_home(),
@@ -198,7 +199,7 @@ impl DbPanel {
         let (row, col) = (event.row, event.column);
 
         // First item row sits just below the dropdown's top border.
-        let list_top = self.geom.selector_y + 2;
+        let list_top = self.selector_y + 2;
 
         // Open DB dropdown: pick a database.
         if self.db_dd.open {
@@ -230,8 +231,8 @@ impl DbPanel {
 
         // Click on the selector row → open the DB or table dropdown depending
         // on which chip was hit.
-        if row == self.geom.selector_y {
-            let on_table = !self.needs_db_pick || col >= self.geom.table_selector_x;
+        if row == self.selector_y {
+            let on_table = !self.needs_db_pick || col >= self.table_selector_x;
             if on_table {
                 self.section = Section::TableSelector;
                 if !self.tables.is_empty() {
@@ -260,40 +261,25 @@ impl DbPanel {
             return vec![];
         }
 
-        // Click on a column header → sort by that column.
-        if Some(row) == self.geom.header_y {
-            if let Some(col_idx) = self.column_at(col) {
+        match self.grid.hit(col, row) {
+            // Click on a column header → sort by that column.
+            Some(GridHit::Header(col_idx)) => {
                 self.section = Section::Grid;
-                self.cursor_col = col_idx;
+                self.grid.cursor_col = col_idx;
                 self.cycle_sort();
-                return self.redraw();
+                self.redraw()
             }
-            return vec![];
-        }
-
-        // Click on a data cell → move the cursor there.
-        if row >= self.geom.data_y0 {
-            let vis = (row - self.geom.data_y0) as usize;
-            let abs = self.row_scroll + vis;
-            if abs < self.page.rows.len() {
+            // Click on a data cell → move the cursor there.
+            Some(GridHit::Cell { row, col }) => {
                 self.section = Section::Grid;
-                self.cursor_row = abs;
-                if let Some(col_idx) = self.column_at(col) {
-                    self.cursor_col = col_idx;
+                self.grid.cursor_row = row;
+                if let Some(col_idx) = col {
+                    self.grid.cursor_col = col_idx;
                 }
-                return self.redraw();
+                self.redraw()
             }
+            None => vec![],
         }
-        vec![]
-    }
-
-    /// Map a screen column to a grid column index using the captured layout.
-    fn column_at(&self, x: u16) -> Option<usize> {
-        self.geom
-            .columns
-            .iter()
-            .find(|(_, start, end)| x >= *start && x < *end)
-            .map(|(idx, _, _)| *idx)
     }
 
     // --- navigation primitives (scroll is recomputed in render) ---
@@ -314,12 +300,12 @@ impl DbPanel {
         if rows == 0 {
             return false;
         }
-        if self.cursor_row + 1 < rows {
-            self.cursor_row += 1;
+        if self.grid.cursor_row + 1 < rows {
+            self.grid.cursor_row += 1;
             true
         } else if self.page.has_more && !self.loading_page() {
             self.offset += self.page_rows;
-            self.cursor_row = 0;
+            self.grid.cursor_row = 0;
             self.reload_page();
             true
         } else {
@@ -331,34 +317,15 @@ impl DbPanel {
         if self.loading_page() {
             return false;
         }
-        if self.cursor_row > 0 {
-            self.cursor_row -= 1;
+        if self.grid.cursor_row > 0 {
+            self.grid.cursor_row -= 1;
             true
         } else if self.offset > 0 && !self.loading_page() {
             self.offset = self.offset.saturating_sub(self.page_rows);
             // Land on the last row of the previous window once it loads.
             self.pending_bottom = true;
-            self.cursor_row = 0;
+            self.grid.cursor_row = 0;
             self.reload_page();
-            true
-        } else {
-            false
-        }
-    }
-
-    fn grid_left(&mut self) -> bool {
-        if self.cursor_col > 0 {
-            self.cursor_col -= 1;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn grid_right(&mut self) -> bool {
-        let cols = self.col_count();
-        if cols > 0 && self.cursor_col + 1 < cols {
-            self.cursor_col += 1;
             true
         } else {
             false
@@ -377,11 +344,11 @@ impl DbPanel {
         if down {
             if self.page.has_more && !self.loading_page() {
                 self.offset += self.page_rows;
-                self.cursor_row = 0;
+                self.grid.cursor_row = 0;
                 self.reload_page();
                 true
-            } else if self.cursor_row != rows - 1 {
-                self.cursor_row = rows - 1;
+            } else if self.grid.cursor_row != rows - 1 {
+                self.grid.cursor_row = rows - 1;
                 true
             } else {
                 false
@@ -389,11 +356,11 @@ impl DbPanel {
         } else if self.offset > 0 && !self.loading_page() {
             self.offset = self.offset.saturating_sub(self.page_rows);
             self.pending_bottom = true;
-            self.cursor_row = 0;
+            self.grid.cursor_row = 0;
             self.reload_page();
             true
-        } else if self.cursor_row != 0 {
-            self.cursor_row = 0;
+        } else if self.grid.cursor_row != 0 {
+            self.grid.cursor_row = 0;
             true
         } else {
             false
@@ -404,14 +371,14 @@ impl DbPanel {
         if self.loading_page() {
             return false;
         }
-        self.cursor_col = 0;
+        self.grid.cursor_col = 0;
         if self.offset > 0 && !self.loading_page() {
             self.offset = 0;
-            self.cursor_row = 0;
+            self.grid.cursor_row = 0;
             self.reload_page();
             true
-        } else if self.cursor_row != 0 {
-            self.cursor_row = 0;
+        } else if self.grid.cursor_row != 0 {
+            self.grid.cursor_row = 0;
             true
         } else {
             false
@@ -432,13 +399,13 @@ impl DbPanel {
         if last_offset != self.offset && !self.loading_page() {
             self.offset = last_offset;
             self.pending_bottom = true;
-            self.cursor_row = 0;
+            self.grid.cursor_row = 0;
             self.reload_page();
             true
         } else {
             let last = self.page.rows.len().saturating_sub(1);
-            if self.cursor_row != last {
-                self.cursor_row = last;
+            if self.grid.cursor_row != last {
+                self.grid.cursor_row = last;
                 true
             } else {
                 false
@@ -448,7 +415,7 @@ impl DbPanel {
 
     fn cycle_sort(&mut self) {
         let names = self.column_names();
-        let Some(col) = names.get(self.cursor_col).cloned() else {
+        let Some(col) = names.get(self.grid.cursor_col).cloned() else {
             return;
         };
         let current = self
@@ -461,7 +428,7 @@ impl DbPanel {
             Some(SortDir::Desc) => Vec::new(),
         };
         self.offset = 0;
-        self.cursor_row = 0;
+        self.grid.cursor_row = 0;
         self.reload_page();
     }
 
@@ -469,7 +436,7 @@ impl DbPanel {
     /// tab-separated (`whole_row == true`). `None` when there is no row/cell
     /// under the cursor.
     pub(crate) fn copy_text(&self, whole_row: bool) -> Option<String> {
-        let row = self.page.rows.get(self.cursor_row)?;
+        let row = self.page.rows.get(self.grid.cursor_row)?;
         if whole_row {
             Some(
                 row.iter()
@@ -478,7 +445,7 @@ impl DbPanel {
                     .join("\t"),
             )
         } else {
-            Some(row.get(self.cursor_col)?.display())
+            Some(row.get(self.grid.cursor_col)?.display())
         }
     }
 
@@ -520,10 +487,10 @@ impl DbPanel {
             self.query_error = Some(t.db_edit_needs_primary_key().to_string());
             return self.redraw();
         }
-        let Some(row) = self.page.rows.get(self.cursor_row) else {
+        let Some(row) = self.page.rows.get(self.grid.cursor_row) else {
             return vec![];
         };
-        let Some(value) = row.get(self.cursor_col) else {
+        let Some(value) = row.get(self.grid.cursor_col) else {
             return vec![];
         };
         // A NULL cell opens as an empty field: typing replaces it with a value,
@@ -536,8 +503,8 @@ impl DbPanel {
         };
         self.query_error = None;
         self.edit = Some(crate::CellEdit {
-            row: self.cursor_row,
-            col: self.cursor_col,
+            row: self.grid.cursor_row,
+            col: self.grid.cursor_col,
             input: termide_ui::TextInput::with_text(text.clone()),
             original: text,
             saving: false,
@@ -668,7 +635,7 @@ impl DbPanel {
     /// says why, so the row can still be read and copied.
     fn open_row_detail(&mut self) {
         let names = self.column_names();
-        let Some(row) = self.page.rows.get(self.cursor_row) else {
+        let Some(row) = self.page.rows.get(self.grid.cursor_row) else {
             return;
         };
         let table = self.selected_table.clone().unwrap_or_default();
@@ -711,7 +678,7 @@ impl DbPanel {
         let modal = DbRowEditModal::new(t.db_row_title_fmt(&table), columns, notice);
         self.modal_request = Some((
             PendingAction::DbRowEdit {
-                row: self.cursor_row,
+                row: self.grid.cursor_row,
                 tsv,
                 json,
                 insert,
@@ -799,7 +766,7 @@ impl DbPanel {
         }
         self.filters.clear();
         self.offset = 0;
-        self.cursor_row = 0;
+        self.grid.cursor_row = 0;
         self.reload_all();
         true
     }
@@ -828,7 +795,7 @@ impl DbPanel {
         self.filters = filters;
         self.query_error = None;
         self.offset = 0;
-        self.cursor_row = 0;
+        self.grid.cursor_row = 0;
         self.reload_all();
     }
 

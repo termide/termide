@@ -1,23 +1,34 @@
-//! Rendering for [`DbPanel`]: table selector, column headers (with the active
-//! sort arrow) and the 2D data grid with a cell cursor.
+//! Rendering for [`DbPanel`]: the table selector, and the data grid of the
+//! loaded page through [`termide_ui::Grid`].
 
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use unicode_width::UnicodeWidthStr;
 
-use termide_db::SortDir;
-use termide_ui::ScrollBar;
+use termide_db::{DbValue, Page, SortDir};
+use termide_ui::{ColumnSort, Grid, GridCell, GridEditor, GridRows, GridWindow};
 use termide_ui_render::InlineSelector;
-
-use termide_core::ThemeColors;
 
 use crate::{ConnState, DbPanel, Section};
 
-const MAX_COL_WIDTH: usize = 40;
-const MIN_COL_WIDTH: usize = 3;
-/// Display width a column occupies on screen: ` content ` slot + "│" divider.
-const COL_OVERHEAD: usize = 3;
+/// The loaded page as grid rows: NULL is drawn dimmed.
+struct PageRows<'a>(&'a Page);
+
+impl GridRows for PageRows<'_> {
+    fn row_count(&self) -> usize {
+        self.0.rows.len()
+    }
+
+    fn cell(&self, row: usize, col: usize) -> Option<GridCell<'_>> {
+        let value = self.0.rows.get(row)?.get(col)?;
+        Some(match value {
+            DbValue::Null => GridCell::muted("NULL"),
+            DbValue::Text(s) => GridCell::new(s.as_str()),
+            v => GridCell::new(v.display()),
+        })
+    }
+}
 
 impl DbPanel {
     pub(crate) fn render_content(
@@ -28,17 +39,16 @@ impl DbPanel {
         border_right_x: Option<u16>,
         border_bottom_y: Option<u16>,
     ) {
+        // The grid is drawn only in the connected state; until then nothing
+        // should hit-test against an old layout.
+        self.grid.hide();
         if area.width < 4 || area.height < 2 {
             return;
         }
         let theme = self.cached_theme;
         let base = Style::default().fg(theme.fg).bg(theme.bg);
 
-        // Reset mouse hit-test geometry for this frame.
-        self.geom.selector_y = area.y;
-        self.geom.header_y = None;
-        self.geom.data_y0 = area.y + 2;
-        self.geom.columns.clear();
+        self.selector_y = area.y;
 
         // --- selector row (bracketed chips, like the git-status selectors) ---
         let tr = termide_i18n::t();
@@ -54,7 +64,7 @@ impl DbPanel {
             let used = chip.render(sx, area.y, area.width / 2, buf);
             sx += used + 1;
         }
-        self.geom.table_selector_x = sx;
+        self.table_selector_x = sx;
         let table_label = self
             .selected_table
             .clone()
@@ -100,18 +110,15 @@ impl DbPanel {
             self.db_dd.render(buf, area, &self.databases, &theme);
         } else if self.table_dd.open {
             let tarea = Rect {
-                x: self.geom.table_selector_x,
+                x: self.table_selector_x,
                 y: area.y,
-                width: area
-                    .width
-                    .saturating_sub(self.geom.table_selector_x - area.x),
+                width: area.width.saturating_sub(self.table_selector_x - area.x),
                 height: area.height,
             };
             self.table_dd.render(buf, tarea, &self.tables, &theme);
         }
     }
 
-    #[allow(clippy::needless_range_loop)]
     fn render_grid(
         &mut self,
         buf: &mut Buffer,
@@ -128,257 +135,45 @@ impl DbPanel {
             return;
         }
 
-        // Column widths from the visible window sample. Reserve room for the
-        // sort arrow in the sorted column's header.
-        let mut widths = self.column_widths(&names);
-        let sorted = self.order_by.first().cloned();
-        if let Some((c, _)) = &sorted {
-            if let Some(idx) = names.iter().position(|n| n == c) {
-                widths[idx] = (widths[idx] + 2).min(MAX_COL_WIDTH);
-            }
-        }
-
-        // Scrollbars sit on the panel's actual frame when the chrome provides
-        // its coordinates; otherwise they fall back to the content edge and a
-        // content column/row is reserved so they don't overlap data.
-        let total_cols = names.len();
-        let total_col_w: usize = widths.iter().map(|w| w + COL_OVERHEAD).sum();
-        let h_needed = total_col_w > area.width as usize;
-        let h_reserve = if h_needed && border_bottom_y.is_none() {
-            1
-        } else {
-            0
-        };
-
-        // Header occupies row 0; data fills the rest (minus a reserved
-        // horizontal-scrollbar row only in the fallback case).
-        let data_rows_region = area.height.saturating_sub(1) as usize;
-        let data_height = data_rows_region.saturating_sub(h_reserve);
-        let v_needed = matches!(self.total_rows, Some(t) if (t as usize) > data_height);
-        let v_reserve = if v_needed && border_right_x.is_none() {
-            1
-        } else {
-            0
-        };
-        let content_width = area.width.saturating_sub(v_reserve);
-
-        self.visible_rows = data_height;
+        let sort = self.order_by.first().and_then(|(c, d)| {
+            let idx = names.iter().position(|n| n == c)?;
+            let dir = match d {
+                SortDir::Asc => ColumnSort::Ascending,
+                SortDir::Desc => ColumnSort::Descending,
+            };
+            Some((idx, dir))
+        });
+        let editor = self.edit.as_mut().map(|e| GridEditor {
+            row: e.row,
+            col: e.col,
+            input: &mut e.input,
+            saving: e.saving,
+        });
+        let rows = PageRows(&self.page);
+        Grid::new(&names, &rows)
+            .window(GridWindow {
+                offset: self.offset as usize,
+                total: self.total_rows.map(|t| t.max(0) as usize),
+            })
+            .sort(sort)
+            .show_cursor(is_focused && self.section == Section::Grid)
+            .editor(editor)
+            .borders(border_right_x, border_bottom_y)
+            .render(area, buf, &mut self.grid, &theme, is_focused);
 
         // Keep the fetch window equal to the visible height: one fetched window
         // is exactly one screen, so we page instead of scrolling within a
         // buffer. Re-fetch when the viewport height changes (resize).
-        let want = data_height.max(1) as u64;
+        let want = self.grid.visible_rows().max(1) as u64;
         if want != self.page_rows {
             self.page_rows = want;
             self.reload_page();
-        }
-
-        // Vertical scroll within the window: keep the cursor row visible.
-        if self.cursor_row < self.row_scroll {
-            self.row_scroll = self.cursor_row;
-        } else if data_height > 0 && self.cursor_row >= self.row_scroll + data_height {
-            self.row_scroll = self.cursor_row + 1 - data_height;
-        }
-
-        // Horizontal scroll: keep the cursor column visible within content_width.
-        self.adjust_col_scroll(&widths, content_width as usize);
-
-        let max_x = area.x + content_width;
-        let border = base.fg(theme.border);
-
-        // Each column is a slot ` content ` (one space of padding on each side);
-        // slots are separated by a "│" divider, so a slot highlighted edge-to-edge
-        // reads as one cell bounded by the dividers.
-
-        // --- header row ---
-        self.geom.header_y = Some(area.y);
-        self.geom.data_y0 = area.y + 1;
-        fill_line(buf, area.x, area.y, area.width, base);
-        let mut x = area.x;
-        for j in self.col_scroll..names.len() {
-            if x >= max_x {
-                break;
-            }
-            let mut label = names[j].clone();
-            if let Some((c, d)) = &sorted {
-                if *c == names[j] {
-                    label.push(' ');
-                    label.push_str(if *d == SortDir::Asc { "↑" } else { "↓" });
-                }
-            }
-            let slot = format!(" {} ", pad(&label, widths[j]));
-            let slot_start = x;
-            x = put(
-                buf,
-                x,
-                area.y,
-                max_x,
-                &slot,
-                base.add_modifier(Modifier::BOLD),
-            );
-            self.geom.columns.push((j, slot_start, x));
-            x = put(buf, x, area.y, max_x, "│", border);
-        }
-
-        // --- data rows ---
-        // Selected row: normal colours but bold. Selected cell: inverse video
-        // across the whole slot (border to border).
-        let rows = &self.page.rows;
-        for vis in 0..data_height {
-            let abs = self.row_scroll + vis;
-            if abs >= rows.len() {
-                break;
-            }
-            let y = area.y + 1 + vis as u16;
-            let is_cur_row = is_focused && self.section == Section::Grid && abs == self.cursor_row;
-            let row_style = if is_cur_row {
-                base.add_modifier(Modifier::BOLD)
-            } else {
-                base
-            };
-            fill_line(buf, area.x, y, area.width, base);
-
-            let row = &rows[abs];
-            let mut x = area.x;
-            for j in self.col_scroll..names.len() {
-                if x >= max_x {
-                    break;
-                }
-                let editing = self.edit.as_mut().filter(|e| e.row == abs && e.col == j);
-                let value = row.get(j);
-                let (text, is_null) = match value {
-                    Some(v) if v.is_null() => ("NULL".to_string(), true),
-                    Some(v) => (v.display(), false),
-                    None => (String::new(), false),
-                };
-                let is_cur_cell = is_cur_row && j == self.cursor_col;
-
-                if let Some(edit) = editing {
-                    // The editor owns the slot: the value is drawn from the
-                    // buffer being typed, with the caret marked inside it, and
-                    // without the inverse-video cell highlight that would hide
-                    // the caret.
-                    x = render_cell_editor(buf, x, y, max_x, widths[j], edit, row_style, &theme);
-                    x = put(buf, x, y, max_x, "│", border);
-                    continue;
-                }
-
-                let slot = format!(" {} ", pad(&text, widths[j]));
-                let mut style = row_style;
-                if is_null && !is_cur_cell {
-                    style = style.fg(theme.disabled);
-                }
-                if is_cur_cell {
-                    style = style.add_modifier(Modifier::REVERSED);
-                }
-                x = put(buf, x, y, max_x, &slot, style);
-                x = put(buf, x, y, max_x, "│", border);
-            }
-        }
-
-        // --- scrollbars (drawn last so they sit above the grid) ---
-        self.scrollbars = termide_core::ScrollBars::default();
-        if v_needed {
-            // Position across the whole table: window offset + in-window scroll.
-            let offset = self.offset as usize + self.row_scroll;
-            let total = self.total_rows.unwrap_or(0) as usize;
-            let vx = border_right_x.unwrap_or(area.x + area.width - 1);
-            self.scrollbars.vertical = ScrollBar::render_tracked(
-                buf,
-                vx,
-                area.y + 1,
-                data_height as u16,
-                offset,
-                data_height,
-                total,
-                &theme,
-                is_focused,
-            );
-        }
-        if h_needed {
-            // Count only fully-visible columns so a partially-clipped rightmost
-            // column still reports "more to the right" at col_scroll == 0.
-            let mut used = 0usize;
-            let mut visible_cols = 0usize;
-            for w in widths.iter().skip(self.col_scroll) {
-                let need = w + COL_OVERHEAD;
-                if used + need > content_width as usize {
-                    break;
-                }
-                used += need;
-                visible_cols += 1;
-            }
-            let visible_cols = visible_cols.max(1);
-            let hy = border_bottom_y.unwrap_or(area.y + area.height - 1);
-            self.scrollbars.horizontal = ScrollBar::render_horizontal_tracked(
-                buf,
-                area.x,
-                hy,
-                content_width,
-                self.col_scroll,
-                visible_cols,
-                total_cols,
-                &theme,
-                is_focused,
-            );
         }
 
         if self.loading {
             let style = base.fg(theme.info);
             let label = format!(" {} ", termide_i18n::t().db_loading());
             buf.set_stringn(area.x, area.y, &label, area.width as usize, style);
-        }
-    }
-
-    /// Compute per-column display widths from header + the visible window.
-    fn column_widths(&self, names: &[String]) -> Vec<usize> {
-        let mut widths: Vec<usize> = names
-            .iter()
-            .map(|n| UnicodeWidthStr::width(n.as_str()).max(MIN_COL_WIDTH))
-            .collect();
-        for row in &self.page.rows {
-            for (j, w) in widths.iter_mut().enumerate() {
-                if let Some(v) = row.get(j) {
-                    let text = if v.is_null() {
-                        "NULL".to_string()
-                    } else {
-                        v.display()
-                    };
-                    let cw = UnicodeWidthStr::width(text.as_str());
-                    if cw > *w {
-                        *w = cw;
-                    }
-                }
-            }
-        }
-        for w in widths.iter_mut() {
-            *w = (*w).min(MAX_COL_WIDTH);
-        }
-        widths
-    }
-
-    fn adjust_col_scroll(&mut self, widths: &[usize], avail: usize) {
-        if self.cursor_col < self.col_scroll {
-            self.col_scroll = self.cursor_col;
-            return;
-        }
-        // Grow col_scroll until the cursor column fits within `avail`.
-        loop {
-            let mut used = 0usize;
-            let mut last_visible = self.col_scroll;
-            for (j, w) in widths.iter().enumerate().skip(self.col_scroll) {
-                let need = w + COL_OVERHEAD;
-                if used + need > avail && j > self.col_scroll {
-                    break;
-                }
-                used += need;
-                last_visible = j;
-            }
-            if self.cursor_col <= last_visible || self.col_scroll >= widths.len().saturating_sub(1)
-            {
-                break;
-            }
-            self.col_scroll += 1;
         }
     }
 
@@ -397,112 +192,4 @@ impl DbPanel {
 fn fill_line(buf: &mut Buffer, x: u16, y: u16, width: u16, style: Style) {
     let blanks = " ".repeat(width as usize);
     buf.set_stringn(x, y, &blanks, width as usize, style);
-}
-
-/// Write a string clipped to `max_x`; returns the new x cursor.
-fn put(buf: &mut Buffer, x: u16, y: u16, max_x: u16, s: &str, style: Style) -> u16 {
-    if x >= max_x {
-        return x;
-    }
-    let budget = (max_x - x) as usize;
-    let (nx, _) = buf.set_stringn(x, y, s, budget, style);
-    nx
-}
-
-/// Pad/truncate `s` to display width `w` (truncation adds an ellipsis).
-fn pad(s: &str, w: usize) -> String {
-    let sw = UnicodeWidthStr::width(s);
-    if sw == w {
-        s.to_string()
-    } else if sw < w {
-        format!("{s}{}", " ".repeat(w - sw))
-    } else {
-        // Truncate by chars to fit w-1, add ellipsis.
-        let mut out = String::new();
-        let mut used = 0usize;
-        for ch in s.chars() {
-            let cw = UnicodeWidthStr::width(ch.to_string().as_str());
-            if used + cw > w.saturating_sub(1) {
-                break;
-            }
-            out.push(ch);
-            used += cw;
-        }
-        out.push('…');
-        // Pad if the ellipsis left us short.
-        let ow = UnicodeWidthStr::width(out.as_str());
-        if ow < w {
-            out.push_str(&" ".repeat(w - ow));
-        }
-        out
-    }
-}
-
-/// Draw an open cell editor into its grid slot.
-///
-/// The visible window scrolls with the cursor so a value longer than the column
-/// stays editable; the cursor cell and the selection are inverse-video, as in
-/// any other text field — the whole-slot highlight used for a selected cell
-/// would swallow them. While the write is in flight the text is dimmed and no
-/// cursor is drawn: the editor is read-only until the server answers.
-#[allow(clippy::too_many_arguments)]
-fn render_cell_editor(
-    buf: &mut Buffer,
-    x: u16,
-    y: u16,
-    max_x: u16,
-    width: usize,
-    edit: &mut crate::CellEdit,
-    row_style: Style,
-    theme: &ThemeColors,
-) -> u16 {
-    use unicode_width::UnicodeWidthChar;
-
-    let base = if edit.saving {
-        row_style.fg(theme.disabled)
-    } else {
-        row_style.fg(theme.fg).bg(theme.selection_bg)
-    };
-    let marked = base.add_modifier(Modifier::REVERSED);
-    let scroll = edit
-        .input
-        .follow_scroll(width.min(usize::from(u16::MAX)) as u16);
-
-    let mut next_x = put(buf, x, y, max_x, " ", base);
-    let text_start = next_x;
-    next_x = put(buf, next_x, y, max_x, &" ".repeat(width), base);
-    let text_end = (text_start as usize + width).min(max_x as usize) as u16;
-
-    let cursor = edit.input.cursor_pos();
-    let selection = edit.input.selection_range();
-    let show_marks = !edit.saving;
-    let mut col = text_start;
-    let mut shown = scroll;
-    for (i, c) in edit.input.text().chars().enumerate().skip(scroll) {
-        let w = UnicodeWidthChar::width(c).unwrap_or(1).max(1) as u16;
-        if col + w > text_end {
-            break;
-        }
-        let selected = selection.is_some_and(|(start, end)| i >= start && i < end);
-        let style = if show_marks && (i == cursor || selected) {
-            marked
-        } else {
-            base
-        };
-        buf.set_string(col, y, c.to_string(), style);
-        col += w;
-        shown = i + 1;
-    }
-    // A cursor past the last character sits on the blank after it.
-    if show_marks
-        && cursor >= shown
-        && cursor == edit.input.text().chars().count()
-        && col < text_end
-    {
-        if let Some(cell) = buf.cell_mut((col, y)) {
-            cell.set_style(marked);
-        }
-    }
-
-    put(buf, next_x, y, max_x, " ", base)
 }

@@ -26,13 +26,14 @@ use ratatui::layout::Rect;
 use termide_config::Config;
 use termide_core::{
     CommandResult, CredentialAttempt, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent,
-    RenderContext, ScrollAxis, ScrollBars, SecretText, ThemeColors, WidthPreference,
+    RenderContext, ScrollAxis, SecretText, ThemeColors, WidthPreference,
 };
 use termide_db::{
     ColumnInfo, Condition, DbBackend, DbConnection, DbError, Page, PageRequest, SortDir,
 };
 use termide_modal::{ActionButton, ActiveModal, InfoActionModal};
 use termide_state::PendingAction;
+use termide_ui::GridState;
 
 use crate::dropdown::Dropdown;
 
@@ -98,14 +99,10 @@ pub struct DbPanel {
     page: Page,
     total_rows: Option<i64>,
     offset: u64,
-    /// Scrollbars drawn by the last render, for mouse thumb dragging.
-    scrollbars: ScrollBars,
 
-    // --- grid cursor / scroll ---
-    cursor_row: usize,
-    cursor_col: usize,
-    row_scroll: usize,
-    col_scroll: usize,
+    /// Grid cursor (row within the loaded page), scroll, scrollbars and the
+    /// layout of the last render.
+    grid: GridState,
     /// After a page-up load, place the cursor on the last row of the new page.
     pending_bottom: bool,
 
@@ -141,10 +138,11 @@ pub struct DbPanel {
     // --- render cache ---
     cached_theme: ThemeColors,
     last_area: Rect,
-    /// Number of data rows visible in the grid viewport (set during render).
-    visible_rows: usize,
-    /// Mouse hit-test geometry captured during render.
-    geom: GridGeometry,
+    /// Y of the selector row at the last render.
+    selector_y: u16,
+    /// X where the table-selector chip starts (the DB chip, if any, is left
+    /// of it) at the last render.
+    table_selector_x: u16,
 
     /// In-place cell edit in progress, if any.
     edit: Option<CellEdit>,
@@ -195,21 +193,6 @@ impl CellEdit {
     }
 }
 
-/// Screen geometry captured each render for mouse hit-testing.
-#[derive(Debug, Clone, Default)]
-pub(crate) struct GridGeometry {
-    /// Y of the selector row.
-    selector_y: u16,
-    /// X where the table-selector chip starts (db chip, if any, is left of it).
-    table_selector_x: u16,
-    /// Y of the column-header row (when the grid is shown).
-    header_y: Option<u16>,
-    /// Y of the first data row.
-    data_y0: u16,
-    /// Per visible column: (column index, x start, x end-exclusive).
-    columns: Vec<(usize, u16, u16)>,
-}
-
 impl DbPanel {
     /// Open a panel for `url`. `label` is the bookmark description (falls back to
     /// a sanitized URL). Connection starts immediately in the background.
@@ -241,12 +224,8 @@ impl DbPanel {
             page: Page::default(),
             total_rows: None,
             offset: 0,
-            cursor_row: 0,
-            cursor_col: 0,
-            row_scroll: 0,
-            col_scroll: 0,
+            grid: GridState::default(),
             pending_bottom: false,
-            scrollbars: ScrollBars::default(),
             filters: Vec::new(),
             order_by: Vec::new(),
             page_rows: DEFAULT_PAGE_ROWS,
@@ -266,8 +245,8 @@ impl DbPanel {
             last_config_ptr: 0,
             cached_theme: ThemeColors::default(),
             last_area: Rect::default(),
-            visible_rows: 0,
-            geom: GridGeometry::default(),
+            selector_y: 0,
+            table_selector_x: 0,
             edit: None,
             pending_value: None,
             edit_status: None,
@@ -457,8 +436,8 @@ impl DbPanel {
         self.page = Page::default();
         self.total_rows = None;
         self.offset = 0;
-        self.cursor_row = 0;
-        self.cursor_col = 0;
+        self.grid.cursor_row = 0;
+        self.grid.cursor_col = 0;
         self.filters.clear();
         self.order_by.clear();
         self.section = Section::TableSelector;
@@ -472,10 +451,7 @@ impl DbPanel {
         self.edit = None;
         self.primary_key.clear();
         self.offset = 0;
-        self.cursor_row = 0;
-        self.cursor_col = 0;
-        self.row_scroll = 0;
-        self.col_scroll = 0;
+        self.grid.reset();
         self.total_rows = None;
         self.filters.clear();
         self.order_by.clear();
@@ -656,7 +632,7 @@ impl DbPanel {
     fn scroll_to(&mut self, axis: ScrollAxis, offset: usize) -> CommandResult {
         match axis {
             ScrollAxis::Horizontal => {
-                self.col_scroll = offset;
+                self.grid.col_scroll = offset;
                 CommandResult::NeedsRedraw(true)
             }
             ScrollAxis::Vertical => {
@@ -667,12 +643,12 @@ impl DbPanel {
                 let window = (offset as u64 / page) * page;
                 let rel = offset.saturating_sub(window as usize);
                 if window == self.offset {
-                    self.cursor_row = rel.min(self.page.rows.len().saturating_sub(1));
+                    self.grid.cursor_row = rel.min(self.page.rows.len().saturating_sub(1));
                 } else {
                     self.offset = window;
                     // `clamp_cursor` trims this once the window lands, the
                     // same as any other page load.
-                    self.cursor_row = rel;
+                    self.grid.cursor_row = rel;
                     self.reload_page();
                 }
                 CommandResult::NeedsRedraw(true)
@@ -855,7 +831,7 @@ impl DbPanel {
                         self.page = page;
                         self.query_error = None;
                         if self.pending_bottom {
-                            self.cursor_row = self.page.rows.len().saturating_sub(1);
+                            self.grid.cursor_row = self.page.rows.len().saturating_sub(1);
                             self.pending_bottom = false;
                         }
                         self.clamp_cursor();
@@ -872,18 +848,8 @@ impl DbPanel {
     }
 
     fn clamp_cursor(&mut self) {
-        let rows = self.page.rows.len();
-        if rows == 0 {
-            self.cursor_row = 0;
-        } else if self.cursor_row >= rows {
-            self.cursor_row = rows - 1;
-        }
         let cols = self.col_count();
-        if cols == 0 {
-            self.cursor_col = 0;
-        } else if self.cursor_col >= cols {
-            self.cursor_col = cols - 1;
-        }
+        self.grid.clamp(self.page.rows.len(), cols);
     }
 
     /// Number of columns to render (from catalog, falling back to page columns).
@@ -1099,7 +1065,7 @@ impl Panel for DbPanel {
                 }
                 CommandResult::Handled(true)
             }
-            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
+            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.grid.scrollbars()),
             PanelCommand::SetScrollOffset { axis, offset } => self.scroll_to(axis, offset),
             // Read-only table view: nothing to cut or paste into.
             PanelCommand::Cut => CommandResult::Handled(false),
@@ -1272,8 +1238,8 @@ mod tests {
     fn enter_opens_the_cell_editor_seeded_with_the_current_value() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_row = 0;
-        panel.cursor_col = 1; // name
+        panel.grid.cursor_row = 0;
+        panel.grid.cursor_col = 1; // name
 
         press(&mut panel, KeyCode::Enter);
 
@@ -1300,7 +1266,7 @@ mod tests {
     fn the_cell_editor_edits_at_its_cursor_and_deletes_a_selection() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 1; // name: "alpha"
+        panel.grid.cursor_col = 1; // name: "alpha"
         press(&mut panel, KeyCode::Enter);
         press(&mut panel, KeyCode::Home);
         press(&mut panel, KeyCode::Right);
@@ -1318,7 +1284,7 @@ mod tests {
     fn ctrl_v_in_the_cell_editor_does_not_type_a_v() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 1; // name: "alpha"
+        panel.grid.cursor_col = 1; // name: "alpha"
         press(&mut panel, KeyCode::Enter);
         // A stand-in clipboard, so the user's is never read or written.
         termide_ui::clipboard::use_fake_clipboard("PASTE");
@@ -1334,7 +1300,7 @@ mod tests {
     fn the_clipboard_commands_act_on_an_open_cell_editor() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 1; // name: "alpha"
+        panel.grid.cursor_col = 1; // name: "alpha"
         press(&mut panel, KeyCode::Enter);
         assert!(matches!(
             panel.handle_command(PanelCommand::Copy),
@@ -1353,7 +1319,7 @@ mod tests {
     fn escape_discards_the_edit() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 1;
+        panel.grid.cursor_col = 1;
 
         press(&mut panel, KeyCode::Enter);
         press(&mut panel, KeyCode::Char('!'));
@@ -1372,7 +1338,7 @@ mod tests {
     fn second_enter_saves_the_edit() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 1;
+        panel.grid.cursor_col = 1;
 
         press(&mut panel, KeyCode::Enter);
         press(&mut panel, KeyCode::Backspace);
@@ -1412,7 +1378,7 @@ mod tests {
     fn enter_on_an_unchanged_value_runs_no_query() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 1;
+        panel.grid.cursor_col = 1;
 
         press(&mut panel, KeyCode::Enter);
         press(&mut panel, KeyCode::Enter);
@@ -1427,7 +1393,7 @@ mod tests {
     fn numeric_column_is_written_as_a_number() {
         let (_dir, url) = fixture();
         let mut panel = open_table(&url, "keyed");
-        panel.cursor_col = 2; // n
+        panel.grid.cursor_col = 2; // n
 
         press(&mut panel, KeyCode::Enter);
         press(&mut panel, KeyCode::Backspace);
@@ -1487,6 +1453,33 @@ mod tests {
             panel.page.rows[0][1],
             termide_db::DbValue::Text("alpha".into())
         );
+    }
+
+    /// The grid lays itself out on render: a click on a header sorts by that
+    /// column, and a click on a cell moves the cursor there.
+    #[test]
+    fn mouse_clicks_hit_the_rendered_grid() {
+        use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        let area = Rect::new(0, 0, 40, 10);
+        let mut buf = Buffer::empty(area);
+        panel.render_content(area, &mut buf, true, None, None);
+        let click = |column, row| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        };
+
+        // Row 0 is the selector, row 1 the header, rows 2.. the data;
+        // columns: " id  │ name  │ n   │".
+        panel.handle_mouse_impl(click(8, 3));
+        assert_eq!((panel.grid.cursor_row, panel.grid.cursor_col), (1, 1));
+
+        panel.handle_mouse_impl(click(1, 1));
+        assert_eq!(panel.grid.cursor_col, 0);
+        assert_eq!(panel.order_by, vec![("id".to_string(), SortDir::Asc)]);
     }
 
     /// Without a primary key there is no way to name one row, so the editor
