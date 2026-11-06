@@ -5,7 +5,9 @@ use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
 use crate::runtime::local_minute;
-use termide_agent_core::{ContextLoad, EntryKind, PromptError, Session, SessionSummary};
+use termide_agent_core::{
+    ContextLoad, EntryKind, PromptError, Session, SessionSummary, UserMessage,
+};
 use termide_core::{ConfirmAction, InputAction, PanelEvent};
 use termide_ui::ChoiceForm;
 
@@ -16,7 +18,7 @@ use crate::runtime::{
 };
 use crate::toolset::served_skills;
 use crate::{
-    format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind,
+    format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind, COMPACT_COMMAND,
     DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION, RENAME_RECENT_ACTION,
 };
 
@@ -708,9 +710,11 @@ impl AgentPanel {
     /// back as `PanelCommand::Confirmed(FORK_SESSION_ACTION)`. Unlike a
     /// session switch this asks nothing of the run in flight: the copy is read
     /// off the flushed log, so a busy panel forks too and only its unfinished
-    /// answer is missing from the copy.
-    pub(crate) fn ask_fork_session(&mut self) -> Vec<PanelEvent> {
+    /// answer is missing from the copy. `focus` (`/fork <focus>`) has the
+    /// copy compacted on it once it opens.
+    pub(crate) fn ask_fork_session(&mut self, focus: Option<String>) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
+        self.fork_focus = focus;
         let Some(path) = self.session_path() else {
             self.notice(t.agent_notice_fork_no_session(), NoticeKind::Info);
             return vec![PanelEvent::NeedsRedraw];
@@ -746,15 +750,86 @@ impl AgentPanel {
     /// one goes on writing its own log, so both keep working.
     pub(crate) fn perform_fork_session(&mut self) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
+        let focus = self.fork_focus.take();
         match self.session_path() {
             Some(path) => vec![PanelEvent::ForkAgentSession {
                 session: path.to_path_buf(),
                 cwd: self.cwd.clone(),
+                focus,
             }],
             None => {
                 self.notice(t.agent_notice_fork_no_session(), NoticeKind::Info);
                 vec![]
             }
+        }
+    }
+
+    /// Summarise the older part of the session now, on `focus` when given:
+    /// whether the summary call went out. A refusal is a notice.
+    pub(crate) fn compact_now(&mut self, focus: Option<String>) -> bool {
+        match self.runtime.compact(focus) {
+            Ok(()) => true,
+            Err(PromptError::Busy) => {
+                self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
+                false
+            }
+            Err(error) => {
+                self.notice(error.to_string(), NoticeKind::Warn);
+                false
+            }
+        }
+    }
+
+    /// Start a fork this panel has just opened on: with `focus`, the copy is
+    /// compacted on it first, so that only what bears on it stays in the
+    /// context; then `first` — the request the forking agent wrote, `None`
+    /// for one the user forks and goes on in by hand — goes as another
+    /// agent's message. An external agent with a `/compact` of its own is
+    /// sent that, as a request; a compaction that does not go out leaves the
+    /// copy whole, and `first` goes at once.
+    pub fn start_fork(&mut self, focus: Option<String>, first: Option<UserMessage>) {
+        let focus = focus.filter(|focus| !focus.trim().is_empty());
+        self.fork_first = first;
+        self.fork_compacting = match focus {
+            Some(focus) if self.external && self.agent_command(COMPACT_COMMAND).is_some() => {
+                let text = format!("/{COMPACT_COMMAND} {focus}");
+                let events = self.send_as(text.clone(), Some(text));
+                self.pending_events.extend(events);
+                true
+            }
+            Some(focus) => self.compact_now(Some(focus)),
+            None => false,
+        };
+        self.release_fork_first();
+    }
+
+    /// A compaction a fork's first request waited for is over, however it
+    /// ended.
+    pub(crate) fn fork_compacted(&mut self) {
+        self.fork_compacting = false;
+    }
+
+    /// Send a fork's first request once nothing it waits for is under way:
+    /// whether it went.
+    pub(crate) fn release_fork_first(&mut self) -> bool {
+        if self.fork_compacting || self.is_busy() {
+            return false;
+        }
+        let Some(first) = self.fork_first.take() else {
+            return false;
+        };
+        if let Err(error) = self.deliver(first) {
+            self.notice(error, NoticeKind::Warn);
+        }
+        true
+    }
+
+    /// Apply what the runtime has sent so far, so the log holds every
+    /// message the run has finished: a fork of the session made now copies
+    /// the reply whose call asked for it.
+    pub fn flush_runtime(&mut self) {
+        for event in self.runtime.drain() {
+            self.apply(event);
         }
     }
 

@@ -16,9 +16,10 @@ use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
 use termide_agent_core::{MessageOrigin, OriginKind, Session, Tool, ToolContext, UserMessage};
-use termide_agent_tools::{AgentsTool, PeerInfo, SendMessageTool};
+use termide_agent_tools::{AgentsTool, ForkRequest, ForkTool, PeerInfo, SendMessageTool};
 use termide_panel_agent::AgentPanel;
 
+use super::Handover;
 use crate::app::App;
 
 /// How many messages agents may pass one another before the user writes
@@ -63,6 +64,20 @@ enum Request {
         /// The task was stopped with the panel's run: its answer waits for
         /// the panel's next request rather than start one.
         held: bool,
+    },
+    /// A `fork` call: copy the session of panel `from` into a panel of its
+    /// own, which takes `prompt` up as the sending agent's message.
+    Fork {
+        from: Option<u64>,
+        /// The forking session.
+        session: Option<String>,
+        agent: String,
+        project_root: PathBuf,
+        /// The `fork` call's id.
+        call: String,
+        prompt: String,
+        focus: Option<String>,
+        reply: Sender<Result<String, String>>,
     },
     /// How many messages agents passed one another to get the run of a
     /// panel going.
@@ -140,6 +155,30 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
         Arc::new(AgentsTool::new(list)),
         Arc::new(SendMessageTool::new(send)),
     ]
+}
+
+/// `fork` for the agent `caller` of a panel in the project at
+/// `project_root`.
+pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
+    let root = project_root.to_path_buf();
+    let agent = caller.to_string();
+    let fork = Arc::new(move |ctx: &ToolContext, request: &ForkRequest| {
+        let (reply, answer) = mpsc::channel();
+        ask(
+            Request::Fork {
+                from: ctx.panel,
+                session: ctx.session.as_ref().and_then(|session| session.id.clone()),
+                agent: agent.clone(),
+                project_root: root.clone(),
+                call: request.call.to_string(),
+                prompt: request.prompt.to_string(),
+                focus: request.focus.map(str::to_string),
+                reply,
+            },
+            &answer,
+        )
+    });
+    Arc::new(ForkTool::new(fork))
 }
 
 /// Whether panel `panel` may hand a task over in the background: its
@@ -242,6 +281,32 @@ impl App {
                     let result = self
                         .in_project(&project_root, |app| app.send_to_peer(message))
                         .and_then(|sent| sent);
+                    if result.is_ok() {
+                        self.state.needs_redraw = true;
+                    }
+                    let _ = reply.send(result);
+                }
+                Request::Fork {
+                    from,
+                    session,
+                    agent,
+                    project_root,
+                    call,
+                    prompt,
+                    focus,
+                    reply,
+                } => {
+                    let fork = Fork {
+                        from,
+                        session,
+                        agent,
+                        call,
+                        prompt,
+                        focus,
+                    };
+                    let result = self
+                        .in_project(&project_root, |app| app.fork_for_agent(fork))
+                        .and_then(|forked| forked);
                     if result.is_ok() {
                         self.state.needs_redraw = true;
                     }
@@ -402,6 +467,53 @@ impl App {
         self.state.needs_redraw = true;
     }
 
+    /// Fork the session of the panel a `fork` call came from into a panel of
+    /// its own, which takes the part of the work handed over as the agent's
+    /// message: one more passed without the user, so a chain of forks is cut
+    /// off as one of messages is.
+    fn fork_for_agent(&mut self, fork: Fork) -> Result<String, String> {
+        let source = self
+            .agent_panels()
+            .find(|panel| Some(panel.panel_id()) == fork.from)
+            .ok_or("the panel this call comes from is gone")?;
+        // The reply that made this call may still wait among the runtime's
+        // events: applied now, the copy holds it.
+        source.flush_runtime();
+        let session = source
+            .session_path()
+            .ok_or("this session keeps no log to copy")?
+            .to_path_buf();
+        let cwd = source.cwd().to_path_buf();
+        let hops = next_hops(source.agent_hops())?;
+        let first = UserMessage::text(fork.prompt).with_origin(MessageOrigin {
+            session: fork.session.unwrap_or_default(),
+            agent: fork.agent,
+            kind: OriginKind::Fork,
+            panel: fork.from,
+            hops,
+        });
+        let compacted = fork.focus.is_some();
+        let (id, panel) = self.open_fork(
+            &session,
+            &cwd,
+            fork.focus,
+            Some(Handover {
+                call: fork.call,
+                first,
+            }),
+        )?;
+        let context = if compacted {
+            "this conversation, compacted on your focus"
+        } else {
+            "this conversation"
+        };
+        Ok(format!(
+            "Forked into session {id} (panel {panel}). It holds {context} and takes your prompt \
+             as its first request; it works with the user from now on. Nothing comes back from \
+             it: leave the part you handed it to it."
+        ))
+    }
+
     fn send_to_peer(&mut self, message: Outgoing) -> Result<String, String> {
         let to = message.to;
         let from = message.from;
@@ -489,6 +601,16 @@ fn next_hops(sent: u32) -> Result<u32, String> {
         ));
     }
     Ok(hops)
+}
+
+/// A `fork` call on its way to the app.
+struct Fork {
+    from: Option<u64>,
+    session: Option<String>,
+    agent: String,
+    call: String,
+    prompt: String,
+    focus: Option<String>,
 }
 
 /// A message on its way to another panel.

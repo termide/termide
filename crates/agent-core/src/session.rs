@@ -1867,6 +1867,28 @@ impl Session {
         Ok(last_retry(&branch))
     }
 
+    /// Bring a fork made in the middle of a run to rest: each call of the
+    /// last reply still without a result gets `result(call)`, and the run
+    /// left open gets its end. The copy then opens as a conversation between
+    /// requests — nothing offered to carry on, no call run a second time —
+    /// rather than as a run cut off. A paused run keeps its pause.
+    ///
+    /// # Errors
+    ///
+    /// When the log cannot be written.
+    pub fn settle(
+        &mut self,
+        result: impl Fn(&crate::message::ToolCall) -> crate::message::ToolResultMessage,
+    ) -> std::io::Result<()> {
+        for call in crate::agent::unanswered_calls(&self.context_messages()) {
+            self.append_message(&Message::ToolResult(result(&call)))?;
+        }
+        if self.last_run() == LastRun::CutOff {
+            self.append_run_end(false)?;
+        }
+        Ok(())
+    }
+
     /// How the current branch's last run ended, see [`Self::unfinished_run`].
     #[must_use]
     pub fn last_run(&self) -> LastRun {
@@ -2477,6 +2499,52 @@ mod tests {
         assert!(session.set_leaf(Some("nope")).is_err());
         session.set_leaf(None).unwrap();
         assert!(session.context_messages().is_empty());
+    }
+
+    #[test]
+    fn a_fork_made_mid_run_is_settled_to_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+        let call = |id: &str, name: &str| crate::message::ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: serde_json::json!({}),
+            extra_content: None,
+        };
+        let mut forking = text_reply("splitting the work");
+        for open in [call("f1", "fork"), call("r1", "read")] {
+            forking
+                .content
+                .push(crate::message::AssistantContent::ToolCall(open));
+        }
+        session
+            .append_message(&Message::User(UserMessage::text("do both")))
+            .unwrap();
+        session.append_run_start().unwrap();
+        session
+            .append_message(&Message::Assistant(forking))
+            .unwrap();
+        assert_eq!(session.last_run(), LastRun::CutOff);
+
+        session
+            .settle(|open| crate::message::ToolResultMessage::text(open, open.name.clone()))
+            .unwrap();
+        // Each open call answered in its order, and the run ended.
+        let messages = session.context_messages();
+        assert!(crate::agent::unanswered_calls(&messages).is_empty());
+        let answers: Vec<String> = messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::ToolResult(result) => Some(result.plain_text()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(answers, ["fork", "read"]);
+        assert_eq!(session.last_run(), LastRun::Ended);
+        // Settled once, it stays as it is.
+        let entries = session.entries().len();
+        session.settle(|_| unreachable!()).unwrap();
+        assert_eq!(session.entries().len(), entries);
     }
 
     #[test]

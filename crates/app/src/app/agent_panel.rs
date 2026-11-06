@@ -90,52 +90,115 @@ impl App {
     /// and is not touched, so both go on working the conversation apart, each
     /// writing its own log. The copy carries the agent and model its log
     /// recorded, as any reopened session does, and a name of its own so the
-    /// two are told apart in the picker.
-    pub(in crate::app) fn fork_agent_session(&mut self, source: &Path, cwd: &Path) -> Result<()> {
+    /// two are told apart in the picker. With `focus`, the copy is compacted
+    /// on it once it opens.
+    pub(in crate::app) fn fork_agent_session(
+        &mut self,
+        source: &Path,
+        cwd: &Path,
+        focus: Option<String>,
+    ) -> Result<()> {
+        if let Err(error) = self.open_fork(source, cwd, focus, None) {
+            self.show_error_modal(error);
+        }
+        Ok(())
+    }
+
+    /// Copy the log at `source` and open the copy in a new panel working in
+    /// `cwd`, compacted on `focus` when given: the new session's id and its
+    /// panel's number, or why it was not opened. `handover` is a fork the
+    /// agent asked for with its `fork` call: the copy, made in the middle of
+    /// the run that call is part of, is brought to rest first — the call
+    /// answered as the one that made the fork — and then takes the part of
+    /// the work handed over as its first request.
+    pub(in crate::app) fn open_fork(
+        &mut self,
+        source: &Path,
+        cwd: &Path,
+        focus: Option<String>,
+        handover: Option<Handover>,
+    ) -> Result<(String, u64), String> {
         let t = termide_i18n::t();
-        let source_session = match Session::open(source) {
-            Ok(session) => session,
-            Err(error) => {
-                log::warn!("cannot open {}: {error}", source.display());
-                self.show_error_modal(t.agent_notice_cannot_fork_fmt(&error.to_string()));
-                return Ok(());
-            }
-        };
+        let source_session = Session::open(source).map_err(|error| {
+            log::warn!("cannot open {}: {error}", source.display());
+            t.agent_notice_cannot_fork_fmt(&error.to_string())
+        })?;
         let name = fork_name(&source_session);
-        let copy = match source_session.fork(cwd, name.as_deref()) {
-            Ok(path) => path,
-            Err(error) => {
+        let copy = source_session.fork(cwd, name.as_deref()).map_err(|error| {
+            log::warn!(
+                "cannot fork the agent session {}: {error}",
+                source.display()
+            );
+            t.agent_notice_cannot_fork_fmt(&error.to_string())
+        })?;
+        // What goes wrong from here leaves a copy no one has open, so it goes
+        // back the way it came.
+        let discard_copy = |error: String| {
+            if let Err(error) = std::fs::remove_file(&copy) {
                 log::warn!(
-                    "cannot fork the agent session {}: {error}",
-                    source.display()
+                    "cannot remove the unused session copy {}: {error}",
+                    copy.display()
                 );
-                self.show_error_modal(t.agent_notice_cannot_fork_fmt(&error.to_string()));
-                return Ok(());
             }
+            error
+        };
+        let first = match handover {
+            Some(Handover { call, first }) => {
+                settle_fork(&copy, &call)
+                    .map_err(|error| discard_copy(t.agent_notice_cannot_fork_fmt(&error)))?;
+                Some(first)
+            }
+            None => None,
         };
         let settings = self.state.config.ai.clone();
-        if let Some(panel) = restore_agent_panel(
+        let Some(mut panel) = restore_agent_panel(
             &settings,
             cwd.to_path_buf(),
             Some(copy.clone()),
             None,
             AgentSetupState::default(),
-        ) {
-            self.add_panel(Box::new(panel));
-            self.auto_save_layout();
-            return Ok(());
-        }
-        // No connection to run on: the copy is a session no one has open, so
-        // it goes back the way it came.
-        if let Err(error) = std::fs::remove_file(&copy) {
-            log::warn!(
-                "cannot remove the unused session copy {}: {error}",
-                copy.display()
-            );
-        }
-        self.show_error_modal(t.agent_not_configured().to_string());
-        Ok(())
+        ) else {
+            return Err(discard_copy(t.agent_not_configured().to_string()));
+        };
+        panel.start_fork(focus, first);
+        let opened = (panel.session_id().unwrap_or_default(), panel.panel_id());
+        self.add_panel(Box::new(panel));
+        self.auto_save_layout();
+        Ok(opened)
     }
+}
+
+/// A fork the agent asked for: the id of its `fork` call, and the part of the
+/// work the fork takes over, as the agent's message.
+pub(in crate::app) struct Handover {
+    pub call: String,
+    pub first: UserMessage,
+}
+
+/// What the copy's log answers the `fork` call with, in place of the result
+/// the session it was copied from gets.
+const FORKED_RESULT: &str = "This session is the fork this call made: a copy of the \
+     conversation in a panel of its own. The part of the work it takes over comes next. \
+     Nothing goes back to the session it was copied from, which carries on with the rest; \
+     you work on with the user here.";
+
+/// Bring the copy at `copy` to rest where the run that forked it stood: the
+/// `fork` call `call` answered as the one that made the fork, any other call
+/// of that reply as one the fork does not run, and the run ended.
+fn settle_fork(copy: &Path, call: &str) -> Result<(), String> {
+    let mut session = Session::open_exclusive(copy).map_err(|error| error.to_string())?;
+    session
+        .settle(|open| {
+            if open.id == call {
+                termide_agent_core::ToolResultMessage::text(open, FORKED_RESULT)
+            } else {
+                termide_agent_core::ToolResultMessage::error(
+                    open,
+                    "not run: the session was forked before this call ran",
+                )
+            }
+        })
+        .map_err(|error| error.to_string())
 }
 
 impl App {
@@ -659,6 +722,8 @@ impl AgentCatalog for FsCatalog {
             for tool in peers::peer_tools(name, &self.project_root) {
                 tools.insert(tool);
             }
+            // Part of the work handed over to a copy of the session.
+            tools.insert(peers::fork_tool(name, &self.project_root));
             // The debugger, driven as the user drives it in the debug panel.
             tools.insert(debug_tool::debug_tool(&self.project_root));
         }
@@ -3978,6 +4043,7 @@ mod tests {
         for tool in peers::peer_tools(DEFAULT_AGENT, tmp.path()) {
             tools.insert(tool);
         }
+        tools.insert(peers::fork_tool(DEFAULT_AGENT, tmp.path()));
         tools.insert(debug_tool::debug_tool(tmp.path()));
         tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
 
@@ -4648,6 +4714,61 @@ mod tests {
             .append_message(&Message::User(UserMessage::text("fix the bug")))
             .unwrap();
         assert_eq!(fork_name(&plain).as_deref(), Some("fix the bug (2)"));
+    }
+
+    #[test]
+    fn a_fork_the_agent_asked_for_answers_its_call_in_the_copy_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut source = Session::create(dir.path(), dir.path()).unwrap();
+        let call = |id: &str, name: &str| ToolCall {
+            id: id.into(),
+            name: name.into(),
+            arguments: serde_json::json!({}),
+            extra_content: None,
+        };
+        let reply = AssistantMessage {
+            content: vec![
+                termide_agent_core::AssistantContent::ToolCall(call("f1", "fork")),
+                termide_agent_core::AssistantContent::ToolCall(call("r1", "read")),
+            ],
+            stop_reason: termide_agent_core::StopReason::ToolUse,
+            usage: Usage::default(),
+            provider: "scripted".into(),
+            model: "m".into(),
+            error_message: None,
+            failure: None,
+            timestamp: 0,
+        };
+        source
+            .append_message(&Message::User(UserMessage::text("do both")))
+            .unwrap();
+        source.append_run_start().unwrap();
+        source.append_message(&Message::Assistant(reply)).unwrap();
+        let copy = source.fork(dir.path(), None).unwrap();
+
+        settle_fork(&copy, "f1").unwrap();
+        let forked = Session::open(&copy).unwrap();
+        let results: Vec<(String, bool, String)> = forked
+            .context_messages()
+            .into_iter()
+            .filter_map(|message| match message {
+                Message::ToolResult(result) => Some((
+                    result.tool_call_id.clone(),
+                    result.is_error,
+                    result.plain_text(),
+                )),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0],
+            ("f1".to_string(), false, FORKED_RESULT.to_string())
+        );
+        assert_eq!((results[1].0.as_str(), results[1].1), ("r1", true));
+        assert_eq!(forked.last_run(), termide_agent_core::LastRun::Ended);
+        // The session it was copied from goes on running its calls.
+        assert_eq!(source.last_run(), termide_agent_core::LastRun::CutOff);
     }
 
     #[test]
@@ -5729,7 +5850,8 @@ done"#;
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
         // The built-in four and `terminals`, plus the two that speak to the
         // user watching the panel, `question` and `suggest_command`, and the
-        // two that speak to the agents of the other panels, and the debugger.
+        // two that speak to the agents of the other panels, `fork`, and the
+        // debugger.
         assert_eq!(
             default.tools.names(),
             [
@@ -5742,6 +5864,7 @@ done"#;
                 "suggest_command",
                 "agents",
                 "send_message",
+                "fork",
                 "debug",
                 "jobs"
             ]

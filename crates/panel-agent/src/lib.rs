@@ -1135,6 +1135,13 @@ pub struct AgentPanel {
     /// How many messages agents passed one another, without the user, to
     /// get the panel's current run going; see [`MessageOrigin::hops`].
     agent_hops: u32,
+    /// The focus `/fork <focus>` asked for, until its confirmation comes.
+    fork_focus: Option<String>,
+    /// A fork's first request, held back while the copy is compacted on its
+    /// focus; see [`AgentPanel::start_fork`].
+    fork_first: Option<UserMessage>,
+    /// The compaction a fork's first request waits for is under way.
+    fork_compacting: bool,
     queued: (usize, usize),
     /// Tokens of the last reported context, for the status chip.
     context_tokens: u64,
@@ -1481,6 +1488,9 @@ impl AgentPanel {
             cards_out: Vec::new(),
             panel_id,
             agent_hops: 0,
+            fork_focus: None,
+            fork_first: None,
+            fork_compacting: false,
             queued: (0, 0),
             context_tokens: 0,
             context_logged: None,
@@ -1872,7 +1882,7 @@ impl Panel for AgentPanel {
                 on_submit: InputAction::Custom(RENAME_ACTION.to_string()),
             }],
             DELETE_SESSION_ACTION => self.ask_delete_session(),
-            FORK_SESSION_ACTION => self.ask_fork_session(),
+            FORK_SESSION_ACTION => self.ask_fork_session(None),
             SAVE_CHAT_ACTION => self.save_chat(),
             CONNECTION_ACTION => {
                 let Some(connections) = &self.connections else {

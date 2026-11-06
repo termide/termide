@@ -452,8 +452,17 @@ apart in the picker and in the panel's title; rename either whenever you like.
 The copy is a session like any other: it shows in the session picker and in a
 fresh panel's banner once its panel lets it go, and you can switch back to it.
 
+`/fork <focus>` forks with a focus: once the copy opens, it is compacted on
+that focus, as `/compact <focus>` would — the older part of the conversation
+summarised with the focus in mind, the latest kept as it is — so the copy
+starts with what bears on the work you split off rather than the whole
+history. The panel you forked from is not compacted. A copy too short to
+compact stays whole, with a notice saying so. The agent can fork too, handing
+part of its work over to a copy (see
+[Forking part of the work](#forking-part-of-the-work)).
+
 From the input, `/new` starts a fresh session (keeping the current one),
-`/fork` copies this one into a new panel, and `/clear` starts one too but
+`/fork [focus]` copies this one into a new panel, and `/clear` starts one too but
 deletes the current one first; `/rename` (or `/name`) renames it. The model,
 agent and permission-mode pickers are the status-bar chips.
 
@@ -491,7 +500,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+F` | On a fresh session's banner, search its list of sessions by title in the prompt box; `Esc` ends the search |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork` copies this one into a new panel, `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/new` starts a fresh session, `/fork [focus]` copies this one into a new panel (compacted on the focus when given), `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | Move between the rows of the input as drawn, a wrapped line included; on the first or last row: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing. A recalled request opens with the cursor on the edge the arrow came in through, so repeated presses keep walking history |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
@@ -1107,7 +1116,8 @@ The agent's built-in tools are listed below, plus those its MCP servers
 provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
 Code on termide's tools, also have **question** and **suggest_command**,
 described after the list, **agents** and **send_message** (see
-[Talking to other panels](#talking-to-other-panels)), and **debug** (see
+[Talking to other panels](#talking-to-other-panels)), **fork** (see
+[Forking part of the work](#forking-part-of-the-work)), and **debug** (see
 [Debugging](#debugging)).
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
@@ -1708,7 +1718,8 @@ and a `deny` rule refuses it even when its server calls it read-only.
 `task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
 says, so it only reads. `suggest_command` puts its card up with only **Copy**
 and **Don't run**. `send_message` is refused: the panel it reaches is not in
-plan mode, and could make the change this one may not. `debug` only reads the
+plan mode, and could make the change this one may not; so is `fork`, whose
+copy is not in plan mode either. `debug` only reads the
 session (`state`); starting, stepping or stopping the program is refused.
 
 The default instructions have the agent work the task through with you
@@ -2189,6 +2200,34 @@ the agent is told to read the file again first. A delegate's reads and
 changes count as its parent panel's. Changes made outside the agents' tools
 (a `shell` command, your editor) are not tracked.
 
+### Forking part of the work
+
+A long session sometimes reaches work that should go on apart from it — a
+side task to finish with you, a second line of work beside the first.
+**fork** hands it over: the agent's session is copied into a new agent panel,
+as `F5` would, and the copy takes the part of the work the agent wrote for it
+as its first request (`& Forking · …` in this panel, `& Taking over from …`
+in the new one). With a `focus`, the copy is compacted on it first, as
+`/fork <focus>` does, so that it starts with what bears on its part rather
+than the whole history; without one it keeps the whole conversation. The
+copy is a session of the same agent, on the same model.
+
+Unlike a [subagent](#subagents), the fork is yours from the start: a session
+like any other, on the panel's usual rules, with its own `task`, and with no
+limit on its model calls. It reports nothing back — the agent that forked is
+told the new session's id and goes on with the rest — and its panel stays
+until you close it; closing the panel that forked does not touch it. The
+agents can still reach one another with `send_message`. The copy is made in
+the middle of the run that forked it: in it, the `fork` call is answered as
+the one that made the copy, and any other call of the same reply as not run
+there, so the copy opens at rest rather than as a run to carry on. The new
+panel takes its place in the layout as any new panel does.
+
+`fork` changes the layout and starts work, so it asks in `ask` mode and is
+refused in plan mode. Its first request counts among the messages agents
+pass one another without you, so a chain of forks is cut off as a chain of
+messages is.
+
 ### External agents
 
 An agent may be another program altogether: put a `command` in the front
@@ -2454,7 +2493,7 @@ to change how the answer is drawn or cited.
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `shell`, `question`,
 `suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`,
-`send_message`, `debug`, `jobs` and `terminals`, seeded
+`send_message`, `fork`, `debug`, `jobs` and `terminals`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list

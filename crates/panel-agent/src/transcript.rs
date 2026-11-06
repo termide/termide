@@ -2153,6 +2153,12 @@ fn tool_headline(
             action("&", verb, format!("{to} · {}", first.trim()))
         }
         "agents" => action("&", t.agent_tool_agents(), String::new()),
+        // A fork: the first line of the part of the work it hands over.
+        "fork" => {
+            let prompt = arg("prompt");
+            let first = prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
+            action("&", t.agent_tool_fork(), first.trim().to_string())
+        }
         // What the agent set going: listed, or one of it stopped by its id.
         "jobs" => match arg("stop").trim() {
             "" => action("&", t.agent_tool_jobs(), String::new()),
@@ -2237,6 +2243,7 @@ fn tool_headline(
         PEER_MESSAGE_TOOL if is_peer_message(call) => {
             let verb = match arg("kind").as_str() {
                 "task" => t.agent_peer_task(),
+                "fork" => t.agent_peer_fork(),
                 "question" => t.agent_peer_question(),
                 "info" => t.agent_peer_info(),
                 _ => t.agent_peer_reply(),

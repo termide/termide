@@ -132,12 +132,8 @@ impl AgentPanel {
             Some((COMPACT_COMMAND, focus)) => {
                 // Built in: summarise the older part of the session now.
                 let focus = (!focus.is_empty()).then(|| focus.to_string());
-                match self.runtime.compact(focus) {
-                    Ok(()) => self.clear_input(),
-                    Err(PromptError::Busy) => {
-                        self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn)
-                    }
-                    Err(error) => self.notice(error.to_string(), NoticeKind::Warn),
+                if self.compact_now(focus) {
+                    self.clear_input();
                 }
                 return vec![PanelEvent::NeedsRedraw];
             }
@@ -148,9 +144,10 @@ impl AgentPanel {
                 self.switch_session(None);
                 return vec![PanelEvent::NeedsRedraw];
             }
-            Some((FORK_COMMAND, _)) => {
+            Some((FORK_COMMAND, focus)) => {
+                // With a focus, the copy is compacted on it once it opens.
                 self.clear_input();
-                return self.ask_fork_session();
+                return self.ask_fork_session((!focus.is_empty()).then(|| focus.to_string()));
             }
             Some((CLEAR_COMMAND, _)) => {
                 // Like `/new`, but the current session is deleted rather than

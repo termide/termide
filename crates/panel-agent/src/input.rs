@@ -1189,7 +1189,7 @@ impl AgentPanel {
         // F5 forks the session: the log is copied and the copy opens in a new
         // panel, while this one goes on with its own.
         if key.code == KeyCode::F(5) && !ctrl && !alt && !shift {
-            return self.ask_fork_session();
+            return self.ask_fork_session(None);
         }
         // F6 switches session (the picker), F7 starts a new one, F8 deletes the
         // current one behind a confirmation card.

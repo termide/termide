@@ -62,7 +62,9 @@ impl IntentEntry {
         }
         let text = message.plain_text();
         match message.origin.as_ref().map(|origin| origin.kind) {
-            Some(OriginKind::Task) => Self::Delegated(text),
+            // A fork's part of the work is set by the agent of the session it
+            // was copied from, as a task is by the delegating one.
+            Some(OriginKind::Task | OriginKind::Fork) => Self::Delegated(text),
             Some(_) => Self::Agent(text),
             None if delegated => Self::Delegated(text),
             None => Self::User(text),

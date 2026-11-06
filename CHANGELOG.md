@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The agent forks part of the work into a panel of its own.** The new `fork` tool copies the agent's session into a new agent panel, where the copy takes the part of the work the agent wrote for it as its first request. With a `focus`, the copy is first compacted on it, so it starts with what bears on its part rather than the whole history. The fork is yours from the start, unlike a subagent: a session like any other, on the panel's usual rules, with no report back and no limit on its model calls, staying until you close its panel. It asks in `ask` mode, is refused in plan mode, and its first request counts among the messages agents pass one another without you. See [Forking part of the work](doc/en/agent.md#forking-part-of-the-work).
+- **`/fork <focus>` forks with a focus.** The copy opens compacted on the focus, as `/compact <focus>` would, while the panel forked from stays as it is; `/fork` alone, `F5` and the menu entry fork the whole conversation as before.
+
 ### Fixed
 - **`task` describes `background` as it works.** The parameter's description told the model a background task ran in a panel of its own; it runs out of sight.
 

@@ -458,8 +458,12 @@ impl App {
                 self.handle_open_directory_switcher()?;
             }
 
-            PanelEvent::ForkAgentSession { session, cwd } => {
-                self.fork_agent_session(&session, &cwd)?;
+            PanelEvent::ForkAgentSession {
+                session,
+                cwd,
+                focus,
+            } => {
+                self.fork_agent_session(&session, &cwd, focus)?;
             }
 
             PanelEvent::ChangeAgentCwd { session, cwd } => {

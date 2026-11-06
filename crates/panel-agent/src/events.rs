@@ -122,6 +122,8 @@ impl AgentPanel {
                 });
                 self.busy = false;
                 self.activity = None;
+                // An external agent's own `/compact` is a run of its own.
+                self.fork_compacted();
                 // A settings change asked for during the run is taken now that
                 // the turn is over: the run kept the endpoint it started on.
                 if self.connection_refresh {
@@ -544,6 +546,7 @@ impl AgentPanel {
                 // the next turn finishes.
                 self.context_tokens = tokens_after;
                 self.end_compaction();
+                self.fork_compacted();
                 // The summary's tokens count with the session's; the log
                 // keeps them with the compaction.
                 self.count_spent(&call.usage);
@@ -574,6 +577,8 @@ impl AgentPanel {
                 reply,
             } => {
                 self.end_compaction();
+                // A fork's first request goes on the copy left whole.
+                self.fork_compacted();
                 if let Some(call) = &call {
                     self.count_spent(&call.usage);
                 }
@@ -745,6 +750,7 @@ impl AgentPanel {
             self.apply(event);
             changed = true;
         }
+        changed |= self.release_fork_first();
         changed |= self.restart_after_early_stop();
         changed |= self.take_reviewer_spent();
         let mut events = self.poll_permissions();

@@ -1233,6 +1233,9 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: the action words for a `jobs` call stopping one of
     /// them, before its id.
     fn agent_tool_jobs_stop(&self) -> &str;
+    /// Agent transcript: the action words for a `fork` call, before the
+    /// first line of the part of the work it hands over.
+    fn agent_tool_fork(&self) -> &str;
     /// Agent transcript: the action words for a `terminals` call listing the
     /// session's terminals.
     fn agent_tool_terminals(&self) -> &str;
@@ -1308,6 +1311,9 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: the action words for a task another agent gives,
     /// before its name.
     fn agent_peer_task(&self) -> &str;
+    /// Agent transcript: the action words for the part of the work a fork
+    /// takes over from the session it was copied from, before its name.
+    fn agent_peer_fork(&self) -> &str;
     /// Agent notices: what defines a `/name` — a built-in command, a prompt
     /// template, a command script, a skill — as the object of "runs" and
     /// "hides".

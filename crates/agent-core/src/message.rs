@@ -274,6 +274,9 @@ pub enum OriginKind {
     Info,
     /// A request for an answer the sender needs to go on.
     Question,
+    /// The part of the work a fork takes over from the session it was copied
+    /// from; no answer goes back.
+    Fork,
 }
 
 impl OriginKind {
@@ -284,6 +287,7 @@ impl OriginKind {
             Self::Reply => "reply",
             Self::Info => "info",
             Self::Question => "question",
+            Self::Fork => "fork",
         }
     }
 }

@@ -3221,11 +3221,17 @@ fn f5_forks_the_session_behind_a_confirmation() {
     let event = wait_for(&mut panel, |e| {
         matches!(e, PanelEvent::ForkAgentSession { .. })
     });
-    let PanelEvent::ForkAgentSession { session, cwd } = event else {
+    let PanelEvent::ForkAgentSession {
+        session,
+        cwd,
+        focus,
+    } = event
+    else {
         unreachable!()
     };
     assert_eq!(session, first);
     assert_eq!(cwd, panel.cwd);
+    assert_eq!(focus, None);
     assert_eq!(panel.session_path().unwrap(), first);
     assert_eq!(session_files(&dir), vec![first.clone()]);
 
@@ -3282,6 +3288,101 @@ fn fork_without_a_session_log_says_so() {
         item,
         Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_fork_no_session()
     )));
+}
+
+#[test]
+fn fork_with_a_focus_hands_it_to_the_copy() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("ok")])
+    });
+    type_text(&mut panel, "first task");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+
+    type_text(&mut panel, "/fork the log format");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    panel.handle_command(PanelCommand::Confirmed {
+        action: FORK_SESSION_ACTION.to_string(),
+    });
+    let event = wait_for(&mut panel, |e| {
+        matches!(e, PanelEvent::ForkAgentSession { .. })
+    });
+    let PanelEvent::ForkAgentSession { focus, .. } = event else {
+        unreachable!()
+    };
+    assert_eq!(focus.as_deref(), Some("the log format"));
+
+    // The focus goes with that confirmation alone: F5 forks the copy whole.
+    panel.handle_key(chord(KeyCode::F(5), KeyModifiers::NONE));
+    panel.handle_command(PanelCommand::Confirmed {
+        action: FORK_SESSION_ACTION.to_string(),
+    });
+    let event = wait_for(&mut panel, |e| {
+        matches!(e, PanelEvent::ForkAgentSession { .. })
+    });
+    assert!(matches!(
+        event,
+        PanelEvent::ForkAgentSession { focus: None, .. }
+    ));
+}
+
+fn fork_request(text: &str) -> UserMessage {
+    UserMessage::text(text).with_origin(termide_agent_core::MessageOrigin {
+        session: "1a2b3c4d".into(),
+        agent: "default".into(),
+        kind: termide_agent_core::OriginKind::Fork,
+        panel: Some(1),
+        hops: 1,
+    })
+}
+
+#[test]
+fn a_forks_first_request_waits_for_its_compaction() {
+    let mut panel = panel(vec![reply("on it")]);
+    // Too short to compact: the summary call fails, and the request goes on
+    // the copy left whole — but only once the compaction is over.
+    panel.start_fork(Some("the log format".into()), Some(fork_request("migrate")));
+    assert!(!panel.is_busy());
+    assert!(panel.fork_first.is_some());
+    settle(&mut panel);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while panel.fork_first.is_some() || panel.is_busy() {
+        assert!(Instant::now() < deadline, "the request did not go");
+        panel.tick();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let failed =
+        termide_i18n::t().agent_notice_compaction_failed_fmt("too few messages to compact");
+    let items = panel.transcript().items();
+    let notice = items
+        .iter()
+        .position(|item| matches!(item, Item::Notice { text, .. } if *text == failed))
+        .expect("the compaction's notice");
+    let request = items
+        .iter()
+        .position(
+            |item| matches!(item, Item::Tool { call, .. } if call.arguments["kind"] == "fork"),
+        )
+        .expect("the fork's request, as the agent's message");
+    assert!(notice < request);
+    // Another agent's words: the count of messages passed without the user
+    // goes on from the session that forked.
+    assert_eq!(panel.agent_hops(), 1);
+}
+
+#[test]
+fn a_fork_without_a_focus_starts_at_once() {
+    let mut panel = panel(vec![reply("on it")]);
+    panel.start_fork(None, Some(fork_request("migrate")));
+    assert!(panel.is_busy());
+    assert!(panel.fork_first.is_none());
+    settle(&mut panel);
+    // One the user forks by hand starts nothing.
+    let mut quiet = self::panel(vec![]);
+    quiet.start_fork(None, None);
+    assert!(!quiet.is_busy());
 }
 
 #[test]

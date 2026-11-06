@@ -899,8 +899,13 @@ pub enum PanelEvent {
     /// copy in a new agent panel working in `cwd`, leaving the panel that
     /// asked at its own session. Emitted by the agent panel; the app does the
     /// copying, since it owns panel creation and the configuration a new panel
-    /// runs on.
-    ForkAgentSession { session: PathBuf, cwd: PathBuf },
+    /// runs on. With `focus`, the copy is compacted on it first, so that only
+    /// what bears on it stays in the copy's context.
+    ForkAgentSession {
+        session: PathBuf,
+        cwd: PathBuf,
+        focus: Option<String>,
+    },
 
     /// Open the agent session logged at the path: the panel already showing
     /// it comes to the front, else a new agent panel opens on it. Emitted by
