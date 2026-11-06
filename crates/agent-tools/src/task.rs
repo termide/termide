@@ -136,7 +136,7 @@ impl Tool for TaskTool {
                 },
                 "background": {
                     "type": "boolean",
-                    "description": "Run it in a panel of its own and carry on without waiting; its answer comes later as a message"
+                    "description": "Hand it over and carry on without waiting; its answer comes later as a message"
                 }
             },
             "required": ["agent", "prompt"]
