@@ -278,6 +278,38 @@ INSERT INTO orders (store, sku, quantity, status, created_at) VALUES
  ('north','PL-6020',15,'ordered','2026-09-26 06:01'),
  ('east','PT-2210',16,'draft','2026-09-27 06:00');
 EOF
+# A stock count exported from the stores, for the CSV table viewer.
+python3 - <<'PY'
+import csv
+items = [
+    ("HX-1001", "Hex bolt M8x40 (box of 50)", "Fasteners", 7.90, 20),
+    ("HX-1002", "Wing nut M8 (box of 100)", "Fasteners", 5.40, 25),
+    ("HX-1040", "Wood screw 4x50 (box of 200)", "Fasteners", 9.80, 30),
+    ("PT-2210", "Exterior paint, white 5 l", "Paint", 39.00, 8),
+    ("PT-2211", "Exterior paint, slate 5 l", "Paint", 41.50, 6),
+    ("PT-2300", "Primer, universal 2.5 l", "Paint", 18.20, 10),
+    ("TL-3105", "Cordless drill 18 V", "Tools", 129.00, 4),
+    ("TL-3120", "Impact driver 18 V", "Tools", 149.00, 3),
+    ("TL-3300", "Spirit level 60 cm", "Tools", 17.50, 6),
+    ("GD-4001", "Garden hose 25 m", "Garden", 34.90, 5),
+    ("GD-4010", "Pruning shears", "Garden", 21.00, 8),
+    ("EL-5002", "Extension cord 10 m", "Electrical", 16.40, 12),
+    ("EL-5050", "LED bulb E27 9 W (4-pack)", "Electrical", 11.90, 24),
+    ("PL-6007", "PVC pipe 32 mm x 2 m", "Plumbing", 6.30, 15),
+    ("PL-6020", 'Ball valve 1/2"', "Plumbing", 8.70, 10),
+]
+stores = [("north", "22:00"), ("east", "21:30"), ("south", "22:15"), ("west", "21:45")]
+with open("data/stock-count.csv", "w", newline="") as out:
+    writer = csv.writer(out)
+    writer.writerow(["store", "sku", "item", "category", "on_hand",
+                     "reorder_point", "unit_price", "stock_value", "counted_at"])
+    for s, (store, time) in enumerate(stores):
+        for i, (sku, name, category, price, reorder) in enumerate(items):
+            on_hand = (i * 17 + s * 29 + 7) % 61
+            writer.writerow([store, sku, name, category, on_hand, reorder,
+                             f"{price:.2f}", f"{on_hand * price:.2f}",
+                             f"2026-09-26 {time}"])
+PY
 git add -A
 commit "2026-08-05T14:40:00Z" "Add sample SQLite database"
 
