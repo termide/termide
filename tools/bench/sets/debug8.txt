@@ -1,0 +1,10 @@
+# Eight short Terminal-Bench 2.1 tasks for checking the harness end to end:
+# four easy, four medium with a 15-minute agent timeout.
+fix-git
+overfull-hbox
+prove-plus-comm
+cobol-modernization
+git-leak-recovery
+extract-elf
+largest-eigenval
+db-wal-recovery
