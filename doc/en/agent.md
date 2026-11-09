@@ -2857,12 +2857,22 @@ prints one JSON object at the end with the answer, the token usage, the tool
 calls the run made and its status. `--output stream-json` instead prints one
 JSON object per line as the run unfolds — a `tool_use` and `tool_result` for
 each tool, a `message` for each answer, and a final `result` line carrying the
-same fields as `json` — for a caller that follows a long run live.
+same fields as `json` — for a caller that follows a long run live. Each line
+has `elapsed_ms`, the time since the run began, and a `tool_result` has the
+tool's `output`, its first 2000 characters. The model's reasoning comes as
+`thinking` lines while it is written, in whole lines of about 4000
+characters, so a run killed mid-call still leaves it in the log, and a call's arguments past 4000 characters come
+the same way as `tool_input` lines; a call cut
+for going round in circles adds a `loop` line with the `thoughts` it kept
+returning to and whether it is `retrying`, and a reply that ends at the
+output limit with nothing in it adds a `cut_off` line. `usage` counts the last answer's
+tokens, `usage_total` the whole run's.
 
 ```
 termide --prompt "count the TODOs in src" --output json
 # {"ok":true,"answer":"7","stop_reason":"stop","model":"…","provider":"…",
 #  "usage":{"input":…,"output":…,"cache_read":…,"cache_write":…},
+#  "usage_total":{…},"elapsed_ms":…,
 #  "tools":[{"name":"shell","subject":"rg -c TODO src","error":false}],"error":null}
 ```
 

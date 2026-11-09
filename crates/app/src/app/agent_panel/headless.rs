@@ -7,8 +7,8 @@ use std::sync::Arc;
 use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, subject_of, Agent,
     AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, IntentLog, Message, Mode, ModelSpec,
-    PermissionHooks, PromptOptions, SessionView, StopReason, StreamEvent, ToolContext, UserMessage,
-    DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    PermissionHooks, PromptOptions, SessionView, StopReason, StreamEvent, ToolContext, Usage,
+    UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
 };
 use termide_agent_tools::SkillTool;
 use termide_config::AiSettings;
@@ -28,6 +28,81 @@ pub enum HeadlessOutput {
     /// One JSON object per event (NDJSON): a `tool_use`/`tool_result` per
     /// tool, a `message` per assistant turn, a final `result`.
     StreamJson,
+}
+
+/// The most of a tool's output a `tool_result` event carries: enough to see
+/// why a call failed or what it found, not a whole file read into the log.
+const STREAM_OUTPUT_CHARS: usize = 2000;
+
+/// How much reasoning a `thinking` event gathers before it is written: the
+/// reasoning reaches the log while the model still writes it, so a call cut
+/// off from outside (a timeout that kills the process) leaves it behind.
+const THINKING_CHUNK_CHARS: usize = 4000;
+
+/// Gathers streamed text into events of whole lines: the reasoning, or,
+/// `raw`, a call's JSON arguments, one line cut anywhere.
+#[derive(Default)]
+struct ThinkingChunks {
+    pending: String,
+    raw: bool,
+}
+
+impl ThinkingChunks {
+    /// Add `delta`; the lines gathered so far once they reach
+    /// [`THINKING_CHUNK_CHARS`] (all of it, cut mid-line, once a line runs
+    /// four times that long).
+    fn push(&mut self, delta: &str) -> Option<String> {
+        self.pending.push_str(delta);
+        if self.pending.len() < THINKING_CHUNK_CHARS {
+            return None;
+        }
+        let end = match self.pending.rfind('\n') {
+            _ if self.raw => self.pending.len(),
+            Some(at) => at + 1,
+            None if self.pending.len() >= 4 * THINKING_CHUNK_CHARS => self.pending.len(),
+            None => return None,
+        };
+        let rest = self.pending.split_off(end);
+        Some(std::mem::replace(&mut self.pending, rest))
+    }
+
+    /// What is left, at the end of a call.
+    fn finish(&mut self) -> Option<String> {
+        let rest = std::mem::take(&mut self.pending);
+        (!rest.is_empty()).then_some(rest)
+    }
+}
+
+/// `text` cut to `max` characters, with how much was left out.
+fn capped(text: &str, max: usize) -> String {
+    match text.char_indices().nth(max) {
+        None => text.to_string(),
+        Some((cut, _)) => format!(
+            "{}… [{} more characters]",
+            &text[..cut],
+            text[cut..].chars().count()
+        ),
+    }
+}
+
+/// The token usage of every assistant turn of the run, added up.
+fn total_usage(messages: &[Message]) -> Usage {
+    let mut total = Usage::default();
+    for message in messages {
+        if let Message::Assistant(assistant) = message {
+            total.add(&assistant.usage);
+        }
+    }
+    total
+}
+
+fn usage_json(usage: &Usage) -> serde_json::Value {
+    serde_json::json!({
+        "input": usage.input,
+        "output": usage.output,
+        "cache_read": usage.cache_read,
+        "cache_write": usage.cache_write,
+    })
 }
 
 /// Run one agent task without the UI and stream the answer to stdout, for
@@ -138,8 +213,17 @@ pub fn run_agent_headless(
     // Tool calls in call order: (id, name, subject, is_error), for the JSON
     // report and, in text mode, the stderr activity lines.
     let mut tools: Vec<(String, String, String, bool)> = Vec::new();
+    // Every stream event carries the time since the run began, so a slow
+    // turn or a long tool call shows in the log.
+    let started = std::time::Instant::now();
+    let mut thinking = ThinkingChunks::default();
+    let mut drafts: std::collections::HashMap<String, (String, ThinkingChunks)> =
+        std::collections::HashMap::new();
+    let elapsed_ms = || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     {
-        let line = |value: &serde_json::Value| {
+        let line = |value: serde_json::Value| {
+            let mut value = value;
+            value["elapsed_ms"] = serde_json::json!(elapsed_ms());
             let mut out = stdout.lock();
             let _ = writeln!(out, "{value}");
             let _ = out.flush();
@@ -153,10 +237,54 @@ pub fn run_agent_headless(
                     wrote_text = true;
                 }
             }
+            AgentEvent::MessageUpdate(StreamEvent::ThinkingDelta(delta)) if stream => {
+                if let Some(text) = thinking.push(&delta) {
+                    line(serde_json::json!({ "type": "thinking", "text": text }));
+                }
+            }
+            // A call's arguments show only when they run long — a big file
+            // written, or a model that does not stop — while they stream;
+            // the end of a short one is dropped, its subject says enough.
+            AgentEvent::MessageUpdate(StreamEvent::ToolCallStart { id, name }) if stream => {
+                let chunks = ThinkingChunks {
+                    raw: true,
+                    ..ThinkingChunks::default()
+                };
+                drafts.insert(id, (name, chunks));
+            }
+            AgentEvent::MessageUpdate(StreamEvent::ToolCallDelta { id, arguments }) if stream => {
+                if let Some((name, chunks)) = drafts.get_mut(&id) {
+                    if let Some(text) = chunks.push(&arguments) {
+                        line(
+                            serde_json::json!({ "type": "tool_input", "name": name, "text": text }),
+                        );
+                    }
+                }
+            }
+            AgentEvent::MessageUpdate(StreamEvent::ToolCallEnd { id }) if stream => {
+                drafts.remove(&id);
+            }
+            AgentEvent::ThinkingLoop { report, retrying } if stream => {
+                if let Some(text) = thinking.finish() {
+                    line(serde_json::json!({ "type": "thinking", "text": text }));
+                }
+                line(serde_json::json!({
+                    "type": "loop",
+                    "retrying": retrying,
+                    "repeats": report.repeats,
+                    "thoughts": report.thoughts,
+                }));
+            }
+            AgentEvent::EmptyCutOff { retrying } if stream => {
+                line(serde_json::json!({ "type": "cut_off", "retrying": retrying }));
+            }
             AgentEvent::MessageEnd(Message::Assistant(message)) if stream => {
+                if let Some(text) = thinking.finish() {
+                    line(serde_json::json!({ "type": "thinking", "text": text }));
+                }
                 let text = message.plain_text();
                 if !text.trim().is_empty() {
-                    line(&serde_json::json!({ "type": "message", "text": text }));
+                    line(serde_json::json!({ "type": "message", "text": text }));
                 }
             }
             AgentEvent::ToolExecutionStart { call } => {
@@ -169,7 +297,7 @@ pub fn run_agent_headless(
                     }
                 }
                 if stream {
-                    line(&serde_json::json!({
+                    line(serde_json::json!({
                         "type": "tool_use",
                         "name": call.name,
                         "subject": subject,
@@ -190,10 +318,11 @@ pub fn run_agent_headless(
                     eprintln!("  ! {}", result.plain_text());
                 }
                 if stream {
-                    line(&serde_json::json!({
+                    line(serde_json::json!({
                         "type": "tool_result",
                         "name": name,
                         "error": result.is_error,
+                        "output": capped(&result.plain_text(), STREAM_OUTPUT_CHARS),
                     }));
                 }
             }
@@ -226,12 +355,9 @@ pub fn run_agent_headless(
             "stop_reason": last.map(|m| stop_label(m.stop_reason)),
             "model": last.map(|m| m.model.clone()),
             "provider": last.map(|m| m.provider.clone()),
-            "usage": last.map(|m| serde_json::json!({
-                "input": m.usage.input,
-                "output": m.usage.output,
-                "cache_read": m.usage.cache_read,
-                "cache_write": m.usage.cache_write,
-            })),
+            "usage": last.map(|m| usage_json(&m.usage)),
+            "usage_total": usage_json(&total_usage(agent.messages())),
+            "elapsed_ms": elapsed_ms(),
             "tools": tools.iter().map(|(_, name, subject, is_error)| serde_json::json!({
                 "name": name,
                 "subject": subject,
@@ -320,6 +446,78 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reasoning_is_written_in_whole_lines_as_it_streams() {
+        let mut chunks = ThinkingChunks::default();
+        let line = format!("{}\n", "x".repeat(99));
+        let mut written = String::new();
+        for _ in 0..100 {
+            // Split mid-line, as a stream does.
+            for piece in [&line[..50], &line[50..]] {
+                if let Some(text) = chunks.push(piece) {
+                    assert!(text.ends_with('\n'), "whole lines only");
+                    written.push_str(&text);
+                }
+            }
+        }
+        assert!(!written.is_empty(), "written before the call ends");
+        written.push_str(&chunks.finish().unwrap_or_default());
+        assert_eq!(written, line.repeat(100));
+        assert_eq!(chunks.finish(), None);
+
+        // A line that never ends is still written, once very long.
+        let mut endless = ThinkingChunks::default();
+        let flushed = (0..4 * THINKING_CHUNK_CHARS)
+            .filter_map(|_| endless.push("y"))
+            .collect::<String>();
+        assert_eq!(flushed.len(), 4 * THINKING_CHUNK_CHARS);
+
+        // JSON arguments are one line: cut at the size.
+        let mut raw = ThinkingChunks {
+            raw: true,
+            ..ThinkingChunks::default()
+        };
+        let flushed = (0..THINKING_CHUNK_CHARS)
+            .filter_map(|_| raw.push("z"))
+            .collect::<String>();
+        assert_eq!(flushed.len(), THINKING_CHUNK_CHARS);
+    }
+
+    #[test]
+    fn a_tool_output_is_capped_by_characters_and_says_how_much_was_cut() {
+        assert_eq!(capped("short", 10), "short");
+        assert_eq!(capped("exactly10!", 10), "exactly10!");
+        // Cut on a character, not a byte: no panic inside a multibyte one.
+        assert_eq!(capped("привет мир", 6), "привет… [4 more characters]");
+    }
+
+    #[test]
+    fn the_total_usage_adds_up_every_assistant_turn() {
+        let turn = |input, output| {
+            Message::Assistant(termide_agent_core::AssistantMessage {
+                content: Vec::new(),
+                stop_reason: StopReason::Stop,
+                usage: Usage {
+                    input,
+                    output,
+                    ..Usage::default()
+                },
+                provider: String::new(),
+                model: String::new(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            })
+        };
+        let messages = [
+            Message::User(UserMessage::text("go")),
+            turn(100, 10),
+            turn(250, 20),
+        ];
+        let total = total_usage(&messages);
+        assert_eq!((total.input, total.output), (350, 30));
+    }
 
     #[test]
     fn recall_from_the_command_line_exits_zero_only_with_results() {

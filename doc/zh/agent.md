@@ -808,12 +808,13 @@ termide --prompt "run the tests and report failures" --agent runner
 
 回答是 stdout 上唯一的内容，因此可以干净地用于管道；工具活动和错误输出到 stderr。`--agent` 选择已定义的代理之一，否则使用默认代理。成功时退出代码为 `0`，失败时为 `1`，被中断时为 `130`。
 
-如需机器可读的结果，添加 `--output json`：它不再流式输出，而是在结束时打印一个 JSON 对象，包含回答、令牌用量、运行中进行的工具调用及其状态。`--output stream-json` 则在运行过程中每行打印一个 JSON 对象——每个工具一个 `tool_use` 和 `tool_result`，每个回答一个 `message`，以及最后一行 `result`，其字段与 `json` 相同——适合需要实时跟踪长时间运行的调用方。
+如需机器可读的结果，添加 `--output json`：它不再流式输出，而是在结束时打印一个 JSON 对象，包含回答、令牌用量、运行中进行的工具调用及其状态。`--output stream-json` 则在运行过程中每行打印一个 JSON 对象——每个工具一个 `tool_use` 和 `tool_result`，每个回答一个 `message`，以及最后一行 `result`，其字段与 `json` 相同——适合需要实时跟踪长时间运行的调用方。每行都带有 `elapsed_ms`，即自运行开始以来的时间；`tool_result` 带有 `output`，即工具输出的前 2000 个字符。模型的推理在生成过程中以 `thinking` 行输出，按整行、每段约 4000 个字符，因此在调用中途被终止的运行也会把它留在日志里，超过 4000 个字符的调用参数也同样以 `tool_input` 行输出；因原地打转而被中断的调用会追加一行 `loop`，包含模型反复回到的想法（`thoughts`）以及是否重试（`retrying`）；达到输出上限却没有任何内容的回复会追加一行 `cut_off`。`usage` 统计最后一个回答的令牌，`usage_total` 统计整个运行的令牌。
 
 ```
 termide --prompt "count the TODOs in src" --output json
 # {"ok":true,"answer":"7","stop_reason":"stop","model":"…","provider":"…",
 #  "usage":{"input":…,"output":…,"cache_read":…,"cache_write":…},
+#  "usage_total":{…},"elapsed_ms":…,
 #  "tools":[{"name":"shell","subject":"rg -c TODO src","error":false}],"error":null}
 ```
 
