@@ -706,6 +706,8 @@ impl Translation for RuntimeTranslation {
         agent_notice_loop_stopped,
         agent_notice_loop_usage,
         agent_notice_goal_stopped,
+        agent_notice_empty_cut_off_retry,
+        agent_notice_empty_cut_off_stopped,
         agent_notice_goal_usage,
         agent_notice_goal_working,
         agent_state_queued,

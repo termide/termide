@@ -5,7 +5,9 @@
 //! nothing to show for it. [`LoopGuard`] watches the streamed text one
 //! sentence (or line) at a time and trips once most of the recent sentences
 //! are ones it has already seen several times: a reasoning that drafts
-//! something twice, or comes back to a point once, does not trip it.
+//! something twice, or comes back to a point once, does not trip it. A
+//! stutter — one short piece over and over, with no sentence long enough to
+//! count — trips it too.
 //!
 //! What the loop does then — cut the call, nudge the model with
 //! [`LoopPrompt`], stop — is up to the agent loop.
@@ -24,6 +26,15 @@ const STALE_AT: u32 = 3;
 const WINDOW: usize = 30;
 /// …and how many of them must be repeats to call it a loop.
 const STALE_IN_WINDOW: usize = 20;
+/// A stream whose last this many bytes repeat one short piece over and
+/// over ("PR PR PR …", the same short line) is stuck on it: a stutter has
+/// no sentences long enough to count, so it is caught apart.
+const STUTTER_SPAN: usize = 2000;
+/// The longest piece a stutter repeats; anything longer is left to the
+/// sentence count, so a draft written twice is no stutter.
+const STUTTER_MAX_PERIOD: usize = 64;
+/// How many bytes pass between two looks for a stutter.
+const STUTTER_CHECK_EVERY: usize = 64;
 /// The most points [`LoopReport::thoughts`] keeps.
 const MAX_THOUGHTS: usize = 8;
 /// The most characters one point keeps.
@@ -59,6 +70,10 @@ pub struct LoopGuard {
     loop_start: Option<usize>,
     thoughts: Vec<String>,
     tripped: bool,
+    /// The last bytes fed, for the stutter check: at least
+    /// [`STUTTER_SPAN`] once that many came.
+    tail: Vec<u8>,
+    since_stutter_check: usize,
 }
 
 impl LoopGuard {
@@ -81,7 +96,36 @@ impl LoopGuard {
                 self.fed += c.len_utf8();
             }
         }
+        if !self.tripped {
+            self.watch_stutter(delta);
+        }
         self.tripped
+    }
+
+    fn watch_stutter(&mut self, delta: &str) {
+        self.tail.extend_from_slice(delta.as_bytes());
+        if self.tail.len() > 4 * STUTTER_SPAN {
+            self.tail.drain(..self.tail.len() - 2 * STUTTER_SPAN);
+        }
+        self.since_stutter_check += delta.len();
+        if self.tail.len() < STUTTER_SPAN || self.since_stutter_check < STUTTER_CHECK_EVERY {
+            return;
+        }
+        self.since_stutter_check = 0;
+        let Some((start, period)) = stutter(&self.tail) else {
+            return;
+        };
+        let run = &self.tail[start..];
+        // A few rounds of the piece, so a short one reads as what it is; a
+        // character split at either end comes out as a replacement mark.
+        let shown = run.len().min(period.max(MAX_THOUGHT_CHARS / 2));
+        self.tripped = true;
+        self.repeats = run.len() / period;
+        self.loop_start = Some(self.fed - run.len());
+        self.thoughts = vec![clip(
+            String::from_utf8_lossy(&run[..shown]).trim(),
+            MAX_THOUGHT_CHARS,
+        )];
     }
 
     /// Whether the stream has looped.
@@ -127,6 +171,19 @@ impl LoopGuard {
             self.tripped = true;
         }
     }
+}
+
+/// Whether the last [`STUTTER_SPAN`] bytes of `tail` repeat one piece of at
+/// most [`STUTTER_MAX_PERIOD`] bytes: where the repeating run begins in
+/// `tail`, and the piece's length.
+fn stutter(tail: &[u8]) -> Option<(usize, usize)> {
+    let span = tail.get(tail.len().checked_sub(STUTTER_SPAN)?..)?;
+    let period = (1..=STUTTER_MAX_PERIOD).find(|&p| span[p..] == span[..span.len() - p])?;
+    let mut start = tail.len() - STUTTER_SPAN;
+    while start > 0 && tail[start - 1] == tail[start - 1 + period] {
+        start -= 1;
+    }
+    Some((start, period))
 }
 
 /// A sentence reduced to what tells it apart: lowercase words, no
@@ -237,10 +294,39 @@ mod tests {
             .collect();
         assert!(!guard.feed(&draft));
         assert!(!guard.feed(&draft));
-        // Short fillers never count.
-        for _ in 0..100 {
+        // Short fillers between steps never count.
+        for i in 0..100 {
             assert!(!guard.feed("Wait. Hmm.\nOk.\n}\n"));
+            assert!(!guard.feed(&format!("Then step {i} checks the header of part {i}.\n")));
         }
+        assert!(guard.report().is_none());
+    }
+
+    #[test]
+    fn a_stutter_on_a_short_piece_trips() {
+        let mut guard = LoopGuard::new();
+        let head = fresh_reasoning(10);
+        assert!(!guard.feed(&head));
+        let mut fed = 0;
+        while !guard.feed("PR ") {
+            fed += 3;
+            assert!(fed < 3 * STUTTER_SPAN, "caught soon after the span");
+        }
+        let report = guard.report().unwrap();
+        // The reasoning before the stutter is kept, none of the stutter.
+        assert_eq!(report.loop_start, head.len());
+        assert!(report.thoughts[0].starts_with("PR PR PR"), "{report:?}");
+        assert!(report.repeats * 3 >= STUTTER_SPAN);
+    }
+
+    #[test]
+    fn a_long_run_that_varies_is_no_stutter() {
+        let mut guard = LoopGuard::new();
+        // A table of distinct values, a rule shorter than the span.
+        let table: String = (0..400).map(|i| format!("0x{i:02x}, ")).collect();
+        assert!(!guard.feed(&table));
+        assert!(!guard.feed(&"=".repeat(STUTTER_SPAN / 2)));
+        assert!(!guard.feed(&fresh_reasoning(5)));
         assert!(guard.report().is_none());
     }
 

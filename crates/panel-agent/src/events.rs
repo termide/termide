@@ -690,6 +690,19 @@ impl AgentPanel {
                     );
                 }
             }
+            AgentEvent::EmptyCutOff { retrying } => {
+                let t = termide_i18n::t();
+                if retrying {
+                    self.notice(t.agent_notice_empty_cut_off_retry(), NoticeKind::Warn);
+                } else {
+                    // As after a second loop: the user decides what comes next.
+                    if self.goal_task.take().is_some() {
+                        self.end_judging();
+                        self.notice(t.agent_notice_goal_stopped(), NoticeKind::Info);
+                    }
+                    self.notice(t.agent_notice_empty_cut_off_stopped(), NoticeKind::Warn);
+                }
+            }
         }
     }
 

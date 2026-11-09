@@ -1064,6 +1064,10 @@ pub trait Translation: Send + Sync {
     fn agent_notice_handoff_failed_fmt(&self, error: &str) -> String;
     fn agent_notice_thinking_loop_retry_fmt(&self, count: usize) -> String;
     fn agent_notice_thinking_loop_stopped_fmt(&self, thoughts: &str) -> String;
+    /// Agent panel: a reply ran to the output limit with nothing usable,
+    /// the model asked again / the run stopped after a second one.
+    fn agent_notice_empty_cut_off_retry(&self) -> &str;
+    fn agent_notice_empty_cut_off_stopped(&self) -> &str;
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;

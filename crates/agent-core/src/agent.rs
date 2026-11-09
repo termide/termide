@@ -540,6 +540,14 @@ pub enum AgentEvent {
         report: LoopReport,
         retrying: bool,
     },
+    /// A model call ran to the output limit with nothing to show — no
+    /// answer, no tool call: a loop the stream did not reveal (a server may
+    /// hold a tool call back until it closes). With `retrying` the loop tells
+    /// the model and calls it once more; without, a second call failed so
+    /// too (or looped) and the run stops for the user to decide.
+    EmptyCutOff {
+        retrying: bool,
+    },
     /// The loop stopped early on a pause request with work still pending, so
     /// the run can be resumed. Not emitted on a natural finish.
     Paused,
@@ -1064,25 +1072,44 @@ impl Agent {
         });
         let mut retried_after_overflow = false;
         // After a call that went round in circles, the next one is made
-        // without reasoning; a second loop stops the run.
+        // without reasoning; after one that ran to the output limit with
+        // nothing to show, the model is told so. A second such call, of
+        // either kind, stops the run.
         let mut thinking = self.model.thinking;
-        let mut looped_once = false;
+        let mut retried = false;
         let assistant = loop {
             let (reply, looped) = self.call_model(thinking, cancel, emit);
             if let Some(report) = looped {
-                self.push(Message::Assistant(cut_loop(reply, &report)), emit);
+                self.push(
+                    Message::Assistant(cut_reasoning(reply, report.loop_start)),
+                    emit,
+                );
                 emit(AgentEvent::ThinkingLoop {
                     report: report.clone(),
-                    retrying: !looped_once,
+                    retrying: !retried,
                 });
-                if looped_once {
+                if retried {
                     emit(AgentEvent::TurnEnd);
                     return TurnOutcome::Halt;
                 }
-                looped_once = true;
+                retried = true;
                 thinking = ThinkingLevel::Off;
                 let nudge = self.loop_prompt.render(&report);
                 self.push(Message::User(UserMessage::text(nudge)), emit);
+                emit(AgentEvent::MessageStart {
+                    prompt_tokens: Some(context_tokens(&self.messages)),
+                });
+                continue;
+            }
+            if is_empty_cut_off(&reply) && !cancel.is_cancelled() {
+                self.push(Message::Assistant(cut_reasoning(reply, usize::MAX)), emit);
+                emit(AgentEvent::EmptyCutOff { retrying: !retried });
+                if retried {
+                    emit(AgentEvent::TurnEnd);
+                    return TurnOutcome::Halt;
+                }
+                retried = true;
+                self.push(Message::User(UserMessage::text(EMPTY_CUT_OFF_NUDGE)), emit);
                 emit(AgentEvent::MessageStart {
                     prompt_tokens: Some(context_tokens(&self.messages)),
                 });
@@ -1717,13 +1744,25 @@ enum TurnOutcome {
     Halt,
 }
 
-/// What of a reply cut for looping enters the transcript: its reasoning up
-/// to where the circling began, unsealed (a cut reasoning is no provider's to
-/// read back), and nothing else — a half-written answer or call is not one.
-/// It ends as cut short by length, not as a failure: nothing went wrong with
-/// the request.
-fn cut_loop(mut reply: AssistantMessage, report: &LoopReport) -> AssistantMessage {
-    let mut left = report.loop_start;
+/// What the model is told after a call that ran to the output limit with
+/// nothing to show.
+const EMPTY_CUT_OFF_NUDGE: &str = "Your last reply ran to the output limit and nothing usable came of it: no answer and no complete tool call. Do not write it again. Take a smaller step now: one tool call with short arguments (a long file goes in parts), or give your answer.";
+
+/// A reply cut off by the output limit with no answer and no tool call:
+/// whatever the model wrote went nowhere.
+fn is_empty_cut_off(reply: &AssistantMessage) -> bool {
+    reply.stop_reason == StopReason::Length
+        && reply.plain_text().trim().is_empty()
+        && reply.tool_calls().next().is_none()
+}
+
+/// What of a reply cut short enters the transcript: its reasoning, up to
+/// `keep` bytes (where a loop began), unsealed (a cut reasoning is no
+/// provider's to read back), and nothing else — a half-written answer or
+/// call is not one. It ends as cut short by length, not as a failure:
+/// nothing went wrong with the request.
+fn cut_reasoning(mut reply: AssistantMessage, keep: usize) -> AssistantMessage {
+    let mut left = keep;
     reply.content = reply
         .content
         .into_iter()
@@ -2817,6 +2856,87 @@ OK let me just start implementing and see what happens.\n";
             .iter()
             .any(|e| matches!(e, AgentEvent::ThinkingLoop { .. })));
         assert_eq!(roles(agent.messages()), vec!["user", "assistant"]);
+    }
+
+    /// A reply that ran to the output limit with only some reasoning: what a
+    /// server that holds back an unfinished tool call sends.
+    fn empty_cut_off_reply() -> AssistantMessage {
+        AssistantMessage {
+            content: vec![AssistantContent::Thinking {
+                text: "Let me check the journal mode.".into(),
+                signature: Some("sealed".into()),
+                redacted: false,
+            }],
+            stop_reason: StopReason::Length,
+            ..text_reply("")
+        }
+    }
+
+    #[test]
+    fn an_empty_reply_cut_off_by_the_limit_is_told_and_tried_again() {
+        let provider = Arc::new(ScriptedProvider::new(vec![
+            empty_cut_off_reply(),
+            text_reply("Done in a smaller step."),
+        ]));
+        let mut agent = Agent::new(
+            provider.clone(),
+            ToolRegistry::new(),
+            ModelSpec {
+                thinking: ThinkingLevel::High,
+                ..model()
+            },
+            PathBuf::from("."),
+        );
+        let events = collect(&mut agent, "go", &mut NoHooks);
+
+        assert_eq!(
+            roles(agent.messages()),
+            vec!["user", "assistant", "user", "assistant"]
+        );
+        let Message::Assistant(cut) = &agent.messages()[1] else {
+            panic!("expected the cut reply");
+        };
+        let [AssistantContent::Thinking { signature, .. }] = cut.content.as_slice() else {
+            panic!("expected the reasoning alone: {:?}", cut.content);
+        };
+        assert!(signature.is_none());
+        let Message::User(nudge) = &agent.messages()[2] else {
+            panic!("expected the nudge");
+        };
+        assert!(nudge.plain_text().contains("output limit"));
+        // The reasoning level stays: the reasoning was not what ran away.
+        assert_eq!(
+            *provider.thinking_seen.lock().unwrap(),
+            vec![ThinkingLevel::High, ThinkingLevel::High]
+        );
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::EmptyCutOff { retrying: true })));
+    }
+
+    #[test]
+    fn a_second_empty_cut_off_or_loop_stops_the_run() {
+        for second in [empty_cut_off_reply(), looping_reply()] {
+            let (mut agent, _) = agent(
+                ScriptedProvider::new(vec![empty_cut_off_reply(), second, text_reply("never")]),
+                ToolRegistry::new(),
+            );
+            let events = collect(&mut agent, "go", &mut NoHooks);
+
+            assert_eq!(
+                roles(agent.messages()),
+                vec!["user", "assistant", "user", "assistant"]
+            );
+            assert!(events.iter().any(|e| matches!(
+                e,
+                AgentEvent::EmptyCutOff { retrying: false }
+                    | AgentEvent::ThinkingLoop {
+                        retrying: false,
+                        ..
+                    }
+            )));
+            assert!(matches!(events.last(), Some(AgentEvent::AgentEnd)));
+        }
     }
 
     #[test]

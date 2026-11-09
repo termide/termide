@@ -2477,11 +2477,18 @@ change what a brief contains.
 
 `loop.md` is what the built-in agent tells a model that went round in
 circles. The agent watches the reasoning and the answer as they stream; once
-most recent sentences restate ones already said several times, it cuts the
+most recent sentences restate ones already said several times, or the last
+2000 bytes repeat one short piece over and over ("PR PR PR …"), it cuts the
 call, keeps the reasoning up to where the circling began, and sends `loop.md`
 with `{{thoughts}}` replaced by the points the model kept going back to; the
 next call is made without reasoning. A second loop stops the run, and an
 active `/goal` with it, and the panel lists those points for you to decide.
+
+Some servers hold a tool call back until it is complete, so a model stuck
+inside one shows nothing until the output limit ends the call. A reply that
+ends at the limit with no answer and no tool call is treated the same way:
+the panel warns, the model is told that nothing came of it and asked for a
+smaller step, and a second such reply (or a loop) stops the run.
 
 [Recall](#recall)'s solver uses `recall.md`: the system prompt of the call that
 answers from the search results, with the question line in its front matter
