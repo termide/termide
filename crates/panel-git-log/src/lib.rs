@@ -155,7 +155,7 @@ fn build_git_log_hotkey_table(config: &Config) -> HotkeyTable {
         );
     }
 
-    t.insert("checkout", &kb.checkout);
+    t.insert("refresh", &kb.refresh);
     t
 }
 
@@ -489,18 +489,20 @@ impl GitLogPanel {
             if self.hotkeys.matches("open_external", &key) {
                 return self.open_commit_external();
             }
-            if self.hotkeys.matches("checkout", &key) {
-                if let Some(commit) = self.selected_commit() {
-                    if !commit.hash.is_empty() {
-                        let t = termide_i18n::t();
-                        self.status_message = Some(format!(
-                            "Checkout {} {}",
-                            commit.hash,
-                            t.git_checkout_not_impl()
-                        ));
-                    }
-                }
+            if self.hotkeys.matches("refresh", &key) {
+                // The reloaded log is self-evident; no lingering status note.
+                self.refresh();
                 return vec![];
+            }
+            // On the commit list; in a selector the same keys open it.
+            if self.current_section == Section::Commits {
+                if self.hotkeys.matches("view_diff", &key) {
+                    return self.view_diff();
+                }
+                if self.hotkeys.matches("info", &key) {
+                    self.show_commit_info();
+                    return vec![];
+                }
             }
         }
 
@@ -618,12 +620,11 @@ impl GitLogPanel {
                             self.branch_dropdown_open = true;
                         }
                     }
+                    // `Space` reaches here only when rebound away from
+                    // `info`: on the commits it then does nothing.
                     Section::Commits => {
                         if key.code == KeyCode::Enter {
                             return self.view_diff();
-                        } else {
-                            // Space on commits shows commit info
-                            self.show_commit_info();
                         }
                     }
                 }
@@ -635,13 +636,6 @@ impl GitLogPanel {
             }
             KeyCode::Right if self.repo_dropdown_open => {
                 self.set_repo_dir_open(self.dropdown_cursor, Some(true));
-            }
-            KeyCode::Char('d') => {
-                return self.view_diff();
-            }
-            KeyCode::Char('r') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                // The reloaded log is self-evident; no lingering status note.
-                self.refresh();
             }
             _ => {}
         }

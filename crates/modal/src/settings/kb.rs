@@ -163,7 +163,7 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "scroll_half_up",
             "scroll_half_down",
         ],
-        5 => &["info", "view_diff", "checkout"],
+        5 => &["info", "view_diff", "refresh"],
         6 => &[
             "scroll_up",
             "scroll_down",
@@ -325,7 +325,7 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             scroll_half_up,
             scroll_half_down
         ),
-        5 => kb_get!(config.git_log.keybindings, name, info, view_diff, checkout),
+        5 => kb_get!(config.git_log.keybindings, name, info, view_diff, refresh),
         6 => kb_get!(
             config.terminal.keybindings,
             name,
@@ -557,7 +557,7 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             value,
             info,
             view_diff,
-            checkout
+            refresh
         ),
         6 => kb_set!(
             config.terminal.keybindings,

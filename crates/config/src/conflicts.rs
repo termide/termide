@@ -283,7 +283,7 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     let gl = &config.git_log.keybindings;
     push(&mut out, "git_log", "info", &gl.info);
     push(&mut out, "git_log", "view_diff", &gl.view_diff);
-    push(&mut out, "git_log", "checkout", &gl.checkout);
+    push(&mut out, "git_log", "refresh", &gl.refresh);
 
     let db = &config.database.keybindings;
     push(&mut out, "database", "sort", &db.sort);

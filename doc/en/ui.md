@@ -225,6 +225,11 @@ The scrollbar spans the whole history from the start. When the log reloads —
 after a commit, a checkout, a rebase — the selected commit stays selected, in
 the same place on screen.
 
+On a commit, `Enter` or `D` opens its diff and `Space` its details; `Ctrl+R`
+reloads the log. All three but `Enter` are `info`, `view_diff` and `refresh`
+under `[git_log.keybindings]`. Checking a branch out is done from the git
+status panel.
+
 Opening a **binary file** (with `Enter` or `F3` in the file manager) shows a
 read-only **hex viewer** — `offset │ hex │ ASCII`, with the row width adapting to
 the panel in 16-byte sections — instead of handing it to the system viewer. A

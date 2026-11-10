@@ -312,7 +312,6 @@ pub trait Translation: Send + Sync {
     fn help_desc_edit_paste(&self) -> &str;
     fn help_desc_view_diff(&self) -> &str;
     fn help_desc_revert(&self) -> &str;
-    fn help_desc_checkout(&self) -> &str;
     fn help_desc_copy_hash(&self) -> &str;
     fn help_desc_scroll_half_down(&self) -> &str;
     fn help_desc_tree_search(&self) -> &str;
@@ -1836,7 +1835,6 @@ pub trait Translation: Send + Sync {
     fn git_log_loading(&self) -> &str;
     fn git_checkout_btn(&self) -> &str;
     fn git_revert_all_confirm(&self) -> &str;
-    fn git_checkout_not_impl(&self) -> &str;
     fn git_no_remote_url(&self) -> &str;
     fn git_diff_staged_marker(&self) -> &str;
     fn git_pushing(&self) -> &str;

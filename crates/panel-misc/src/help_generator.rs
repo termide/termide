@@ -664,8 +664,8 @@ impl HelpGenerator {
                 description: t.help_desc_show_hover().to_string(),
             },
             HelpEntry {
-                keys: Self::format_keys(&kb.checkout),
-                description: t.help_desc_checkout().to_string(),
+                keys: Self::format_keys(&kb.refresh),
+                description: t.help_desc_refresh().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&fm_kb.open_external),

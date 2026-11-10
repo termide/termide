@@ -275,8 +275,8 @@ pub struct GitLogKeybindings {
     pub info: Option<KeyBinding>,
     /// View commit diff
     pub view_diff: Option<KeyBinding>,
-    /// Checkout commit/branch
-    pub checkout: Option<KeyBinding>,
+    /// Reload the log
+    pub refresh: Option<KeyBinding>,
 }
 
 impl GitLogKeybindings {
@@ -292,7 +292,7 @@ impl GitLogKeybindings {
 
         set_default!(info, "Space");
         set_default!(view_diff, "D");
-        set_default!(checkout, "C");
+        set_default!(refresh, "Ctrl+R");
     }
 }
 

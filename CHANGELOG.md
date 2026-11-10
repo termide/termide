@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Ctrl+F` reaches full-screen programs.** The terminal took it for its find bar even while `less`, `vim` or `emacs` had the screen, where it pages down or moves forward. With the alternate screen up the key now goes to the program.
 - **`Alt+D` reaches the shell outside a detached instance.** It only showed "not a detached instance"; in a terminal it now goes to the shell as readline's `kill-word`.
 - **The database panel's "clear all filters" has a key that works.** Its default `Alt+F` is also the global "new file manager", which is matched first, so the key opened a file manager. It is now `Shift+F3`, beside the `F3` filter; a test keeps every panel default clear of the global keys.
+- **The git log's keys follow the settings.** `info` and `view_diff` under `[git_log.keybindings]` were read but never checked — `Space`, `d` and `Ctrl+R` were fixed in the code — so rebinding them did nothing; they now work, with a new `refresh` (`Ctrl+R`). The `C` "checkout" key, which only said it was not implemented, is gone with its `checkout` setting; branches are checked out from the git status panel.
 
 ### Security
 - **A debugger is no longer looked up in a relative `PATH` entry.** A `PATH` with `.` or an empty entry made termide look for `lldb-dap`, `gdb`, `dlv` or Python in the directory it was started in, which may be a project's, and start whatever that project put there under the name. Only absolute entries are searched now, as for plugins.

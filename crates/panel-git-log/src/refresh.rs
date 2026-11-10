@@ -296,6 +296,9 @@ mod tests {
 
     use ratatui::layout::Rect;
 
+    use termide_config::{Config, KeyBinding};
+    use termide_core::PanelEvent;
+
     use super::PAGE;
     use crate::GitLogPanel;
 
@@ -383,6 +386,35 @@ mod tests {
             panel.commits[PAGE].message,
             format!("commit {}", 1199 - PAGE)
         );
+    }
+
+    /// The commit keys come from `[git_log.keybindings]`: a rebound key
+    /// works and the default it replaced does not.
+    #[test]
+    fn the_commit_keys_follow_the_settings() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let dir = repo(3);
+        let mut panel = panel(dir.path());
+        settle(&mut panel, |p| idle(p) && p.log.is_some());
+        let opens_diff = |events: Vec<PanelEvent>| {
+            events
+                .iter()
+                .any(|event| matches!(event, PanelEvent::OpenGitDiff { .. }))
+        };
+        let plain = |c: char| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+
+        let mut config = Config::default();
+        config.normalize();
+        panel.hotkeys = crate::build_git_log_hotkey_table(&config);
+        assert!(opens_diff(panel.handle_key_inner(plain('d'))));
+
+        config.git_log.keybindings.view_diff = Some(KeyBinding::Single("X".into()));
+        panel.hotkeys = crate::build_git_log_hotkey_table(&config);
+        assert!(opens_diff(panel.handle_key_inner(plain('x'))));
+        assert!(!opens_diff(panel.handle_key_inner(plain('d'))));
+        // Enter opens the diff whatever the binding.
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(opens_diff(panel.handle_key_inner(enter)));
     }
 
     #[test]
