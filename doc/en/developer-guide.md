@@ -85,6 +85,18 @@ cargo test -- --nocapture
 cargo test test_name
 ```
 
+UI and agent behaviour is checked live with
+[`tools/tui-harness`](../../tools/tui-harness/README.md): it runs the built
+binary headlessly in a pty against scenario scripts (keys, waits, checks on
+the screen), with a throwaway HOME, the demo project and mock model or ACP
+agents.
+
+```bash
+cargo build
+tools/tui-harness/run.sh           # every scenario
+tools/tui-harness/run.sh agent     # one of them
+```
+
 ### Code Quality Checks
 
 ```bash

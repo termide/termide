@@ -1,0 +1,22 @@
+# Codex over the Agent Client Protocol, played by the stand-in adapter in
+# tools/screenshots/mock-acp (its `npx` comes first on PATH). termide's rules
+# allow the edit (inventory/** in config.toml); its permission card answers
+# Codex's request to run the tests.
+mock-acp codex
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "I'll start with the report module." 20
+file-contains inventory/report.py "critical" 20
+wait "Agent wants to run shell" 20
+expect "python3 -m unittest -q"
+snapshot permission
+type "1"
+wait "Done: reorder_rows now returns a fifth column" 30
+wait-gone "[■]" 15
+snapshot done
+quit

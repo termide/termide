@@ -1,0 +1,13 @@
+# From the file manager into the editor: End puts the cursor on the last
+# entry (README.md), F4 edits it; typing changes it and Ctrl+S saves it.
+start
+wait "README.md"
+key End F4
+wait "A small stock-keeping service"
+key Ctrl+Home
+type "Edited by the harness. "
+wait "Edited by the harness. # Inventory"
+key Ctrl+S
+file-contains README.md "Edited by the harness. # Inventory"
+snapshot saved
+quit

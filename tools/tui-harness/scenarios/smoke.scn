@@ -1,0 +1,6 @@
+# termide starts in the demo project, shows its files, and quits on Alt+Q.
+start
+wait "inventory"
+wait "README.md"
+snapshot start
+quit

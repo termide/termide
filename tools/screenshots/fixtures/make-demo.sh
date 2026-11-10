@@ -1,14 +1,20 @@
 #!/usr/bin/env bash
-# Build the synthetic project every screenshot shows, under /tmp/demo.
+# Build the synthetic project every screenshot shows, under /tmp/demo (or
+# $DEMO_ROOT: tools/tui-harness builds it in a scratch directory on the host).
 # Everything here is invented: names, data, history, author. Runs inside the
 # recording container only; the dates are fixed so each run is identical.
 set -euo pipefail
 
-ROOT=/tmp/demo
+ROOT=${DEMO_ROOT:-/tmp/demo}
 PROJECT=$ROOT/inventory
 rm -rf "$ROOT"
 mkdir -p "$PROJECT"
 cd "$PROJECT"
+
+# `sed -i` in the form both GNU and BSD (macOS) sed accept.
+sedi() {
+    sed -i.orig "$1" "$2" && rm "$2.orig"
+}
 
 commit() {
     # commit <iso-date> <message>
@@ -420,13 +426,13 @@ git branch feature/csv-export
 git worktree add -q "$ROOT/inventory-csv-export" feature/csv-export
 (
     cd "$ROOT/inventory-csv-export"
-    sed -i 's/^def to_csv(rows: list\[tuple\]) -> str:/def to_csv(rows: list[tuple], delimiter: str = ",") -> str:/' inventory/report.py
-    sed -i 's/    writer = csv.writer(buffer)/    writer = csv.writer(buffer, delimiter=delimiter)/' inventory/report.py
+    sedi 's/^def to_csv(rows: list\[tuple\]) -> str:/def to_csv(rows: list[tuple], delimiter: str = ",") -> str:/' inventory/report.py
+    sedi 's/    writer = csv.writer(buffer)/    writer = csv.writer(buffer, delimiter=delimiter)/' inventory/report.py
     git add -A
     commit "2026-09-10T13:15:00Z" "Allow a custom CSV delimiter"
 )
 
-sed -i 's/__version__ = "0.4.0"/__version__ = "0.4.1"/' inventory/__init__.py
+sedi 's/__version__ = "0.4.0"/__version__ = "0.4.1"/' inventory/__init__.py
 git add -A
 commit "2026-09-15T17:02:00Z" "Release 0.4.1"
 GIT_COMMITTER_DATE="2026-09-15T17:02:00Z" git tag -a v0.4.1 -m "0.4.1"
@@ -443,7 +449,7 @@ def low_stock(items: list[Item], ratio: float = 0.25) -> list[Item]:
     """Items at or below `ratio` of their reorder point."""
     return [item for item in items if item.on_hand <= item.reorder_point * ratio]
 EOF
-sed -i 's/Stock levels are counted nightly; the report runs at 06:00 UTC./Stock levels are counted nightly at 22:00; the report runs at 06:00 UTC./' README.md
+sedi 's/Stock levels are counted nightly; the report runs at 06:00 UTC./Stock levels are counted nightly at 22:00; the report runs at 06:00 UTC./' README.md
 git add README.md
 cat > inventory/suppliers.py <<'EOF'
 SUPPLIERS = {
@@ -456,9 +462,15 @@ EOF
 # Fixed timestamps, so the file manager shows the same dates on every run.
 # libfaketime shifts the times stat() reports by the fake clock's offset but
 # leaves utimensat() alone, so stamp each file with the target minus it.
-offset=$(( $(date +%s) - $(LD_PRELOAD= date +%s) ))
-stamp=$(( $(date -d "2026-09-27 09:58:00" +%s) - offset ))
-find "$ROOT" -path '*/.git/*' -prune -o -exec touch -h -d "@$stamp" {} +
+# BSD date has no -d and there is no fake clock outside the container: a
+# host run stamps the target time as it is.
+if date -d @0 >/dev/null 2>&1; then
+    offset=$(( $(date +%s) - $(LD_PRELOAD= date +%s) ))
+    stamp=$(( $(date -d "2026-09-27 09:58:00" +%s) - offset ))
+    find "$ROOT" -path '*/.git/*' -prune -o -exec touch -h -d "@$stamp" {} +
+else
+    find "$ROOT" -path '*/.git/*' -prune -o -exec touch -h -t 202609270958 {} +
+fi
 git status -s >/dev/null  # refresh the index stat cache after the touch
 
 # Named launchers for the demo services, so a process list reads

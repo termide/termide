@@ -3,3 +3,15 @@ command = "cargo build --release"
 name = "Build release"
 mode = "report"
 key = "Ctrl+Alt+B"
+
+# Live checks of the UI through tools/tui-harness; scenarios separated by
+# spaces, or every one when left empty.
+[tui-harness]
+command = "cargo build && tools/tui-harness/run.sh $TERMIDE_PARAM_SCENARIOS"
+name = "TUI harness"
+mode = "report"
+cwd = "project"
+
+[[tui-harness.params]]
+name = "scenarios"
+label = "Scenarios (empty: all)"
