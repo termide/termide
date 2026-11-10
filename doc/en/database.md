@@ -80,7 +80,7 @@ shows the current range, total row count, active sort and filter, e.g.
 | `Home` / `End` | Jump to the first / last row |
 | `S` | Sort by the current column — cycles ascending → descending → unsorted |
 | `Ctrl+F` / `F3` | Filter the current column (opens the filter dialog) |
-| `Alt+F` | Clear all filters |
+| `Shift+F3` | Clear all filters |
 | `Enter` (on grid) | Edit the current cell in place (`Enter` saves, `Escape` discards) |
 | `Space` / `F12` (on grid) | Open the row dialog: edit any value, or copy the row |
 | `Ctrl+C` | Copy the current cell value |
@@ -121,7 +121,7 @@ Typing a value auto-selects a default operator if the column was still `—`, so
 you can just type. Bottom buttons: **Apply**, **Clear filters**, **Cancel**.
 Applying replaces the whole filter set; conditions on different columns combine
 with **AND**; an operator left without a value is ignored. `contains`/`starts
-with`/`ends with` are case-insensitive. `Alt+F` clears all filters without
+with`/`ends with` are case-insensitive. `Shift+F3` clears all filters without
 opening the dialog. Values are always sent as bound parameters; if a filter
 produces a database error (e.g. a non-numeric value on a numeric column) it is
 shown as a non-fatal warning in the status bar and the current data stays.

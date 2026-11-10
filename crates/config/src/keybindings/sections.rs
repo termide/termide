@@ -329,7 +329,8 @@ impl DatabaseKeybindings {
         if self.filter.is_none() {
             self.filter = Some(KeyBinding::Multiple(vec!["Ctrl+F".into(), "F3".into()]));
         }
-        set_default!(clear_filter, "Alt+F");
+        // Beside the `F3` filter; `Alt+F` is the global new file manager.
+        set_default!(clear_filter, "Shift+F3");
         if self.detail.is_none() {
             self.detail = Some(KeyBinding::Multiple(vec!["Space".into(), "F12".into()]));
         }

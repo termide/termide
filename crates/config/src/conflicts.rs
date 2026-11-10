@@ -612,6 +612,29 @@ mod tests {
         assert!(clashes.is_empty(), "{clashes:?}");
     }
 
+    /// Global keys are matched before the focused panel sees a key, so a
+    /// panel default under a global one would never fire — unless the global
+    /// action hands the key on to that panel, as listed here.
+    #[test]
+    fn no_default_global_key_shadows_a_panel_default() {
+        // `open_path` lets the file manager keep `Ctrl+G` for its own
+        // "go to path".
+        const HANDED_ON: &[(&str, &str)] = &[("open_path", "go_to_path")];
+        let mut cfg = Config::default();
+        cfg.normalize();
+        let shadowed: Vec<_> = find_conflicts(&cfg)
+            .into_iter()
+            .filter(|c| c.kind == ConflictKind::CrossSectionShadowed)
+            .filter(|c| {
+                !HANDED_ON.iter().any(|(global, local)| {
+                    c.locations.iter().any(|l| l.action == *global)
+                        && c.locations.iter().any(|l| l.action == *local)
+                })
+            })
+            .collect();
+        assert!(shadowed.is_empty(), "{shadowed:#?}");
+    }
+
     #[test]
     fn enumerate_default_config() {
         let mut cfg = Config::default();
