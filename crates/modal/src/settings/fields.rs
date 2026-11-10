@@ -167,10 +167,16 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 field_type: FieldType::Number,
             },
         ],
-        SettingsTab::Terminal => vec![FieldDescriptor {
-            label: t.settings_terminal_default_shell(),
-            field_type: FieldType::OptionalText,
-        }],
+        SettingsTab::Terminal => vec![
+            FieldDescriptor {
+                label: t.settings_terminal_default_shell(),
+                field_type: FieldType::OptionalText,
+            },
+            FieldDescriptor {
+                label: t.settings_terminal_scrollback_lines(),
+                field_type: FieldType::Number,
+            },
+        ],
         SettingsTab::Lsp => vec![
             FieldDescriptor {
                 label: t.settings_lsp_enabled(),
@@ -308,6 +314,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
                 .default_shell
                 .clone()
                 .unwrap_or_else(|| i18n::t().settings_value_auto().to_string()),
+            1 => config.terminal.scrollback_lines.to_string(),
             _ => String::new(),
         },
         SettingsTab::Lsp => match index {

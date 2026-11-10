@@ -955,6 +955,7 @@ settings_debugger_bad_args = "Có dấu nháy chưa đóng"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Shell mặc định"
+settings_terminal_scrollback_lines = "Số dòng cuộn lại"
 settings_vfs_connection_timeout = "Hết thời gian kết nối (giây)"
 
 lsp_rename_no_identifier = "Không có định danh tại con trỏ"

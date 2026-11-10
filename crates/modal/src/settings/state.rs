@@ -555,7 +555,10 @@ impl SettingsModal {
                 Header(t.settings_header_search()),
                 Field(1), // content_search_max_file_size_mb
             ],
-            SettingsTab::Terminal => vec![Field(0)],
+            SettingsTab::Terminal => vec![
+                Field(0), // default_shell
+                Field(1), // scrollback_lines
+            ],
             SettingsTab::Lsp => {
                 let mut rows = vec![
                     Header(t.settings_header_general()),
@@ -887,6 +890,12 @@ impl SettingsModal {
                 3 => self.config.file_manager.dir_size_budget_ms = val,
                 _ => {}
             },
+            SettingsTab::Terminal => {
+                if index == 1 {
+                    self.config.terminal.scrollback_lines =
+                        usize::try_from(val).unwrap_or(usize::MAX);
+                }
+            }
             SettingsTab::Lsp => match index {
                 2 => self.config.lsp.completion_delay_ms = val,
                 3 => self.config.lsp.hover_delay_ms = val,
@@ -1000,6 +1009,24 @@ mod content_row_tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_scrollback_field_edits_the_terminal_setting() {
+        let mut modal = SettingsModal::new(Config::default(), Config::default(), false);
+        modal.active_tab = SettingsTab::Terminal;
+        modal.field_cursor = modal
+            .content_rows()
+            .iter()
+            .position(|row| *row == ContentRow::Field(1))
+            .expect("the scrollback field is shown");
+        assert_eq!(modal.field_value(1), "10000");
+
+        modal.start_edit();
+        modal.edit_input = termide_ui::TextInput::with_text("2500".to_string());
+        modal.commit_edit();
+        assert_eq!(modal.config.terminal.scrollback_lines, 2500);
+        assert_eq!(modal.config.terminal.default_shell, None);
     }
 }
 

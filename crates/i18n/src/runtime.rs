@@ -936,6 +936,7 @@ impl Translation for RuntimeTranslation {
         settings_fm_dir_size_in_wide_view,
         settings_fm_dir_size_budget_ms,
         settings_terminal_default_shell,
+        settings_terminal_scrollback_lines,
         settings_lsp_add_server,
         settings_lsp_delete_server,
         settings_lsp_server_language,

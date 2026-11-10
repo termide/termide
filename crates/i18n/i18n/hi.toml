@@ -955,6 +955,7 @@ settings_debugger_bad_args = "एक उद्धरण चिह्न बं�
 settings_tab_terminal = "टर्मिनल"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "डिफ़ॉल्ट शेल"
+settings_terminal_scrollback_lines = "स्क्रॉलबैक पंक्तियाँ"
 settings_vfs_connection_timeout = "कनेक्शन टाइमआउट (से.)"
 
 lsp_rename_no_identifier = "कर्सर पर कोई पहचानकर्ता नहीं"

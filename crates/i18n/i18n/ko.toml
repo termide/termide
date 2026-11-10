@@ -954,6 +954,7 @@ settings_debugger_bad_args = "닫히지 않은 따옴표가 있습니다"
 settings_tab_terminal = "터미널"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "기본 셸"
+settings_terminal_scrollback_lines = "스크롤백 줄 수"
 settings_vfs_connection_timeout = "연결 시간 초과 (초)"
 
 lsp_rename_no_identifier = "커서 위치에 식별자가 없습니다"

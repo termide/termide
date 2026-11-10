@@ -954,6 +954,7 @@ settings_debugger_bad_args = "Falta cerrar una comilla"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Shell predeterminada"
+settings_terminal_scrollback_lines = "Líneas de historial"
 settings_vfs_connection_timeout = "Tiempo de espera de conexión (s)"
 
 lsp_rename_no_identifier = "No hay identificador bajo el cursor"

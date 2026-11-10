@@ -905,14 +905,32 @@ pub struct ViewerSettings {
 }
 
 /// Terminal panel settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TerminalSettings {
     /// Default shell path (None = auto-detect)
     #[serde(default)]
     pub default_shell: Option<String>,
+    /// Lines of output a terminal keeps above its screen; 0 keeps none.
+    /// Terminals opened after a change take it.
+    #[serde(default = "default_scrollback_lines")]
+    pub scrollback_lines: usize,
     /// Terminal keyboard shortcuts
     #[serde(default)]
     pub keybindings: TerminalKeybindings,
+}
+
+impl Default for TerminalSettings {
+    fn default() -> Self {
+        Self {
+            default_shell: None,
+            scrollback_lines: default_scrollback_lines(),
+            keybindings: TerminalKeybindings::default(),
+        }
+    }
+}
+
+fn default_scrollback_lines() -> usize {
+    10_000
 }
 
 /// Logging settings.
@@ -1516,6 +1534,25 @@ impl Config {
         self.database.keybindings.with_defaults();
         self.viewer.keybindings.with_defaults();
         self.terminal.keybindings.with_defaults();
+    }
+}
+
+#[cfg(test)]
+mod terminal_settings_tests {
+    use super::*;
+
+    #[test]
+    fn scrollback_lines_default_to_ten_thousand_and_are_read() {
+        let config = |text: &str| toml::from_str::<Config>(text).unwrap().terminal;
+        assert_eq!(config("").scrollback_lines, 10_000);
+        assert_eq!(
+            config("[terminal]\ndefault_shell = \"/bin/zsh\"\n").scrollback_lines,
+            10_000
+        );
+        assert_eq!(
+            config("[terminal]\nscrollback_lines = 500\n").scrollback_lines,
+            500
+        );
     }
 }
 

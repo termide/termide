@@ -955,6 +955,7 @@ settings_debugger_bad_args = "Kapatılmamış bir tırnak var"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Varsayılan shell"
+settings_terminal_scrollback_lines = "Geri kaydırma satırları"
 settings_vfs_connection_timeout = "Bağlantı zaman aşımı (sn)"
 
 lsp_rename_no_identifier = "İmleç konumunda tanımlayıcı yok"

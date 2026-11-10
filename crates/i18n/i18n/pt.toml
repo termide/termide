@@ -955,6 +955,7 @@ settings_debugger_bad_args = "Falta fechar uma aspa"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Shell padrão"
+settings_terminal_scrollback_lines = "Linhas de histórico"
 settings_vfs_connection_timeout = "Tempo limite de conexão (s)"
 
 lsp_rename_no_identifier = "Nenhum identificador sob o cursor"

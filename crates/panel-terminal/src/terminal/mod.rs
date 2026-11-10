@@ -8,6 +8,7 @@ pub mod vt100_parser;
 
 use ratatui::style::Color;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::LazyLock;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
@@ -306,6 +307,15 @@ pub struct TerminalScreen {
     pub bell: bool,
 }
 
+/// How many lines a new screen keeps in its scrollback: the
+/// `terminal.scrollback_lines` setting, published by the app.
+static SCROLLBACK_LINES: AtomicUsize = AtomicUsize::new(10_000);
+
+/// Set how many scrollback lines the terminals opened from now on keep.
+pub fn set_scrollback_lines(lines: usize) {
+    SCROLLBACK_LINES.store(lines, Ordering::Relaxed);
+}
+
 impl TerminalScreen {
     pub fn new(rows: usize, cols: usize) -> Self {
         // Hard-floor the dimensions at 1×1 so the scroll/cursor code (which
@@ -339,7 +349,7 @@ impl TerminalScreen {
             alt_lines_wrapped: std::collections::VecDeque::from(vec![false; rows]),
             scrollback_wrapped: std::collections::VecDeque::new(),
             scroll_offset: 0,
-            max_scrollback: 10000,
+            max_scrollback: SCROLLBACK_LINES.load(Ordering::Relaxed),
             wrap_pending: false,
             zwj_base: None,
             dirty: true,

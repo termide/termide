@@ -955,6 +955,7 @@ settings_debugger_bad_args = "มีเครื่องหมายคำพ�
 settings_tab_terminal = "เทอร์มินัล"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "เชลล์เริ่มต้น"
+settings_terminal_scrollback_lines = "จำนวนบรรทัดย้อนหลัง"
 settings_vfs_connection_timeout = "หมดเวลาการเชื่อมต่อ (วิ.)"
 
 lsp_rename_no_identifier = "ไม่มีตัวระบุที่ตำแหน่งเคอร์เซอร์"

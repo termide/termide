@@ -955,6 +955,7 @@ settings_debugger_bad_args = "একটি উদ্ধৃতিচিহ্ন 
 settings_tab_terminal = "টার্মিনাল"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "ডিফল্ট শেল"
+settings_terminal_scrollback_lines = "স্ক্রলব্যাক লাইন"
 settings_vfs_connection_timeout = "সংযোগের টাইমআউট (সে.)"
 
 lsp_rename_no_identifier = "কার্সারে কোনো আইডেন্টিফায়ার নেই"

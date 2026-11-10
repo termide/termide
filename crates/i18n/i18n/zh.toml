@@ -987,6 +987,7 @@ settings_debugger_bad_args = "有未闭合的引号"
 settings_tab_terminal = "终端"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "默认 Shell"
+settings_terminal_scrollback_lines = "回滚行数"
 settings_vfs_connection_timeout = "连接超时 (秒)"
 
 lsp_rename_no_identifier = "光标位置无标识符"

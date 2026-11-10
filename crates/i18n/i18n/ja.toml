@@ -954,6 +954,7 @@ settings_debugger_bad_args = "閉じられていない引用符があります"
 settings_tab_terminal = "ターミナル"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "既定のシェル"
+settings_terminal_scrollback_lines = "スクロールバック行数"
 settings_vfs_connection_timeout = "接続タイムアウト (秒)"
 
 lsp_rename_no_identifier = "カーソル位置に識別子がありません"

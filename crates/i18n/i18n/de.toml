@@ -955,6 +955,7 @@ settings_debugger_bad_args = "Ein Anführungszeichen ist nicht geschlossen"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Standard-Shell"
+settings_terminal_scrollback_lines = "Zeilen im Verlauf"
 settings_vfs_connection_timeout = "Verbindungs-Timeout (Sek.)"
 
 lsp_rename_no_identifier = "Kein Bezeichner unter dem Cursor"

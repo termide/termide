@@ -20,6 +20,7 @@ mod terminal_info;
 mod windows_proc;
 
 pub use tap::{OutputTap, TapChunk};
+pub use terminal::set_scrollback_lines;
 pub use terminal_info::TerminalInfo;
 
 use anyhow::Result;

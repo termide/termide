@@ -485,6 +485,7 @@ settings_fm_dir_size_budget_ms = "Бюджет подсчёта размера (
 
 # Settings modal — Terminal fields
 settings_terminal_default_shell = "Оболочка по умолчанию"
+settings_terminal_scrollback_lines = "Строк прокрутки"
 
 # Settings modal — LSP fields
 settings_lsp_enabled = "LSP включён"

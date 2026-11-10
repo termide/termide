@@ -954,6 +954,7 @@ settings_debugger_bad_args = "Un guillemet n’est pas fermé"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Shell par défaut"
+settings_terminal_scrollback_lines = "Lignes d'historique"
 settings_vfs_connection_timeout = "Délai de connexion (s)"
 
 lsp_rename_no_identifier = "Aucun identifiant sous le curseur"

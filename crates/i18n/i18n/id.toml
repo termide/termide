@@ -955,6 +955,7 @@ settings_debugger_bad_args = "Ada tanda kutip yang belum ditutup"
 settings_tab_terminal = "Terminal"
 settings_tab_vfs = "VFS"
 settings_terminal_default_shell = "Shell bawaan"
+settings_terminal_scrollback_lines = "Baris riwayat gulir"
 settings_vfs_connection_timeout = "Batas waktu koneksi (dtk)"
 
 lsp_rename_no_identifier = "Tidak ada pengenal di kursor"

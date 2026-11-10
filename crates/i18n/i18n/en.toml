@@ -478,6 +478,7 @@ settings_fm_dir_size_budget_ms = "Directory size budget (ms)"
 
 # Settings modal — Terminal fields
 settings_terminal_default_shell = "Default shell"
+settings_terminal_scrollback_lines = "Scrollback lines"
 
 # Settings modal — LSP fields
 settings_lsp_enabled = "LSP enabled"

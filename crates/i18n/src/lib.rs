@@ -1562,6 +1562,7 @@ pub trait Translation: Send + Sync {
 
     // Settings modal — Terminal fields
     fn settings_terminal_default_shell(&self) -> &str;
+    fn settings_terminal_scrollback_lines(&self) -> &str;
 
     // Settings modal — LSP fields
     fn settings_lsp_enabled(&self) -> &str;
