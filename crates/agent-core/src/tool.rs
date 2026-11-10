@@ -130,6 +130,11 @@ pub struct ToolTraits {
     /// The language of the commands the tool runs, for a tool that runs
     /// them: what the permission checks read a command as.
     pub shell: ShellSyntax,
+    /// The call types a command line into a shell waiting at its prompt,
+    /// and at most presses Enter after it: the permission checks judge the
+    /// typed text as the `shell` command it runs, under the `shell` rules.
+    /// Set per call by [`Tool::call_traits`].
+    pub typed_at_prompt: bool,
 }
 
 /// The command language of a shell, as the permission checks read it.
@@ -244,6 +249,14 @@ pub trait Tool: Send + Sync {
     /// default.
     fn traits(&self) -> ToolTraits {
         ToolTraits::default()
+    }
+
+    /// What the tool says of `call` to the permission hooks: its
+    /// [`traits`](Tool::traits), unless what the call amounts to depends on
+    /// the state it finds — keys typed into a shell at its prompt run a
+    /// command, the same keys typed into a running program do not.
+    fn call_traits(&self, _call: &ToolCall, _ctx: &ToolContext) -> ToolTraits {
+        self.traits()
     }
 
     /// The schema entry handed to the provider.

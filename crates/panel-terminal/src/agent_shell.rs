@@ -567,6 +567,20 @@ impl AgentShell {
         }
     }
 
+    /// The shell the session runs in.
+    pub fn shell(&self) -> SessionShell {
+        self.kind
+    }
+
+    /// Whether the shell waits at its prompt for a command line: no command
+    /// it was given runs, and none typed into it either — the shell marks
+    /// the start of every command it runs, typed or given, and its end.
+    /// What is typed now goes to the shell, not to a program it started.
+    pub fn at_prompt(&self) -> bool {
+        self.status() == ShellStatus::Idle
+            && !matches!(self.tap.last_mark(), Some(mark) if mark.kind == MarkKind::Start)
+    }
+
     /// Run `command` and pass its output to `on_output` as it comes, until
     /// it ends, `timeout` passes (it then runs on) or `cancelled` says so
     /// (it is then sent `Ctrl+C`). A caller while another runs waits for it;
@@ -1083,6 +1097,40 @@ mod shell_tests {
             .send("sh -c 'exit 7'", &["Enter".to_string()], &wait, &|| false)
             .unwrap();
         assert_eq!(sent.end, SendEnd::Finished(Some(7)));
+    }
+
+    /// A program started by a typed line has the terminal, though no
+    /// command the session was given runs: what is typed next is its input,
+    /// until it ends and the shell is back at its prompt.
+    #[test]
+    fn a_program_started_by_a_typed_line_is_not_the_prompt() {
+        for program in ["bash", "zsh", "fish"] {
+            let home = tempfile::tempdir().unwrap();
+            let Some((_term, shell)) = session_in(program, home.path()) else {
+                continue;
+            };
+            let wait = SendWait {
+                until: None,
+                quiet: Some(Duration::from_millis(300)),
+                timeout: Duration::from_secs(20),
+            };
+            let (_, outcome) = run(&shell, "true", Duration::from_secs(20));
+            assert_eq!(outcome.end, RunEnd::Finished(Some(0)), "{program}");
+            assert!(shell.at_prompt(), "{program}");
+            shell
+                .send("cat", &["Enter".to_string()], &wait, &|| false)
+                .unwrap();
+            assert_eq!(shell.status(), ShellStatus::Idle, "{program}");
+            assert!(!shell.at_prompt(), "{program}");
+            shell
+                .send("", &["Ctrl+D".to_string()], &wait, &|| false)
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !shell.at_prompt() {
+                assert!(Instant::now() < deadline, "{program}: cat still runs");
+                std::thread::sleep(POLL);
+            }
+        }
     }
 
     #[test]

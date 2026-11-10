@@ -199,6 +199,10 @@ impl Tool for Retexted {
         self.inner.traits()
     }
 
+    fn call_traits(&self, call: &ToolCall, ctx: &ToolContext) -> crate::ToolTraits {
+        self.inner.call_traits(call, ctx)
+    }
+
     fn check(&self, call: &ToolCall, ctx: &ToolContext) -> Result<(), String> {
         self.inner.check(call, ctx)
     }

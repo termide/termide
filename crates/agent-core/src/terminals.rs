@@ -73,6 +73,11 @@ pub struct TerminalEntry {
     /// How long it has been open.
     pub age: Duration,
     pub log: Option<PathBuf>,
+    /// The language of the shell it runs.
+    pub shell: crate::ShellSyntax,
+    /// The shell waits at its prompt: what is typed into it is a command
+    /// line, not input to a program it runs.
+    pub at_prompt: bool,
 }
 
 /// Output of a terminal the agent had not read yet.
@@ -241,6 +246,8 @@ mod tests {
             state,
             age: Duration::from_secs(600),
             log: None,
+            shell: crate::ShellSyntax::Posix,
+            at_prompt: false,
         }
     }
 

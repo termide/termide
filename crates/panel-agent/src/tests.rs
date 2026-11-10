@@ -13756,6 +13756,8 @@ fn the_sessions_terminals_show_in_the_strip_and_end_with_it() {
         state,
         age: Duration::from_secs(60),
         log: None,
+        shell: termide_agent_core::ShellSyntax::Posix,
+        at_prompt: false,
     };
     terminals.entries.lock().unwrap().extend([
         (

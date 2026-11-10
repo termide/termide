@@ -13,14 +13,14 @@ use std::time::Instant;
 
 use termide_agent_core::terminals::duration;
 use termide_agent_core::{
-    TerminalEntry, TerminalOutput, TerminalRun, TerminalRunEnd, TerminalRunOutcome,
+    ShellSyntax, TerminalEntry, TerminalOutput, TerminalRun, TerminalRunEnd, TerminalRunOutcome,
     TerminalScreenText, TerminalSend, TerminalSendEnd, TerminalSendOutcome, TerminalSessions,
     TerminalState,
 };
 
 use termide_agent_tools::ShellProgram;
 use termide_panel_terminal::agent_shell::{
-    AgentShell, RunEnd, RunError, ScreenText, SendEnd, SendWait, ShellStatus,
+    AgentShell, RunEnd, RunError, ScreenText, SendEnd, SendWait, SessionShell, ShellStatus,
 };
 use termide_panel_terminal::Terminal;
 
@@ -66,6 +66,12 @@ impl Entry {
             state: self.state(),
             age: self.opened.elapsed(),
             log: self.shell.tap().log_path(),
+            shell: match self.shell.shell() {
+                SessionShell::Bash => ShellSyntax::Posix,
+                SessionShell::Zsh => ShellSyntax::Zsh,
+                SessionShell::Fish => ShellSyntax::Fish,
+            },
+            at_prompt: self.shell.at_prompt(),
         }
     }
 }

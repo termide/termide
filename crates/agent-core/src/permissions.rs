@@ -178,25 +178,67 @@ fn not_read_only(call: &ToolCall, shell: ShellSyntax) -> Option<String> {
         // Reading the debug session changes nothing; every other action runs
         // or stops the program.
         "debug" if call.arguments["action"] == "state" => None,
+        // Looking at the agent's own terminals changes nothing; typing into
+        // one, interrupting or closing it does.
+        "terminals" if terminals_looks(call) => None,
         SHELL_TOOL => {
-            let Some((_, parsed)) =
-                parse_in(call.arguments["command"].as_str().unwrap_or(""), shell)
-            else {
-                return Some("a command that cannot be read as a whole".to_string());
-            };
-            if parsed.has_substitution {
-                return Some("a command substitution".to_string());
-            }
-            if parsed.parts.is_empty() {
-                return Some("an empty command".to_string());
-            }
-            parsed
-                .parts
-                .iter()
-                .find(|part| !is_read_only_command(part))
-                .map(|part| format!("`{part}`"))
+            command_not_read_only(call.arguments["command"].as_str().unwrap_or(""), shell)
         }
         _ => Some(String::new()),
+    }
+}
+
+/// What in shell `command` is not look-only, as [`not_read_only`] tells it.
+fn command_not_read_only(command: &str, shell: ShellSyntax) -> Option<String> {
+    let Some((_, parsed)) = parse_in(command, shell) else {
+        return Some("a command that cannot be read as a whole".to_string());
+    };
+    if parsed.has_substitution {
+        return Some("a command substitution".to_string());
+    }
+    if parsed.parts.is_empty() {
+        return Some("an empty command".to_string());
+    }
+    parsed
+        .parts
+        .iter()
+        .find(|part| !is_read_only_command(part))
+        .map(|part| format!("`{part}`"))
+}
+
+/// Whether a `terminals` call only looks: lists the agent's terminals,
+/// reads one's output or its screen.
+fn terminals_looks(call: &ToolCall) -> bool {
+    matches!(
+        call.arguments["action"].as_str(),
+        None | Some("list" | "read" | "screen")
+    )
+}
+
+/// Whether a call runs a shell command line: a `shell` call, or a line
+/// typed into one of the agent's terminals at its prompt. Both are judged
+/// part by part under the `shell` rules.
+fn runs_command_line(call: &ToolCall, ctx: &ToolContext) -> bool {
+    call.name == SHELL_TOOL || ctx.tool.typed_at_prompt
+}
+
+/// The calls no mode asks about, though a rule may still refuse one. Each
+/// changes nothing; or it is put to the user already — a question, or a
+/// card whose command, goal or loop runs only when the user picks it; or
+/// it touches only what the agent itself set going: listing or stopping
+/// its jobs, looking at, interrupting or closing its terminals. The plan
+/// guard lets them through and the mode allows them, from this one list.
+fn asks_no_one(call: &ToolCall) -> bool {
+    match call.name.as_str() {
+        // `recall` reads the project's own session logs (under the
+        // configuration directory), its git history and its code; `agents`
+        // lists the panels; a skill's text may live outside the project.
+        "skill" | "question" | "recall" | "agents" | "jobs" | "suggest_command"
+        | "suggest_goal" | "suggest_loop" => true,
+        // Typing into a terminal is judged by what it types.
+        "terminals" => call.arguments["action"].as_str() != Some("send"),
+        "debug" => call.arguments["action"] == "state",
+        _ => false,
     }
 }
 
@@ -260,16 +302,16 @@ impl PlanGuard {
 
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
-        if self.mode.get() != Mode::Plan
-            || matches!(
-                call.name.as_str(),
-                "task" | "suggest_command" | "suggest_goal" | "suggest_loop" | "jobs"
-            )
-            || ctx.tool.mcp
+        if self.mode.get() != Mode::Plan || call.name == "task" || asks_no_one(call) || ctx.tool.mcp
         {
             return ToolDecision::Allow;
         }
-        let Some(what) = not_read_only(call, ctx.tool.shell) else {
+        let not_look_only = if ctx.tool.typed_at_prompt {
+            command_not_read_only(&subject_of(call, ctx), ctx.tool.shell)
+        } else {
+            not_read_only(call, ctx.tool.shell)
+        };
+        let Some(what) = not_look_only else {
             return ToolDecision::Allow;
         };
         self.refused = true;
@@ -885,7 +927,7 @@ impl PermissionHooks {
     pub fn decide(&self, call: &ToolCall, ctx: &ToolContext) -> Decision {
         let subject = subject_of(call, ctx);
         let mode = self.mode.get();
-        if call.name == SHELL_TOOL {
+        if runs_command_line(call, ctx) {
             return self.judge_command(&subject, ctx).decision;
         }
         // What git keeps under `.git` — its config, its hooks — names programs
@@ -908,24 +950,9 @@ impl PermissionHooks {
         match (mode, call.name.as_str()) {
             (Mode::All, _) => Decision::Allow,
             (_, "read") if inside => Decision::Allow,
-            // Loads a skill's own text, which may live outside the project;
-            // a question is already put to the user, so is never asked about.
-            // `suggest_command` changes nothing itself — it shows a card and
-            // the user runs what is on it or does not — so it asks no one
-            // twice; the panel withholds `[Run]` where the mode or a rule
-            // forbids the command. `recall` reads the project's own session
-            // logs (under the configuration directory), its git history and
-            // its code, and writes nothing. A goal or a loop offered on a
-            // card starts only when the user picks `[Start]`, so it asks no
-            // one twice either.
-            (
-                _,
-                "skill" | "question" | "suggest_command" | "suggest_goal" | "suggest_loop"
-                | "recall",
-            ) => Decision::Allow,
-            // `jobs` lists and stops only what the agent itself set going:
-            // its own work, which it is not asked about in any mode.
-            (_, "jobs") => Decision::Allow,
+            // The panel withholds `[Run]` on a `suggest_command` card where
+            // the mode or a rule forbids the command.
+            _ if asks_no_one(call) => Decision::Allow,
             // Stepping, pausing or stopping a program, setting a breakpoint,
             // reading the session: the program's launch was the decision, and
             // these only move it on or look at it. `start`, and `evaluate`,
@@ -1170,7 +1197,8 @@ impl PermissionHooks {
             ),
             Decision::Ask => {
                 let subject = subject_of(call, ctx);
-                let (parts, forced) = if call.name == SHELL_TOOL {
+                let command_line = runs_command_line(call, ctx);
+                let (parts, forced) = if command_line {
                     let verdict = self.judge_command(&subject, ctx);
                     (verdict.asked, verdict.forced)
                 } else {
@@ -1191,8 +1219,12 @@ impl PermissionHooks {
                 // it would vouch for blindly.
                 let bundle = parts.len() > 1;
                 // An edit under `.git` asks every time, so no answer outlasts it.
+                // Keys typed into a program the shell runs, or that edit the
+                // line unseen, are read by no check: the same keys mean
+                // something else each time, so each send is answered alone.
                 let destructive = parts.iter().any(|p| destructive_command(&p.text))
-                    || self.guards_git_dir(call, &subject);
+                    || self.guards_git_dir(call, &subject)
+                    || (call.name == "terminals" && !command_line);
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
@@ -1206,12 +1238,12 @@ impl PermissionHooks {
                     // A whole-command `ask` rule can ask about a command
                     // whose every part is settled, which leaves no part, and
                     // so no rule, to record.
-                    && (call.name != SHELL_TOOL || parts.first().is_some_and(|p| p.pattern.is_some()));
+                    && (!command_line || parts.first().is_some_and(|p| p.pattern.is_some()));
                 // A destructive call is allowed once at a time; `all` is the
                 // mode that lets a run through without asking. Denying for the
                 // session stays on offer: it trusts nothing.
                 let can_allow_session = !destructive;
-                let suggested = if call.name == SHELL_TOOL {
+                let suggested = if command_line {
                     parts
                         .iter()
                         .filter_map(|p| p.pattern.clone())
@@ -1220,8 +1252,15 @@ impl PermissionHooks {
                 } else {
                     suggested_pattern(&call.name, &subject)
                 };
+                // A line typed at a prompt is a `shell` command: asked about
+                // as one, and its answer recorded as a `shell` rule.
+                let tool = if command_line {
+                    SHELL_TOOL.to_string()
+                } else {
+                    call.name.clone()
+                };
                 let request = PermissionRequest {
-                    tool: call.name.clone(),
+                    tool,
                     suggested_pattern: suggested,
                     subject,
                     call: call.clone(),
@@ -1324,6 +1363,32 @@ impl PermissionHooks {
 pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
     match call.name.as_str() {
         SHELL_TOOL => call.arguments["command"].as_str().unwrap_or("").to_string(),
+        // A line typed at a prompt is the command it runs; any other `send`
+        // shows the terminal and all it types, keys too, since each such
+        // call is answered on its own.
+        "terminals" if ctx.tool.typed_at_prompt => call.arguments["input"]
+            .as_str()
+            .unwrap_or("")
+            .trim_end_matches('\n')
+            .to_string(),
+        "terminals" => {
+            let arg = |key: &str| call.arguments[key].as_str().unwrap_or("");
+            let action = call.arguments["action"].as_str().unwrap_or("list");
+            let mut subject = format!("{action} {}", arg("session").trim());
+            if action == "send" {
+                let keys = match &call.arguments["keys"] {
+                    Value::Array(keys) => keys.iter().filter_map(Value::as_str).collect(),
+                    Value::String(key) => vec![key.as_str()],
+                    _ => Vec::new(),
+                };
+                subject.push_str(": ");
+                subject.push_str(&arg("input").escape_debug().to_string());
+                for key in keys {
+                    subject.push_str(&format!(" [{key}]"));
+                }
+            }
+            subject.trim_end().to_string()
+        }
         "read" | "edit" | "write" => {
             let raw = call.arguments["path"].as_str().unwrap_or("");
             real_relative_to_project(raw, &ctx.cwd)
@@ -5676,6 +5741,149 @@ mod tests {
         };
         assert_eq!(decide(Mode::Plan), Decision::Allow);
         assert_eq!(decide(Mode::Ask), Decision::Ask);
+    }
+
+    /// The plan guard and the mode read one list of the calls that ask no
+    /// one, so neither lets through or refuses what the other does not.
+    #[test]
+    fn the_calls_that_ask_no_one_pass_every_mode_and_the_plan_guard() {
+        let calls = [
+            call("skill", json!({ "name": "deploy" })),
+            call("question", json!({ "questions": [] })),
+            call("recall", json!({ "queries": ["why"] })),
+            call("agents", json!({})),
+            call("jobs", json!({})),
+            call("jobs", json!({ "stop": "t1" })),
+            call("suggest_command", json!({ "command": "make" })),
+            call("terminals", json!({})),
+            call("terminals", json!({ "action": "read", "session": "dev" })),
+            call("terminals", json!({ "action": "screen", "session": "dev" })),
+            call(
+                "terminals",
+                json!({ "action": "interrupt", "session": "dev" }),
+            ),
+            call("terminals", json!({ "action": "close", "session": "dev" })),
+            call("debug", json!({ "action": "state" })),
+        ];
+        for call in &calls {
+            for mode in Mode::ALL {
+                let (hooks, _) = hooks(
+                    PermissionRules {
+                        mode,
+                        ..PermissionRules::default()
+                    },
+                    vec![],
+                );
+                assert_eq!(
+                    hooks.decide(call, &ctx()),
+                    Decision::Allow,
+                    "{call:?} {mode:?}"
+                );
+            }
+            let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+            assert!(
+                matches!(guard.before_tool_call(call, &ctx()), ToolDecision::Allow),
+                "{call:?}"
+            );
+        }
+    }
+
+    fn typed_ctx() -> ToolContext {
+        ToolContext {
+            tool: crate::ToolTraits {
+                typed_at_prompt: true,
+                ..Default::default()
+            },
+            ..ctx()
+        }
+    }
+
+    fn send(input: &str) -> ToolCall {
+        call(
+            "terminals",
+            json!({ "action": "send", "session": "dev", "input": input, "keys": ["Enter"] }),
+        )
+    }
+
+    /// Keys typed into a program the shell runs are read by no check: each
+    /// send asks, shows all it types, and no answer outlasts it — an answer
+    /// for the session once let every later send through, whatever it typed.
+    #[test]
+    fn typing_into_a_running_program_asks_every_time() {
+        let (mut hooks, asked) = hooks(
+            PermissionRules {
+                mode: Mode::Configured,
+                ..PermissionRules::default()
+            },
+            vec![PermissionAnswer::AllowSession, PermissionAnswer::Deny],
+        );
+        assert!(matches!(
+            hooks.before_tool_call(&send("1+1"), &ctx()),
+            ToolDecision::Allow
+        ));
+        assert!(matches!(
+            hooks.before_tool_call(&send("import os; os.remove('x')"), &ctx()),
+            ToolDecision::Block { .. }
+        ));
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked.len(), 2);
+        assert_eq!(asked[0].tool, "terminals");
+        assert_eq!(asked[0].subject, "send dev: 1+1 [Enter]");
+        assert!(!asked[0].can_allow_session && !asked[0].can_persist);
+    }
+
+    /// A line typed into a shell at its prompt runs a command, and is
+    /// judged as the `shell` command it is: look-only commands pass, the
+    /// `shell` rules count, and an answer is recorded as a `shell` rule.
+    #[test]
+    fn a_line_typed_at_the_prompt_is_judged_as_a_shell_command() {
+        let (mut hooks, asked) = hooks(
+            rules(
+                r#"
+                mode = "configured"
+                [shell]
+                "cargo test*" = "allow"
+                "#,
+            ),
+            vec![PermissionAnswer::AllowSession],
+        );
+        assert_eq!(
+            hooks.decide(&send("git status"), &typed_ctx()),
+            Decision::Allow
+        );
+        assert_eq!(
+            hooks.decide(&send("cargo test -p x"), &typed_ctx()),
+            Decision::Allow
+        );
+        assert_eq!(
+            hooks.decide(&send("mkdir out"), &typed_ctx()),
+            Decision::Ask
+        );
+        assert!(matches!(
+            hooks.before_tool_call(&send("mkdir out"), &typed_ctx()),
+            ToolDecision::Allow
+        ));
+        {
+            let asked = asked.lock().unwrap();
+            assert_eq!(asked[0].tool, "shell");
+            assert_eq!(asked[0].subject, "mkdir out");
+        }
+        // The answer covers the same command run by `shell`.
+        assert_eq!(hooks.decide(&bash("mkdir out"), &ctx()), Decision::Allow);
+
+        let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+        assert!(matches!(
+            guard.before_tool_call(&send("ls"), &typed_ctx()),
+            ToolDecision::Allow
+        ));
+        assert!(matches!(
+            guard.before_tool_call(&send("touch x"), &typed_ctx()),
+            ToolDecision::Block { .. }
+        ));
+        assert!(matches!(
+            guard.before_tool_call(&send("ls"), &ctx()),
+            ToolDecision::Block { .. }
+        ));
     }
 
     fn mcp_ctx(read_only: bool) -> ToolContext {

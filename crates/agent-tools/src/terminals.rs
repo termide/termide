@@ -9,9 +9,9 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use termide_agent_core::terminals::duration;
 use termide_agent_core::{
-    CancelToken, TerminalOutput, TerminalScreenText, TerminalSend, TerminalSendEnd,
+    CancelToken, ShellSyntax, TerminalOutput, TerminalScreenText, TerminalSend, TerminalSendEnd,
     TerminalSessions, TerminalState, Tool, ToolCall, ToolContext, ToolResultMessage, ToolText,
-    ToolUpdate,
+    ToolTraits, ToolUpdate,
 };
 
 use crate::args::{optional_str, optional_u64};
@@ -99,6 +99,15 @@ impl Tool for TerminalsTool {
         })
     }
 
+    fn call_traits(&self, call: &ToolCall, ctx: &ToolContext) -> ToolTraits {
+        let mut traits = self.traits();
+        if let Some(shell) = typed_command_line(call, ctx, self.terminals.as_ref()) {
+            traits.typed_at_prompt = true;
+            traits.shell = shell;
+        }
+        traits
+    }
+
     fn prompt_snippet(&self) -> Option<&str> {
         ToolText::seed(NAME).snippet.as_deref()
     }
@@ -175,6 +184,55 @@ impl Tool for TerminalsTool {
             Err(message) => ToolResultMessage::error(call, message),
         }
     }
+}
+
+/// The language of the shell `call` types a plain command line into, when
+/// it does: a `send` to a terminal whose shell waits at its prompt, of text
+/// with no control character but line breaks, submitted by a final line
+/// break or `Enter` and no other key. Such a call runs its text as a
+/// command, and is judged as one;
+/// any other `send` types into what the permission checks cannot read — a
+/// program the shell runs, or keys that edit the line unseen.
+fn typed_command_line(
+    call: &ToolCall,
+    ctx: &ToolContext,
+    terminals: &dyn TerminalSessions,
+) -> Option<ShellSyntax> {
+    let args = &call.arguments;
+    if args["action"].as_str() != Some("send") {
+        return None;
+    }
+    let input = match &args["input"] {
+        Value::Null => "",
+        Value::String(input) => input.as_str(),
+        _ => return None,
+    };
+    if input.chars().any(|c| c.is_control() && c != '\n') {
+        return None;
+    }
+    // Only a line sent whole is a command to judge: text left on the line
+    // for a later call would be judged in pieces, which together can make a
+    // command no piece reads as.
+    let submitted = match &args["keys"] {
+        Value::Null => input.ends_with('\n'),
+        Value::String(key) => key == "Enter",
+        Value::Array(keys) => match keys.as_slice() {
+            [] => input.ends_with('\n'),
+            [key] => key.as_str() == Some("Enter"),
+            _ => false,
+        },
+        _ => false,
+    };
+    if !submitted {
+        return None;
+    }
+    let owner = ctx.session.as_ref()?.id.as_deref()?;
+    let name = args["session"].as_str()?.trim();
+    terminals
+        .list(owner)
+        .into_iter()
+        .find(|entry| entry.name == name && entry.at_prompt)
+        .map(|entry| entry.shell)
 }
 
 /// A terminal's screen for the agent: its rows, then where the cursor is.
@@ -375,6 +433,8 @@ mod tests {
     #[derive(Default)]
     struct Fake {
         calls: Mutex<Vec<String>>,
+        /// Whether the shell of `dev` waits at its prompt.
+        at_prompt: bool,
     }
 
     impl TerminalSessions for Fake {
@@ -398,6 +458,8 @@ mod tests {
                 },
                 age: Duration::from_secs(80),
                 log: None,
+                shell: ShellSyntax::Zsh,
+                at_prompt: self.at_prompt,
             }]
         }
         fn read(&self, _owner: &str, name: &str) -> Result<TerminalOutput, String> {
@@ -453,7 +515,7 @@ mod tests {
         fn release(&self, _owner: &str) {}
     }
 
-    fn call(tool: &TerminalsTool, args: Value, session: Option<&str>) -> ToolResultMessage {
+    fn ctx_of(session: Option<&str>) -> ToolContext {
         let mut ctx = ToolContext::new("/tmp");
         ctx.session = session.map(|id| SessionView {
             id: Some(id.into()),
@@ -467,13 +529,65 @@ mod tests {
                 thinking: termide_agent_core::ThinkingLevel::Off,
             },
         });
-        let call = ToolCall {
+        ctx
+    }
+
+    fn tool_call(args: Value) -> ToolCall {
+        ToolCall {
             id: "t".into(),
             name: NAME.into(),
             arguments: args,
             extra_content: None,
+        }
+    }
+
+    fn call(tool: &TerminalsTool, args: Value, session: Option<&str>) -> ToolResultMessage {
+        tool.execute(
+            &tool_call(args),
+            &ctx_of(session),
+            &mut |_| {},
+            &CancelToken::new(),
+        )
+    }
+
+    /// Only a whole line of plain text, sent to a shell at its prompt, is
+    /// told to the permission checks as the command it runs.
+    #[test]
+    fn a_plain_line_sent_to_a_shell_at_its_prompt_is_a_command_line() {
+        let typed = |at_prompt: bool, args: Value| {
+            let tool = TerminalsTool::new(Arc::new(Fake {
+                at_prompt,
+                ..Fake::default()
+            }));
+            let traits = tool.call_traits(&tool_call(args), &ctx_of(Some("s1")));
+            traits.typed_at_prompt.then_some(traits.shell)
         };
-        tool.execute(&call, &ctx, &mut |_| {}, &CancelToken::new())
+        let send = |input: &str, keys: Value| json!({ "action": "send", "session": "dev", "input": input, "keys": keys });
+        assert_eq!(
+            typed(true, send("ls", json!(["Enter"]))),
+            Some(ShellSyntax::Zsh)
+        );
+        assert_eq!(
+            typed(true, send("ls\n", Value::Null)),
+            Some(ShellSyntax::Zsh)
+        );
+        assert_eq!(
+            typed(true, send("ls", json!("Enter"))),
+            Some(ShellSyntax::Zsh)
+        );
+        // A program runs in the shell: the line is its input.
+        assert_eq!(typed(false, send("ls", json!(["Enter"]))), None);
+        // Left on the line, sent with other keys, or with control bytes.
+        assert_eq!(typed(true, send("ls", json!([]))), None);
+        assert_eq!(typed(true, send("ls", json!(["Tab", "Enter"]))), None);
+        assert_eq!(typed(true, send("l\u{1b}[As", json!(["Enter"]))), None);
+        assert_eq!(
+            typed(true, json!({ "action": "read", "session": "dev" })),
+            None
+        );
+        let elsewhere =
+            json!({ "action": "send", "session": "nope", "input": "ls", "keys": ["Enter"] });
+        assert_eq!(typed(true, elsewhere), None);
     }
 
     #[test]

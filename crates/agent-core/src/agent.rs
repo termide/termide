@@ -240,7 +240,7 @@ pub fn judge_tool_call(
         ));
     };
     let ctx = &ToolContext {
-        tool: tool.traits(),
+        tool: tool.call_traits(call, ctx),
         ..ctx.clone()
     };
     // A call bound to fail is not worth a prompt or a reviewer's verdict.

@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A reply that hit the output limit with nothing in it no longer ends the run.** A server that holds a tool call back until it closes sends nothing of a model stuck inside one, and the run ended on the empty reply as if the model had answered. The panel now warns, the model is told and asked for a smaller step, and a second such reply, or a loop, stops the run.
 - **A new session keeps the tools switched off.** A session started in an agent panel came up with every tool on, though it kept the permissions granted for the session; it now begins with the set the one left had switched off, kept out of its context and written to its log.
 - **`task` describes `background` as it works.** The parameter's description told the model a background task ran in a panel of its own; it runs out of sight.
+- **The agent looks at its own terminals without asking.** `terminals` listing, `read`, `screen`, `interrupt` and `close` asked in every mode but `all`, and `agents` and the `debug` session's `state` were refused in plan mode, though both only read: the plan guard and the modes kept two lists of the calls that ask no one, and they had drifted apart. One list now serves both.
+
+### Security
+- **Allowing one `terminals send` for the session no longer lets every later one through.** The answer was kept as a rule for `send` alone, so any later keys typed into any of the agent's terminals ran unasked, past the checks `shell` goes through. A whole line typed into a shell at its prompt is now judged as the `shell` command it runs, under the `shell` rules; any other `send` — input to a program, keys that edit the line — asks every time, shows all it types and offers no answer that outlasts it. See [Terminal sessions](doc/en/agent.md#terminal-sessions).
 
 ## [0.49.0] - 2026-11-05
 

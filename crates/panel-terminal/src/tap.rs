@@ -284,6 +284,11 @@ impl OutputTap {
             .collect()
     }
 
+    /// The latest mark taken in, while memory still holds it.
+    pub fn last_mark(&self) -> Option<Mark> {
+        self.lock().marks.back().copied()
+    }
+
     /// The bytes from offset `from` on with the marks at or past
     /// `marks_from`, taken together: read one after the other, a mark could
     /// arrive between the two and its bytes pass for output.

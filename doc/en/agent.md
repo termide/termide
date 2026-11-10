@@ -1269,6 +1269,18 @@ in a log, up to 256 MiB, which the agent can read. Before each request the
 agent is reminded which of its terminals are open, so it closes those it no
 longer needs.
 
+Listing, reading, `screen`, `interrupt` and `close` touch only the agent's
+own terminals, so they never ask, in plan mode too. A `send` is judged by
+what it types. A whole line of plain text sent to a shell waiting at its
+prompt — submitted with `Enter` or a final line break, with no other key —
+runs a command, and is judged as that command under the `shell` rules:
+`git status` runs, `make` asks as it would from `shell`, an answer for the
+session or "always" is kept as a `shell` rule, and plan mode refuses what is
+not look-only. Any other `send` — input to a program the shell runs (a REPL,
+an editor), keys that edit the line (`Tab`, `Up`), text left on the line —
+is read by no check, so it asks every time, shows all it types, keys
+included, and no answer outlasts it; plan mode refuses it.
+
 A terminal belongs to the agent session that opened it, and lives as long as
 that session is open in a panel. It ends — the shell and everything started
 in it — when the panel closes, when the panel switches to another session,
@@ -1741,6 +1753,8 @@ what they start runs in plan mode too. `send_message` is refused: the panel it r
 plan mode, and could make the change this one may not; so is `fork`, whose
 copy is not in plan mode either. `debug` only reads the
 session (`state`); starting, stepping or stopping the program is refused.
+`agents`, `jobs` and `terminals` (but its `send`) run; a line `send` types at
+a shell prompt passes when it is look-only, and any other `send` is refused.
 
 The default instructions have the agent work the task through with you
 before it writes the plan. It explores first and finds out the facts itself,
