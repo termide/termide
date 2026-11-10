@@ -21,7 +21,8 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 | Shortcut               | Action                                     |
 |------------------------|--------------------------------------------|
 | `Ctrl+\`               | Open directory switcher                    |
-| `Ctrl+F`               | Open text search in scrollback             |
+| `Ctrl+F`               | Open text search in scrollback (a full-screen program such as `less` or `vim` gets the key instead) |
+| `Esc`                  | Sent to the program, the shell at its prompt too (vi mode needs it); close the panel with `Alt+W`. Once the program has ended, `Esc` closes the panel |
 | `Ctrl+C`               | Copy selection to clipboard **if text is selected**, otherwise sent to the shell as `SIGINT` |
 | `Ctrl+V`               | Paste text from clipboard                  |
 | `Shift+Enter`          | Insert newline (multi-line input)          |
@@ -47,6 +48,13 @@ trigger `backward-word` / `forward-word` in bash/zsh readline, `Shift+Home` /
 Plain arrows keep their existing path, including application-cursor-mode
 substitution (`\x1bOA` vs `\x1b[A`). `Alt+Left` / `Alt+Right` remain bound
 globally to previous/next panel group and therefore aren't forwarded.
+
+The global `Alt+F` (new file manager) and `Alt+B` (add bookmark) are taken
+before the terminal too, so readline's `forward-word` and `backward-word`
+are reached with `Ctrl+Right` / `Ctrl+Left` instead, or rebind those keys
+under `[general.keybindings]`. `Alt+D` detaches a
+[detached instance](detached-instances.md); outside one it has nothing to do and goes
+to the shell, as readline's `kill-word`.
 
 A shell with no binding for such a sequence echoes its last letter: bash 5
 and zsh print `A` for `Shift+Up`, `D` for `Shift+Left`, and so on. Any
@@ -78,7 +86,7 @@ works across the entire scrollback buffer and the visible screen:
 - **Refresh**: `Ctrl+R` re-runs the query against the current scrollback
 - **Close**: `Escape`
 
-The search keybinding defaults to `Ctrl+F` (instead of `Ctrl+Shift+F`) because most host terminals intercept `Ctrl+Shift+F` for their own search.
+The search keybinding defaults to `Ctrl+F` (instead of `Ctrl+Shift+F`) because most host terminals intercept `Ctrl+Shift+F` for their own search. While a full-screen program has the alternate screen up, the key goes to it — page-down in `less` and `vim` — since the scrollback the bar searches is not what the program shows; at the shell's screen readline's `forward-char` is on `Right`.
 
 ## Shell Selection
 

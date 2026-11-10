@@ -1171,8 +1171,13 @@ impl Panel for Terminal {
         }
 
         // Ctrl+F opens or refocuses the inline find bar (docked at the top,
-        // like the editor / file manager).
-        if self.hotkeys.matches("search", &key) {
+        // like the editor / file manager). A full-screen program owns the
+        // screen and its keys — page-down in less and vim, forward-char in
+        // emacs — and the scrollback the bar searches is not what it shows,
+        // so there the key goes to it; an open bar still takes it.
+        if self.hotkeys.matches("search", &key)
+            && (self.find_bar.is_some() || !self.read_screen().use_alt_screen)
+        {
             self.open_find_bar();
             return vec![PanelEvent::NeedsRedraw];
         }
@@ -1627,10 +1632,11 @@ impl Panel for Terminal {
     }
 
     fn captures_escape(&self) -> bool {
-        // The open find bar consumes Escape (closes the bar). Otherwise, if
-        // there are running processes, Escape is passed to them rather than
-        // closing the panel.
-        self.find_bar.is_some() || (self.is_alive() && self.has_running_processes())
+        // The open find bar consumes Escape (closes the bar). Otherwise a live
+        // terminal hands it to its program — the shell at its prompt too,
+        // where vi mode leaves insert mode with it — and is closed with the
+        // close-panel key; only one whose program has ended closes on it.
+        self.find_bar.is_some() || self.is_alive()
     }
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<PanelState> {
@@ -1663,7 +1669,7 @@ impl Panel for Terminal {
 
     fn has_running_processes(&self) -> bool {
         if let Some(pid) = self.shell_pid {
-            // On the key-input path via `captures_escape`, so every branch
+            // Asked on close and quit for every terminal, so every branch
             // below stays at a single kernel query — no scan over all pids.
             // Falls through to `false` rather than returning outright, so the
             // trailing platform blocks stay reachable code.
@@ -2060,6 +2066,44 @@ mod title_tests {
             title.contains("subdir"),
             "title {title:?} did not follow the shell into subdir"
         );
+    }
+
+    /// Esc at an idle prompt goes to the shell — vi mode needs it — rather
+    /// than asking to close the panel.
+    #[test]
+    fn a_live_terminal_keeps_escape_even_at_an_idle_prompt() {
+        let Ok(term) = Terminal::new_with_cwd(24, 80, None) else {
+            return; // No PTY available.
+        };
+        assert!(term.is_alive());
+        assert!(term.captures_escape());
+    }
+
+    /// A full-screen program gets Ctrl+F (page-down in less and vim); the
+    /// shell's screen opens the find bar with it.
+    #[test]
+    fn ctrl_f_goes_to_a_full_screen_program() {
+        let Ok(mut term) = Terminal::new_with_cwd(24, 80, None) else {
+            return; // No PTY available.
+        };
+        let ctrl_f = || {
+            termide_core::KeyChord::new(
+                crossterm::event::KeyEvent::new(
+                    crossterm::event::KeyCode::Char('f'),
+                    crossterm::event::KeyModifiers::CONTROL,
+                ),
+                &termide_core::KeyNormalizer::default(),
+            )
+        };
+        let mut config = Config::default();
+        config.normalize();
+        term.hotkeys = build_terminal_hotkey_table(&config);
+        term.write_screen().use_alt_screen = true;
+        term.handle_key(ctrl_f());
+        assert!(term.find_bar.is_none());
+        term.write_screen().use_alt_screen = false;
+        term.handle_key(ctrl_f());
+        assert!(term.find_bar.is_some());
     }
 
     /// With the find bar focused, a terminal paste and Ctrl+V edit the query

@@ -5,9 +5,9 @@
 //! child, `comm` for a process name. macOS has no `/proc`, so the same
 //! questions go through libproc's `proc_pidinfo` and `proc_listpids`.
 //!
-//! Cost matters here: `has_children` is on the key-input path via
-//! `captures_escape`, and the other two run on the render path behind a TTL
-//! cache. `PROC_PPID_ONLY` keeps the child lookup to a single syscall instead
+//! Cost matters here: `has_children` answers whether closing a panel or
+//! quitting must ask first, and the other two run on the render path behind
+//! a TTL cache. `PROC_PPID_ONLY` keeps the child lookup to a single syscall instead
 //! of a scan over every PID on the system.
 
 use std::path::PathBuf;

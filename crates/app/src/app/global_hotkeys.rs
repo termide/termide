@@ -331,6 +331,11 @@ impl App {
             return Ok(true);
         }
         if table.matches("detach_instance", key) {
+            // Outside a detached instance there is nothing to detach, and a
+            // terminal's shell has a use for the key: readline's kill-word.
+            if !self.detach_available() && self.terminal_is_focused() {
+                return Ok(false);
+            }
             self.handle_detach_instance();
             return Ok(true);
         }
@@ -376,6 +381,13 @@ impl App {
         }
         self.open_path_prompt();
         true
+    }
+
+    /// Whether the focused panel is a terminal.
+    fn terminal_is_focused(&mut self) -> bool {
+        self.layout_manager
+            .active_panel_mut()
+            .is_some_and(|panel| panel.as_terminal_mut().is_some())
     }
 
     /// Route a clipboard command (`Copy`/`Cut`/`Paste`) to the focused panel.
