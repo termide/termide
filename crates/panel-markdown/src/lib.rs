@@ -14,8 +14,10 @@ mod links;
 mod navigation;
 mod render;
 mod search;
+mod stream;
 
 pub use render::{render_markdown, render_markdown_with};
+pub use stream::{render_streamed, StreamedHead};
 
 use std::any::Any;
 use std::path::{Path, PathBuf};

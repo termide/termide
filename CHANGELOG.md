@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A new session keeps the tools switched off.** A session started in an agent panel came up with every tool on, though it kept the permissions granted for the session; it now begins with the set the one left had switched off, kept out of its context and written to its log.
 - **`task` describes `background` as it works.** The parameter's description told the model a background task ran in a panel of its own; it runs out of sight.
 
+### Performance
+- **A long agent session no longer slows the panel while the agent works.** Each spinner frame copied every line of the session again, and each streamed piece of an answer laid out the whole answer anew. Now a frame lays out only what changed: the spinner, or the block being written, and of an answer only what came since its last finished paragraph or code block. On a session of 2,000 blocks a spinner frame went from 0.8 ms to a few µs, and a frame of a 40 KB answer streaming in from 2.5 ms to 0.3 ms.
+
 ## [0.49.0] - 2026-11-05
 
 [0.49.0]: https://github.com/termide/termide/releases/tag/0.49.0
