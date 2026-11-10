@@ -23,17 +23,12 @@ pub(crate) fn rename_in_file(path: &Path) {
     let Some(renamed) = rename(&text) else {
         return;
     };
-    let tmp = path.with_extension("toml.tmp");
-    let written = std::fs::write(&tmp, renamed).and_then(|()| std::fs::rename(&tmp, path));
-    match written {
+    match termide_agent_core::write_atomic(path, renamed.as_bytes()) {
         Ok(()) => log::info!(
             "Renamed [ai.permissions.{LEGACY_SHELL_TOOL}] to [ai.permissions.{SHELL_TOOL}] in {}",
             path.display()
         ),
-        Err(error) => {
-            let _ = std::fs::remove_file(&tmp);
-            log::warn!("Could not rewrite {}: {error}", path.display());
-        }
+        Err(error) => log::warn!("Could not rewrite {}: {error}", path.display()),
     }
 }
 

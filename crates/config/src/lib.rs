@@ -578,14 +578,11 @@ impl Config {
 
         let content = toml::to_string_pretty(&diff)?;
         // Settings save on every change, so a crash or a full disk mid-write
-        // must not leave a truncated file: write a sibling, then rename it
-        // over the target, which replaces it in one step.
-        let tmp = path.with_extension("toml.tmp");
-        std::fs::write(&tmp, content)?;
-        if let Err(e) = std::fs::rename(&tmp, path) {
-            let _ = std::fs::remove_file(&tmp);
-            return Err(e.into());
-        }
+        // must not leave a truncated file, and two saves at once (a project's
+        // settings and the global ones, two termide windows) must not share a
+        // temporary file: a synced, uniquely named sibling is renamed over the
+        // target — through a symlink, as a dotfiles checkout keeps it.
+        termide_agent_core::write_atomic(path, content.as_bytes())?;
         Ok(())
     }
 
@@ -745,6 +742,31 @@ mod save_baseline_tests {
             written.trim().is_empty(),
             "an untouched config should write an empty file, got:\n{written}"
         );
+    }
+
+    /// A config kept in a dotfiles checkout and linked into place stays
+    /// linked, and a save leaves no temporary file behind.
+    #[cfg(unix)]
+    #[test]
+    fn saving_writes_through_a_symlink_and_leaves_no_temporary_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("dotfiles.toml");
+        std::fs::write(&real, "").unwrap();
+        let link = dir.path().join("config.toml");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let baseline = Config::default();
+        let mut config = Config::default();
+        config.general.language = "ru".to_string();
+        config.save_to(&link, &baseline).unwrap();
+
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(std::fs::read_to_string(&real).unwrap().contains("ru"));
+        let left: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(left.len(), 2, "{left:?}");
     }
 
     /// What the user did change still round-trips.
