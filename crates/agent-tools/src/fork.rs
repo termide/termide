@@ -21,6 +21,9 @@ pub struct ForkRequest<'a> {
     pub prompt: &'a str,
     /// What the copy is compacted on before it, if anything.
     pub focus: Option<&'a str>,
+    /// The short name the copy takes, shown as its panel's title, if the
+    /// call gave one.
+    pub title: Option<&'a str>,
     /// The id of the `fork` call, which the copy's log answers in place of
     /// the call this session goes on running.
     pub call: &'a str,
@@ -60,6 +63,10 @@ impl Tool for ForkTool {
                     "type": "string",
                     "description": "The fork's first request: its part of the work, and what stays with this session"
                 },
+                "title": {
+                    "type": "string",
+                    "description": "A short name for the fork, a few words on its part of the work: the title of its panel and its name among the sessions; leave it out to name it after the first line of `prompt`"
+                },
                 "focus": {
                     "type": "string",
                     "description": "What the copy keeps in full when it is compacted before the request; leave it out to keep the whole conversation"
@@ -89,15 +96,17 @@ impl Tool for ForkTool {
             Ok(_) => return ToolResultMessage::error(call, "`prompt` is empty"),
             Err(message) => return ToolResultMessage::error(call, message),
         };
-        let focus = call
-            .arguments
-            .get("focus")
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|focus| !focus.is_empty());
+        let optional = |name: &str| {
+            call.arguments
+                .get(name)
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        };
         let request = ForkRequest {
             prompt,
-            focus,
+            focus: optional("focus"),
+            title: optional("title"),
             call: &call.id,
         };
         match (self.fork)(ctx, &request) {
@@ -134,17 +143,22 @@ mod tests {
             log.lock().unwrap().push((
                 request.prompt.to_string(),
                 request.focus.map(str::to_string),
+                request.title.map(str::to_string),
                 request.call.to_string(),
             ));
             Ok("forked into 1a2b3c4d".into())
         }));
         let done = run(
             &tool,
-            json!({ "prompt": "migrate the logs", "focus": " the log format " }),
+            json!({
+                "prompt": "migrate the logs",
+                "focus": " the log format ",
+                "title": " Log migration "
+            }),
         );
         assert_eq!(done.plain_text(), "forked into 1a2b3c4d");
-        // A blank focus keeps the whole conversation.
-        assert!(!run(&tool, json!({ "prompt": "x", "focus": " " })).is_error);
+        // A blank focus keeps the whole conversation; a blank title is none.
+        assert!(!run(&tool, json!({ "prompt": "x", "focus": " ", "title": "" })).is_error);
         assert!(run(&tool, json!({ "prompt": "  " })).is_error);
         assert!(run(&tool, json!({ "focus": "x" })).is_error);
         assert_eq!(
@@ -153,9 +167,10 @@ mod tests {
                 (
                     "migrate the logs".to_string(),
                     Some("the log format".to_string()),
+                    Some("Log migration".to_string()),
                     "f1".to_string()
                 ),
-                ("x".to_string(), None, "f1".to_string())
+                ("x".to_string(), None, None, "f1".to_string())
             ]
         );
     }

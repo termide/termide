@@ -450,7 +450,9 @@ part at that moment: each goes on writing its own file, so one conversation now
 runs in two places, and you can have the agent try two approaches side by side.
 The copy takes a name of its own — the source's with a counter on it,
 `Refactor` becoming `Refactor (2)`, then `Refactor (3)` — so the two are told
-apart in the picker and in the panel's title; rename either whenever you like.
+apart in the picker and in the panel's title, where the counter sits next to
+the label (`Agent (2): Refactor`) so a narrow panel keeps it; rename either
+whenever you like.
 The copy is a session like any other: it shows in the session picker and in a
 fresh panel's banner once its panel lets it go, and you can switch back to it.
 
@@ -2244,7 +2246,11 @@ as its first request (`& Forking · …` in this panel, `& Taking over from …`
 in the new one). With a `focus`, the copy is compacted on it first, as
 `/fork <focus>` does, so that it starts with what bears on its part rather
 than the whole history; without one it keeps the whole conversation. The
-copy is a session of the same agent, on the same model.
+copy is a session of the same agent, on the same model. It is named after its
+own part of the work rather than after the session it came from: the `title`
+the agent gave it, or else the first line of that request, cut short — with a
+counter only when another session already has the name — and that name is
+its panel's title, so several forks of one session are told apart at a glance.
 
 Unlike a [subagent](#subagents), the fork is yours from the start: a session
 like any other, on the panel's usual rules, with its own `task`, and with no

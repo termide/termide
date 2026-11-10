@@ -77,6 +77,8 @@ enum Request {
         call: String,
         prompt: String,
         focus: Option<String>,
+        /// The name the agent gave the fork, if any.
+        title: Option<String>,
         reply: Sender<Result<String, String>>,
     },
     /// How many messages agents passed one another to get the run of a
@@ -173,6 +175,7 @@ pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
                 call: request.call.to_string(),
                 prompt: request.prompt.to_string(),
                 focus: request.focus.map(str::to_string),
+                title: request.title.map(str::to_string),
                 reply,
             },
             &answer,
@@ -294,6 +297,7 @@ impl App {
                     call,
                     prompt,
                     focus,
+                    title,
                     reply,
                 } => {
                     let fork = Fork {
@@ -303,6 +307,7 @@ impl App {
                         call,
                         prompt,
                         focus,
+                        title,
                     };
                     let result = self
                         .in_project(&project_root, |app| app.fork_for_agent(fork))
@@ -485,6 +490,7 @@ impl App {
             .to_path_buf();
         let cwd = source.cwd().to_path_buf();
         let hops = next_hops(source.agent_hops())?;
+        let title = super::fork_title(fork.title.as_deref(), &fork.prompt);
         let first = UserMessage::text(fork.prompt).with_origin(MessageOrigin {
             session: fork.session.unwrap_or_default(),
             agent: fork.agent,
@@ -500,6 +506,7 @@ impl App {
             Some(Handover {
                 call: fork.call,
                 first,
+                title,
             }),
         )?;
         let context = if compacted {
@@ -611,6 +618,7 @@ struct Fork {
     call: String,
     prompt: String,
     focus: Option<String>,
+    title: Option<String>,
 }
 
 /// A message on its way to another panel.

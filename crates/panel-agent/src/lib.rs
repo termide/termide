@@ -1803,11 +1803,15 @@ impl Panel for AgentPanel {
         } else {
             capitalize(&self.agent)
         };
-        let named = self
-            .session
-            .as_ref()
-            .and_then(Session::name)
-            .map(single_line);
+        let named = self.session.as_ref().and_then(Session::name);
+        // A fork's counter goes by the label, where cutting the title from
+        // its end leaves it: `Agent (2): Refactor…` keeps the copies of one
+        // session apart in narrow panels.
+        let (label, named) = match named.map(Session::split_fork_counter) {
+            Some((base, Some(n))) => (format!("{label} ({n})"), Some(single_line(base))),
+            Some((base, None)) => (label, Some(single_line(base))),
+            None => (label, None),
+        };
         let subject = named
             .or_else(|| {
                 self.transcript.items().iter().find_map(|item| match item {

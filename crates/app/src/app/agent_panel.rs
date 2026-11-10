@@ -124,7 +124,10 @@ impl App {
             log::warn!("cannot open {}: {error}", source.display());
             t.agent_notice_cannot_fork_fmt(&error.to_string())
         })?;
-        let name = fork_name(&source_session);
+        let name = fork_name(
+            &source_session,
+            handover.as_ref().map(|handover| handover.title.as_str()),
+        );
         let copy = source_session.fork(cwd, name.as_deref()).map_err(|error| {
             log::warn!(
                 "cannot fork the agent session {}: {error}",
@@ -144,7 +147,7 @@ impl App {
             error
         };
         let first = match handover {
-            Some(Handover { call, first }) => {
+            Some(Handover { call, first, .. }) => {
                 settle_fork(&copy, &call)
                     .map_err(|error| discard_copy(t.agent_notice_cannot_fork_fmt(&error)))?;
                 Some(first)
@@ -169,11 +172,13 @@ impl App {
     }
 }
 
-/// A fork the agent asked for: the id of its `fork` call, and the part of the
-/// work the fork takes over, as the agent's message.
+/// A fork the agent asked for: the id of its `fork` call, the part of the
+/// work the fork takes over, as the agent's message, and the name the copy
+/// takes for it.
 pub(in crate::app) struct Handover {
     pub call: String,
     pub first: UserMessage,
+    pub title: String,
 }
 
 /// What the copy's log answers the `fork` call with, in place of the result
@@ -306,16 +311,13 @@ impl App {
 /// one session twice gives two different names without either panel having to
 /// remember the other. Two forks cannot race for one number: this runs on the
 /// app's main thread, which is the only place a fork is made.
-fn fork_name(source: &Session) -> Option<String> {
+///
+/// `title` is the name the agent gave a fork it asked for: the copy takes it
+/// as it is, and with a counter only when another session there has it.
+fn fork_name(source: &Session, title: Option<&str>) -> Option<String> {
     if source.is_empty() {
         return None;
     }
-    // A name forked before keeps its counter, so the next one counts on from
-    // it rather than starting again at two.
-    let base = match source.name() {
-        Some(name) => strip_fork_suffix(name).to_string(),
-        None => SessionSummary::from(source).label(),
-    };
     let taken: Vec<String> = source
         .path()
         .parent()
@@ -326,27 +328,52 @@ fn fork_name(source: &Session) -> Option<String> {
                 .collect()
         })
         .unwrap_or_default();
+    let title = title.map(str::trim).filter(|title| !title.is_empty());
+    if let Some(title) = title.filter(|title| !taken.iter().any(|name| name == title)) {
+        return Some(title.to_string());
+    }
+    // A name forked before keeps its counter, so the next one counts on from
+    // it rather than starting again at two.
+    let base = match title {
+        Some(title) => Session::split_fork_counter(title).0.to_string(),
+        None => match source.name() {
+            Some(name) => Session::split_fork_counter(name).0.to_string(),
+            None => SessionSummary::from(source).label(),
+        },
+    };
     (2..)
         .find(|n| !taken.iter().any(|name| name == &format!("{base} ({n})")))
         .map(|n| format!("{base} ({n})"))
 }
 
-/// A name's fork counter taken off: `Refactor (2)` → `Refactor`, so the next
-/// fork of it is `Refactor (3)`. Only the suffix this code writes counts as a
-/// counter — digits in brackets after a space, two or more — so a name the
-/// user gave, `work (draft)` or `fix (1)`, keeps its brackets.
-fn strip_fork_suffix(name: &str) -> &str {
-    let trimmed = name.trim_end();
-    let Some(head) = trimmed.strip_suffix(')') else {
-        return name;
-    };
-    let Some((before, counter)) = head.rsplit_once('(') else {
-        return name;
-    };
-    match counter.parse::<usize>() {
-        Ok(n) if n >= 2 && before.ends_with(' ') => before.trim_end(),
-        _ => name,
+/// How long a fork's name runs, in characters, when it comes from the first
+/// line of the request the agent handed over.
+const FORK_TITLE_CHARS: usize = 48;
+
+/// The name of a fork the agent asked for: the `title` it gave, or else the
+/// first line of the part of the work it handed over, cut short — so the
+/// panel says what that copy is doing rather than repeating the name of the
+/// session it came from.
+fn fork_title(title: Option<&str>, prompt: &str) -> String {
+    if let Some(title) = title.map(str::trim).filter(|title| !title.is_empty()) {
+        return title.split_whitespace().collect::<Vec<_>>().join(" ");
     }
+    let line = prompt
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or_default();
+    let line = line.split_whitespace().collect::<Vec<_>>().join(" ");
+    if line.chars().count() <= FORK_TITLE_CHARS {
+        return line;
+    }
+    let cut: String = line.chars().take(FORK_TITLE_CHARS - 1).collect();
+    // Cut at the last word that fits, when there is one to cut at.
+    let cut = match cut.rsplit_once(' ') {
+        Some((words, _)) if !words.is_empty() => words,
+        _ => cut.as_str(),
+    };
+    format!("{}…", cut.trim_end())
 }
 
 /// Rebuild an agent panel saved in a project layout. `None` when there is
@@ -4696,21 +4723,21 @@ mod tests {
         let mut session = Session::create(dir.path(), dir.path()).unwrap();
         // Nothing sent yet: naming the copy would keep an empty log alive, so
         // the copy stays unnamed and is discarded with its panel.
-        assert_eq!(fork_name(&session), None);
+        assert_eq!(fork_name(&session, None), None);
 
         session.set_name("Refactor").unwrap();
-        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (2)"));
+        assert_eq!(fork_name(&session, None).as_deref(), Some("Refactor (2)"));
 
         // Forking counts on from the names already in the directory: with the
         // first copy listed under `(2)`, the next fork takes `(3)`.
         let first_copy = session
-            .fork(dir.path(), fork_name(&session).as_deref())
+            .fork(dir.path(), fork_name(&session, None).as_deref())
             .unwrap();
         let forked = Session::open_exclusive(&first_copy).unwrap();
         assert_eq!(forked.name(), Some("Refactor (2)"));
-        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (3)"));
+        assert_eq!(fork_name(&session, None).as_deref(), Some("Refactor (3)"));
         // Forking the copy counts on too, from the name it carries.
-        assert_eq!(fork_name(&forked).as_deref(), Some("Refactor (3)"));
+        assert_eq!(fork_name(&forked, None).as_deref(), Some("Refactor (3)"));
 
         // A source the user never named is labelled by its first prompt, so
         // the copy's suffix is what tells the two rows apart.
@@ -4718,7 +4745,7 @@ mod tests {
         plain
             .append_message(&Message::User(UserMessage::text("fix the bug")))
             .unwrap();
-        assert_eq!(fork_name(&plain).as_deref(), Some("fix the bug (2)"));
+        assert_eq!(fork_name(&plain, None).as_deref(), Some("fix the bug (2)"));
     }
 
     #[test]
@@ -4782,32 +4809,57 @@ mod tests {
         let mut session = Session::create(dir.path(), dir.path()).unwrap();
         session.set_name("Refactor").unwrap();
         let copy = session.fork(dir.path(), Some("Refactor (2)")).unwrap();
-        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (3)"));
+        assert_eq!(fork_name(&session, None).as_deref(), Some("Refactor (3)"));
 
         // The counter counts the names in use, not the forks made: rename the
         // copy away and `(2)` is free again, so no number runs up for nothing.
         let mut forked = Session::open(&copy).unwrap();
         forked.set_name("Refactor (7)").unwrap();
-        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (2)"));
+        assert_eq!(fork_name(&session, None).as_deref(), Some("Refactor (2)"));
         // A fork of the renamed copy takes the same free number: whichever
         // forks first writes it, and the other then counts on from there.
-        assert_eq!(fork_name(&forked).as_deref(), Some("Refactor (2)"));
+        assert_eq!(fork_name(&forked, None).as_deref(), Some("Refactor (2)"));
         drop(forked);
         std::fs::remove_file(&copy).unwrap();
-        assert_eq!(fork_name(&session).as_deref(), Some("Refactor (2)"));
+        assert_eq!(fork_name(&session, None).as_deref(), Some("Refactor (2)"));
     }
 
     #[test]
-    fn a_fork_suffix_counts_on_from_the_name_it_carries() {
-        assert_eq!(strip_fork_suffix("Refactor (2)"), "Refactor");
-        assert_eq!(strip_fork_suffix("Refactor (12)"), "Refactor");
-        // The counter starts at two: one fork makes the second of a kind.
-        assert_eq!(strip_fork_suffix("Refactor (1)"), "Refactor (1)");
-        // Not a counter: other brackets, other contents, no brackets.
-        assert_eq!(strip_fork_suffix("work (draft)"), "work (draft)");
-        assert_eq!(strip_fork_suffix("2 of 3"), "2 of 3");
-        assert_eq!(strip_fork_suffix("()"), "()");
-        assert_eq!(strip_fork_suffix("Refactor"), "Refactor");
+    fn a_fork_the_agent_named_takes_its_title_with_a_counter_only_when_taken() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), dir.path()).unwrap();
+        session.set_name("Refactor").unwrap();
+        assert_eq!(fork_name(&session, Some(" Docs ")).as_deref(), Some("Docs"));
+        session.fork(dir.path(), Some("Docs")).unwrap();
+        assert_eq!(
+            fork_name(&session, Some("Docs")).as_deref(),
+            Some("Docs (2)")
+        );
+        // A blank title is none: the copy is named after its source.
+        assert_eq!(
+            fork_name(&session, Some(" ")).as_deref(),
+            Some("Refactor (2)")
+        );
+    }
+
+    #[test]
+    fn a_fork_without_a_title_is_named_after_the_first_line_of_its_request() {
+        assert_eq!(fork_title(Some("  Log   migration "), "x"), "Log migration");
+        assert_eq!(
+            fork_title(None, "\n  Migrate the   logs  \nthen the docs"),
+            "Migrate the logs"
+        );
+        assert_eq!(fork_title(Some(" "), "the docs"), "the docs");
+        // A long line is cut at the last word that fits.
+        let long = "word ".repeat(20);
+        let title = fork_title(None, &long);
+        assert!(title.ends_with("word…"), "{title}");
+        assert!(title.chars().count() <= FORK_TITLE_CHARS, "{title}");
+        let unbroken = "x".repeat(60);
+        assert_eq!(
+            fork_title(None, &unbroken).chars().count(),
+            FORK_TITLE_CHARS
+        );
     }
 
     #[test]

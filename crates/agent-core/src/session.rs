@@ -1402,6 +1402,27 @@ impl Session {
             .filter(|name| !name.is_empty())
     }
 
+    /// A name split into its base and the fork counter a fork's copy is
+    /// named with: `Refactor (2)` → (`Refactor`, `Some(2)`). Only the suffix
+    /// forks write counts — digits in brackets after a space, two or more —
+    /// so a name the user gave, `work (draft)` or `fix (1)`, is all base.
+    #[must_use]
+    pub fn split_fork_counter(name: &str) -> (&str, Option<u32>) {
+        let trimmed = name.trim_end();
+        let counter = trimmed
+            .strip_suffix(')')
+            .and_then(|head| head.rsplit_once('('))
+            .and_then(|(before, digits)| {
+                let n = digits.parse::<u32>().ok()?;
+                (n >= 2 && before.ends_with(' ') && !digits.starts_with('+'))
+                    .then(|| (before.trim_end(), n))
+            });
+        match counter {
+            Some((base, n)) => (base, Some(n)),
+            None => (name, None),
+        }
+    }
+
     /// Name (or rename) the conversation. An empty name clears it.
     pub fn set_name(&mut self, name: &str) -> std::io::Result<String> {
         let name = name.trim().to_string();
@@ -2150,6 +2171,22 @@ mod tests {
     use crate::agent::test_support::text_reply;
     use crate::failure::FailureKind;
     use crate::message::{AssistantMessage, UserMessage};
+
+    #[test]
+    fn a_fork_counter_is_only_the_suffix_forks_write() {
+        let split = Session::split_fork_counter;
+        assert_eq!(split("Refactor (2)"), ("Refactor", Some(2)));
+        assert_eq!(split("Refactor (12)"), ("Refactor", Some(12)));
+        // The counter starts at two: one fork makes the second of a kind.
+        assert_eq!(split("Refactor (1)"), ("Refactor (1)", None));
+        // Not a counter: other brackets, other contents, no brackets.
+        assert_eq!(split("work (draft)"), ("work (draft)", None));
+        assert_eq!(split("fix (+2)"), ("fix (+2)", None));
+        assert_eq!(split("x(2)"), ("x(2)", None));
+        assert_eq!(split("2 of 3"), ("2 of 3", None));
+        assert_eq!(split("()"), ("()", None));
+        assert_eq!(split("Refactor"), ("Refactor", None));
+    }
 
     #[test]
     fn is_empty_tracks_conversation_and_discard_removes_the_file() {

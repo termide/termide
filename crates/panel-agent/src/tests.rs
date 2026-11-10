@@ -2416,6 +2416,14 @@ fn slash_rename_and_name_set_the_session_title() {
     panel.submit();
     assert_eq!(panel.title(), "Agent: other");
     assert!(panel.input_text().is_empty());
+    // A fork's counter moves next to the label, where cutting the title
+    // from its end leaves it; brackets that are no counter stay put.
+    type_text(&mut panel, "/rename other (2)");
+    panel.submit();
+    assert_eq!(panel.title(), "Agent (2): other");
+    type_text(&mut panel, "/rename fix (1)");
+    panel.submit();
+    assert_eq!(panel.title(), "Agent: fix (1)");
 
     // Without an argument, it opens the rename prompt instead of sending.
     type_text(&mut panel, "/rename");
