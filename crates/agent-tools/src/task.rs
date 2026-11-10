@@ -2,8 +2,9 @@
 //!
 //! The agent picks an agent definition by name — its own included, for a
 //! fresh copy of itself — and gives it a prompt; that agent runs its own loop
-//! to the end — reading, editing, asking nothing, since no one is watching a
-//! nested run — and its final answer comes back as the tool result. It keeps a
+//! to the end — reading and editing as its permissions allow, and asking the
+//! user of its parent's panel about the rest, on a card headed with its name —
+//! and its final answer comes back as the tool result. It keeps a
 //! focused sub-task, and the files it read along the way, out of the main
 //! conversation, the way Claude Code's `Task` and OpenCode's sub-sessions do.
 //!

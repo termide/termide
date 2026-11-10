@@ -630,10 +630,10 @@ pub trait PermissionPrompter: Send {
     }
 }
 
-/// A prompter that answers every question with the same denial. A subagent
-/// runs with no one to ask, so anything the rules and mode do not already
-/// allow is refused with a reason the model reads, rather than blocking a
-/// user who is not watching this nested run.
+/// A prompter that answers every question with the same denial, for a run
+/// with no one to ask — a headless run, or a subagent whose parent has no
+/// panel to put a card in: anything the rules and mode do not already allow
+/// is refused with a reason the model reads, rather than waiting on no one.
 pub struct AutoDenyPrompter {
     reason: String,
 }
