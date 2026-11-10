@@ -13,9 +13,9 @@ use termide_agent_core::{
     AssistantContent, AssistantMessage, Autorun, CancelToken, CompactionCall, CompactionReason,
     EntryKind, Failure, FailureKind, GoalRecord, LastRun, LimitPolicy, LoopRecord, Message,
     PermissionAnswer, PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput,
-    ShellRunner, StopReason, StreamEvent, Suggestion, SuggestionReply, ThinkingLevel, Timing,
-    ToolCall, ToolContext, ToolDecision, ToolResultMessage, ToolUpdate, Usage, UserMessage,
-    ACP_PROVIDER, MODEL_OPTION,
+    ShellRunner, StopReason, StreamEvent, Suggestion, SuggestionKind, SuggestionReply,
+    ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision, ToolResultMessage, ToolUpdate,
+    Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION,
 };
 use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -9326,11 +9326,21 @@ fn suggest_in_worker(
     command: &str,
     why: &str,
 ) -> std::thread::JoinHandle<SuggestionReply> {
+    offer_in_worker(panel, SuggestionKind::Command, command, why)
+}
+
+/// Put an offer of `kind` on the panel's channel and wait for its card.
+fn offer_in_worker(
+    panel: &mut AgentPanel,
+    kind: SuggestionKind,
+    command: &str,
+    why: &str,
+) -> std::thread::JoinHandle<SuggestionReply> {
     let (suggester, rx) = suggestion_channel(CancelToken::new());
     panel.suggestion_rx = rx;
     let command = command.to_string();
     let why = why.to_string();
-    let worker = std::thread::spawn(move || suggester.suggest(Suggestion { command, why }));
+    let worker = std::thread::spawn(move || suggester.suggest(Suggestion { kind, command, why }));
     let deadline = Instant::now() + Duration::from_secs(5);
     while panel.pending.is_none() {
         panel.tick();
@@ -9419,6 +9429,7 @@ fn a_second_suggestion_while_a_card_is_up_declines() {
         let suggester = suggester.clone();
         std::thread::spawn(move || {
             suggester.suggest(Suggestion {
+                kind: SuggestionKind::Command,
                 command: "ls".into(),
                 why: "look".into(),
             })
@@ -9436,6 +9447,7 @@ fn a_second_suggestion_while_a_card_is_up_declines() {
     let (tx, settled) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
         let reply = suggester.suggest(Suggestion {
+            kind: SuggestionKind::Command,
             command: "pwd".into(),
             why: String::new(),
         });
@@ -9458,6 +9470,116 @@ fn a_second_suggestion_while_a_card_is_up_declines() {
     );
     panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
     assert_eq!(first.join().unwrap(), SuggestionReply::Declined);
+}
+
+/// A goal the agent offers shows on a card of its own; `[Start]` starts it
+/// as the typed `/goal` line would, and only then answers the call.
+#[test]
+fn an_offered_goal_starts_on_start() {
+    let mut panel = panel(vec![reply("working"), reply("DONE\nall green")]);
+    let worker = offer_in_worker(
+        &mut panel,
+        SuggestionKind::Goal,
+        "the build is green",
+        "many steps",
+    );
+    let form = panel.pending.as_ref().unwrap().form();
+    assert_eq!(form.title(), "Start this goal?");
+    assert_eq!(form.options(), ["Start", "Edit first"]);
+    let detail = form.detail().unwrap();
+    assert!(detail.contains("the build is green"), "{detail}");
+    assert!(detail.contains("many steps"), "{detail}");
+    assert!(detail.contains("does not start unless"), "{detail}");
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Run);
+    assert_eq!(
+        panel.goal_task.as_ref().map(|task| task.goal.as_str()),
+        Some("the build is green")
+    );
+    settle_goal(&mut panel);
+    assert!(panel.transcript().items().iter().any(|i| matches!(
+        i,
+        Item::User { command: Some(c), .. } if c == "/goal the build is green"
+    )));
+}
+
+/// A goal under way is named on the card, and replaced only on `[Start]`.
+#[test]
+fn an_offered_goal_names_the_one_it_replaces() {
+    let mut panel = panel(vec![]);
+    let worker = offer_in_worker(&mut panel, SuggestionKind::Goal, "new aim", "");
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Declined);
+    assert!(panel.goal_task.is_none(), "dismissing starts nothing");
+
+    panel.goal_task = Some(GoalTask {
+        goal: "old aim".into(),
+        iterations: 1,
+        started: Instant::now(),
+        used_tools: false,
+        idle_turns: 0,
+        judge_at: None,
+        judging: false,
+        judge_failures: 0,
+        first_turn: None,
+    });
+    let worker = offer_in_worker(&mut panel, SuggestionKind::Goal, "new aim", "");
+    let detail = panel.pending.as_ref().unwrap().form().detail().unwrap();
+    assert!(
+        detail.contains("replaces the current goal: old aim"),
+        "{detail}"
+    );
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Declined);
+    assert_eq!(
+        panel.goal_task.as_ref().map(|task| task.goal.as_str()),
+        Some("old aim"),
+        "the goal under way stays"
+    );
+}
+
+/// A loop's card says how often it runs; `[Edit first]` puts its `/loop`
+/// line in the input as a message, not a shell command.
+#[test]
+fn an_offered_loop_can_be_edited_first() {
+    let mut panel = panel(vec![]);
+    let worker = offer_in_worker(
+        &mut panel,
+        SuggestionKind::Loop {
+            interval: Some(Duration::from_secs(300)),
+        },
+        "check CI",
+        "",
+    );
+    let form = panel.pending.as_ref().unwrap().form();
+    assert_eq!(form.title(), "Start this loop?");
+    let detail = form.detail().unwrap();
+    assert!(detail.contains("runs every 5m"), "{detail}");
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Edit);
+    assert!(!panel.shell_mode);
+    assert_eq!(panel.input_text(), "/loop 5m check CI");
+    assert!(panel.loop_task.is_none(), "editing starts nothing");
+}
+
+/// `[Start]` on a loop starts it, as the typed `/loop` line would.
+#[test]
+fn an_offered_loop_starts_on_start() {
+    let mut panel = panel(vec![reply("a")]);
+    let worker = offer_in_worker(
+        &mut panel,
+        SuggestionKind::Loop {
+            interval: Some(Duration::from_secs(300)),
+        },
+        "check CI",
+        "",
+    );
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    assert_eq!(worker.join().unwrap(), SuggestionReply::Run);
+    let task = panel.loop_task.as_ref().expect("the loop started");
+    assert_eq!(task.prompt, "check CI");
+    assert_eq!(task.interval, Some(Duration::from_secs(300)));
+    assert_eq!(task.iterations, 1, "its first run went at once");
 }
 
 #[test]

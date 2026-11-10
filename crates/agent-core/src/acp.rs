@@ -189,8 +189,15 @@ pub fn split_command_line(line: &str) -> Result<Vec<String>, String> {
 
 /// termide's tools an external agent on its own tools (Codex, Gemini CLI) is
 /// served beside them: what it has no tool of its own for — the project's
-/// memory and skills, and the panel's question and command cards.
-pub const COMPANION_TOOLS: &[&str] = &["recall", "skill", "question", "suggest_command"];
+/// memory and skills, and the panel's question, command, goal and loop cards.
+pub const COMPANION_TOOLS: &[&str] = &[
+    "recall",
+    "skill",
+    "question",
+    "suggest_command",
+    "suggest_goal",
+    "suggest_loop",
+];
 
 /// Of `tools`, those in [`COMPANION_TOOLS`], for an agent that runs on its
 /// own system prompt: the `skill` tool, whose skills termide's prompt lists,

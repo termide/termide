@@ -135,7 +135,8 @@ pub use session::{
 pub use shell::{ShellOutput, ShellRunner};
 pub use spend::{Spender, Spending};
 pub use suggest::{
-    suggestion_channel, CommandSuggester, Suggestion, SuggestionEnvelope, SuggestionReply,
+    format_interval, parse_interval, suggestion_channel, CommandSuggester, Suggestion,
+    SuggestionEnvelope, SuggestionKind, SuggestionReply,
 };
 pub use terminals::{
     TerminalEntry, TerminalOutput, TerminalRun, TerminalRunEnd, TerminalRunOutcome,

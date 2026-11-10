@@ -16,8 +16,8 @@
 use serde_json::{json, Value};
 use termide_agent_core::ToolText;
 use termide_agent_core::{
-    CancelToken, Suggestion, SuggestionReply, Tool, ToolCall, ToolContext, ToolResultMessage,
-    ToolUpdate,
+    CancelToken, Suggestion, SuggestionKind, SuggestionReply, Tool, ToolCall, ToolContext,
+    ToolResultMessage, ToolUpdate,
 };
 
 use crate::args::{optional_str, required_str};
@@ -80,7 +80,11 @@ impl Tool for SuggestCommandTool {
             .unwrap_or_default()
             .trim()
             .to_string();
-        let suggestion = Suggestion { command, why };
+        let suggestion = Suggestion {
+            kind: SuggestionKind::Command,
+            command,
+            why,
+        };
         let Some(suggester) = &ctx.suggester else {
             return ToolResultMessage::error(
                 call,

@@ -2048,8 +2048,9 @@ fn tool_headline(
     // fetched, `?` for a search, `/` for a skill as it is typed by hand, `&`
     // for any exchange with another agent — a task, a message to or from a
     // panel, the panels listed — as a shell backgrounds a job, `*` for an MCP
-    // tool, `¿` for a question to the user — then its localized action in the
-    // same state color and its subject.
+    // tool, `¿` for a question to the user, `◎` and `↺` for a goal and a loop
+    // offered to the user — then its localized action in the same state color
+    // and its subject.
     let accent = Style::default().fg(state);
     let styled_action = |glyph: &str, verb: &str, subject: String, style: Style| {
         let mut spans = vec![
@@ -2133,6 +2134,25 @@ fn tool_headline(
                 first.trim().to_string()
             };
             action("¿", t.agent_tool_question(), subject)
+        }
+        // A goal or a loop offered on a card, under the glyph its row in the
+        // state strip has once started.
+        "suggest_goal" => action(
+            crate::render::GOAL_GLYPH,
+            t.agent_tool_suggest_goal(),
+            crate::single_line(&arg("goal")),
+        ),
+        "suggest_loop" => {
+            let prompt = crate::single_line(&arg("prompt"));
+            let subject = match arg("interval").trim() {
+                "" => prompt,
+                every => format!("{every} · {prompt}"),
+            };
+            action(
+                crate::render::LOOP_GLYPH,
+                t.agent_tool_suggest_loop(),
+                subject,
+            )
         }
         // Every exchange with another agent opens with `&`, as a task does;
         // the verb tells which way it goes. A message to a session, by its

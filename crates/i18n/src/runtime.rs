@@ -760,6 +760,12 @@ impl Translation for RuntimeTranslation {
         agent_suggest_edit,
         agent_suggest_copy,
         agent_suggest_dismiss,
+        agent_suggest_goal_title,
+        agent_suggest_loop_title,
+        agent_suggest_start_by_agent,
+        agent_suggest_start,
+        agent_suggest_dont_start,
+        agent_suggest_loop_back_to_back,
         agent_suggest_denied_plan,
         agent_suggest_denied_rule,
         agent_notice_clipboard_failed,
@@ -811,6 +817,8 @@ impl Translation for RuntimeTranslation {
         agent_tool_mcp,
         agent_tool_question,
         agent_tool_suggest,
+        agent_tool_suggest_goal,
+        agent_tool_suggest_loop,
         agent_tool_send_message,
         agent_tool_agents,
         agent_tool_send_question,
@@ -2306,6 +2314,18 @@ impl Translation for RuntimeTranslation {
 
     fn agent_suggest_cwd_fmt(&self, cwd: &str) -> String {
         self.format("agent_suggest_cwd_fmt", &[("cwd", cwd)])
+    }
+
+    fn agent_suggest_loop_every_fmt(&self, interval: &str) -> String {
+        self.format("agent_suggest_loop_every_fmt", &[("interval", interval)])
+    }
+
+    fn agent_suggest_replaces_goal_fmt(&self, goal: &str) -> String {
+        self.format("agent_suggest_replaces_goal_fmt", &[("goal", goal)])
+    }
+
+    fn agent_suggest_replaces_loop_fmt(&self, prompt: &str) -> String {
+        self.format("agent_suggest_replaces_loop_fmt", &[("prompt", prompt)])
     }
 
     fn agent_notice_external_failed_fmt(&self, error: &str) -> String {

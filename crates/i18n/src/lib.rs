@@ -1020,6 +1020,13 @@ pub trait Translation: Send + Sync {
     fn agent_suggest_edit(&self) -> &str;
     fn agent_suggest_copy(&self) -> &str;
     fn agent_suggest_dismiss(&self) -> &str;
+    /// The card a `suggest_goal` or `suggest_loop` offer shows, and its rows.
+    fn agent_suggest_goal_title(&self) -> &str;
+    fn agent_suggest_loop_title(&self) -> &str;
+    fn agent_suggest_start_by_agent(&self) -> &str;
+    fn agent_suggest_start(&self) -> &str;
+    fn agent_suggest_dont_start(&self) -> &str;
+    fn agent_suggest_loop_back_to_back(&self) -> &str;
     fn agent_notice_clipboard_failed(&self) -> &str;
     fn agent_notice_goal_reached(&self) -> &str;
     fn agent_notice_goal_impossible(&self) -> &str;
@@ -1030,6 +1037,9 @@ pub trait Translation: Send + Sync {
     fn agent_notice_bang_running_cmd_fmt(&self, command: &str) -> String;
     fn agent_suggest_why_fmt(&self, why: &str) -> String;
     fn agent_suggest_cwd_fmt(&self, cwd: &str) -> String;
+    fn agent_suggest_loop_every_fmt(&self, interval: &str) -> String;
+    fn agent_suggest_replaces_goal_fmt(&self, goal: &str) -> String;
+    fn agent_suggest_replaces_loop_fmt(&self, prompt: &str) -> String;
     /// Why the card withholds `[Run]`: plan mode, or one of the user's rules.
     fn agent_suggest_denied_plan(&self) -> &str;
     fn agent_suggest_denied_rule(&self) -> &str;
@@ -1264,6 +1274,8 @@ pub trait Translation: Send + Sync {
     fn agent_tool_question(&self) -> &str;
     /// Agent transcript: the action words for a `suggest_command` call.
     fn agent_tool_suggest(&self) -> &str;
+    fn agent_tool_suggest_goal(&self) -> &str;
+    fn agent_tool_suggest_loop(&self) -> &str;
     /// Agent transcript: the action words for a `send_message` call, before
     /// the panel number.
     fn agent_tool_send_message(&self) -> &str;

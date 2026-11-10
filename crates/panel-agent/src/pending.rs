@@ -7,7 +7,7 @@ use std::time::Instant;
 use termide_agent_core::{
     shell_parts, CommandScript, Decision, Failure, Mode, PermissionAnswer, PermissionEnvelope,
     PersistScope, QuestionAnswer, QuestionEnvelope, QuestionReply, SuggestionEnvelope,
-    SuggestionReply,
+    SuggestionKind, SuggestionReply,
 };
 use termide_core::PanelEvent;
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -64,7 +64,9 @@ pub(crate) enum Pending {
     /// A command the `suggest_command` tool offered. It runs only on `[Run]`,
     /// through the panel's own runner — never as a tool call the agent makes —
     /// and `[Run]` is withheld where plan mode or a `deny` rule covers the
-    /// command, so the card cannot walk through the user's own rules.
+    /// command, so the card cannot walk through the user's own rules. A goal
+    /// or a loop offered by `suggest_goal` or `suggest_loop` comes the same
+    /// way, and starts only on `[Start]`.
     Suggestion {
         envelope: SuggestionEnvelope,
         form: ChoiceForm,
@@ -248,6 +250,51 @@ pub(crate) fn suggestion_form(
     let form = ChoiceForm::new(t.agent_suggest_title(), options)
         .with_detail(detail)
         .with_cancel(t.agent_suggest_dismiss());
+    (form, answers)
+}
+
+/// The card for a goal or a loop the `suggest_goal` or `suggest_loop` tool
+/// offered: its text in full, how often a loop runs, why it is offered, and
+/// what it would replace (`replaces`, the goal or loop under way). `[Start]`
+/// starts it as if the user had typed the `/goal` or `/loop` line, and
+/// `[Edit first]` puts that line in the input. Plan mode and the rules do
+/// not withhold `[Start]`: a goal's turns run under them like any request.
+pub(crate) fn autorun_form(
+    envelope: &SuggestionEnvelope,
+    replaces: Option<&str>,
+) -> (ChoiceForm, Vec<SuggestionReply>) {
+    let t = termide_i18n::t();
+    let suggestion = &envelope.suggestion;
+    let mut detail = suggestion.command.clone();
+    let title = match suggestion.kind {
+        SuggestionKind::Loop { interval } => {
+            detail.push('\n');
+            detail.push_str(&match interval {
+                Some(every) => t.agent_suggest_loop_every_fmt(&termide_i18n::duration(every)),
+                None => t.agent_suggest_loop_back_to_back().to_string(),
+            });
+            t.agent_suggest_loop_title()
+        }
+        _ => t.agent_suggest_goal_title(),
+    };
+    if !suggestion.why.is_empty() {
+        detail.push('\n');
+        detail.push_str(&t.agent_suggest_why_fmt(&suggestion.why));
+    }
+    if let Some(replaced) = replaces {
+        detail.push('\n');
+        detail.push_str(replaced);
+    }
+    detail.push('\n');
+    detail.push_str(t.agent_suggest_start_by_agent());
+    let answers = vec![SuggestionReply::Run, SuggestionReply::Edit];
+    let options = vec![
+        t.agent_suggest_start().to_string(),
+        t.agent_suggest_edit().to_string(),
+    ];
+    let form = ChoiceForm::new(title, options)
+        .with_detail(detail)
+        .with_cancel(t.agent_suggest_dont_start());
     (form, answers)
 }
 
@@ -611,10 +658,32 @@ impl AgentPanel {
                 let _ = envelope.reply.send(SuggestionReply::Declined);
                 continue;
             }
-            envelope.denied = self.suggestion_denied(&envelope.suggestion.command);
-            let (form, answers) = suggestion_form(&envelope, &self.cwd);
+            let t = termide_i18n::t();
+            let (form, answers, title) = match envelope.suggestion.kind {
+                SuggestionKind::Command => {
+                    envelope.denied = self.suggestion_denied(&envelope.suggestion.command);
+                    let (form, answers) = suggestion_form(&envelope, &self.cwd);
+                    (form, answers, t.agent_suggest_title())
+                }
+                SuggestionKind::Goal => {
+                    let replaces = self
+                        .goal_task
+                        .as_ref()
+                        .map(|task| t.agent_suggest_replaces_goal_fmt(&task.goal));
+                    let (form, answers) = autorun_form(&envelope, replaces.as_deref());
+                    (form, answers, t.agent_suggest_goal_title())
+                }
+                SuggestionKind::Loop { .. } => {
+                    let replaces = self
+                        .loop_task
+                        .as_ref()
+                        .map(|task| t.agent_suggest_replaces_loop_fmt(&task.prompt));
+                    let (form, answers) = autorun_form(&envelope, replaces.as_deref());
+                    (form, answers, t.agent_suggest_loop_title())
+                }
+            };
             events.push(PanelEvent::SetStatusMessage {
-                message: termide_i18n::t().agent_suggest_title().to_string(),
+                message: title.to_string(),
                 is_error: false,
             });
             self.pending = Some(Pending::Suggestion {
@@ -644,6 +713,10 @@ impl AgentPanel {
         // The card is answered, so the call's wait rests; what follows — the
         // command running, or nothing at all — is not a wait on the user.
         self.end_permission_wait();
+        if envelope.suggestion.kind != SuggestionKind::Command {
+            self.answer_autorun(reply, envelope);
+            return;
+        }
         match reply {
             SuggestionReply::Run => {
                 // The tool runs it; the panel does not run it a second time.
@@ -659,6 +732,43 @@ impl AgentPanel {
                 let _ = envelope.reply.send(SuggestionReply::Copied);
             }
             SuggestionReply::Declined => {
+                let _ = envelope.reply.send(SuggestionReply::Declined);
+            }
+        }
+    }
+
+    /// Answer an offered goal or loop. `[Start]` starts it here, as the
+    /// `/goal` or `/loop` line typed would — one under way is stopped first,
+    /// as `/goal stop` would — and only then lets the call return, so the
+    /// agent hears of it once it is set. `[Edit first]` puts the line in the
+    /// input.
+    fn answer_autorun(&mut self, reply: SuggestionReply, envelope: SuggestionEnvelope) {
+        let suggestion = &envelope.suggestion;
+        match reply {
+            SuggestionReply::Run => {
+                let events = match suggestion.kind {
+                    SuggestionKind::Goal => {
+                        if self.goal_task.is_some() {
+                            self.stop_goal();
+                        }
+                        self.start_goal(suggestion.command.clone(), Some(suggestion.typed()))
+                    }
+                    SuggestionKind::Loop { interval } => {
+                        if self.loop_task.is_some() {
+                            self.stop_loop();
+                        }
+                        self.start_loop(suggestion.command.clone(), interval)
+                    }
+                    SuggestionKind::Command => Vec::new(),
+                };
+                self.pending_events.extend(events);
+                let _ = envelope.reply.send(SuggestionReply::Run);
+            }
+            SuggestionReply::Edit => {
+                self.set_input(&suggestion.typed());
+                let _ = envelope.reply.send(SuggestionReply::Edit);
+            }
+            SuggestionReply::Copied | SuggestionReply::Declined => {
                 let _ = envelope.reply.send(SuggestionReply::Declined);
             }
         }

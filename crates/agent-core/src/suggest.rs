@@ -13,25 +13,88 @@
 //! wakes regularly to notice an abort. A run with no one to ask — a subagent,
 //! headless mode — has no [`CommandSuggester`] in its
 //! [`ToolContext`](crate::ToolContext), and the tool says so to the model.
+//!
+//! The `suggest_goal` and `suggest_loop` tools offer unattended work the
+//! same way: a `/goal` or a `/loop` starts only from a card the user
+//! answered, as if they had typed it.
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::time::Duration;
 
 use crate::cancel::CancelToken;
 
+/// What an offer would start.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SuggestionKind {
+    /// A shell command (`suggest_command`).
+    #[default]
+    Command,
+    /// A `/goal`, its text the goal (`suggest_goal`).
+    Goal,
+    /// A `/loop`, its text the prompt re-run every `interval`, or back to
+    /// back without one (`suggest_loop`).
+    Loop { interval: Option<Duration> },
+}
+
 /// What the model offered, and what the user made of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Suggestion {
-    /// The command line, as the model would run it.
+    pub kind: SuggestionKind,
+    /// The command line as the model would run it; for a goal, the goal; for
+    /// a loop, its prompt.
     pub command: String,
     /// Why it is offered; may be empty. Shown to the user, not run.
     pub why: String,
 }
 
+impl Suggestion {
+    /// What the user would type in the panel's prompt to start it: the
+    /// command itself, or the `/goal …` or `/loop …` line.
+    #[must_use]
+    pub fn typed(&self) -> String {
+        match self.kind {
+            SuggestionKind::Command => self.command.clone(),
+            SuggestionKind::Goal => format!("/goal {}", self.command),
+            SuggestionKind::Loop { interval: None } => format!("/loop {}", self.command),
+            SuggestionKind::Loop {
+                interval: Some(every),
+            } => format!("/loop {} {}", format_interval(every), self.command),
+        }
+    }
+}
+
+/// Parse an interval as `/loop` takes it: `30s`, `5m`, `2h`, or a bare count
+/// of seconds; `None` for anything else or zero.
+#[must_use]
+pub fn parse_interval(token: &str) -> Option<Duration> {
+    let (digits, unit) = match token.chars().last() {
+        Some('s') => (&token[..token.len() - 1], 1),
+        Some('m') => (&token[..token.len() - 1], 60),
+        Some('h') => (&token[..token.len() - 1], 3600),
+        _ => (token, 1),
+    };
+    let n: u64 = digits.parse().ok()?;
+    (n > 0).then(|| Duration::from_secs(n * unit))
+}
+
+/// An interval in the largest unit [`parse_interval`] reads back exactly.
+#[must_use]
+pub fn format_interval(every: Duration) -> String {
+    let secs = every.as_secs().max(1);
+    if secs.is_multiple_of(3600) {
+        format!("{}h", secs / 3600)
+    } else if secs.is_multiple_of(60) {
+        format!("{}m", secs / 60)
+    } else {
+        format!("{secs}s")
+    }
+}
+
 /// How an offered command ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SuggestionReply {
-    /// The user confirmed it; run it.
+    /// The user confirmed it; run it. For a goal or a loop, the panel has
+    /// started it.
     Run,
     /// The user took the text to the input to edit before running.
     Edit,
@@ -105,6 +168,7 @@ mod tests {
 
     fn suggestion() -> Suggestion {
         Suggestion {
+            kind: SuggestionKind::Command,
             command: "gh issue comment 59 --repo termide/termide".into(),
             why: "post the reply".into(),
         }
@@ -119,6 +183,35 @@ mod tests {
         assert_eq!(envelope.denied, None);
         envelope.reply.send(SuggestionReply::Run).unwrap();
         assert_eq!(worker.join().unwrap(), SuggestionReply::Run);
+    }
+
+    /// A goal or a loop is offered as the line that would start it, and an
+    /// interval reads back as it was given.
+    #[test]
+    fn a_goal_or_a_loop_is_typed_as_its_command() {
+        let offer = |kind| Suggestion {
+            kind,
+            command: "get the build green".into(),
+            why: String::new(),
+        };
+        assert_eq!(
+            offer(SuggestionKind::Goal).typed(),
+            "/goal get the build green"
+        );
+        assert_eq!(
+            offer(SuggestionKind::Loop { interval: None }).typed(),
+            "/loop get the build green"
+        );
+        for token in ["30s", "5m", "2h", "90s"] {
+            let interval = parse_interval(token);
+            assert_eq!(
+                offer(SuggestionKind::Loop { interval }).typed(),
+                format!("/loop {token} get the build green")
+            );
+        }
+        assert_eq!(parse_interval("90"), Some(Duration::from_secs(90)));
+        assert_eq!(parse_interval("0m"), None);
+        assert_eq!(parse_interval("soon"), None);
     }
 
     #[test]

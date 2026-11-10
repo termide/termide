@@ -228,6 +228,8 @@ fn debug_moves_only(call: &ToolCall) -> bool {
 /// the permission rules decide it, and ask when they do not. And so does
 /// `suggest_command`, which runs nothing itself: the panel shows its card
 /// without `[Run]` in plan mode, so the user can still copy the command.
+/// `suggest_goal` and `suggest_loop` start nothing themselves either: what
+/// the user starts on their card runs in plan mode like a typed request.
 /// `send_message` stays refused: the agent it reaches is not in plan mode,
 /// and could make the change this one may not.
 pub struct PlanGuard {
@@ -259,7 +261,10 @@ impl PlanGuard {
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
         if self.mode.get() != Mode::Plan
-            || matches!(call.name.as_str(), "task" | "suggest_command" | "jobs")
+            || matches!(
+                call.name.as_str(),
+                "task" | "suggest_command" | "suggest_goal" | "suggest_loop" | "jobs"
+            )
             || ctx.tool.mcp
         {
             return ToolDecision::Allow;
@@ -910,8 +915,14 @@ impl PermissionHooks {
             // twice; the panel withholds `[Run]` where the mode or a rule
             // forbids the command. `recall` reads the project's own session
             // logs (under the configuration directory), its git history and
-            // its code, and writes nothing.
-            (_, "skill" | "question" | "suggest_command" | "recall") => Decision::Allow,
+            // its code, and writes nothing. A goal or a loop offered on a
+            // card starts only when the user picks `[Start]`, so it asks no
+            // one twice either.
+            (
+                _,
+                "skill" | "question" | "suggest_command" | "suggest_goal" | "suggest_loop"
+                | "recall",
+            ) => Decision::Allow,
             // `jobs` lists and stops only what the agent itself set going:
             // its own work, which it is not asked about in any mode.
             (_, "jobs") => Decision::Allow,

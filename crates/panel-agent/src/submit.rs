@@ -57,14 +57,7 @@ pub(crate) fn parse_loop_args(args: &str) -> (Option<Duration>, &str) {
 
 /// Parse a duration like `30s`, `5m`, `2h`, or a bare count of seconds.
 pub(crate) fn parse_duration(token: &str) -> Option<Duration> {
-    let (digits, unit) = match token.chars().last() {
-        Some('s') => (&token[..token.len() - 1], 1),
-        Some('m') => (&token[..token.len() - 1], 60),
-        Some('h') => (&token[..token.len() - 1], 3600),
-        _ => (token, 1),
-    };
-    let n: u64 = digits.parse().ok()?;
-    (n > 0).then(|| Duration::from_secs(n * unit))
+    termide_agent_core::parse_interval(token)
 }
 
 /// `/<name> args` at the start of a message: the command name and the
@@ -236,23 +229,7 @@ impl AgentPanel {
                     );
                     return vec![PanelEvent::NeedsRedraw];
                 }
-                let t = termide_i18n::t();
-                self.notice(
-                    match interval {
-                        Some(d) => t.agent_notice_looping_every_fmt(&termide_i18n::duration(d)),
-                        None => t.agent_notice_looping().to_string(),
-                    },
-                    NoticeKind::Info,
-                );
-                self.loop_task = Some(LoopTask {
-                    prompt: prompt.to_string(),
-                    interval,
-                    next_at: None,
-                    due_ms: None,
-                    iterations: 0,
-                    started: Instant::now(),
-                });
-                return self.loop_step();
+                return self.start_loop(prompt.to_string(), interval);
             }
             Some((GOAL_COMMAND, args)) => {
                 self.clear_input();
@@ -646,6 +623,33 @@ impl AgentPanel {
         task.due_ms = None;
         let prompt = task.prompt.clone();
         self.send(prompt)
+    }
+
+    /// Start a `/loop`: send `prompt` now, then again every `interval`, or
+    /// back to back without one. While the agent works, the first run joins
+    /// it as a steering message.
+    pub(crate) fn start_loop(
+        &mut self,
+        prompt: String,
+        interval: Option<Duration>,
+    ) -> Vec<PanelEvent> {
+        let t = termide_i18n::t();
+        self.notice(
+            match interval {
+                Some(d) => t.agent_notice_looping_every_fmt(&termide_i18n::duration(d)),
+                None => t.agent_notice_looping().to_string(),
+            },
+            NoticeKind::Info,
+        );
+        self.loop_task = Some(LoopTask {
+            prompt,
+            interval,
+            next_at: None,
+            due_ms: None,
+            iterations: 0,
+            started: Instant::now(),
+        });
+        self.loop_step()
     }
 
     /// Start a `/goal`: work autonomously toward `goal`, a judge deciding after

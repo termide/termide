@@ -296,7 +296,7 @@ pub fn run_judged_call(
 pub fn runs_alongside(call: &ToolCall, tools: &ToolRegistry) -> bool {
     match call.name.as_str() {
         "task" => true,
-        "question" | "suggest_command" => false,
+        "question" | "suggest_command" | "suggest_goal" | "suggest_loop" => false,
         _ => {
             let shell = tools
                 .get(&call.name)

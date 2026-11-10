@@ -11,6 +11,7 @@
 //! a file.
 
 mod args;
+mod autorun;
 mod capture;
 mod clean;
 mod debug;
@@ -33,6 +34,7 @@ use std::sync::Arc;
 
 use termide_agent_core::ToolRegistry;
 
+pub use autorun::{SuggestGoalTool, SuggestLoopTool};
 pub use clean::{clean_output, Cleaned};
 pub use debug::{parse_action as parse_debug_action, DebugAction, DebugCheck, DebugRun, DebugTool};
 pub use edit::EditTool;

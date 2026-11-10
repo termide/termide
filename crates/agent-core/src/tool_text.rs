@@ -36,7 +36,7 @@ use crate::tool::{Tool, ToolContext, ToolRegistry, ToolUpdate};
 pub const TOOLS_DIR: &str = "tools";
 
 /// The shipped texts of every built-in tool, by name.
-pub const SEED_TOOLS: [(&str, &str); 17] = [
+pub const SEED_TOOLS: [(&str, &str); 19] = [
     ("read", include_str!("../assets/tools/read.md")),
     ("edit", include_str!("../assets/tools/edit.md")),
     ("write", include_str!("../assets/tools/write.md")),
@@ -45,6 +45,14 @@ pub const SEED_TOOLS: [(&str, &str); 17] = [
     (
         "suggest_command",
         include_str!("../assets/tools/suggest_command.md"),
+    ),
+    (
+        "suggest_goal",
+        include_str!("../assets/tools/suggest_goal.md"),
+    ),
+    (
+        "suggest_loop",
+        include_str!("../assets/tools/suggest_loop.md"),
     ),
     ("task", include_str!("../assets/tools/task.md")),
     ("jobs", include_str!("../assets/tools/jobs.md")),

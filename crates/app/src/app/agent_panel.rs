@@ -27,7 +27,8 @@ use termide_agent_providers::{
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
     builtin_tools, JobsTool, OwnTasks, QuestionTool, ShellTool, SkillTool, SubagentOutcome,
-    SubagentRun, SubagentTask, SuggestCommandTool, TaskTool, TerminalsTool,
+    SubagentRun, SubagentTask, SuggestCommandTool, SuggestGoalTool, SuggestLoopTool, TaskTool,
+    TerminalsTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
 use termide_config::{AiSettings, Connection, WebSettings};
@@ -712,12 +713,14 @@ impl AgentCatalog for FsCatalog {
         } else {
             base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref())
         };
-        // Someone watches the panel's agent to answer its questions and to
-        // confirm a command it is offered; a subagent and headless mode build
-        // their tools without either.
+        // Someone watches the panel's agent to answer its questions, to
+        // confirm a command it is offered and to start a goal or a loop it
+        // offers; a subagent and headless mode build their tools without them.
         if backend.is_none() {
             tools.insert(Arc::new(QuestionTool));
             tools.insert(Arc::new(SuggestCommandTool));
+            tools.insert(Arc::new(SuggestGoalTool));
+            tools.insert(Arc::new(SuggestLoopTool));
             // The agents of the other panels are there to write to.
             for tool in peers::peer_tools(name, &self.project_root) {
                 tools.insert(tool);
@@ -4034,6 +4037,8 @@ mod tests {
         tools.insert(Arc::new(termide_agent_web::WebSearchTool::new(web)));
         tools.insert(Arc::new(QuestionTool));
         tools.insert(Arc::new(SuggestCommandTool));
+        tools.insert(Arc::new(SuggestGoalTool));
+        tools.insert(Arc::new(SuggestLoopTool));
         let run: SubagentRun = Arc::new(|_, _, _, _| unreachable!());
         tools.insert(Arc::new(TaskTool::new(
             vec![("review".into(), "Reviews".into())],
@@ -5849,9 +5854,9 @@ done"#;
 
         let default = catalog.resolve(DEFAULT_AGENT).unwrap();
         // The built-in four and `terminals`, plus the two that speak to the
-        // user watching the panel, `question` and `suggest_command`, and the
-        // two that speak to the agents of the other panels, `fork`, and the
-        // debugger.
+        // user watching the panel, `question` and the `suggest_*` cards, and
+        // the two that speak to the agents of the other panels, `fork`, and
+        // the debugger.
         assert_eq!(
             default.tools.names(),
             [
@@ -5862,6 +5867,8 @@ done"#;
                 "terminals",
                 "question",
                 "suggest_command",
+                "suggest_goal",
+                "suggest_loop",
                 "agents",
                 "send_message",
                 "fork",

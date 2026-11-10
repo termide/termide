@@ -278,8 +278,9 @@ Codex and Gemini CLI also get the tools of termide's MCP servers, served over
 the same local MCP server beside their own and checked as Claude Code's calls
 are; their own MCP configuration still applies. Of termide's own tools they get
 those they have no counterpart of: `recall`, `skill` (whose description lists
-the skills, since their own prompt does not), `question` and
-`suggest_command`, each present when the agent definition has it. They read the list of an MCP
+the skills, since their own prompt does not), `question`,
+`suggest_command`, `suggest_goal` and `suggest_loop`, each present when the
+agent definition has it. They read the list of an MCP
 server's tools only once, when their session starts, so the session waits up
 to ten seconds for termide's MCP servers to answer. A server that connects
 later, or is reloaded, reaches them in the next session.
@@ -1115,8 +1116,9 @@ session log on a dead branch.
 
 The agent's built-in tools are listed below, plus those its MCP servers
 provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
-Code on termide's tools, also have **question** and **suggest_command**,
-described after the list, **agents** and **send_message** (see
+Code on termide's tools, also have **question**, **suggest_command**,
+**suggest_goal** and **suggest_loop**, described after the list, **agents**
+and **send_message** (see
 [Talking to other panels](#talking-to-other-panels)), **fork** (see
 [Forking part of the work](#forking-part-of-the-work)), and **debug** (see
 [Debugging](#debugging)).
@@ -1209,6 +1211,22 @@ rules: where plan mode is on or a `deny` rule covers the command, **Run** and
 no permission — it changes nothing by itself — so the agent can always reach you
 this way; only your confirmation reaches the shell. Like `question`, the tool
 belongs to the panel's agent alone, Claude Code included.
+
+**suggest_goal** and **suggest_loop** offer you unattended work instead of a
+`/goal` or `/loop` line to paste: the agent reaches for them when a task will
+take many turns and can be checked as done, or must be done again and again —
+polling a CI run, watching a deploy. The card shows the goal, or the loop's
+prompt and how often it runs, why it is offered and, when one is under way,
+the goal or loop it would replace. **Start** starts it exactly as the
+`/goal` or `/loop` line typed would (see [Service prompts](#service-prompts)) — a goal offered during a
+run takes its first turn once the run ends, a loop's prompt joins the run —
+and the one under way is stopped first; **Edit first** puts that line in the
+prompt for you to change and send; **Don't start**, or `Esc`, declines, and
+the agent is told not to offer it again. Nothing starts without the card, so
+the goal or loop is yours, stopped as any other. Offering costs no permission,
+in plan mode too, where the goal's turns run under plan mode like a request
+you type. Like `question`, these tools belong to the panel's agent alone,
+Claude Code included.
 
 ### Terminal sessions
 
@@ -1718,7 +1736,8 @@ on offer. A tool switched off for the session in the tools menu stays off,
 and a `deny` rule refuses it even when its server calls it read-only.
 `task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
 says, so it only reads. `suggest_command` puts its card up with only **Copy**
-and **Don't run**. `send_message` is refused: the panel it reaches is not in
+and **Don't run**; `suggest_goal` and `suggest_loop` keep **Start**, since
+what they start runs in plan mode too. `send_message` is refused: the panel it reaches is not in
 plan mode, and could make the change this one may not; so is `fork`, whose
 copy is not in plan mode either. `debug` only reads the
 session (`state`); starting, stepping or stopping the program is refused.
@@ -2500,8 +2519,9 @@ to change how the answer is drawn or cited.
 
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `shell`, `question`,
-`suggest_command`, `task`, `skill`, `fetch`, `web_search`, `recall`, `agents`,
-`send_message`, `fork`, `debug`, `jobs` and `terminals`, seeded
+`suggest_command`, `suggest_goal`, `suggest_loop`, `task`, `skill`, `fetch`,
+`web_search`, `recall`, `agents`, `send_message`, `fork`, `debug`, `jobs` and
+`terminals`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list
