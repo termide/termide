@@ -13,8 +13,10 @@ url.workspace = true
 percent-encoding = "2"
 log = "0.4"
 
-# SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed).
-russh = "0.65"
+# SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed). Its
+# crypto on ring, as the TLS below, rather than the default aws-lc-rs, a C
+# library built with cmake: one crypto backend in the binary, and no cmake.
+russh = { version = "0.65", default-features = false, features = ["flate2", "ring", "rsa"] }
 russh-sftp = "2.2"
 # Hashed known_hosts names (`|1|salt|hash`); the versions russh already uses.
 hmac = "0.13"
