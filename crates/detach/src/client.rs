@@ -187,27 +187,18 @@ fn wait_for_exit(instance: &registry::InstanceInfo, timeout: Duration) -> bool {
 
 /// Ask this terminal what it can do, on the hosted instance's behalf.
 ///
-/// Must run before raw mode: the Kitty query is a request/response handshake
-/// that needs cooked-mode readiness. Over SSH the probe is skipped entirely —
-/// a terminal that never answers would hang the attach — which matches what a
-/// local termide does in the same situation.
+/// Over SSH the Kitty query is left out, as a local termide leaves it out
+/// there; the wait for a terminal that answers nothing is bounded.
 fn probe_terminal() -> ClientCaps {
-    let via_ssh =
-        std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
-    // The width probe has a bounded wait of its own and is answered by any
-    // terminal that answers cursor-position reports, SSH or not.
-    let vs16_wide = termide_core::probe_variation_selector_width().unwrap_or(false);
-    if via_ssh {
-        return ClientCaps {
-            kitty: false,
-            via_ssh: true,
-            vs16_wide,
-        };
-    }
+    let via_ssh = termide_core::running_over_ssh();
+    // Both questions in one round trip with a bounded wait; the width one is
+    // answered by any terminal that answers cursor-position reports, SSH or
+    // not.
+    let probe = termide_core::probe_terminal(!via_ssh);
     ClientCaps {
-        kitty: crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false),
-        via_ssh: false,
-        vs16_wide,
+        kitty: probe.keyboard_enhancement,
+        via_ssh,
+        vs16_wide: probe.vs16_wide.unwrap_or(false),
     }
 }
 

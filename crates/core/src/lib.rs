@@ -30,6 +30,7 @@ pub mod panel;
 pub mod scrollbar;
 pub mod terminal_caps;
 pub mod terminal_modes;
+pub mod terminal_probe;
 pub mod util;
 pub mod wide_cells;
 
@@ -58,10 +59,11 @@ pub use terminal_modes::{
     adopt_variation_selector_width, enter_terminal_modes, leave_terminal_modes,
     probe_variation_selector_width, variation_selector_width_override, VS16_WIDTH_ENV,
 };
+pub use terminal_probe::{probe_terminal, TerminalProbe};
 pub use wide_cells::mark_variation_selector_tails;
 // Re-export keyboard primitives so panels can stay on `termide_core` as
 // their dependency surface.
-pub use termide_keyboard::{KeyNormalizer, KeyboardCaps};
+pub use termide_keyboard::{running_over_ssh, KeyNormalizer, KeyboardCaps};
 
 // Re-export theme and config for convenience
 pub use termide_config::Config;

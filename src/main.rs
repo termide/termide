@@ -675,11 +675,26 @@ fn main() -> Result<()> {
     enable_raw_mode()?;
     let stdout = io::stdout();
 
-    // Check if terminal supports enhanced keyboard protocol (kitty protocol).
-    // This enables proper Alt+Cyrillic handling in modern terminals like Ghostty, Kitty, WezTerm.
-    // Skip on SSH: the detection sends escape sequences and waits for a response,
-    // which can hang indefinitely if the SSH terminal doesn't reply.
-    let keyboard_caps = termide_keyboard::KeyboardCaps::detect(config.general.report_all_keys);
+    // Two questions for the host terminal, asked in one round trip: whether
+    // it speaks the Kitty keyboard protocol (proper Alt+Cyrillic in Ghostty,
+    // Kitty, WezTerm; not asked over SSH, where some bridges swallow the
+    // query), and whether `⏱️`-style emoji take one column or two, which the
+    // frame diff must agree with. The width glyph is drawn on the alternate
+    // screen and cleared. A hosted instance has the daemon at the other end of
+    // its PTY, which answers no query: there the attach client probes its own
+    // terminal and hands the answers over.
+    let via_ssh = termide_keyboard::running_over_ssh();
+    let probe = if hosted {
+        termide_core::TerminalProbe::default()
+    } else {
+        crossterm::execute!(io::stdout(), crossterm::terminal::EnterAlternateScreen)?;
+        termide_core::probe_terminal(!via_ssh)
+    };
+    let keyboard_caps = termide_keyboard::KeyboardCaps::from_probe(
+        probe.keyboard_enhancement,
+        config.general.report_all_keys,
+        via_ssh,
+    );
     let keyboard_enhanced = keyboard_caps.kitty_full;
 
     let title = format!(
@@ -696,16 +711,7 @@ fn main() -> Result<()> {
     // connects to a detached instance gets exactly these modes and no other.
     termide_core::enter_terminal_modes(&keyboard_caps, Some(&title))?;
 
-    // Whether `⏱️`-style emoji take one column or two is the host terminal's
-    // call, and the frame diff must agree with it. A hosted instance has the
-    // daemon at the other end of its PTY, which answers no query: there the
-    // attach client probes its own terminal and hands the answer over.
-    let vs16_probe = if hosted {
-        None
-    } else {
-        Some(termide_core::probe_variation_selector_width())
-    };
-    let vs16_wide = termide_core::adopt_variation_selector_width(vs16_probe.flatten());
+    let vs16_wide = termide_core::adopt_variation_selector_width(probe.vs16_wide);
 
     // In a detached instance, the daemon signals us when a client attaches.
     // A no-op otherwise.
@@ -747,17 +753,17 @@ fn main() -> Result<()> {
     stderr_guard::divert();
 
     // Re-emit any deferred startup warnings now that the logger is up
-    match vs16_probe {
-        Some(Some(answer)) => log::info!(
+    match (hosted, probe.vs16_wide) {
+        (false, Some(answer)) => log::info!(
             "Host terminal makes emoji + VS16 (⏱️) {} wide; frame diff follows it",
             if answer { "two columns" } else { "one column" }
         ),
-        Some(None) => log::warn!(
+        (false, None) => log::warn!(
             "Host terminal did not answer the VS16 width probe; assuming {} (set {}=0|1 to override)",
             if vs16_wide { "two columns" } else { "one column" },
             termide_core::VS16_WIDTH_ENV
         ),
-        None => log::info!("Hosted instance: VS16 width comes from the attach client"),
+        (true, _) => log::info!("Hosted instance: VS16 width comes from the attach client"),
     }
     // — these end up in the Journal panel where users actually look.
     for msg in config_load_warnings {

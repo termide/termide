@@ -56,7 +56,7 @@ pub fn enter_terminal_modes(caps: &KeyboardCaps, title: Option<&str>) -> io::Res
             | KeyboardEnhancementFlags::REPORT_EVENT_TYPES;
 
         // REPORT_ALL_KEYS_AS_ESCAPE_CODES is what makes macOS `Option+<letter>`
-        // reach us as `Alt+<letter>`. `KeyboardCaps::detect` restricts it to
+        // reach us as `Alt+<letter>`. `KeyboardCaps::from_probe` restricts it to
         // macOS and honours `general.report_all_keys`, because it also stops
         // dead-key and IME composition from reaching the app.
         if caps.all_keys {

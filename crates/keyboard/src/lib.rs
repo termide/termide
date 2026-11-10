@@ -6,7 +6,7 @@
 
 mod normalize;
 
-pub use normalize::{KeyNormalizer, KeyboardCaps};
+pub use normalize::{running_over_ssh, KeyNormalizer, KeyboardCaps};
 
 /// US-QWERTY shifted-punctuation → unshifted equivalent.
 ///

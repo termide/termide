@@ -5432,6 +5432,7 @@ dependencies = [
  "anyhow",
  "crossterm",
  "dirs",
+ "libc",
  "ratatui",
  "regex",
  "tempfile",

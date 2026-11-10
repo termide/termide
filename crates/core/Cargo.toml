@@ -23,5 +23,8 @@ termide-project = { path = "../project" }
 termide-file-ops = { path = "../file-ops" }
 termide-keyboard = { path = "../keyboard" }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

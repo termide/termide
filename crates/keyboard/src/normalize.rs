@@ -31,7 +31,7 @@ use crate::{cyrillic_to_latin, unshifted_punctuation};
 
 /// Snapshot of the terminal's keyboard-protocol capabilities.
 ///
-/// Constructed once at startup (see `KeyboardCaps::detect`) and threaded
+/// Constructed once at startup (see `KeyboardCaps::from_probe`) and threaded
 /// through `KeyNormalizer`. The fields mirror the Kitty keyboard
 /// enhancement flags that termide pushes in `src/main.rs`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -52,37 +52,18 @@ pub struct KeyboardCaps {
     /// terminal also emits standalone modifier-key events, which
     /// `crates/core/src/event.rs` drops.
     pub all_keys: bool,
-    /// `true` when termide ran inside an SSH session and skipped the
-    /// detection probe (probe blocks indefinitely on some bridges).
+    /// `true` when termide ran inside an SSH session and did not ask for
+    /// the keyboard protocol ([`running_over_ssh`]).
     pub via_ssh: bool,
 }
 
-impl KeyboardCaps {
-    /// Probe terminal capabilities. Returns `Default` (all false) when:
-    /// - running inside SSH (probe is skipped to avoid hangs);
-    /// - probe failed or returned `false`.
-    ///
-    /// `request_all_keys` carries `general.report_all_keys` from the
-    /// config. It is honoured on macOS only: elsewhere `Option`/`Alt`
-    /// does not compose text, so `Alt+<letter>` already arrives with the
-    /// ALT bit and the flag would only cost dead-key/compose input.
-    ///
-    /// Call this **before** `enable_raw_mode` / `PushKeyboardEnhancementFlags` —
-    /// the probe is a query/response handshake that needs cooked-mode
-    /// readiness.
-    pub fn detect(request_all_keys: bool) -> Self {
-        let via_ssh =
-            std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some();
-        if via_ssh {
-            return Self {
-                via_ssh: true,
-                ..Self::default()
-            };
-        }
-        let supported = crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false);
-        Self::from_probe(supported, request_all_keys, false)
-    }
+/// Whether termide runs inside an SSH session, where it does not ask the
+/// terminal for the Kitty keyboard protocol: some bridges swallow the query.
+pub fn running_over_ssh() -> bool {
+    std::env::var_os("SSH_CONNECTION").is_some() || std::env::var_os("SSH_TTY").is_some()
+}
 
+impl KeyboardCaps {
     /// Build capabilities from an already-known probe result.
     ///
     /// A termide hosted in a detached session cannot run the probe itself:
