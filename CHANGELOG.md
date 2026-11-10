@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A forked panel's counter stays in sight.** The title of an agent panel is cut from its end to fit, which took the counter off a fork's name — `Refactor (2)` and `Refactor (3)` both read `Agent: Refactor…`. The counter now sits next to the label, `Agent (2): Refactor`.
 
 ### Security
+- **A debugger is no longer looked up in a relative `PATH` entry.** A `PATH` with `.` or an empty entry made termide look for `lldb-dap`, `gdb`, `dlv` or Python in the directory it was started in, which may be a project's, and start whatever that project put there under the name. Only absolute entries are searched now, as for plugins.
 - **Allowing one `terminals send` for the session no longer lets every later one through.** The answer was kept as a rule for `send` alone, so any later keys typed into any of the agent's terminals ran unasked, past the checks `shell` goes through. A whole line typed into a shell at its prompt is now judged as the `shell` command it runs, under the `shell` rules; any other `send` — input to a program, keys that edit the line — asks every time, shows all it types and offers no answer that outlasts it. See [Terminal sessions](doc/en/agent.md#terminal-sessions).
 
 ## [0.49.0] - 2026-11-05

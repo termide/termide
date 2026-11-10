@@ -277,7 +277,7 @@ command = "/opt/homebrew/opt/llvm/bin/lldb-dap"  # in place of the one on PATH (
 args = ["--log"]                                 # flags for every launch
 ```
 
-- `command` names the debugger's program: a path (`~/` stands for the home directory), or a name looked up on `PATH`. For `debugpy` and `pdb` it is the Python to run. A path that does not exist makes the debugger count as not installed rather than falling back to another.
+- `command` names the debugger's program: a path (`~/` stands for the home directory), or a name looked up in the absolute directories of `PATH` (a relative entry such as `.` is skipped, so a project cannot plant a debugger termide would start). For `debugpy` and `pdb` it is the Python to run. A path that does not exist makes the debugger count as not installed rather than falling back to another.
 - `args` are the debugger's flags for every launch, in place of its default ones; a launch's `debugger_args` come after them. Unset keeps the defaults, `[]` drops them. The only default today is `--only-same-user=false` for `dlv-dap` where `/proc/net/tcp` cannot be read (Termux on Android): Delve's same-user check would refuse every connection there. Setting `args` for `dlv-dap` in such a system replaces it, so list it again if you still need it.
 - The arguments Termide needs to talk to an adapter (`dap --listen=…` for Delve, `-i dap` for GDB, `-m debugpy.adapter`) and its scripts for command-line debuggers are always given and cannot be changed.
 - `native` is tried in order for a Rust file debugged without a command; it takes `lldb-dap`, `gdb-dap`, `lldb` and `gdb`.

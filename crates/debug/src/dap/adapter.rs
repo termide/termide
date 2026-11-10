@@ -317,8 +317,17 @@ fn resolve_program_in(command: &str, home: Option<PathBuf>) -> Option<PathBuf> {
 
 /// `name` in a directory of `PATH`.
 pub fn find_in_path(name: &str) -> Option<PathBuf> {
-    let paths = std::env::var_os("PATH")?;
-    std::env::split_paths(&paths).find_map(|dir| {
+    find_in_path_var(name, &std::env::var_os("PATH")?)
+}
+
+/// `name` in an absolute directory of `paths`: a relative entry (`.`, an
+/// empty one) would resolve against the directory termide was started in,
+/// which may be a project's, and run a program that project planted.
+fn find_in_path_var(name: &str, paths: &std::ffi::OsStr) -> Option<PathBuf> {
+    std::env::split_paths(paths).find_map(|dir| {
+        if !dir.is_absolute() {
+            return None;
+        }
         let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
@@ -357,6 +366,29 @@ mod tests {
         );
         assert_eq!(resolve_program_in("~/go/bin/gdb", home), None);
         assert_eq!(resolve_program_in("~/go/bin/dlv", None), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn path_lookup_skips_relative_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("dlv"), "").unwrap();
+        let absolute = std::env::join_paths([dir.path()]).unwrap();
+        assert_eq!(
+            find_in_path_var("dlv", &absolute),
+            Some(dir.path().join("dlv"))
+        );
+        // The same directory named relative to the current one, which it
+        // resolves to, is not searched.
+        let cwd = std::env::current_dir().unwrap();
+        let mut relative = PathBuf::new();
+        for _ in cwd.components().skip(1) {
+            relative.push("..");
+        }
+        relative.push(dir.path().strip_prefix("/").unwrap());
+        assert!(relative.join("dlv").is_file(), "the entry resolves");
+        let relative = std::env::join_paths([relative]).unwrap();
+        assert_eq!(find_in_path_var("dlv", &relative), None);
     }
 
     #[test]
