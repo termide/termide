@@ -5894,6 +5894,26 @@ fn switching_off_before_the_first_request_keeps_it_out_of_the_context() {
 }
 
 #[test]
+fn a_new_session_keeps_what_the_last_switched_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![])
+    });
+    panel.offered_tools = vec!["read".into(), "shell".into()];
+    panel.apply_toolset(&["read".to_string()]);
+    let off: BTreeSet<String> = ["shell".to_string()].into();
+    let first = panel.session_path().unwrap().to_path_buf();
+    assert!(panel.switch_session(None));
+    assert_ne!(panel.session_path().unwrap(), first.as_path());
+    assert_eq!(panel.toolset_off, off);
+    assert_eq!(panel.context_off, off);
+    // The new log records it, so a reopen comes back with it.
+    let session = Session::open(panel.session_path().unwrap()).unwrap();
+    assert_eq!(session.current_toolset(), Some(vec!["shell".to_string()]));
+}
+
+#[test]
 fn switching_off_mid_session_refuses_until_a_compaction_takes_it_out() {
     let mut panel = panel(vec![]);
     panel.offered_tools = vec!["read".into(), "shell".into()];

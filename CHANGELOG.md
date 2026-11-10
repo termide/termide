@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **A model that stutters is caught.** The loop guard counted repeated sentences only, so a model repeating one short piece ("PR PR PR …") ran on to the output limit; the last 2000 bytes repeating a piece of up to 64 bytes now count as a loop too.
 - **A reply that hit the output limit with nothing in it no longer ends the run.** A server that holds a tool call back until it closes sends nothing of a model stuck inside one, and the run ended on the empty reply as if the model had answered. The panel now warns, the model is told and asked for a smaller step, and a second such reply, or a loop, stops the run.
+- **A new session keeps the tools switched off.** A session started in an agent panel came up with every tool on, though it kept the permissions granted for the session; it now begins with the set the one left had switched off, kept out of its context and written to its log.
 - **`task` describes `background` as it works.** The parameter's description told the model a background task ran in a panel of its own; it runs out of sight.
 
 ## [0.49.0] - 2026-11-05

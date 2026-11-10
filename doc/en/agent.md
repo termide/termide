@@ -416,7 +416,8 @@ session an unchecked item stays in the context, so as not to throw away the
 provider's prompt cache, but every call to it is refused; it leaves the
 context at the next moment the cache is lost anyway — a compaction, an agent
 or model switch — and cannot be switched back on in that session. The set is
-kept in the session log, so a reopened session comes back with it. Claude Code
+kept in the session log, so a reopened session comes back with it, and a new
+session started in the panel begins with it, out of the context. Claude Code
 has the checklist too: it is served termide's tools when its session starts,
 so an unchecked item is refused from the first request on rather than kept out
 of its context. Codex and Gemini CLI have it once an MCP server of termide's

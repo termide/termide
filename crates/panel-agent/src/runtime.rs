@@ -83,18 +83,18 @@ pub(crate) fn start_session(
 /// What `session` switched off, and the profile to run it with when that
 /// differs from what is running: another agent than `current`, or another
 /// set switched off than `built_without` (what the running profile was built
-/// without). `None` keeps the running profile.
+/// without). `None` keeps the running profile. A session that recorded no
+/// set takes `inherited`.
 pub(crate) fn session_agent(
     catalog: &dyn AgentCatalog,
     current: &str,
     built_without: &BTreeSet<String>,
+    inherited: &BTreeSet<String>,
     session: Option<&Session>,
 ) -> (BTreeSet<String>, Option<(String, AgentProfile)>) {
     let off: BTreeSet<String> = session
         .and_then(Session::current_toolset)
-        .unwrap_or_default()
-        .into_iter()
-        .collect();
+        .map_or_else(|| inherited.clone(), |set| set.into_iter().collect());
     let recorded = session
         .and_then(Session::current_agent)
         .filter(|name| name != current);

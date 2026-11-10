@@ -1240,6 +1240,7 @@ impl AgentPanel {
             setup.catalog.as_ref(),
             &agent,
             &BTreeSet::new(),
+            &BTreeSet::new(),
             session.as_ref(),
         );
         // What the running profile was built without: the session's set when

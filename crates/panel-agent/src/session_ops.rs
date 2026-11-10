@@ -1,6 +1,7 @@
 //! Session operations: switching, renaming and resuming sessions, deleting
 //! one, its summary, undo, and the `/handoff` brief.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::sync::{Arc, PoisonError};
 
@@ -72,15 +73,30 @@ impl AgentPanel {
         // what its reviewer spent last included.
         self.sync_autorun();
         self.take_reviewer_spent();
+        // A new session starts with the tools the one left had switched off,
+        // as it keeps the permissions; a resumed one has its own set.
+        let inherited = if session.is_none() {
+            self.toolset_off.clone()
+        } else {
+            BTreeSet::new()
+        };
         let session = session.or_else(|| {
-            start_session(
+            let mut session = start_session(
                 self.session_dir.as_deref(),
                 &self.cwd,
                 &self.connection,
                 &self.provider_kind,
                 &self.model,
                 &self.agent,
-            )
+            )?;
+            // Written to its log, so a reopen comes back with it.
+            if !inherited.is_empty() {
+                let disabled: Vec<String> = inherited.iter().cloned().collect();
+                if let Err(error) = session.append_toolset(&disabled) {
+                    log::warn!("agent session write failed: {error}");
+                }
+            }
+            Some(session)
         });
         let model = session_model(&self.configured_model, session.as_ref());
         self.checkpoints = checkpoint_store(self.session_dir.as_deref(), session.as_ref());
@@ -93,6 +109,7 @@ impl AgentPanel {
             self.catalog.as_ref(),
             &agent,
             &self.context_off,
+            &inherited,
             session.as_ref(),
         );
         // The model the agent's definition names, which an external agent is
