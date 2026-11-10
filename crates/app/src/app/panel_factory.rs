@@ -155,25 +155,6 @@ impl App {
         Ok(())
     }
 
-    /// Open config file in editor
-    pub(super) fn open_config_in_editor(&mut self) -> Result<()> {
-        use termide_config::Config;
-
-        let config_path = match Config::config_file_path() {
-            Ok(path) => path,
-            Err(e) => {
-                log::warn!("Failed to get config path: {}", e);
-                self.show_error_modal(format!("Failed to get config path: {}", e));
-                return Ok(());
-            }
-        };
-
-        self.close_help_panels();
-
-        let _ = self.open_editor_for_file(config_path);
-        Ok(())
-    }
-
     /// Open Settings modal with tabbed interface.
     ///
     /// The modal is seeded from `state.config` (the effective config —

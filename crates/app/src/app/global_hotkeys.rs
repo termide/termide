@@ -409,7 +409,8 @@ impl App {
             "new_editor" => self.handle_new_editor()?,
             "new_journal" => self.handle_new_journal()?,
             "open_help" => self.handle_new_help()?,
-            "open_preferences" => self.open_config_in_editor()?,
+            // As its key and the menu do: the settings window.
+            "open_preferences" => self.open_settings_modal(),
             "open_projects" => self.handle_open_projects_modal()?,
             "new_project" => self.handle_new_project()?,
             "open_git_status" => self.handle_open_git_status()?,
