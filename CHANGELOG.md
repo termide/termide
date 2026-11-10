@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The database panel's "clear all filters" has a key that works.** Its default `Alt+F` is also the global "new file manager", which is matched first, so the key opened a file manager. It is now `Shift+F3`, beside the `F3` filter; a test keeps every panel default clear of the global keys.
 - **The git log's keys follow the settings.** `info` and `view_diff` under `[git_log.keybindings]` were read but never checked — `Space`, `d` and `Ctrl+R` were fixed in the code — so rebinding them did nothing; they now work, with a new `refresh` (`Ctrl+R`). The `C` "checkout" key, which only said it was not implemented, is gone with its `checkout` setting; branches are checked out from the git status panel.
 - **A terminal that answers no queries no longer holds startup for seconds.** termide asked the host terminal about the keyboard protocol and the emoji width one question at a time, each waiting up to two seconds for a reply, so a terminal or relay that stayed silent delayed the first frame by about four seconds — and so did every start of a detached instance, which asked the session daemon. The questions now go out together, the terminal's reply to the last one ends the wait, a silent one is given up on after a second, and a detached instance asks nothing, taking the answers from the client as before.
+- **The battery indicator follows the battery.** A new reading was drawn only when something else on the screen changed; the menu bar is now redrawn whenever any of its indicators would read differently.
 
 ### Security
 - **A debugger is no longer looked up in a relative `PATH` entry.** A `PATH` with `.` or an empty entry made termide look for `lldb-dap`, `gdb`, `dlv` or Python in the directory it was started in, which may be a project's, and start whatever that project put there under the name. Only absolute entries are searched now, as for plugins.
@@ -35,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 - **A long agent session no longer slows the panel while the agent works.** Each spinner frame copied every line of the session again, and each streamed piece of an answer laid out the whole answer anew. Now a frame lays out only what changed: the spinner, or the block being written, and of an answer only what came since its last finished paragraph or code block. On a session of 2,000 blocks a spinner frame went from 0.8 ms to a few µs, and a frame of a 40 KB answer streaming in from 2.5 ms to 0.3 ms.
+- **An idle termide no longer redraws for figures it does not show.** Every resource sample that moved used RAM by a megabyte redrew the whole screen, though the menu bar shows it in gigabytes; a sample now redraws only when an indicator would read differently, or the clock turns a minute.
 
 ## [0.49.0] - 2026-11-05
 

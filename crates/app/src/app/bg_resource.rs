@@ -9,27 +9,24 @@ use super::App;
 impl App {
     /// Update system resource monitoring (CPU, RAM, network)
     /// Respects the configured update interval.
-    /// Only triggers redraw if display values actually changed.
+    /// Redraws only when the menu bar would show something else: a sample
+    /// that moves RAM by megabytes the bar rounds to gigabytes draws nothing,
+    /// a new minute on the clock does.
     pub(super) fn update_system_resources(&mut self) {
         let interval =
             std::time::Duration::from_millis(self.state.config.general.resource_monitor_interval);
         let elapsed = self.state.last_resource_update.elapsed();
 
         if elapsed >= interval {
-            let old_stats = self.state.system_monitor.stats();
-            let old_net_down = self.state.system_monitor.net_download_rate();
-            let old_net_up = self.state.system_monitor.net_upload_rate();
+            let shown = self.state.system_monitor.readout();
             self.state.system_monitor.update();
             self.state.last_resource_update = std::time::Instant::now();
-            let new_stats = self.state.system_monitor.stats();
-            let new_net_down = self.state.system_monitor.net_download_rate();
-            let new_net_up = self.state.system_monitor.net_upload_rate();
-            // Only redraw if display values actually changed
-            if old_stats.cpu_usage.round() as u8 != new_stats.cpu_usage.round() as u8
-                || old_stats.memory_used / (1024 * 1024) != new_stats.memory_used / (1024 * 1024)
-                || old_net_down / 1024 != new_net_down / 1024
-                || old_net_up / 1024 != new_net_up / 1024
-            {
+            if self.state.system_monitor.readout() != shown {
+                self.state.needs_redraw = true;
+            }
+            let clock = termide_ui_render::menu::clock_text();
+            if clock != self.state.clock_shown {
+                self.state.clock_shown = clock;
                 self.state.needs_redraw = true;
             }
             self.update_disk_space();

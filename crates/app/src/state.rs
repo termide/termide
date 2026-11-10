@@ -124,6 +124,9 @@ pub struct AppState {
     pub system_monitor: SystemMonitor,
     /// Last time system resources were updated
     pub last_resource_update: std::time::Instant,
+    /// The menu bar clock's time at the last resource update: a new minute
+    /// is redrawn on the next update, as nothing else redraws the clock.
+    pub clock_shown: String,
     /// Currently open resource modal (for auto-refresh in tick)
     pub resource_modal_kind: Option<ResourceModalKind>,
     /// Last time resource modal was refreshed
@@ -277,6 +280,7 @@ impl AppState {
             runtime_overrides: termide_config::RuntimeOverrides::default(),
             system_monitor: SystemMonitor::new(),
             last_resource_update: std::time::Instant::now(),
+            clock_shown: termide_ui_render::menu::clock_text(),
             resource_modal_kind: None,
             last_resource_modal_refresh: None,
             last_layout_save: None,

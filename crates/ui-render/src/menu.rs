@@ -248,6 +248,11 @@ pub fn resource_color(usage: u8, theme: &Theme) -> Color {
     }
 }
 
+/// The time the menu bar's clock shows now.
+pub fn clock_text() -> String {
+    Local::now().format("%H:%M").to_string()
+}
+
 /// The texts of the indicators on the right of the menu bar.
 struct IndicatorTexts {
     net_down: String,
@@ -273,7 +278,7 @@ impl IndicatorTexts {
             battery: params
                 .battery
                 .map(|b| format!("{}{}% ", battery_icon(b), b.percent)),
-            clock: format!(" {} ", Local::now().format("%H:%M")),
+            clock: format!(" {} ", clock_text()),
         }
     }
 

@@ -64,6 +64,47 @@ pub fn format_ram_bytes(used: u64, total: u64) -> (String, RamUnit) {
     (format!("{used}/{total}"), unit)
 }
 
+/// What the menu bar shows of the system's resources, in the units it shows
+/// them in: two equal readouts draw the same indicators, so a new sample
+/// needs a redraw only when its readout differs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Readout {
+    cpu_percent: u8,
+    /// Picks the RAM indicator's colour.
+    ram_percent: u8,
+    ram: (String, RamUnit),
+    net_down: String,
+    net_up: String,
+    battery: Option<BatteryInfo>,
+}
+
+impl Readout {
+    /// The readout of one sample: CPU load in percent, RAM used and total
+    /// in bytes, network rates in bytes per second.
+    pub fn of(
+        cpu_usage: f32,
+        memory_used: u64,
+        memory_total: u64,
+        net_down_rate: u64,
+        net_up_rate: u64,
+        battery: Option<BatteryInfo>,
+    ) -> Self {
+        let ram_percent = if memory_total > 0 {
+            ((memory_used as f64 / memory_total as f64) * 100.0).round() as u8
+        } else {
+            0
+        };
+        Self {
+            cpu_percent: cpu_usage.round() as u8,
+            ram_percent,
+            ram: format_ram_bytes(memory_used, memory_total),
+            net_down: format_net_speed(net_down_rate),
+            net_up: format_net_speed(net_up_rate),
+            battery,
+        }
+    }
+}
+
 /// Battery information.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BatteryInfo {
@@ -288,6 +329,19 @@ impl SystemMonitor {
             memory_used: sys.used_memory(),
             memory_total: sys.total_memory(),
         })
+    }
+
+    /// What the menu bar shows of the current sample.
+    pub fn readout(&self) -> Readout {
+        let stats = self.stats();
+        Readout::of(
+            stats.cpu_usage,
+            stats.memory_used,
+            stats.memory_total,
+            self.net_download_rate(),
+            self.net_upload_rate(),
+            self.battery_cached(),
+        )
     }
 
     /// Get CPU usage as integer percentage (0-100).
@@ -658,6 +712,27 @@ mod tests {
             ("5/16".to_string(), RamUnit::Gigabytes)
         );
         assert_eq!(format_ram_bytes(GIB, 2 * GIB).1, RamUnit::Gigabytes);
+    }
+
+    #[test]
+    fn a_readout_changes_only_with_what_the_bar_shows() {
+        let base = Readout::of(12.2, 5 * GIB, 16 * GIB, 1500, 300, None);
+        // Megabytes of RAM and bytes of traffic below the shown units.
+        assert_eq!(
+            base,
+            Readout::of(11.8, 5 * GIB + 40 * MIB, 16 * GIB, 1900, 900, None)
+        );
+        assert_ne!(base, Readout::of(13.0, 5 * GIB, 16 * GIB, 1500, 300, None));
+        assert_ne!(base, Readout::of(12.2, 6 * GIB, 16 * GIB, 1500, 300, None));
+        assert_ne!(base, Readout::of(12.2, 5 * GIB, 16 * GIB, 2100, 300, None));
+        let battery = Some(BatteryInfo {
+            percent: 80,
+            charging: false,
+        });
+        assert_ne!(
+            base,
+            Readout::of(12.2, 5 * GIB, 16 * GIB, 1500, 300, battery)
+        );
     }
 
     // =========================================================================
