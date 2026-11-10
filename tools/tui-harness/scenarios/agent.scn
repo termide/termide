@@ -1,0 +1,24 @@
+# The agent against the scripted mock model (tools/screenshots/mock-llm): it
+# reads and edits inventory/report.py, asks before running the tests, and
+# answers. The agent opens in the narrow right column; Alt+Home moves it to
+# the wide first one and Alt+F11 gives it the column's height, so the
+# sentences waited for do not wrap.
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Let me look at how the reorder report is built." 20
+file-contains inventory/report.py "critical = item.on_hand" 20
+wait "Agent wants to run shell" 20
+expect "python3 -m unittest -q"
+snapshot permission
+type "1"
+wait "Want me to highlight critical rows" 30
+# The pause and stop buttons on the input rule go when the run is over.
+wait-gone "[■]" 15
+snapshot done
+quit

@@ -12,7 +12,7 @@ for arg in "$@"; do
 done
 if [ -n "$adapter" ]; then
     [ -n "$version" ] && { echo 0.0.0-demo; exit 0; }
-    exec python3 "/opt/shots/mock-acp/$adapter.py"
+    exec python3 "$(dirname "$0")/$adapter.py"
 fi
 echo "npx: offline in the recordings: $*" >&2
 exit 1

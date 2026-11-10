@@ -1,0 +1,10 @@
+# A terminal panel (Alt+T) runs a command and shows its output.
+start
+wait "README.md"
+key Alt+T
+wait "demo$"
+type "echo harness-$((6 * 7))"
+key Enter
+wait "harness-42"
+snapshot output
+quit

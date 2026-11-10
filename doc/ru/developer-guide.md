@@ -86,6 +86,18 @@ cargo test -- --nocapture
 cargo test test_name
 ```
 
+Поведение интерфейса и агента проверяется вживую через
+[`tools/tui-harness`](../../tools/tui-harness/README.md): он запускает
+собранный бинарник без окна, в pty, по сценариям (клавиши, ожидания,
+проверки экрана), с одноразовым HOME, демо-проектом и мок-моделью или
+мок-агентами ACP.
+
+```bash
+cargo build
+tools/tui-harness/run.sh           # все сценарии
+tools/tui-harness/run.sh agent     # один из них
+```
+
 ### Проверка качества кода
 
 ```bash
