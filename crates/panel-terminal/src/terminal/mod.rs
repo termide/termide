@@ -114,6 +114,16 @@ impl Cell {
         }
     }
 
+    /// A space drawn the same as no cell at all: on the panel's own
+    /// background, neither underlined nor reversed.
+    fn looks_blank(&self) -> bool {
+        self.ch == ' '
+            && self.extra.is_none()
+            && self.style.bg == Color::Reset
+            && !self.style.underline
+            && !self.style.reverse
+    }
+
     fn continuation(style: CellStyle) -> Self {
         Self {
             ch: CONTINUATION,
@@ -704,8 +714,18 @@ impl TerminalScreen {
         }
     }
 
-    /// Append a line that left the top of the main screen to the scrollback.
-    fn push_scrollback(&mut self, line: Vec<Cell>, wrapped: bool) {
+    /// Append a line that left the top of the main screen to the scrollback,
+    /// without the blank cells at its end: a line is as wide as the screen,
+    /// mostly blank, and the scrollback keeps thousands. Its lines already
+    /// differ in width from the grid once the panel is resized, so every
+    /// reader takes a short one.
+    fn push_scrollback(&mut self, mut line: Vec<Cell>, wrapped: bool) {
+        let kept = line
+            .iter()
+            .rposition(|cell| !cell.looks_blank())
+            .map_or(0, |last| last + 1);
+        line.truncate(kept);
+        line.shrink_to_fit();
         self.scrollback.push_back(line);
         self.scrollback_wrapped.push_back(wrapped);
 
@@ -1108,6 +1128,29 @@ mod tests {
         screen.scroll_up();
         assert_eq!(screen.scrollback.len(), 8);
         assert_eq!(screen.scroll_offset, 8);
+    }
+
+    #[test]
+    fn the_scrollback_keeps_a_line_up_to_its_last_visible_cell() {
+        let mut screen = TerminalScreen::new(3, 80);
+        screen.lines[0][0].ch = 'a';
+        screen.lines[0][1].ch = 'b';
+        // A space on a coloured background is seen, so it stays.
+        screen.lines[1][0].ch = 'c';
+        screen.lines[1][5].style.bg = Color::Blue;
+        fill_scrollback(&mut screen, 3);
+
+        let widths: Vec<usize> = screen.scrollback.iter().map(Vec::len).collect();
+        assert_eq!(widths, [2, 6, 0]);
+        assert!(screen
+            .scrollback
+            .iter()
+            .all(|line| line.capacity() == line.len()));
+
+        // A taller screen takes them back at full width.
+        screen.resize(6, 80);
+        assert!(screen.lines.iter().all(|line| line.len() == 80));
+        assert_eq!(row_text(&screen, 0), "ab");
     }
 
     fn row_text(screen: &TerminalScreen, row: usize) -> String {
