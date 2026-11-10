@@ -10,7 +10,7 @@ use termide_agent_core::{
 };
 use termide_core::ThemeColors;
 use termide_panel_image::inline::{fit_cells, picture_key, picture_size};
-use termide_panel_markdown::render_markdown_with;
+use termide_panel_markdown::{render_markdown_with, render_streamed, StreamedHead};
 use termide_richtext::{Builder, DiagramFold, RowCopy};
 
 use crate::pan::DiagramSpot;
@@ -498,8 +498,22 @@ pub struct Transcript {
     /// Whether an item laid out so far carries a picture.
     any_pictures: bool,
     cache: Vec<Option<Cached>>,
-    /// Flattened lines of every item, rebuilt when any cache entry changed.
+    /// The finished part of the streaming answer, rendered: each delta lays
+    /// out only the rest.
+    stream_head: Option<StreamedHead>,
+    /// Flattened lines of every item, then the live footer. Rebuilt from the
+    /// first item that changed (`dirty_from`) onwards: a streamed delta or a
+    /// spinner frame touches only the tail, so a long session is not copied
+    /// again each frame.
     flat: Vec<Line<'static>>,
+    /// The first flattened line of each item laid out, parallel to `items`
+    /// once [`Transcript::lines`] has run.
+    item_start: Vec<usize>,
+    /// How many flattened lines the items take, the live footer after them.
+    items_end: usize,
+    /// The first item whose flattened lines are stale; `items.len()` when
+    /// only the live footer is, `None` when nothing is.
+    dirty_from: Option<usize>,
     /// Item index per flattened line, for click-to-expand.
     line_item: Vec<usize>,
     /// How each flattened line reads when copied.
@@ -513,7 +527,6 @@ pub struct Transcript {
     /// How far each item's diagrams are panned, by their ordinal in the
     /// item; parallel to `items`. Kept across widths, clamped when read.
     pans: Vec<Vec<usize>>,
-    flat_dirty: bool,
     /// Live footer lines appended after the last item while the agent works
     /// (the ticking generation and clock meta with the spinner); empty when
     /// idle.
@@ -576,7 +589,8 @@ impl Transcript {
         self.artifacts_folded.push(false);
         self.pans.push(Vec::new());
         self.cache.push(None);
-        self.flat_dirty = true;
+        // The block before may gain the gap an answer leaves before a step.
+        self.mark_dirty(self.items.len().saturating_sub(2));
     }
 
     pub fn clear(&mut self) {
@@ -587,32 +601,38 @@ impl Transcript {
         self.pans.clear();
         self.any_pictures = false;
         self.cache.clear();
+        self.stream_head = None;
         self.flat.clear();
         self.line_item.clear();
         self.flat_copy.clear();
         self.flat_links.clear();
         self.flat_pictures.clear();
         self.flat_diagrams.clear();
-        self.flat_dirty = true;
+        self.item_start.clear();
+        self.items_end = 0;
+        self.dirty_from = Some(0);
     }
 
     fn invalidate(&mut self, index: usize) {
         if let Some(slot) = self.cache.get_mut(index) {
             *slot = None;
         }
-        self.flat_dirty = true;
+        self.mark_dirty(index);
+    }
+
+    /// Note that the flattened lines from item `index` on are stale.
+    fn mark_dirty(&mut self, index: usize) {
+        self.dirty_from = Some(self.dirty_from.map_or(index, |from| from.min(index)));
     }
 
     /// Set the live footer shown after the last block while the agent works
     /// (the generation and clock meta with the spinner). An empty vector
-    /// removes it.
+    /// removes it. Only the footer is laid out again, not the blocks above.
     pub fn set_live_footer(&mut self, footer: Vec<Line<'static>>) {
-        // The footer ticks every frame, so a rebuild of the flat line list is
-        // needed whenever it is present or is being cleared.
-        if !footer.is_empty() || !self.live_footer.is_empty() {
-            self.flat_dirty = true;
+        if footer != self.live_footer {
+            self.live_footer = footer;
+            self.mark_dirty(self.items.len());
         }
-        self.live_footer = footer;
     }
 
     /// Append reasoning to the streaming thinking block, starting one if the
@@ -708,6 +728,8 @@ impl Transcript {
         at: String,
         drop_if_empty: bool,
     ) {
+        // The finished answer renders whole, folding what it folds.
+        self.stream_head = None;
         if let Some(index) = self.last_streaming(false) {
             // A streaming answer that turns out empty (only whitespace deltas,
             // as before a tool call) leaves no block behind.
@@ -718,7 +740,8 @@ impl Transcript {
                 self.artifacts_folded.remove(index);
                 self.pans.remove(index);
                 self.cache.remove(index);
-                self.flat_dirty = true;
+                // The block before may lose the gap it left before this one.
+                self.mark_dirty(index.saturating_sub(1));
                 return;
             }
             if let Item::Assistant {
@@ -1148,7 +1171,10 @@ impl Transcript {
     /// The first flattened line of item `index`, for scrolling it into view.
     #[must_use]
     pub fn first_line_of(&self, index: usize) -> Option<usize> {
-        self.line_item.iter().position(|&i| i == index)
+        // A block with no lines has none; the line at its start is the next
+        // block's — or the live footer's, which counts as the last block's.
+        let start = *self.item_start.get(index)?;
+        (self.line_item.get(start) == Some(&index)).then_some(start)
     }
 
     /// Lay out every item at `width` (re-rendering only what changed) and
@@ -1169,20 +1195,36 @@ impl Transcript {
                     pictures: self.picture_layout,
                     artifact_rows: self.artifact_rows,
                 };
-                let cached = render_item(&self.items[index], view, width, colors, is_light);
+                let cached = render_item(
+                    &self.items[index],
+                    view,
+                    width,
+                    colors,
+                    is_light,
+                    &mut self.stream_head,
+                );
                 self.any_pictures |= !item_pictures(&self.items[index]).is_empty();
                 self.cache[index] = Some(cached);
-                self.flat_dirty = true;
+                self.mark_dirty(index);
             }
         }
-        if self.flat_dirty {
-            self.flat.clear();
-            self.line_item.clear();
-            self.flat_copy.clear();
-            self.flat_links.clear();
-            self.flat_pictures.clear();
-            self.flat_diagrams.clear();
-            for (index, cached) in self.cache.iter().enumerate() {
+        if let Some(from) = self.dirty_from.take() {
+            // Keep what the blocks before `from` laid out; each flattened
+            // list holds its entries in block order.
+            let from = from.min(self.items.len()).min(self.item_start.len());
+            let cut = self.item_start.get(from).copied().unwrap_or(self.items_end);
+            self.item_start.truncate(from);
+            self.flat.truncate(cut);
+            self.line_item.truncate(cut);
+            self.flat_copy.truncate(cut);
+            let kept = self.flat_links.partition_point(|(item, _)| *item < from);
+            self.flat_links.truncate(kept);
+            let kept = self.flat_pictures.partition_point(|spot| spot.item < from);
+            self.flat_pictures.truncate(kept);
+            let kept = self.flat_diagrams.partition_point(|spot| spot.item < from);
+            self.flat_diagrams.truncate(kept);
+            for (index, cached) in self.cache.iter().enumerate().skip(from) {
+                self.item_start.push(self.flat.len());
                 if let Some(cached) = cached {
                     let base = self.flat.len();
                     self.flat_diagrams
@@ -1218,12 +1260,12 @@ impl Transcript {
                     }
                 }
             }
+            self.items_end = self.flat.len();
             for line in &self.live_footer {
                 self.flat.push(line.clone());
                 self.flat_copy.push(RowCopy::default());
                 self.line_item.push(self.items.len().saturating_sub(1));
             }
-            self.flat_dirty = false;
         }
         &self.flat
     }
@@ -2330,12 +2372,15 @@ fn inline_args(arguments: &Value) -> String {
 /// The lines of `item` at `width`, folded as `view` says when the item folds,
 /// and whether it does. A block whose unfolded form is a single row has
 /// nothing to fold, so it shows that row with no fold marker.
+/// `stream_head` keeps the finished part of a streaming answer rendered
+/// from one delta to the next (see [`render_streamed`]).
 fn render_item(
     item: &Item,
     view: ItemView,
     width: u16,
     colors: &ThemeColors,
     is_light: bool,
+    stream_head: &mut Option<StreamedHead>,
 ) -> Cached {
     let mut foldable = is_foldable(item, view.fold);
     // Only reasoning can be foldable yet fit one row unfolded: a foldable tool
@@ -2386,6 +2431,7 @@ fn render_item(
     };
     let mut marks = Marks {
         diagrams,
+        stream_head: stream_head.take(),
         ..Marks::default()
     };
     let mut lines = render_body(
@@ -2397,6 +2443,7 @@ fn render_item(
         is_light,
         &mut marks,
     );
+    *stream_head = marks.stream_head.take();
     let capped = foldable && !collapsed && marks.folded_diagrams > 0;
     let Marks {
         mut links,
@@ -2514,6 +2561,8 @@ struct Marks {
     folded_diagrams: usize,
     /// The diagrams too wide for the block, kept whole to be panned.
     wide_diagrams: Vec<DiagramSpot>,
+    /// The rendered finished part of a streaming answer; set by the caller.
+    stream_head: Option<StreamedHead>,
 }
 
 /// The lines of `item` itself, without the gap [`render_item`] puts above it;
@@ -2738,11 +2787,11 @@ fn render_body(
         }
         Item::Assistant {
             text,
+            streaming,
             error,
             at,
             cost,
             run_ms,
-            ..
         } => {
             // The answer, marked like the user's message with an accent `›`,
             // shown in full and trimmed of the stray blank lines models lead
@@ -2755,15 +2804,28 @@ fn render_body(
             if !answer.is_empty() {
                 // Reserve the marker's width and indent wrapped lines under it,
                 // so the accent `›` never pushes the first line over the edge.
-                // A diagram `marks` says folds is a one-line card.
-                let body = render_markdown_with(
-                    answer,
-                    width.saturating_sub(2),
-                    colors,
-                    is_light,
-                    marks.diagrams,
-                    true,
-                );
+                // A diagram `marks` says folds is a one-line card. A streaming
+                // answer folds none, and lays out only what came since its
+                // last finished block.
+                let body = if *streaming && marks.diagrams.is_none() {
+                    render_streamed(
+                        &mut marks.stream_head,
+                        answer,
+                        width.saturating_sub(2),
+                        colors,
+                        is_light,
+                        true,
+                    )
+                } else {
+                    render_markdown_with(
+                        answer,
+                        width.saturating_sub(2),
+                        colors,
+                        is_light,
+                        marks.diagrams,
+                        true,
+                    )
+                };
                 marks.folded_diagrams = body.folded_diagrams;
                 // Past the `› ` mark, a wide diagram's content starts four
                 // columns in and has the rest of the width.
@@ -3394,6 +3456,232 @@ mod tests {
             text.contains("› first line\n\n  - one\n  - two and a much\n  longer tail\n"),
             "{text}"
         );
+    }
+
+    /// A session of `exchanges` user / answer / tool exchanges.
+    fn long_session(exchanges: usize) -> Transcript {
+        let mut transcript = Transcript::default();
+        for n in 0..exchanges {
+            transcript.push(Item::User {
+                text: format!("question {n}: what does this function do?"),
+                at: String::new(),
+                command: None,
+                images: Vec::new(),
+            });
+            transcript.push(Item::Tool {
+                call: call("read", json!({ "path": format!("src/file{n}.rs") })),
+                result: None,
+                live: None,
+                at: String::new(),
+                duration_ms: Some(12),
+                waited_ms: None,
+                waiting: false,
+            });
+            transcript.push(Item::Assistant {
+                text: format!(
+                    "It **parses** the input `{n}` and returns a [result](https://example.com/{n}).\n\n\
+                     - first point\n- second point\n\n```rust\nfn f() -> u32 {{ {n} }}\n```\n\n\
+                     A closing paragraph long enough to wrap over a couple of rows in a panel \
+                     of ordinary width, as answers do."
+                ),
+                streaming: false,
+                error: None,
+                at: String::new(),
+                cost: None,
+                run_ms: None,
+            });
+        }
+        transcript
+    }
+
+    /// What the flattened layout holds: text, item per line, copy rows,
+    /// links, pictures, wide diagrams and each item's first line.
+    type Layout = (
+        Vec<String>,
+        Vec<usize>,
+        Vec<RowCopy>,
+        Vec<(usize, RowLink)>,
+        Vec<PictureSpot>,
+        Vec<DiagramSpot>,
+        Vec<Option<usize>>,
+    );
+
+    /// The flattened layout, to compare one built bit by bit with one built
+    /// whole.
+    fn layout_of(transcript: &Transcript) -> Layout {
+        (
+            text_of(transcript.rendered()),
+            transcript.line_item.clone(),
+            transcript.flat_copy.clone(),
+            transcript.flat_links.clone(),
+            transcript.flat_pictures.clone(),
+            transcript.flat_diagrams.clone(),
+            (0..transcript.items().len() + 1)
+                .map(|index| transcript.first_line_of(index))
+                .collect(),
+        )
+    }
+
+    /// Lay `transcript` out after a change, and check that only rebuilding
+    /// from the changed block gives what laying everything out again does.
+    fn check_incremental(transcript: &mut Transcript, width: u16) {
+        let colors = ThemeColors::default();
+        transcript.lines(width, &colors, false);
+        let incremental = layout_of(transcript);
+        transcript.mark_dirty(0);
+        transcript.lines(width, &colors, false);
+        assert_eq!(incremental, layout_of(transcript));
+    }
+
+    #[test]
+    fn a_layout_rebuilt_from_a_change_matches_one_rebuilt_whole() {
+        let mut transcript = long_session(3);
+        check_incremental(&mut transcript, 60);
+
+        // A footer comes and ticks over the last block.
+        transcript.set_live_footer(vec![Line::from("🕒 1s ⠙")]);
+        check_incremental(&mut transcript, 60);
+        transcript.set_live_footer(vec![Line::from("🕒 2s ⠹"), Line::from("✍️")]);
+        check_incremental(&mut transcript, 60);
+
+        // An answer streams in with a link, then a step follows it: the
+        // answer gains the gap it leaves before a step.
+        transcript.stream_answer("See [the docs](https://example.com) and ");
+        check_incremental(&mut transcript, 60);
+        transcript.stream_answer("more.\n\n```mermaid\ngraph LR\n  A --> B\n```\n");
+        check_incremental(&mut transcript, 60);
+        transcript.finish_assistant(
+            "See [the docs](https://example.com) and more.".into(),
+            None,
+            None,
+            String::new(),
+            false,
+        );
+        check_incremental(&mut transcript, 60);
+        transcript.push(Item::Tool {
+            call: call("shell", json!({ "command": "ls" })),
+            result: None,
+            live: Some("a\nb\nc\nd\n".into()),
+            at: String::new(),
+            duration_ms: None,
+            waited_ms: None,
+            waiting: false,
+        });
+        check_incremental(&mut transcript, 60);
+
+        // An answer that streams only blanks leaves, and the gap before it
+        // with it.
+        transcript.stream_answer("  ");
+        check_incremental(&mut transcript, 60);
+        transcript.finish_assistant(String::new(), None, None, String::new(), false);
+        check_incremental(&mut transcript, 60);
+
+        // A block in the middle unfolds; the width changes; the footer goes.
+        transcript.toggle_expanded(1);
+        check_incremental(&mut transcript, 60);
+        check_incremental(&mut transcript, 41);
+        transcript.set_live_footer(Vec::new());
+        check_incremental(&mut transcript, 41);
+
+        transcript.clear();
+        check_incremental(&mut transcript, 41);
+        assert!(transcript.rendered().is_empty());
+    }
+
+    #[test]
+    fn a_streamed_answer_shows_as_the_same_text_laid_out_at_once() {
+        let colors = ThemeColors::default();
+        let answer = "Here is the plan, with a [link](https://example.com).\n\n\
+                      ## Steps\n\n1. read\n\n2. edit\n\n```rust\nfn f() {}\n\n```\n\n\
+                      Then a paragraph long enough to wrap in a narrow panel, twice over.\n\n\
+                      ```mermaid\ngraph LR\n  A --> B\n```\n\nDone.";
+        let mut streamed = long_session(1);
+        let mut end = 0;
+        while end < answer.len() {
+            let next = (end + 5).min(answer.len());
+            streamed.stream_answer(&answer[end..next]);
+            end = next;
+            let mut whole = long_session(1);
+            whole.stream_answer(&answer[..end]);
+            let a = text_of(streamed.lines(40, &colors, false));
+            let b = text_of(whole.lines(40, &colors, false));
+            assert_eq!(a, b, "after {:?}", &answer[..end]);
+            assert_eq!(layout_of(&streamed), layout_of(&whole));
+        }
+        assert!(streamed.stream_head.is_some());
+        streamed.finish_assistant(answer.into(), None, None, String::new(), false);
+        assert!(streamed.stream_head.is_none());
+    }
+
+    #[test]
+    fn a_spinner_frame_lays_out_only_the_footer() {
+        let colors = ThemeColors::default();
+        let mut transcript = long_session(3);
+        transcript.lines(60, &colors, false);
+        let items_end = transcript.line_count();
+        transcript.set_live_footer(vec![Line::from("🕒 1s ⠙")]);
+        assert_eq!(transcript.dirty_from, Some(transcript.items().len()));
+        transcript.lines(60, &colors, false);
+        assert_eq!(transcript.line_count(), items_end + 1);
+        // The same frame again changes nothing.
+        transcript.set_live_footer(vec![Line::from("🕒 1s ⠙")]);
+        assert_eq!(transcript.dirty_from, None);
+    }
+
+    /// Timing of a long session's frames; run with `--ignored --nocapture`.
+    #[test]
+    #[ignore = "timing, not a check"]
+    fn time_frames_of_a_long_session() {
+        use std::time::Instant;
+        let colors = ThemeColors::default();
+        let mut transcript = long_session(700);
+        let start = Instant::now();
+        let total = transcript.lines(100, &colors, false).len();
+        eprintln!("first layout: {:?}, {total} lines", start.elapsed());
+
+        let frames = 100;
+        let start = Instant::now();
+        for frame in 0..frames {
+            transcript.set_live_footer(vec![Line::from(format!("🕒 {frame}s ⠙"))]);
+            transcript.lines(100, &colors, false);
+        }
+        eprintln!("spinner frame: {:?}", start.elapsed() / frames);
+
+        let start = Instant::now();
+        for frame in 0..frames {
+            transcript.stream_answer("Another sentence of a long streamed answer, word by word. ");
+            if frame % 10 == 9 {
+                transcript.stream_answer("\n\n");
+            }
+            transcript.set_live_footer(vec![Line::from(format!("🕒 {frame}s ⠙"))]);
+            transcript.lines(100, &colors, false);
+        }
+        eprintln!("streaming frame: {:?}", start.elapsed() / frames);
+
+        // A long answer: ~40 KB of paragraphs, lists and code.
+        for n in 0..200 {
+            transcript.stream_answer(&format!(
+                "Paragraph {n} explains a step at some length, with `code` and **bold** words.\n\n\
+                 ```rust\nlet x = {n};\n```\n\n- item one\n- item two\n\n"
+            ));
+        }
+        transcript.lines(100, &colors, false);
+        let start = Instant::now();
+        for frame in 0..frames {
+            transcript.stream_answer("more words of the tail ");
+            transcript.set_live_footer(vec![Line::from(format!("🕒 {frame}s ⠙"))]);
+            transcript.lines(100, &colors, false);
+        }
+        eprintln!(
+            "streaming frame, 40 KB answer: {:?}",
+            start.elapsed() / frames
+        );
+
+        let start = Instant::now();
+        for _ in 0..frames {
+            std::hint::black_box(transcript.first_line_of(1000));
+        }
+        eprintln!("first_line_of: {:?}", start.elapsed() / frames);
     }
 
     #[test]

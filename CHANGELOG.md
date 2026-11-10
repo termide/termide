@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A debugger is no longer looked up in a relative `PATH` entry.** A `PATH` with `.` or an empty entry made termide look for `lldb-dap`, `gdb`, `dlv` or Python in the directory it was started in, which may be a project's, and start whatever that project put there under the name. Only absolute entries are searched now, as for plugins.
 - **Allowing one `terminals send` for the session no longer lets every later one through.** The answer was kept as a rule for `send` alone, so any later keys typed into any of the agent's terminals ran unasked, past the checks `shell` goes through. A whole line typed into a shell at its prompt is now judged as the `shell` command it runs, under the `shell` rules; any other `send` — input to a program, keys that edit the line — asks every time, shows all it types and offers no answer that outlasts it. See [Terminal sessions](doc/en/agent.md#terminal-sessions).
 
+### Performance
+- **A long agent session no longer slows the panel while the agent works.** Each spinner frame copied every line of the session again, and each streamed piece of an answer laid out the whole answer anew. Now a frame lays out only what changed: the spinner, or the block being written, and of an answer only what came since its last finished paragraph or code block. On a session of 2,000 blocks a spinner frame went from 0.8 ms to a few µs, and a frame of a 40 KB answer streaming in from 2.5 ms to 0.3 ms.
+
 ## [0.49.0] - 2026-11-05
 
 [0.49.0]: https://github.com/termide/termide/releases/tag/0.49.0
