@@ -32,7 +32,7 @@ tree-sitter-ruby = "0.23"
 # (13-15 for 0.27); an out-of-range grammar builds fine but fails to load at
 # runtime, which silently disables its highlighting.
 tree-sitter-php = "0.24"
-tree-sitter-haskell = "0.23"
+tree-sitter-haskell = "0.24"
 tree-sitter-nix = "0.3"
 tree-sitter-lua = "0.5"
 

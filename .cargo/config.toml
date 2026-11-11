@@ -10,7 +10,7 @@
 # through an `(Array *)` cast and then reads `contents` through the scanner's
 # own type (tree-sitter/tree-sitter#4960); optimised with strict aliasing, GCC
 # keeps the pointer from before the realloc and writes into freed memory. The
-# Haskell scanner did (tree-sitter-haskell#144; glibc aborted
+# Haskell scanner did until 0.24 (tree-sitter-haskell#144; glibc aborted
 # `cargo test --release -p termide-highlight` on Linux), and the bash, html,
 # python, ruby and yaml scanners use the same macros. A CFLAGS set in the
 # environment replaces this one: add -fno-strict-aliasing to it (the AUR
