@@ -2760,6 +2760,7 @@ impl Subagents {
             persist: None,
             system_prompt: run.system_prompt,
             plan: self.dirs.plan_prompt(),
+            plan_seen: false,
             goal: self.dirs.goal_prompt(),
             handoff: self.dirs.handoff_prompt(),
             reviewer: run.reviewer,

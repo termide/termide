@@ -304,6 +304,7 @@ class Run:
         }
         if self.mock_acp:
             env["PATH"] = f"{SHOTS / 'mock-acp'}:{env['PATH']}"
+            env["MOCK_ACP_LOG"] = str(self.out / "mock-acp.log")
         return env
 
     def prepare(self):
@@ -459,6 +460,28 @@ class Run:
             timeout,
             f"a request for the model {model!r}",
         )
+
+    def v_mock_acp_got(self, text, timeout=DEFAULT_TIMEOUT):
+        """Wait until the ACP stand-in's log holds `text`: a stand-in that
+        keeps one (the Claude Code one) writes a line for each session it
+        opens and each prompt block it is sent."""
+        if not self.mock_acp:
+            raise Failure("mock-acp-got needs mock-acp")
+        log = self.out / "mock-acp.log"
+        self.wait_until(
+            lambda: log.exists() and text in log.read_text(errors="replace"),
+            timeout,
+            f"{text!r} in the ACP stand-in's log",
+        )
+
+    def v_mock_acp_count(self, text, count):
+        """Check that the ACP stand-in's log holds `text` exactly `count` times."""
+        if not self.mock_acp:
+            raise Failure("mock-acp-count needs mock-acp")
+        log = self.out / "mock-acp.log"
+        seen = log.read_text(errors="replace").count(text) if log.exists() else 0
+        if seen != int(count):
+            raise Failure(f"{text!r} {seen} times in the ACP stand-in's log, not {count}")
 
     def v_snapshot(self, name):
         self.need_term().pump(0.05)

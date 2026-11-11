@@ -407,21 +407,21 @@ fn an_external_agent_following_the_modes_is_offered_to_carry_the_plan_out() {
     panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
     settle(&mut panel);
 
-    // Its history is its own: no clean context to offer.
     let form = panel.pending.as_ref().expect("plan card").form();
     assert!(form.title().starts_with("Plan mode"), "{}", form.title());
     let t = termide_i18n::t();
     assert_eq!(
         form.options(),
         [
+            t.agent_plan_clean_mode_fmt("configured"),
             t.agent_plan_mode_fmt("configured"),
             t.agent_plan_accept_edits().to_string(),
         ]
     );
 
-    // The first row goes back to the mode planned from and sends the
-    // request that keeps the context.
-    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    // The second row goes back to the mode planned from and sends the
+    // request that keeps the context, in the same session of the agent's.
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
     let _ = panel.tick();
     assert_eq!(panel.mode.get(), Mode::Configured);
     settle(&mut panel);
@@ -435,6 +435,58 @@ fn an_external_agent_following_the_modes_is_offered_to_carry_the_plan_out() {
         })
         .collect();
     assert_eq!(users, ["add a feature", "Do it."]);
+}
+
+#[test]
+fn an_external_agent_carries_a_plan_out_from_a_clean_context_in_a_new_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        connections: Some(Arc::new(Connections)),
+        system_prompt: "Base prompt.".into(),
+        plan_prompt: PlanPrompt::from_file(
+            "---\nrequest: Do it.\nclean_request: Do it afresh.\n---\nPlan first.",
+        ),
+        ..setup(vec![])
+    });
+    assert!(panel.switch_connection("cli"));
+    let _ = panel.set_mode(Mode::Plan);
+    // Started in plan mode, it is still handed the prompt without the plan
+    // instructions: one fixed for its session would outlive the mode.
+    assert!(panel.rebuild_keeping_prompt());
+    let (prompt, _) = EXTERNAL_PROMPT.with(|p| p.borrow_mut().take()).unwrap();
+    assert_eq!(prompt, "Base prompt.");
+    type_text(&mut panel, "add a feature");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let _ = panel.tick();
+    assert!(
+        panel.session.as_ref().unwrap().external_session().is_some(),
+        "its session is recorded"
+    );
+
+    panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
+    let _ = panel.tick();
+    assert_eq!(panel.mode.get(), Mode::Configured);
+    settle(&mut panel);
+    // A new session of the agent's, told what the clearing kept, its log
+    // known to have been in plan mode.
+    let (resume, history) = EXTERNAL_START.with(|s| s.borrow_mut().take()).unwrap();
+    assert_eq!(resume, None);
+    assert_eq!(history, ["user:add a feature", "assistant:from outside"]);
+    let (prompt, plan_seen) = EXTERNAL_PROMPT.with(|p| p.borrow_mut().take()).unwrap();
+    assert_eq!(prompt, "Base prompt.");
+    assert!(plan_seen);
+    let users: Vec<&str> = panel
+        .transcript()
+        .items()
+        .iter()
+        .filter_map(|i| match i {
+            Item::User { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(users.last(), Some(&"Do it afresh."));
 }
 
 #[test]

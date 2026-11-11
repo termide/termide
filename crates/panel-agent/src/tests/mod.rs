@@ -1048,6 +1048,9 @@ thread_local! {
     /// session to resume and the history, as `role:text`.
     static EXTERNAL_START: std::cell::RefCell<Option<(Option<String>, Vec<String>)>> =
         const { std::cell::RefCell::new(None) };
+    /// The system prompt and `plan_seen` it was handed.
+    static EXTERNAL_PROMPT: std::cell::RefCell<Option<(String, bool)>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// An "external agent" for tests: answers every prompt with one text
@@ -1070,6 +1073,9 @@ struct External {
 
 impl External {
     fn new(setup: BackendSetup) -> Self {
+        EXTERNAL_PROMPT.with(|prompt| {
+            *prompt.borrow_mut() = Some((setup.system_prompt.clone(), setup.plan_seen));
+        });
         let resume = setup
             .resume
             .map(|r| format!("{}:{}", r.agent, r.session_id));

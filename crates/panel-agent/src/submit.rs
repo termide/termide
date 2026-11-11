@@ -381,6 +381,10 @@ impl AgentPanel {
         let mode = self.mode.get();
         if mode != Mode::Plan {
             self.working_mode = mode;
+        } else {
+            // A session started in plan mode records it too: an agent
+            // session resumed from the log later is told the mode is off.
+            self.log_mode(mode);
         }
         self.count_hops(&message);
         if self.is_busy() {

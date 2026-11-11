@@ -213,6 +213,9 @@ pub(crate) fn spawn_runtime(
     // The `suggest_command` tool offers commands through this, and waits for
     // the card; it reaches an external agent the same way.
     let (suggester, suggestion_rx) = suggestion_channel(cancel.clone());
+    // An external backend gets the prompt without plan mode's instructions:
+    // one that fixes it for the session is told them as notes instead.
+    let backend_prompt = system_prompt.to_string();
     let system_prompt = if rules.mode == Mode::Plan {
         plan_prompt.apply(system_prompt)
     } else {
@@ -296,8 +299,9 @@ pub(crate) fn spawn_runtime(
             rules: backend_rules,
             persist: persist_rule.map(|f| Box::new(f) as PersistRule),
             mode: mode.clone(),
-            system_prompt: system_prompt.to_string(),
+            system_prompt: backend_prompt,
             plan: plan_prompt.clone(),
+            plan_seen: session.is_some_and(|s| s.had_mode(Mode::Plan)),
             goal: goal_prompt.clone(),
             handoff: handoff_prompt.clone(),
             reviewer: reviewer.clone(),

@@ -1566,6 +1566,14 @@ impl Session {
             })
     }
 
+    /// Whether the current branch ever switched to `mode`.
+    #[must_use]
+    pub fn had_mode(&self, mode: Mode) -> bool {
+        self.branch()
+            .into_iter()
+            .any(|entry| matches!(entry.kind, EntryKind::ModeChange { mode: m } if m == mode))
+    }
+
     /// The permission mode the last user message outside plan mode was sent
     /// in on the current branch: the mode a plan made now was planned from.
     /// A mode only passed through on the way to another is not one. `None`

@@ -68,6 +68,8 @@ Timeouts are in seconds and default to 10.
 | `expect-row N "REGEX"` | Check row N (0 is the top, -1 the bottom) |
 | `file-contains PATH "TEXT" [T]` | Wait until the project's file PATH holds TEXT |
 | `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
+| `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …` |
+| `mock-acp-count "TEXT" N` | Check that the ACP stand-in's log holds TEXT exactly N times |
 | `run "COMMAND"` | Run a shell command in the project, outside termide |
 | `snapshot NAME` | Save the screen as text |
 | `sleep S` | Let termide run for S seconds |
@@ -79,8 +81,10 @@ A scenario that does not `quit` is killed at its end. The examples:
 with a permission card), `acp-codex` (the same task through Codex over
 ACP), `delegate` (a background subagent's row and report, on the model
 `[ai.subagents]` names), `goal` (`/goal` with its judge on the model
-`[ai.goal_judge]` names) and `plan` (plan mode's carry-out card going back
-to the mode worked in, past the ones `Shift+Tab` passes through).
+`[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
+to the mode worked in, past the ones `Shift+Tab` passes through) and
+`acp-plan` (plan mode on Claude Code: the instructions as a note, never in
+its system prompt, and a clean-context carry-out in a new session).
 
 ## Writing one
 

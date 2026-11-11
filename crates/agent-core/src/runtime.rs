@@ -139,12 +139,16 @@ pub struct BackendSetup {
     /// built-in agent; `None` when there is nowhere to write it.
     pub persist: Option<PersistRule>,
     /// termide's system prompt for the agent, for a backend that takes it in
-    /// place of its own.
+    /// place of its own. It never holds plan mode's instructions: a prompt
+    /// fixed for the session would keep them after the mode went off.
     pub system_prompt: String,
-    /// Plan mode's texts. `system_prompt` holds the instructions when the
-    /// session starts in plan mode; a backend whose prompt cannot change
-    /// later tells the agent of a switch with them.
+    /// Plan mode's texts, which a backend whose prompt cannot change tells
+    /// the agent as notes before its turns: the instructions while the mode
+    /// is on, `leave` once it went off.
     pub plan: PlanPrompt,
+    /// Whether the session log records plan mode, so an agent session
+    /// resumed from it may hold plan instructions it was not told are off.
+    pub plan_seen: bool,
     /// The `/goal` judge's and the `/handoff` brief's texts, which a backend
     /// without a call of its own for them sends the agent as a request.
     pub goal: GoalPrompt,

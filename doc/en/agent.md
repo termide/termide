@@ -1831,10 +1831,11 @@ The session log keeps all of it: reopening the session shows the cleared
 conversation, as after a compaction, `recall` still finds what was cleared,
 and undoing the carry-out request brings it back.
 
-On Claude Code, Codex and Gemini CLI the card comes up too, without the
-clean-context row: such an agent keeps its own history, so there is nothing
-of termide's to clear. An external agent that answers to its own
-configuration has no plan mode and no card.
+On Claude Code, Codex and Gemini CLI the card comes up too. Such an agent
+keeps its own history, so the clean-context row starts a new session of it
+instead: its first message is a recap of what the clearing kept, followed by
+`clean_request:`. The other rows go on in the same session. An external agent
+that answers to its own configuration has no plan mode and no card.
 
 ### Auto mode
 
@@ -2518,10 +2519,13 @@ prompt while the mode is on, and `request:` in its front matter is the
 message sent when you accept the plan; `clean_request:`, the one sent when
 you accept it from a clean context (without it, `request:` serves). Reword the body to change what a plan
 must contain, or the request to change how the agent is told to go ahead.
-Claude Code takes its system prompt once, when its session starts, so a
-switch of plan mode after that reaches it as a note before your next
-message, which the session log leaves out: the body when the mode comes on,
-`leave:` when it goes off.
+Claude Code takes its system prompt once, when its session starts, so the
+body never goes into it, where it would outlast the mode. Instead it reaches
+Claude Code as a note before your next message, which the session log leaves
+out: the body on the first message in plan mode, `leave:` on the first after
+the mode goes off. Both are sent again after Claude Code compacts its
+context, and `leave:` when a session of its from a conversation that was in
+plan mode is resumed.
 
 `/goal <what to achieve>` uses `goal.md`: the agent works toward the goal, and
 after each turn a judge — a separate, read-only model call — decides whether it
