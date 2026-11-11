@@ -739,6 +739,14 @@ impl AgentShell {
                     }
                 }
                 if let Some(code) = ended_after(&self.tap, from) {
+                    // The text and the end can arrive together, after the
+                    // look above: the text still comes first.
+                    if wait
+                        .until
+                        .is_some_and(|until| until(&self.tap.read_since(from).data))
+                    {
+                        return outcome(SendEnd::Matched);
+                    }
                     return outcome(SendEnd::Finished(code));
                 }
             } else if self.tap.is_closed() {
