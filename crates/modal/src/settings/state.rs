@@ -587,12 +587,17 @@ impl SettingsModal {
                     Field(0),  // max_tokens
                     Field(1),  // reasoning
                     Field(10), // on a limit or an outage
+                    Field(11), // where delegated tasks run
+                    Field(12), // their model
+                    Field(13), // the /goal judge
+                    Field(14), // its model
+                    Field(15), // the /handoff brief
+                    Field(16), // its model
                     Spacer,
                     Header(t.settings_header_permissions()),
-                    Field(7),  // permission mode for new sessions
-                    Field(8),  // auto mode reviewer
-                    Field(9),  // its model
-                    Field(11), // where delegated tasks run
+                    Field(7), // permission mode for new sessions
+                    Field(8), // auto mode reviewer
+                    Field(9), // its model
                     Spacer,
                     Header(t.settings_header_transcript()),
                     Field(2), // autofold
@@ -858,6 +863,12 @@ impl SettingsModal {
             self.debugger_edit_text(field_idx)
         } else if self.field_tab() == SettingsTab::Debug && field_idx == super::debugger::NATIVE {
             self.config.debug.native.join(", ")
+        } else if let Some((side, true)) = (self.field_tab() == SettingsTab::Ai)
+            .then(|| super::fields::side_field(&self.config, field_idx))
+            .flatten()
+        {
+            // A side model's own id, not the placeholder an empty one shows.
+            side.model.clone()
         } else {
             let mut value = self.field_value(field_idx);
             // Strip "(auto)" / "(none)" placeholders
@@ -951,8 +962,12 @@ impl SettingsModal {
             SettingsTab::Ai => {
                 if index == super::fields::AI_CHROME_PATH_FIELD {
                     self.config.ai.web.chrome_path = text.to_string();
-                } else if index == super::fields::AI_AUTO_REVIEWER_MODEL_FIELD {
-                    self.config.ai.auto_reviewer.model = text.trim().to_string();
+                } else if super::fields::side_field(&self.config, index)
+                    .is_some_and(|(_, is_model)| is_model)
+                {
+                    if let Some(side) = super::fields::side_field_mut(&mut self.config, index) {
+                        side.model = text.trim().to_string();
+                    }
                 }
             }
             SettingsTab::Connection => self.apply_connection_text(index, text),

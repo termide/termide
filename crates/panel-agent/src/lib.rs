@@ -48,8 +48,8 @@ use termide_agent_core::{
     HandoffPrompt, Hooks, LateTools, LimitPolicy, LoopPrompt, McpReload, McpServerState, Mode,
     ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope, PermissionRules, PersistScope,
     PlanPrompt, PromptError, PromptTemplate, Provider, QuestionEnvelope, Refusals, ReviewerSetup,
-    Session, SessionSummary, ShellOutput, ShellRunner, SkillInfo, SuggestionEnvelope, Tool,
-    ToolRegistry, UserMessage, DEFAULT_AGENT,
+    Session, SessionSummary, ShellOutput, ShellRunner, SideModels, SkillInfo, SuggestionEnvelope,
+    Tool, ToolRegistry, UserMessage, DEFAULT_AGENT,
 };
 use termide_config::Config;
 use termide_core::{
@@ -386,6 +386,8 @@ pub struct AgentPanelSetup {
     /// The `auto` mode reviewer: its texts from `system/classify.md`, and a
     /// model of its own when one is configured.
     pub reviewer: ReviewerSetup,
+    /// The models the `/goal` judge and the `/handoff` brief run on.
+    pub side_models: SideModels,
     /// What the model reads when a call is refused, from
     /// `system/permissions.md`.
     pub refusals: Refusals,
@@ -447,6 +449,8 @@ pub struct ConnectionChoice {
     pub backend: Option<BackendFactory>,
     /// Who reviews its sessions' calls in `auto` mode.
     pub reviewer: ReviewerSetup,
+    /// The models the `/goal` judge and the `/handoff` brief run on.
+    pub side_models: SideModels,
     /// The connection as the settings give it, built from: what the panel
     /// keeps to tell a later change of it from the same one.
     pub settings: termide_config::Connection,
@@ -1032,6 +1036,9 @@ pub struct AgentPanel {
     loop_prompt: LoopPrompt,
     /// Builds the `auto` mode reviewer of each agent the panel spawns.
     reviewer: ReviewerSetup,
+    /// The models of the goal judge and the handoff brief of each agent the
+    /// panel spawns.
+    side_models: SideModels,
     /// The refusal texts every agent the panel spawns uses.
     refusals: Refusals,
     /// When blocks fold now; passed to each transcript. `Ctrl+O` switches
@@ -1408,6 +1415,7 @@ impl AgentPanel {
             &setup.handoff_prompt,
             &setup.loop_prompt,
             &setup.reviewer,
+            &setup.side_models,
             &setup.refusals,
             setup.persist_rule,
             setup.hooks.as_ref(),
@@ -1518,6 +1526,7 @@ impl AgentPanel {
             handoff_prompt: setup.handoff_prompt,
             loop_prompt: setup.loop_prompt,
             reviewer: setup.reviewer,
+            side_models: setup.side_models,
             refusals: setup.refusals,
             fold: setup.fold,
             fold_setting: setup.fold,

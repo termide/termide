@@ -576,6 +576,7 @@ impl AgentPanel {
             spent: self.reviewer.spent.clone(),
             ..choice.reviewer.clone()
         };
+        self.side_models = choice.side_models.clone();
         self.backend = self.provider_backend.clone().or_else(|| {
             self.catalog
                 .resolve(&self.agent)
@@ -656,6 +657,7 @@ impl AgentPanel {
             spent: self.reviewer.spent.clone(),
             ..choice.reviewer.clone()
         };
+        self.side_models = choice.side_models.clone();
         if changed_model {
             self.configured_model = model.clone();
             self.model = model;

@@ -4,7 +4,7 @@
 
 use std::collections::BTreeSet;
 
-use termide_config::Connection;
+use termide_config::{Connection, SideModel};
 use termide_core::SecretText;
 use termide_i18n as i18n;
 use unicode_width::UnicodeWidthStr;
@@ -143,12 +143,43 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
 /// How the subagents' connection `value` of `connection` reads: a name, or
 /// for an empty one the connection itself — none, for a CLI agent on tools
 /// of its own, which cannot run them.
-fn subagents_label(connection: &Connection, value: &str) -> String {
+fn subagents_label(connection: &Connection, side: &SideModel) -> String {
     let t = i18n::t();
-    match value {
-        "" if !connection.runs_subagents() => t.settings_value_none().to_string(),
+    let label = match side.connection.as_str() {
+        "" if !connection.runs_subagents() && side.model.is_empty() => {
+            t.settings_value_none().to_string()
+        }
         "" => t.settings_ai_connection_subagents_own().to_string(),
         name => name.to_string(),
+    };
+    with_model(label, side)
+}
+
+/// `label` of a side model, followed by the model it names, when it names
+/// one: the page picks a connection, the file may name a model of it too.
+fn with_model(label: String, side: &SideModel) -> String {
+    match side.model.trim() {
+        "" => label,
+        model => format!("{label} · {model}"),
+    }
+}
+
+/// Point `side` at connection `name`; a model named for the connection it
+/// was on does not carry over to another.
+fn point_side(side: &mut SideModel, name: &str) {
+    if side.connection != name {
+        *side = SideModel::from(name);
+    }
+}
+
+/// Point `side`, when it is on connection `old`, at `new`: a rename keeps
+/// its model, a removal (an empty `new`) drops it with the connection.
+fn retarget_side(side: &mut SideModel, old: &str, new: &str) {
+    if side.connection == old {
+        side.connection = new.to_string();
+        if new.is_empty() {
+            side.model.clear();
+        }
     }
 }
 
@@ -341,8 +372,7 @@ impl SettingsModal {
         if self.config.ai.connections.remove(name).is_none() {
             return;
         }
-        self.retarget_subagents(name, "");
-        self.retarget_reviewers(name, "");
+        self.retarget_side_models(name, "");
         self.stored_api_keys.remove(name);
         self.api_key_changes.push(ApiKeyChange::Remove {
             connection: name.to_string(),
@@ -453,13 +483,18 @@ impl SettingsModal {
         }
     }
 
-    /// How the reviewer `value` of a connection reads: a connection's name,
-    /// or for an empty one the default, `[ai.auto_reviewer]`, it falls to.
-    fn reviewer_label(&self, value: &str) -> String {
-        if !value.is_empty() {
-            return value.to_string();
-        }
+    /// How the reviewer `side` of a connection reads: a connection's name,
+    /// or for an unset one the default, `[ai.auto_reviewer]`, it falls to.
+    fn reviewer_label(&self, side: &SideModel) -> String {
         let t = i18n::t();
+        if !side.is_unset() {
+            let name = if side.connection.is_empty() {
+                t.settings_agent_auto_reviewer_session()
+            } else {
+                &side.connection
+            };
+            return with_model(name.to_string(), side);
+        }
         let default = &self.config.ai.auto_reviewer.connection;
         let default = if default.is_empty() {
             t.settings_agent_auto_reviewer_session()
@@ -548,8 +583,13 @@ impl SettingsModal {
                 let values: Vec<String> = std::iter::once(String::new())
                     .chain(self.config.ai.connections.keys().cloned())
                     .collect();
-                let labels = values.iter().map(|v| self.reviewer_label(v)).collect();
-                let current = values.iter().position(|v| *v == connection.reviewer);
+                let labels = values
+                    .iter()
+                    .map(|v| self.reviewer_label(&SideModel::from(v.as_str())))
+                    .collect();
+                let current = values
+                    .iter()
+                    .position(|v| *v == connection.reviewer.connection);
                 Some(EnumOptions {
                     values,
                     labels,
@@ -560,9 +600,11 @@ impl SettingsModal {
                 let values = self.subagents_choices();
                 let labels = values
                     .iter()
-                    .map(|value| subagents_label(connection, value))
+                    .map(|value| subagents_label(connection, &SideModel::from(value.as_str())))
                     .collect();
-                let current = values.iter().position(|v| *v == connection.subagents);
+                let current = values
+                    .iter()
+                    .position(|v| *v == connection.subagents.connection);
                 Some(EnumOptions {
                     values,
                     labels,
@@ -584,12 +626,12 @@ impl SettingsModal {
             }
             SUBAGENTS => {
                 if let Some(connection) = self.edited_mut() {
-                    connection.subagents = value.to_string();
+                    point_side(&mut connection.subagents, value);
                 }
             }
             REVIEWER => {
                 if let Some(connection) = self.edited_mut() {
-                    connection.reviewer = value.to_string();
+                    point_side(&mut connection.reviewer, value);
                 }
             }
             API_KEY => self.apply_api_key_choice(value),
@@ -603,7 +645,9 @@ impl SettingsModal {
         if index == SUBAGENTS {
             let choices = self.subagents_choices();
             if let Some(connection) = self.edited_mut() {
-                step_value(&mut connection.subagents, &choices, forward);
+                let mut name = connection.subagents.connection.clone();
+                step_value(&mut name, &choices, forward);
+                point_side(&mut connection.subagents, &name);
             }
             return;
         }
@@ -612,7 +656,9 @@ impl SettingsModal {
                 .chain(self.config.ai.connections.keys().cloned())
                 .collect();
             if let Some(connection) = self.edited_mut() {
-                step_value(&mut connection.reviewer, &choices, forward);
+                let mut name = connection.reviewer.connection.clone();
+                step_value(&mut name, &choices, forward);
+                point_side(&mut connection.reviewer, &name);
             }
             return;
         }
@@ -731,38 +777,28 @@ impl SettingsModal {
         if self.config.ai.connection == old {
             self.config.ai.connection = new.to_string();
         }
-        self.retarget_subagents(old, new);
-        self.retarget_reviewers(old, new);
+        self.retarget_side_models(old, new);
         if let Some(edit) = self.connection_edit.as_mut() {
             edit.name = new.to_string();
         }
     }
 
-    /// Point the connections whose subagents ran on `old` at `new`; an empty
-    /// `new` hands them back to their own connection.
-    fn retarget_subagents(&mut self, old: &str, new: &str) {
-        for connection in self.config.ai.connections.values_mut() {
-            if connection.subagents == old {
-                connection.subagents = new.to_string();
-            }
+    /// Point the side models on `old` — the connections' reviewers and
+    /// subagents, and the `[ai]` defaults — at `new`; an empty `new` hands
+    /// them to what they fall back to.
+    fn retarget_side_models(&mut self, old: &str, new: &str) {
+        let ai = &mut self.config.ai;
+        for connection in ai.connections.values_mut() {
+            retarget_side(&mut connection.subagents, old, new);
+            retarget_side(&mut connection.reviewer, old, new);
         }
-    }
-
-    /// Point the reviewers on `old` — the connections' and `[ai.auto_reviewer]`
-    /// — at `new`; an empty `new` hands them to the default.
-    fn retarget_reviewers(&mut self, old: &str, new: &str) {
-        for connection in self.config.ai.connections.values_mut() {
-            if connection.reviewer == old {
-                connection.reviewer = new.to_string();
-            }
-        }
-        let default = &mut self.config.ai.auto_reviewer;
-        if default.connection == old {
-            default.connection = new.to_string();
-            if new.is_empty() {
-                // Its model was one of the connection gone.
-                default.model.clear();
-            }
+        for side in [
+            &mut ai.auto_reviewer,
+            &mut ai.subagents,
+            &mut ai.goal_judge,
+            &mut ai.handoff,
+        ] {
+            retarget_side(side, old, new);
         }
     }
 
@@ -821,7 +857,11 @@ impl SettingsModal {
             runs_subagents,
             self.open_connection_name().map(str::to_string),
         ) {
-            self.retarget_subagents(&name, "");
+            let ai = &mut self.config.ai;
+            for connection in ai.connections.values_mut() {
+                retarget_side(&mut connection.subagents, &name, "");
+            }
+            retarget_side(&mut ai.subagents, &name, "");
         }
         self.model_options.clear();
         self.request_models();
@@ -1623,9 +1663,15 @@ mod tests {
         assert_eq!(options.values, ["", "claude", "cloud", "local"]);
         assert_eq!(options.current, Some(0));
         modal.apply_connection_enum(SUBAGENTS, "local");
-        assert_eq!(modal.config.ai.connections["codex"].subagents, "local");
+        assert_eq!(
+            modal.config.ai.connections["codex"].subagents.connection,
+            "local"
+        );
         modal.cycle_connection_field(SUBAGENTS, false);
-        assert_eq!(modal.config.ai.connections["codex"].subagents, "cloud");
+        assert_eq!(
+            modal.config.ai.connections["codex"].subagents.connection,
+            "cloud"
+        );
 
         // Claude Code and a model connection run their own when left empty.
         for own in ["claude", "local"] {
@@ -1640,15 +1686,46 @@ mod tests {
         // to Codex; a switch to Claude Code keeps it.
         modal.open_connection("cloud".into());
         edit(&mut modal, NAME, "hosted");
-        assert_eq!(modal.config.ai.connections["codex"].subagents, "hosted");
+        assert_eq!(
+            modal.config.ai.connections["codex"].subagents.connection,
+            "hosted"
+        );
         modal.apply_connection_enum(PROVIDER, "claude_code");
-        assert_eq!(modal.config.ai.connections["codex"].subagents, "hosted");
+        assert_eq!(
+            modal.config.ai.connections["codex"].subagents.connection,
+            "hosted"
+        );
         modal.apply_connection_enum(PROVIDER, "gemini_cli");
-        assert!(modal.config.ai.connections["codex"].subagents.is_empty());
+        assert!(modal.config.ai.connections["codex"].subagents.is_unset());
         modal.open_connection("codex".into());
         modal.apply_connection_enum(SUBAGENTS, "local");
         modal.delete_connection("local");
-        assert!(modal.config.ai.connections["codex"].subagents.is_empty());
+        assert!(modal.config.ai.connections["codex"].subagents.is_unset());
+    }
+
+    /// A model the file names with the connection shows on the page, and
+    /// goes when another connection is picked: it was one of the first's.
+    #[test]
+    fn a_side_models_model_shows_and_goes_with_its_connection() {
+        let mut config = with_local();
+        config
+            .ai
+            .connections
+            .insert("cloud".into(), Connection::default());
+        config.ai.connections.get_mut("local").unwrap().reviewer = SideModel {
+            connection: "cloud".into(),
+            model: "small".into(),
+        };
+        let mut modal = ai_modal(config);
+        modal.open_connection("local".into());
+        assert_eq!(modal.connection_value(REVIEWER), "cloud · small");
+        modal.apply_connection_enum(REVIEWER, "cloud");
+        assert_eq!(modal.config.ai.connections["local"].reviewer.model, "small");
+        modal.apply_connection_enum(REVIEWER, "local");
+        assert_eq!(
+            modal.config.ai.connections["local"].reviewer,
+            SideModel::from("local")
+        );
     }
 
     #[test]
@@ -1674,19 +1751,29 @@ mod tests {
         let options = modal.connection_enum_options(REVIEWER).unwrap();
         assert_eq!(options.values, ["", "claude", "local"]);
         modal.apply_connection_enum(REVIEWER, "local");
-        assert_eq!(modal.config.ai.connections["local"].reviewer, "local");
+        assert_eq!(
+            modal.config.ai.connections["local"].reviewer.connection,
+            "local"
+        );
         modal.cycle_connection_field(REVIEWER, false);
-        assert_eq!(modal.config.ai.connections["local"].reviewer, "claude");
+        assert_eq!(
+            modal.config.ai.connections["local"].reviewer.connection,
+            "claude"
+        );
         // A CLI agent's page has it too: termide reviews its calls in `auto`.
         modal.open_connection("claude".into());
         assert!(modal.content_rows().contains(&ContentRow::Field(REVIEWER)));
         // Renamed, the reviewer is followed, the default's too; deleted, the
         // connections' fall to the default, and the default to the session.
         edit(&mut modal, NAME, "cc");
-        assert_eq!(modal.config.ai.connections["local"].reviewer, "cc");
+        assert_eq!(
+            modal.config.ai.connections["local"].reviewer.connection,
+            "cc"
+        );
         assert_eq!(modal.config.ai.auto_reviewer.connection, "cc");
+        assert_eq!(modal.config.ai.auto_reviewer.model, "haiku");
         modal.delete_connection("cc");
-        assert!(modal.config.ai.connections["local"].reviewer.is_empty());
+        assert!(modal.config.ai.connections["local"].reviewer.is_unset());
         assert!(modal.config.ai.auto_reviewer.connection.is_empty());
         assert!(modal.config.ai.auto_reviewer.model.is_empty());
         modal.open_connection("local".into());

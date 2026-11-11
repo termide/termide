@@ -4,6 +4,7 @@ use serde_json::json;
 
 use super::test_support::*;
 use super::*;
+use crate::classifier::ModelChoice;
 
 fn agent(provider: ScriptedProvider, tools: ToolRegistry) -> (Agent, Arc<ScriptedProvider>) {
     let provider = Arc::new(provider);
@@ -424,6 +425,53 @@ fn the_judge_reports_a_verdict_and_leaves_the_transcript_alone() {
     let seen = provider.seen_requests();
     assert_eq!(seen.len(), 1);
     assert_eq!(roles(&seen[0]), vec!["user"]);
+}
+
+/// The judge and the brief run on the models chosen for them: one of their
+/// own, or the session's under another id; the session's own otherwise.
+#[test]
+fn the_judge_and_the_brief_run_on_their_own_models() {
+    let mut judged = text_reply("DONE: shipped");
+    judged.usage.input = 10;
+    let judge = Arc::new(ScriptedProvider::new(vec![judged]));
+    let mut briefed = text_reply("the brief");
+    briefed.usage.input = 10;
+    let (agent, session) = agent(ScriptedProvider::new(vec![briefed]), ToolRegistry::new());
+    let agent = agent.with_side_models(SideModels {
+        goal_judge: ModelChoice::own(
+            judge.clone(),
+            ModelSpec {
+                id: "judge-model".into(),
+                ..model()
+            },
+        ),
+        handoff: ModelChoice {
+            own: None,
+            session_model: Some("brief-model".into()),
+        },
+    });
+    let spent_on = |events: &[AgentEvent]| {
+        events.iter().find_map(|e| match e {
+            AgentEvent::Spent { model, .. } => Some(model.clone()),
+            _ => None,
+        })
+    };
+    let mut events = Vec::new();
+    let verdict = agent
+        .judge("ship it", &CancelToken::new(), &mut |e| events.push(e))
+        .expect("judge succeeds");
+    assert_eq!(verdict.outcome, GoalOutcome::Done);
+    assert_eq!(judge.seen_requests().len(), 1);
+    assert!(session.seen_requests().is_empty());
+    assert_eq!(spent_on(&events).as_deref(), Some("judge-model"));
+
+    let mut events = Vec::new();
+    agent.handoff(&CancelToken::new(), &mut |e| events.push(e));
+    assert_eq!(session.seen_requests().len(), 1);
+    assert_eq!(spent_on(&events).as_deref(), Some("brief-model"));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::Handoff { brief: Ok(brief) } if brief == "the brief")));
 }
 
 #[test]

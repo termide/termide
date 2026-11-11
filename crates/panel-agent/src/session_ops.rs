@@ -162,6 +162,7 @@ impl AgentPanel {
             &self.handoff_prompt,
             &self.loop_prompt,
             &self.reviewer,
+            &self.side_models,
             &self.refusals,
             self.persist_rule,
             self.hooks.as_ref(),

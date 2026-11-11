@@ -15,9 +15,9 @@ use termide_agent_core::{
     Failure, FailureKind, HostTools, IntentLog, LimitPolicy, Message, MessageOrigin, ModeHandle,
     ModelChoice, ModelSpec, OriginKind, PermissionAnswer, PermissionHooks, PermissionRules,
     PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup, Session,
-    SessionParent, SessionSummary, ShellOutput, ShellRunner, Spender, StreamEvent, ThinkingLevel,
-    Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage, DEFAULT_AGENT,
-    GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    SessionParent, SessionSummary, ShellOutput, ShellRunner, SideModels, Spender, StreamEvent,
+    ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage,
+    DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -1062,6 +1062,7 @@ impl ConnectionCatalog for AiConnections {
             context_window: connection.effective_context_window(),
             backend: cli_provider_backend(connection, agent),
             reviewer: reviewer_setup(&settings, &self.dirs, name),
+            side_models: side_models(&settings),
             settings: connection.clone(),
         })
     }
@@ -1282,6 +1283,16 @@ fn reviewer_setup(settings: &AiSettings, dirs: &AgentDirs, session: &str) -> Rev
     }
 }
 
+/// The models the `/goal` judge and the `/handoff` brief of termide's own
+/// loop run on: what `[ai.goal_judge]` and `[ai.handoff]` name, see
+/// [`side_model`]; the session's own where they name none.
+fn side_models(settings: &AiSettings) -> SideModels {
+    SideModels {
+        goal_judge: side_model(settings, &settings.goal_judge, "[ai.goal_judge]"),
+        handoff: side_model(settings, &settings.handoff, "[ai.handoff]"),
+    }
+}
+
 /// The reviewer of a session on connection `session` when `choice` names no
 /// model and that connection is Claude Code or Codex: the cheapest model of
 /// the subscription, picked from those the agent offers — the session's own
@@ -1418,8 +1429,9 @@ fn unix_now() -> u64 {
 /// Where a task delegated from a session runs.
 #[derive(Debug, PartialEq)]
 enum SubagentTarget {
-    /// termide's loop on the session's own model connection.
-    Session,
+    /// termide's loop on the session's own model connection, under the model
+    /// named in place of the session's, when one is.
+    Session(Option<String>),
     /// termide's loop on another model connection, by name.
     Model(String, Connection),
     /// A session of its own of Claude Code on this connection, by name,
@@ -1427,26 +1439,36 @@ enum SubagentTarget {
     Cli(String, Connection),
 }
 
-/// Where a task delegated from a session on `active` runs: on the connection
-/// its connection's `subagents` field names, else on the session's own — for
-/// a Claude Code session a copy of Claude Code. Codex and Gemini CLI keep
+/// Where a task delegated from a session on `active` runs: where its
+/// connection's `subagents` or `[ai.subagents]` says — a connection, under
+/// the model named in place of its own — else on the session's own, for a
+/// Claude Code session a copy of Claude Code. Codex and Gemini CLI keep
 /// tools of their own and run none: one named there is passed over, and a
 /// session on one with nothing usable named has nowhere to run them, which
 /// the error says.
 fn subagent_target(settings: &AiSettings, active: &Active) -> Result<SubagentTarget, String> {
     let session = active.connection.as_str();
-    let named = settings
-        .connections
-        .get(session)
-        .map(|connection| connection.subagents.trim())
-        .unwrap_or_default();
+    let side = settings.subagents_of(session);
+    let named = side.connection.as_str();
+    let model = (!side.model.is_empty()).then(|| side.model.clone());
+    // The named model in place of the connection's own.
+    let with_model = |connection: &Connection| Connection {
+        model: model.clone().unwrap_or_else(|| connection.model.clone()),
+        ..connection.clone()
+    };
     if !named.is_empty() && named != session {
         match settings.connections.get(named) {
             Some(connection) if !connection.is_cli() => {
-                return Ok(SubagentTarget::Model(named.to_string(), connection.clone()));
+                return Ok(SubagentTarget::Model(
+                    named.to_string(),
+                    with_model(connection),
+                ));
             }
             Some(connection) if connection.runs_subagents() => {
-                return Ok(SubagentTarget::Cli(named.to_string(), connection.clone()));
+                return Ok(SubagentTarget::Cli(
+                    named.to_string(),
+                    with_model(connection),
+                ));
             }
             Some(_) => log::warn!(
                 "connection {session}: subagents names {named}, a CLI agent, which cannot run them"
@@ -1455,7 +1477,7 @@ fn subagent_target(settings: &AiSettings, active: &Active) -> Result<SubagentTar
         }
     }
     if !termide_config::is_cli_provider(&active.kind) {
-        return Ok(SubagentTarget::Session);
+        return Ok(SubagentTarget::Session(model));
     }
     let own = settings
         .connections
@@ -1466,7 +1488,7 @@ fn subagent_target(settings: &AiSettings, active: &Active) -> Result<SubagentTar
             ..Connection::default()
         });
     if own.runs_subagents() {
-        return Ok(SubagentTarget::Cli(session.to_string(), own));
+        return Ok(SubagentTarget::Cli(session.to_string(), with_model(&own)));
     }
     Err(format!(
         "the connection {session} is a CLI agent on tools of its own, which cannot run \
@@ -2537,12 +2559,13 @@ impl Subagents {
                 connection_name,
                 connection.provider,
             ),
-            SubagentTarget::Session => (
+            SubagentTarget::Session(model) => (
                 Arc::clone(&active.provider),
                 definition
                     .spec
                     .model
                     .clone()
+                    .or(model)
                     .unwrap_or_else(|| active.model.clone()),
                 active.context_window,
                 active.connection.clone(),
@@ -3353,6 +3376,7 @@ fn agent_setup(
         handoff_prompt,
         loop_prompt,
         reviewer,
+        side_models: side_models(settings),
         refusals,
         fold: match settings.fold_blocks {
             termide_config::FoldBlocks::Immediately => FoldMode::Immediately,

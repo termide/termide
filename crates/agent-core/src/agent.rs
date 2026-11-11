@@ -8,7 +8,7 @@ use serde_json::Value;
 
 use crate::ask::UserAsker;
 use crate::cancel::{CancelToken, PauseGate};
-use crate::classifier::{IntentEntry, IntentLog, SessionView};
+use crate::classifier::{IntentEntry, IntentLog, SessionView, SideModels};
 use crate::compaction::{
     context_tokens, is_context_overflow_error, should_compact, split_point, CompactionCall,
     CompactionPolicy, CompactionPrompts, CompactionReason, MIN_SUMMARY_CHARS, REJECTED_REPLY_CHARS,
@@ -577,6 +577,8 @@ pub struct Agent {
     compaction_prompts: CompactionPrompts,
     goal_prompt: GoalPrompt,
     handoff_prompt: HandoffPrompt,
+    /// The models the `/goal` judge and the `/handoff` brief run on.
+    side_models: SideModels,
     /// The nudge sent after a call that went round in circles.
     loop_prompt: LoopPrompt,
     /// Whom the `question` tool asks; `None` when no one is watching.
@@ -654,6 +656,7 @@ impl Agent {
             compaction_prompts: CompactionPrompts::default(),
             goal_prompt: GoalPrompt::default(),
             handoff_prompt: HandoffPrompt::default(),
+            side_models: SideModels::default(),
             loop_prompt: LoopPrompt::default(),
             asker: None,
             prompter: None,
@@ -806,6 +809,13 @@ impl Agent {
     #[must_use]
     pub fn with_handoff_prompt(mut self, prompt: HandoffPrompt) -> Self {
         self.handoff_prompt = prompt;
+        self
+    }
+
+    /// Judge goals and write handoff briefs on `models`.
+    #[must_use]
+    pub fn with_side_models(mut self, models: SideModels) -> Self {
+        self.side_models = models;
         self
     }
 
@@ -1586,14 +1596,18 @@ impl Agent {
             self.goal_prompt.request.clone(),
         )));
         let system_prompt = self.goal_prompt.system_prompt(goal);
+        let (provider, model) = self
+            .side_models
+            .goal_judge
+            .resolve_on(&self.provider, &self.model);
         let request = Request {
-            model: &self.model,
+            model: &model,
             system_prompt: &system_prompt,
             messages: &messages,
             tools: &[],
             thinking: ThinkingLevel::Off,
         };
-        let reply = self.provider.stream(
+        let reply = provider.stream(
             &request,
             &mut |event| emit(AgentEvent::GoalJudgeUpdate(event)),
             cancel,
@@ -1601,7 +1615,7 @@ impl Agent {
         if reply.usage.total() > 0 {
             emit(AgentEvent::Spent {
                 by: Spender::GoalJudge,
-                model: self.model.id.clone(),
+                model: model.id.clone(),
                 usage: reply.usage,
             });
         }
@@ -1644,18 +1658,22 @@ impl Agent {
         messages.push(Message::User(UserMessage::text(
             self.handoff_prompt.request.clone(),
         )));
+        let (provider, model) = self
+            .side_models
+            .handoff
+            .resolve_on(&self.provider, &self.model);
         let request = Request {
-            model: &self.model,
+            model: &model,
             system_prompt: &self.handoff_prompt.instructions,
             messages: &messages,
             tools: &[],
             thinking: ThinkingLevel::Off,
         };
-        let reply = self.provider.stream(&request, &mut |_| {}, cancel);
+        let reply = provider.stream(&request, &mut |_| {}, cancel);
         if reply.usage.total() > 0 {
             emit(AgentEvent::Spent {
                 by: Spender::Handoff,
-                model: self.model.id.clone(),
+                model: model.id.clone(),
                 usage: reply.usage,
             });
         }

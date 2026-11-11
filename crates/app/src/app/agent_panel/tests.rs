@@ -439,8 +439,15 @@ fn subagents_run_where_the_session_connection_says() {
     }
     let target = |settings: &AiSettings, session: &str| {
         subagent_target(settings, &active_on(settings, session)).map(|target| match target {
-            SubagentTarget::Session => "session".to_string(),
-            SubagentTarget::Model(name, _) => format!("model {name}"),
+            SubagentTarget::Session(None) => "session".to_string(),
+            SubagentTarget::Session(Some(model)) => format!("session {model}"),
+            // Named only when it is not the connection's own.
+            SubagentTarget::Model(name, connection)
+                if connection.model == settings.connections[&name].model =>
+            {
+                format!("model {name}")
+            }
+            SubagentTarget::Model(name, connection) => format!("model {name} {}", connection.model),
             SubagentTarget::Cli(name, _) => format!("cli {name}"),
         })
     };
@@ -472,6 +479,30 @@ fn subagents_run_where_the_session_connection_says() {
     }
     set(&mut settings, "codex", "gone");
     assert!(target(&settings, "codex").is_err());
+
+    // With nothing on the connection, `[ai.subagents]` says, a model of the
+    // connection included; the connection's own still comes first.
+    set(&mut settings, "local", "");
+    set(&mut settings, "codex", "");
+    settings.subagents = termide_config::SideModel {
+        connection: "cloud".into(),
+        model: "small".into(),
+    };
+    assert_eq!(
+        target(&settings, "local").as_deref(),
+        Ok("model cloud small")
+    );
+    assert_eq!(
+        target(&settings, "codex").as_deref(),
+        Ok("model cloud small")
+    );
+    set(&mut settings, "codex", "local");
+    assert_eq!(target(&settings, "codex").as_deref(), Ok("model local"));
+    settings.subagents = termide_config::SideModel {
+        connection: String::new(),
+        model: "small".into(),
+    };
+    assert_eq!(target(&settings, "local").as_deref(), Ok("session small"));
 }
 
 /// A CLI agent standing in for Claude Code: it offers models, answers a

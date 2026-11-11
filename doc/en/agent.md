@@ -33,7 +33,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
 # context_window_fallback = 32000  # used only when the server does not report a window
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
-# reviewer = "small"               # the connection whose model reviews in `auto`; default: [ai.auto_reviewer]
+# reviewer = "small"               # the connection whose model reviews in `auto`, or { connection, model }; default: [ai.auto_reviewer]
 # app_attribution = false          # not to identify termide to the endpoint; default on, and only where it is tracked
 
 [ai.connections.cloud]
@@ -43,13 +43,40 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 [ai.connections.codex]
 provider = "codex"                 # a CLI agent needs nothing else
-# subagents = "local"              # the connection delegated tasks run on; default: this one
+# subagents = "local"              # the connection delegated tasks run on, or { connection, model }; default: [ai.subagents]
 ```
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
 `reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and
 `app_attribution`; what it leaves out takes that field's default.
+
+Side work runs on the session's model unless a key names another, each in
+the same shape — a connection and a model of it, either left empty for the
+session's connection or the connection's own model:
+
+| Key | What runs on it | Set per connection by |
+|---|---|---|
+| `[ai.auto_reviewer]` | the `auto` mode reviewer — see [Auto mode](#auto-mode) | `reviewer` |
+| `[ai.subagents]` | delegated tasks — see [Subagents](#subagents) | `subagents` |
+| `[ai.goal_judge]` | the `/goal` judge — see [Service prompts](#service-prompts) | — |
+| `[ai.handoff]` | the `/handoff` brief — see [Service prompts](#service-prompts) | — |
+| `[ai.recall]` `connection`, `model` | `recall`'s solver — see [Recall](#recall) | — |
+
+```toml
+[ai.goal_judge]
+connection = "cloud"   # a connection's name; empty: the session's own
+model = "claude-opus-5"  # a model of it; empty: the connection's model
+```
+
+A connection's `reviewer` and `subagents` take the same table
+(`subagents = { connection = "local", model = "qwen3-coder" }`) or just a
+connection's name, and come before the `[ai]` key of the same work. Compaction
+always runs on the session's model, whose window the summary has to fit. The
+goal judge and the handoff brief read the whole transcript, so the model chosen
+for them needs a window as large as the session's; and they apply to termide's
+own loop only — Claude Code, Codex and Gemini CLI hold their conversation
+themselves and answer both.
 `max_concurrent_requests` caps how many requests the connection serves at
 once across the whole termide process — the agents of every panel, their
 subagents, the `auto` reviewer and the other side calls on it; the rest wait
@@ -1862,8 +1889,8 @@ model = "haiku"         # a model of it; empty: the connection's model
 
 A connection can name its own reviewer: `reviewer` in its table (**Auto mode
 reviewer** on its settings page) is a connection whose model reviews the calls
-of sessions on it, wherever its subagents run; left empty, `[ai.auto_reviewer]`
-does. So a local connection can be reviewed by a small local model and a
+of sessions on it, wherever its subagents run — or, in the file, a table with
+a model of it too; left empty, `[ai.auto_reviewer]` does. So a local connection can be reviewed by a small local model and a
 Claude Code one by Haiku through the subscription, and switching the session's
 connection switches its reviewer with it. The choice follows a renamed
 connection, and a deleted one hands the review back to the default.
@@ -2125,8 +2152,10 @@ view moves into a panel at once. `o` on a finished `task` block opens its
 session in a panel.
 
 A delegate runs on the connection the session's connection names under
-**Subagents** on its settings page (`subagents` in the file), or on the
-session's own when it names none. On a connection termide talks to a model on,
+**Subagents** on its settings page (`subagents` in the file), else on the one
+`[ai.subagents]` names (**Subagents** on the AI tab), or on the session's own
+when neither names one; a model named with it runs in place of the
+connection's. On a connection termide talks to a model on,
 it runs termide's own loop, on that connection's model; the `model` its
 `AGENT.md` names applies on the session's connection, whose endpoint the id is
 for. On a Claude Code connection it is a copy of Claude Code: a session of its
@@ -2498,7 +2527,9 @@ while it goes on (`◎ Heading for the goal …` with how long it has run, and t
 check while it runs; a click on `✕` stops it, elsewhere on the row brings its
 latest run into view), and a bare `/goal` reports it and its turn count.
 `/goal stop`, `Esc`, or stopping the run ends it. Reword `goal.md` to change how
-strictly the goal is judged.
+strictly the goal is judged. The judge runs on the session's model unless
+`[ai.goal_judge]` (**Goal judge** on the AI tab) names another — a stronger one
+to judge strictly, say.
 
 ```
 /goal get the test suite green    work until the judge agrees it is done
@@ -2515,7 +2546,8 @@ matter. When the brief is ready a card offers to **save it to `HANDOFF.md`** in
 the panel's directory (where another agent, even an external one that reads
 files, can pick it up — add it to `.gitignore`) or to **start a new session
 from it**, seeding the fresh session with the brief. Reword `handoff.md` to
-change what a brief contains.
+change what a brief contains. The brief is written by the session's model
+unless `[ai.handoff]` (**Handoff brief** on the AI tab) names another.
 
 `loop.md` is what the built-in agent tells a model that went round in
 circles. The agent watches the reasoning and the answer as they stream; once

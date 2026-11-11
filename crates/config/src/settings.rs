@@ -140,6 +140,25 @@ pub struct AiSettings {
     #[serde(default)]
     pub auto_reviewer: SideModel,
 
+    /// `[ai.subagents]`: where the agents a session delegates to with `task`
+    /// run, unless its connection names its own. Left empty, on the session's
+    /// connection.
+    #[serde(default)]
+    pub subagents: SideModel,
+
+    /// `[ai.goal_judge]`: the model that judges whether a `/goal` is reached.
+    /// Left empty, the model the session runs on. termide's own loop only: a
+    /// CLI agent's session is judged by the agent, which holds the
+    /// conversation.
+    #[serde(default)]
+    pub goal_judge: SideModel,
+
+    /// `[ai.handoff]`: the model that writes a `/handoff` brief. Left empty,
+    /// the model the session runs on; termide's own loop only, as for
+    /// `goal_judge`.
+    #[serde(default)]
+    pub handoff: SideModel,
+
     /// Context compaction policy.
     #[serde(default)]
     pub compaction: termide_agent_core::CompactionPolicy,
@@ -217,21 +236,31 @@ pub struct Connection {
     /// Gemini CLI has no such setting. Unset leaves the agent's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_limit: Option<u64>,
-    /// The connection, by name, the agents this one delegates to with
-    /// `task` run on; empty runs them on this one. A subagent runs the
-    /// built-in loop, so it needs a model connection, not a CLI agent.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub subagents: String,
+    /// Where the agents this one delegates to with `task` run, over
+    /// `[ai.subagents]`: a connection and a model of it, or a connection's
+    /// bare name. Unset leaves it to `[ai.subagents]`. A subagent runs the
+    /// built-in loop or a copy of Claude Code, so not Codex or Gemini CLI.
+    #[serde(
+        default,
+        skip_serializing_if = "SideModel::is_unset",
+        serialize_with = "SideModel::serialize_compact"
+    )]
+    pub subagents: SideModel,
     /// How many requests the connection serves at once across the termide
     /// process — the panels' agents, their subagents and side calls — the
     /// rest waiting their turn; 0 sets no limit. A local server usually runs
     /// one at a time (or llama.cpp's `--parallel` many).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub max_concurrent_requests: u32,
-    /// The connection, by name, whose model reviews the calls of this one's
-    /// sessions in `auto` mode; empty leaves it to `[ai.auto_reviewer]`.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub reviewer: String,
+    /// The model that reviews the calls of this one's sessions in `auto`
+    /// mode, over `[ai.auto_reviewer]`: a connection and a model of it, or a
+    /// connection's bare name. Unset leaves it to `[ai.auto_reviewer]`.
+    #[serde(
+        default,
+        skip_serializing_if = "SideModel::is_unset",
+        serialize_with = "SideModel::serialize_compact"
+    )]
+    pub reviewer: SideModel,
     /// Whether to identify termide to the endpoint, so its usage is filed
     /// under termide there rather than as unattributed. On by default, and
     /// offered only for the endpoints that keep such a breakdown
@@ -276,9 +305,9 @@ impl Default for Connection {
             api_key_env: String::new(),
             context_window_fallback: None,
             context_window_limit: None,
-            subagents: String::new(),
+            subagents: SideModel::default(),
             max_concurrent_requests: 0,
-            reviewer: String::new(),
+            reviewer: SideModel::default(),
             app_attribution: agent_defaults::app_attribution(),
         }
     }
@@ -445,16 +474,78 @@ impl FoldBlocks {
     }
 }
 
-/// A model for a side call — the `auto` reviewer, the recall solver: a
-/// connection, a model or a CLI agent's subscription, and the model of it to
-/// use. An empty connection means the model the session runs on; an empty
-/// model, the connection's own.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// A model for side work — the `auto` reviewer, subagents, the `/goal`
+/// judge, the `/handoff` brief: a connection, a model or a CLI agent's
+/// subscription, and the model of it to use. An empty connection means the
+/// session's; an empty model, the connection's own.
+///
+/// Written as a table; a bare string reads as a connection's name, the form
+/// a connection's `reviewer` and `subagents` took before they could name a
+/// model, and the one they are still written in when they name none.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct SideModel {
-    #[serde(default)]
     pub connection: String,
-    #[serde(default)]
     pub model: String,
+}
+
+impl SideModel {
+    /// Neither a connection nor a model: whoever is asked falls back.
+    #[must_use]
+    pub fn is_unset(&self) -> bool {
+        self.connection.trim().is_empty() && self.model.trim().is_empty()
+    }
+
+    /// The same, trimmed.
+    #[must_use]
+    pub fn trimmed(&self) -> Self {
+        Self {
+            connection: self.connection.trim().to_string(),
+            model: self.model.trim().to_string(),
+        }
+    }
+
+    /// A connection's bare name when no model is named, else the table.
+    fn serialize_compact<S: serde::Serializer>(
+        side: &Self,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        if side.model.is_empty() {
+            serializer.serialize_str(&side.connection)
+        } else {
+            side.serialize(serializer)
+        }
+    }
+}
+
+impl From<&str> for SideModel {
+    fn from(connection: &str) -> Self {
+        Self {
+            connection: connection.to_string(),
+            model: String::new(),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for SideModel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Table {
+            #[serde(default)]
+            connection: String,
+            #[serde(default)]
+            model: String,
+        }
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum NameOrTable {
+            Name(String),
+            Table(Table),
+        }
+        Ok(match NameOrTable::deserialize(deserializer)? {
+            NameOrTable::Name(connection) => Self::from(connection.as_str()),
+            NameOrTable::Table(Table { connection, model }) => Self { connection, model },
+        })
+    }
 }
 
 /// `[ai.recall]`: how long each source of a `recall` search may take, and whether it
@@ -573,16 +664,34 @@ impl AiSettings {
     }
 
     /// The model that reviews `auto` mode calls of a session on connection
-    /// `session`: the connection its `reviewer` names, on that connection's
-    /// model, else `[ai.auto_reviewer]`.
+    /// `session`: what its `reviewer` names, else `[ai.auto_reviewer]`.
     #[must_use]
     pub fn reviewer_of(&self, session: &str) -> SideModel {
-        match self.connections.get(session) {
-            Some(connection) if !connection.reviewer.trim().is_empty() => SideModel {
-                connection: connection.reviewer.trim().to_string(),
-                model: String::new(),
-            },
-            _ => self.auto_reviewer.clone(),
+        self.side_of(
+            session,
+            |connection| &connection.reviewer,
+            &self.auto_reviewer,
+        )
+    }
+
+    /// Where the agents a session on connection `session` delegates to run:
+    /// what its `subagents` names, else `[ai.subagents]`.
+    #[must_use]
+    pub fn subagents_of(&self, session: &str) -> SideModel {
+        self.side_of(session, |connection| &connection.subagents, &self.subagents)
+    }
+
+    /// The side model connection `session` names in `own`, else `fallback`;
+    /// trimmed either way.
+    fn side_of(
+        &self,
+        session: &str,
+        own: impl Fn(&Connection) -> &SideModel,
+        fallback: &SideModel,
+    ) -> SideModel {
+        match self.connections.get(session).map(own) {
+            Some(side) if !side.is_unset() => side.trimmed(),
+            _ => fallback.trimmed(),
         }
     }
 
@@ -641,6 +750,9 @@ impl Default for AiSettings {
             reasoning: agent_defaults::reasoning(),
             permissions: termide_agent_core::PermissionRules::default(),
             auto_reviewer: SideModel::default(),
+            subagents: SideModel::default(),
+            goal_judge: SideModel::default(),
+            handoff: SideModel::default(),
             compaction: termide_agent_core::CompactionPolicy::default(),
             fold_blocks: FoldBlocks::default(),
             web: WebSettings::default(),
@@ -1750,16 +1862,54 @@ mod ai_settings_tests {
             .insert("local".into(), Connection::default());
         assert_eq!(settings.reviewer_of("local"), settings.auto_reviewer);
         assert_eq!(settings.reviewer_of("gone"), settings.auto_reviewer);
-        settings.connections.get_mut("local").unwrap().reviewer = "claude".into();
+        settings.connections.get_mut("local").unwrap().reviewer = " claude ".into();
+        assert_eq!(settings.reviewer_of("local"), SideModel::from("claude"));
+        let text = toml::to_string(&settings.connections["local"]).unwrap();
+        assert!(text.contains("reviewer = \" claude \""), "{text}");
+    }
+
+    /// A connection's `reviewer` and `subagents` name a model as the global
+    /// keys do, and a bare name, the form they had before, still reads.
+    #[test]
+    fn a_connections_side_model_reads_as_a_name_or_a_table() {
+        let text = "reviewer = \"claude\"\n\
+                    subagents = { connection = \"local\", model = \"qwen\" }\n";
+        let connection: Connection = toml::from_str(text).unwrap();
+        assert_eq!(connection.reviewer, SideModel::from("claude"));
         assert_eq!(
-            settings.reviewer_of("local"),
+            connection.subagents,
             SideModel {
-                connection: "claude".into(),
-                model: String::new(),
+                connection: "local".into(),
+                model: "qwen".into(),
             }
         );
-        let text = toml::to_string(&settings.connections["local"]).unwrap();
-        assert!(text.contains("reviewer = \"claude\""), "{text}");
+        let saved = toml::to_string(&connection).unwrap();
+        assert!(saved.contains("reviewer = \"claude\""), "{saved}");
+        assert_eq!(toml::from_str::<Connection>(&saved).unwrap(), connection);
+    }
+
+    /// Subagents run where the connection says, else where `[ai.subagents]`
+    /// says; the judge and the handoff have a key each.
+    #[test]
+    fn subagents_fall_back_to_the_global_key() {
+        let mut settings: AiSettings = toml::from_str(
+            "[subagents]\nconnection = \"cloud\"\n\
+             [goal_judge]\nmodel = \"big\"\n\
+             [handoff]\nconnection = \"local\"\n",
+        )
+        .unwrap();
+        assert_eq!(settings.goal_judge.model, "big");
+        assert_eq!(settings.handoff, SideModel::from("local"));
+        settings
+            .connections
+            .insert("local".into(), Connection::default());
+        assert_eq!(settings.subagents_of("local"), SideModel::from("cloud"));
+        settings.connections.get_mut("local").unwrap().subagents = SideModel {
+            connection: String::new(),
+            model: "small".into(),
+        };
+        assert_eq!(settings.subagents_of("local").model, "small");
+        assert_eq!(settings.subagents_of("gone"), SideModel::from("cloud"));
     }
 
     /// The identification comes from the endpoint and the switch together:

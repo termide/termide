@@ -269,6 +269,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         goal_prompt: GoalPrompt::default(),
         handoff_prompt: HandoffPrompt::default(),
         loop_prompt: termide_agent_core::LoopPrompt::default(),
+        side_models: termide_agent_core::SideModels::default(),
         reviewer: ReviewerSetup::default(),
         refusals: Refusals::default(),
         persist_rule: None,
@@ -649,6 +650,7 @@ impl ConnectionCatalog for Connections {
             context_window: 200_000,
             backend,
             // Each connection's reviewer reviews under a model of its name.
+            side_models: termide_agent_core::SideModels::default(),
             reviewer: ReviewerSetup {
                 model: termide_agent_core::ModelChoice {
                     own: None,
@@ -745,6 +747,7 @@ impl ConnectionCatalog for Moving {
             model: "m".into(),
             context_window: 200_000,
             backend: None,
+            side_models: termide_agent_core::SideModels::default(),
             reviewer: ReviewerSetup::default(),
             settings: self.settings(),
         })
@@ -1743,6 +1746,7 @@ impl ConnectionCatalog for Switchable {
             model: entry.model,
             context_window: 200_000,
             backend,
+            side_models: termide_agent_core::SideModels::default(),
             reviewer: ReviewerSetup::default(),
             settings: termide_config::Connection::default(),
         })

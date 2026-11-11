@@ -4,7 +4,7 @@
 //! each tab, how to read/write them on a `Config`, and the type markers used
 //! by the renderer. It deliberately contains no UI state or rendering logic.
 
-use termide_config::{Config, LimitPolicy};
+use termide_config::{Config, LimitPolicy, SideModel};
 use termide_i18n as i18n;
 use termide_theme::Theme;
 
@@ -260,6 +260,30 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_agent_on_limit(),
                 field_type: FieldType::Enum,
             },
+            FieldDescriptor {
+                label: t.settings_agent_subagents(),
+                field_type: FieldType::Enum,
+            },
+            FieldDescriptor {
+                label: t.settings_agent_subagents_model(),
+                field_type: FieldType::OptionalText,
+            },
+            FieldDescriptor {
+                label: t.settings_agent_goal_judge(),
+                field_type: FieldType::Enum,
+            },
+            FieldDescriptor {
+                label: t.settings_agent_goal_judge_model(),
+                field_type: FieldType::OptionalText,
+            },
+            FieldDescriptor {
+                label: t.settings_agent_handoff(),
+                field_type: FieldType::Enum,
+            },
+            FieldDescriptor {
+                label: t.settings_agent_handoff_model(),
+                field_type: FieldType::OptionalText,
+            },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
@@ -356,18 +380,15 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
                 }
             }
             AI_PERMISSION_MODE_FIELD => permission_mode_label(config.ai.permission_mode()),
-            AI_AUTO_REVIEWER_FIELD => auto_reviewer_label(&config.ai.auto_reviewer.connection),
             AI_ON_LIMIT_FIELD => on_limit_label(config.ai.on_limit),
-            AI_AUTO_REVIEWER_MODEL_FIELD => {
-                if config.ai.auto_reviewer.model.is_empty() {
-                    i18n::t()
-                        .settings_agent_auto_reviewer_model_default()
-                        .to_string()
-                } else {
-                    config.ai.auto_reviewer.model.clone()
-                }
-            }
-            _ => String::new(),
+            index => match side_field(config, index) {
+                Some((side, false)) => side_connection_label(&side.connection),
+                Some((side, true)) if side.model.is_empty() => i18n::t()
+                    .settings_agent_auto_reviewer_model_default()
+                    .to_string(),
+                Some((side, true)) => side.model.clone(),
+                None => String::new(),
+            },
         },
         SettingsTab::Debug => match index {
             super::debugger::NATIVE => config.debug.native.join(", "),
@@ -581,10 +602,11 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
                 .collect();
             (values, labels, config.ai.on_limit.label().to_string())
         }
-        (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
-            let values = auto_reviewer_choices(config);
-            let labels = values.iter().map(|v| auto_reviewer_label(v)).collect();
-            (values, labels, config.ai.auto_reviewer.connection.clone())
+        (SettingsTab::Ai, index) if AI_SIDE_FIELDS.contains(&index) => {
+            let values = side_choices(config, index);
+            let labels = values.iter().map(|v| side_connection_label(v)).collect();
+            let (side, _) = side_field(config, index)?;
+            (values, labels, side.connection.clone())
         }
         _ => return None,
     };
@@ -633,8 +655,10 @@ pub(super) fn apply_enum_value(config: &mut Config, tab: SettingsTab, index: usi
                 config.ai.on_limit = policy;
             }
         }
-        (SettingsTab::Ai, AI_AUTO_REVIEWER_FIELD) => {
-            config.ai.auto_reviewer.connection = value.to_string();
+        (SettingsTab::Ai, index) if AI_SIDE_FIELDS.contains(&index) => {
+            if let Some(side) = side_field_mut(config, index) {
+                side.connection = value.to_string();
+            }
         }
         _ => {}
     }
@@ -719,19 +743,74 @@ fn permission_mode_label(mode: &str) -> String {
 /// The AI tab's field for the connection whose model reviews in `auto` mode.
 pub(super) const AI_AUTO_REVIEWER_FIELD: usize = 8;
 
-/// The AI tab's field for the model of that connection (or of the
-/// session's) the reviewer runs on.
-pub(super) const AI_AUTO_REVIEWER_MODEL_FIELD: usize = 9;
+/// The AI tab's fields for where subagents run, `[ai.subagents]`.
+pub(super) const AI_SUBAGENTS_FIELD: usize = 11;
+/// The AI tab's fields for the `/goal` judge's model, `[ai.goal_judge]`.
+pub(super) const AI_GOAL_JUDGE_FIELD: usize = 13;
+/// The AI tab's fields for the `/handoff` brief's model, `[ai.handoff]`.
+pub(super) const AI_HANDOFF_FIELD: usize = 15;
 
-/// What the `auto` mode reviewer can be: the session's connection (empty),
-/// or any connection — a CLI agent reviews through its subscription.
-fn auto_reviewer_choices(config: &Config) -> Vec<String> {
-    std::iter::once(String::new())
-        .chain(config.ai.connections.keys().cloned())
-        .collect()
+/// The AI tab's side-model connection fields, each followed by the field of
+/// the model of that connection.
+const AI_SIDE_FIELDS: [usize; 4] = [
+    AI_AUTO_REVIEWER_FIELD,
+    AI_SUBAGENTS_FIELD,
+    AI_GOAL_JUDGE_FIELD,
+    AI_HANDOFF_FIELD,
+];
+
+/// The side model field `index` of the AI tab edits, and whether it is the
+/// model field rather than the connection one.
+pub(super) fn side_field(config: &Config, index: usize) -> Option<(&SideModel, bool)> {
+    let (connection_field, is_model) = side_field_index(index)?;
+    let ai = &config.ai;
+    let side = match connection_field {
+        AI_AUTO_REVIEWER_FIELD => &ai.auto_reviewer,
+        AI_SUBAGENTS_FIELD => &ai.subagents,
+        AI_GOAL_JUDGE_FIELD => &ai.goal_judge,
+        _ => &ai.handoff,
+    };
+    Some((side, is_model))
 }
 
-fn auto_reviewer_label(value: &str) -> String {
+/// [`side_field`], to change.
+pub(super) fn side_field_mut(config: &mut Config, index: usize) -> Option<&mut SideModel> {
+    let (connection_field, _) = side_field_index(index)?;
+    let ai = &mut config.ai;
+    Some(match connection_field {
+        AI_AUTO_REVIEWER_FIELD => &mut ai.auto_reviewer,
+        AI_SUBAGENTS_FIELD => &mut ai.subagents,
+        AI_GOAL_JUDGE_FIELD => &mut ai.goal_judge,
+        _ => &mut ai.handoff,
+    })
+}
+
+fn side_field_index(index: usize) -> Option<(usize, bool)> {
+    if AI_SIDE_FIELDS.contains(&index) {
+        Some((index, false))
+    } else {
+        index
+            .checked_sub(1)
+            .filter(|field| AI_SIDE_FIELDS.contains(field))
+            .map(|field| (field, true))
+    }
+}
+
+/// What a side model's connection can be: the session's (empty), or any
+/// connection — a CLI agent answers through its subscription — save that
+/// subagents run only where termide can run them, see
+/// [`Connection::runs_subagents`](termide_config::Connection::runs_subagents).
+fn side_choices(config: &Config, field: usize) -> Vec<String> {
+    let connections = config
+        .ai
+        .connections
+        .iter()
+        .filter(|(_, connection)| field != AI_SUBAGENTS_FIELD || connection.runs_subagents())
+        .map(|(name, _)| name.clone());
+    std::iter::once(String::new()).chain(connections).collect()
+}
+
+fn side_connection_label(value: &str) -> String {
     if value.is_empty() {
         i18n::t().settings_agent_auto_reviewer_session().to_string()
     } else {
@@ -739,9 +818,11 @@ fn auto_reviewer_label(value: &str) -> String {
     }
 }
 
-fn cycle_auto_reviewer(config: &mut Config, forward: bool) {
-    let choices = auto_reviewer_choices(config);
-    step_value(&mut config.ai.auto_reviewer.connection, &choices, forward);
+fn cycle_side(config: &mut Config, field: usize, forward: bool) {
+    let choices = side_choices(config, field);
+    if let Some(side) = side_field_mut(config, field) {
+        step_value(&mut side.connection, &choices, forward);
+    }
 }
 
 /// Step the permission mode to the next (or previous) one, wrapping.
@@ -856,7 +937,7 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
             2 => cycle_fold_blocks(config, true),
             3..=5 => cycle_web_field(config, index, true),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, true),
-            AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, true),
+            index if AI_SIDE_FIELDS.contains(&index) => cycle_side(config, index, true),
             AI_ON_LIMIT_FIELD => cycle_on_limit(config, true),
             _ => {}
         },
@@ -917,7 +998,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
             2 => cycle_fold_blocks(config, false),
             3..=5 => cycle_web_field(config, index, false),
             AI_PERMISSION_MODE_FIELD => cycle_permission_mode(config, false),
-            AI_AUTO_REVIEWER_FIELD => cycle_auto_reviewer(config, false),
+            index if AI_SIDE_FIELDS.contains(&index) => cycle_side(config, index, false),
             AI_ON_LIMIT_FIELD => cycle_on_limit(config, false),
             _ => {}
         },
@@ -998,8 +1079,9 @@ mod field_index_tests {
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            11,
-            "the permission mode, its reviewer and model and the limit policy follow the web fields"
+            17,
+            "the permission mode, its reviewer and model, the limit policy and the side \
+             models follow the web fields"
         );
         assert!(matches!(fields[6].field_type, FieldType::OptionalText));
         assert!(matches!(fields[7].field_type, FieldType::Enum));
@@ -1121,7 +1203,10 @@ mod enum_option_tests {
     fn the_limit_policy_cycles_and_reads_back() {
         let mut config = Config::default();
         let field = AI_ON_LIMIT_FIELD;
-        assert_eq!(fields_for_tab(SettingsTab::Ai).len(), field + 1);
+        assert_eq!(
+            fields_for_tab(SettingsTab::Ai)[field].label,
+            i18n::t().settings_agent_on_limit()
+        );
         assert_eq!(config.ai.on_limit, LimitPolicy::Ask);
         cycle_enum_forward(&mut config, SettingsTab::Ai, field);
         assert_eq!(config.ai.on_limit, LimitPolicy::AskElseWait);
@@ -1153,7 +1238,6 @@ mod enum_option_tests {
             );
         }
         let field = AI_AUTO_REVIEWER_FIELD;
-        assert_eq!(AI_AUTO_REVIEWER_MODEL_FIELD, field + 1);
         let options = enum_options(&config, SettingsTab::Ai, field).unwrap();
         // A CLI agent reviews through its subscription.
         assert_eq!(options.values, ["", "cli", "cloud"]);
@@ -1170,13 +1254,56 @@ mod enum_option_tests {
         apply_enum_value(&mut config, SettingsTab::Ai, field, "cloud");
         assert_eq!(config.ai.auto_reviewer.connection, "cloud");
         // The model beside it: the connection's own until one is named.
-        let model = AI_AUTO_REVIEWER_MODEL_FIELD;
+        let model = AI_AUTO_REVIEWER_FIELD + 1;
         assert_eq!(
             get_field_value(&config, SettingsTab::Ai, model),
             i18n::t().settings_agent_auto_reviewer_model_default()
         );
         config.ai.auto_reviewer.model = "haiku".into();
         assert_eq!(get_field_value(&config, SettingsTab::Ai, model), "haiku");
+    }
+
+    /// Subagents, the goal judge and the handoff brief each take a connection
+    /// and a model of it, as the reviewer does; subagents only where termide
+    /// can run them.
+    #[test]
+    fn the_side_models_take_a_connection_and_a_model() {
+        let mut config = Config::default();
+        for (name, provider) in [
+            ("cloud", "anthropic_compatible"),
+            ("cli", "claude_code"),
+            ("codex", "codex"),
+        ] {
+            config.ai.connections.insert(
+                name.to_string(),
+                termide_config::Connection {
+                    provider: provider.to_string(),
+                    ..termide_config::Connection::default()
+                },
+            );
+        }
+        let options = enum_options(&config, SettingsTab::Ai, AI_SUBAGENTS_FIELD).unwrap();
+        assert_eq!(options.values, ["", "cli", "cloud"]);
+        let options = enum_options(&config, SettingsTab::Ai, AI_GOAL_JUDGE_FIELD).unwrap();
+        assert_eq!(options.values, ["", "cli", "cloud", "codex"]);
+
+        apply_enum_value(&mut config, SettingsTab::Ai, AI_GOAL_JUDGE_FIELD, "cloud");
+        assert_eq!(config.ai.goal_judge.connection, "cloud");
+        cycle_enum_forward(&mut config, SettingsTab::Ai, AI_HANDOFF_FIELD);
+        assert_eq!(config.ai.handoff.connection, "cli");
+        assert_eq!(
+            get_field_value(&config, SettingsTab::Ai, AI_SUBAGENTS_FIELD),
+            i18n::t().settings_agent_auto_reviewer_session()
+        );
+        let model = AI_HANDOFF_FIELD + 1;
+        assert_eq!(
+            get_field_value(&config, SettingsTab::Ai, model),
+            i18n::t().settings_agent_auto_reviewer_model_default()
+        );
+        side_field_mut(&mut config, model).unwrap().model = "haiku".into();
+        assert_eq!(config.ai.handoff.model, "haiku");
+        assert_eq!(get_field_value(&config, SettingsTab::Ai, model), "haiku");
+        assert!(config.ai.goal_judge.model.is_empty());
     }
 
     /// Choosing from the dropdown and cycling with Left/Right must write the

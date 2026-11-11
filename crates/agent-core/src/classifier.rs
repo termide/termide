@@ -367,12 +367,35 @@ impl ModelChoice {
             return Some((Arc::clone(provider), model.clone()));
         }
         let session = session?;
-        let mut model = session.model.clone();
+        Some(self.resolve_on(&session.provider, &session.model))
+    }
+
+    /// The provider and model to call: its own, else `provider` with `model`,
+    /// under the model id named in its place when one is.
+    #[must_use]
+    pub fn resolve_on(
+        &self,
+        provider: &Arc<dyn Provider>,
+        model: &ModelSpec,
+    ) -> (Arc<dyn Provider>, ModelSpec) {
+        if let Some((provider, model)) = &self.own {
+            return (Arc::clone(provider), model.clone());
+        }
+        let mut model = model.clone();
         if let Some(id) = self.session_model.as_ref().filter(|id| !id.is_empty()) {
             model.id = id.clone();
         }
-        Some((Arc::clone(&session.provider), model))
+        (Arc::clone(provider), model)
     }
+}
+
+/// The models of the side calls that read a session's whole transcript —
+/// the `/goal` judge and the `/handoff` brief — each the session's own
+/// unless one is chosen.
+#[derive(Clone, Default, Debug)]
+pub struct SideModels {
+    pub goal_judge: ModelChoice,
+    pub handoff: ModelChoice,
 }
 
 /// The tokens model calls spent, added up across the threads that make

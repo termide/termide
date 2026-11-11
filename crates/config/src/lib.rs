@@ -1080,17 +1080,12 @@ mod layered_load_tests {
     }
 
     #[test]
-    fn the_old_auto_reviewer_string_is_left_out_with_a_warning() {
+    fn the_old_auto_reviewer_string_reads_as_the_connection_it_named() {
         let text = "[ai]\nauto_reviewer = \"cloud\"\nbell_on_attention = false\n";
         let (loaded, _dir) = layered(text, None);
-        assert_eq!(loaded.effective.ai.auto_reviewer, SideModel::default());
+        assert_eq!(loaded.effective.ai.auto_reviewer, SideModel::from("cloud"));
         assert!(!loaded.effective.ai.bell_on_attention);
-        assert_eq!(loaded.warnings.len(), 1);
-        assert!(
-            loaded.warnings[0].contains("ai.auto_reviewer"),
-            "{:?}",
-            loaded.warnings
-        );
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
     }
 
     #[test]

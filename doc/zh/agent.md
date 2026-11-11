@@ -26,7 +26,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # 省略时：提供方列出的第一个
 # context_window_fallback = 32000  # 仅在服务器未报告窗口大小时使用
 # max_concurrent_requests = 1      # 整个 termide 中同时发送的请求数；默认 0：不限制
 # app_attribution = false          # 不向端点表明 termide 身份；默认开启，且仅在记录该信息的端点生效
-# reviewer = "small"               # 在 `auto` 中由哪个连接的模型审查；默认：[ai.auto_reviewer]
+# reviewer = "small"               # 在 `auto` 中由哪个连接的模型审查，或 { connection, model }；默认：[ai.auto_reviewer]
 
 [ai.connections.cloud]
 provider = "anthropic_compatible"
@@ -35,10 +35,12 @@ api_key_env = "ANTHROPIC_API_KEY"
 
 [ai.connections.codex]
 provider = "codex"                 # CLI 代理无需其他设置
-# subagents = "local"              # 委派的任务在哪个连接上运行；默认：本连接
+# subagents = "local"              # 委派的任务在哪个连接上运行，或 { connection, model }；默认：[ai.subagents]
 ```
 
 连接包含 `provider`、`base_url`、`model`、`api_key_env`、`context_window_fallback`、`subagents`（见[子代理](#子代理)）、`reviewer`（见 [auto 模式](#auto-模式)）、`max_concurrent_requests` 和 `app_attribution`；省略的字段取其默认值。`max_concurrent_requests` 限制该连接在整个 termide 进程中同时处理的请求数——所有面板的代理、它们的子代理、`auto` 审查者以及其他附带调用；其余请求按先来先服务排队等待，`Esc` 可在等待中的请求发送之前停止它。本地服务器通常一次只运行一个请求（llama.cpp 运行的数量等于其 `--parallel` 槽数），超出的请求要么在服务器上等待，要么占用另一段对话所需提示缓存的槽；请把它设为服务器实际运行的数量。默认值 0 表示不限制。它按连接名称计数，因此指向同一服务器的两个连接分别计数，两个 termide 进程也不共享它。CLI 代理自己发送请求，因此没有该设置。除 hosted API 之外的每个服务器都会被请求提示词处理进度（`return_progress`）：llama.cpp 和 omlx（0.7.1 及以后）会报告它，其他服务器则忽略；拒绝该字段的服务器会立即收到去掉该字段的同一请求。`app_attribution` 向按应用程序记录用量的端点表明 termide 的身份——目前是 OpenRouter，它会把不带这些标头的请求归入 `Unknown`。开启后 termide 在那里报出自己的名称、地址与所属类别。这默认开启，因为 termide 本来就在 `User-Agent` 里向它交谈的每个端点报出自己的名字——这些标头只是让记录这一点的端点把它已经看到的内容归到名字之下，而不是 `Unknown`。连接页面只为会记录这些的端点显示这个开关：本地的 llama.cpp、vLLM 或 Ollama 没有按应用记录的概念，会忽略这些标头，也就无从切换。在起作用的地方，该地址对应的应用页面是所有发送它的用户共用的，用量会公开显示；关掉开关即不被归属。标头取自端点自身的条目，因此在开关仍开着时更换端点不会发送任何内容——单凭开关不会在任何地方报出 termide。`[ai]` 中的其他设置——输出上限、推理、权限、压缩等——无论会话使用哪个连接都生效。
+
+附带工作默认使用会话的模型，除非有键指定另一个；这些键形式相同——一个连接及其模型，连接留空即会话的连接，模型留空即该连接自己的模型：`[ai.auto_reviewer]`（`auto` 审查者，连接中的 `reviewer` 优先）、`[ai.subagents]`（委派的任务，连接中的 `subagents` 优先）、`[ai.goal_judge]`（`/goal` 的评判）、`[ai.handoff]`（`/handoff` 的交接摘要），以及 `[ai.recall]` 的 `connection`、`model`（`recall` 的求解器）。连接中的 `reviewer` 和 `subagents` 接受同样的表（`subagents = { connection = "local", model = "qwen3-coder" }`）或仅一个连接名。压缩始终使用会话的模型。目标评判和交接摘要会读取整个记录，所选模型的窗口需不小于会话的窗口；它们只作用于 termide 自身的循环——Claude Code、Codex 和 Gemini CLI 自己保存对话并自行回答。
 
 `reasoning` 是新会话请求的推理级别：`off`、`minimal`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`。每个模型只提供其 API 接受的级别，缺少的级别会落到它拥有的最接近的级别：Claude Opus 5.5 和 Fable 无法停止思考，因此 `off` 得到它们的最低努力程度；在上限为 `high` 的模型上，`max` 变为 `high`。在 Messages API 上由模型决定形式：Claude 4.6 及更新版本使用自适应思考及其努力程度（并请求推理摘要，否则较新的模型不会返回），Claude 4.5 及更早版本以及网关自己的模型使用思考预算。连接到 OpenAI、OpenRouter 或 Gemini API 的 OpenAI 兼容连接把级别放在 `reasoning_effort` 中（OpenAI 的模型有各自的取值集合，其他模型为 `low`、`medium` 和 `high`）。其他任何服务器——无论其地址如何：llama.cpp 运行在租用的服务器上与运行在家中同样常见——都会收到 `chat_template_kwargs.enable_thinking`，即 vLLM 或 llama.cpp 上 Qwen3、GLM 和 DeepSeek 聊天模板的开关，因此也有带 `off` 和 `high` 的 **Reasoning** 标签。旧的 `prefer_reasoning = true | false` 仍然可读，分别读作 `high` 或 `off`。
 

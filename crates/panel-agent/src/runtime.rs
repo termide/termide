@@ -11,8 +11,8 @@ use termide_agent_core::{
     CompactionPrompts, GoalPrompt, HandoffPrompt, HistoryStep, Hooks, HostTools, LoggedMessage,
     LoopPrompt, Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
     PermissionHooks, PermissionRules, PersistRule, PlanGuard, PlanPrompt, Provider,
-    QuestionEnvelope, Refusals, ReviewerSetup, Session, ShellRunner, SkillInfo, SuggestionEnvelope,
-    TerminalSessions, Timing, ToolContext, ToolRegistry, MODEL_OPTION,
+    QuestionEnvelope, Refusals, ReviewerSetup, Session, ShellRunner, SideModels, SkillInfo,
+    SuggestionEnvelope, TerminalSessions, Timing, ToolContext, ToolRegistry, MODEL_OPTION,
 };
 
 use crate::toolset::{Blocked, ToolsetGuard};
@@ -191,6 +191,7 @@ pub(crate) fn spawn_runtime(
     handoff_prompt: &HandoffPrompt,
     loop_prompt: &LoopPrompt,
     reviewer: &ReviewerSetup,
+    side_models: &SideModels,
     refusals: &Refusals,
     persist_rule: Option<PersistFn>,
     extra_hooks: Option<&HooksFactory>,
@@ -348,6 +349,7 @@ pub(crate) fn spawn_runtime(
     .with_compaction_prompts(compaction_prompts.clone())
     .with_goal_prompt(goal_prompt.clone())
     .with_handoff_prompt(handoff_prompt.clone())
+    .with_side_models(side_models.clone())
     .with_loop_prompt(loop_prompt.clone())
     .with_messages(messages)
     .with_session_id(session.map(|s| s.id().to_string()))

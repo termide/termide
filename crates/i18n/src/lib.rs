@@ -1407,6 +1407,15 @@ pub trait Translation: Send + Sync {
     fn settings_agent_auto_reviewer_session(&self) -> &str;
     fn settings_agent_auto_reviewer_model(&self) -> &str;
     fn settings_agent_auto_reviewer_model_default(&self) -> &str;
+    /// AI settings: where subagents run, `[ai.subagents]`, and the model of it
+    fn settings_agent_subagents(&self) -> &str;
+    fn settings_agent_subagents_model(&self) -> &str;
+    /// AI settings: the `/goal` judge's model, `[ai.goal_judge]`
+    fn settings_agent_goal_judge(&self) -> &str;
+    fn settings_agent_goal_judge_model(&self) -> &str;
+    /// AI settings: the `/handoff` brief's model, `[ai.handoff]`
+    fn settings_agent_handoff(&self) -> &str;
+    fn settings_agent_handoff_model(&self) -> &str;
     /// AI settings: what a run stopped by a limit or an outage does.
     fn settings_agent_on_limit(&self) -> &str;
     fn settings_agent_on_limit_ask(&self) -> &str;
