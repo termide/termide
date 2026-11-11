@@ -23,19 +23,35 @@ pub struct CommitInfo {
     pub refs: Option<String>,
 }
 
+/// Options that keep a patch in git's own format whatever the user's config
+/// says: no external diff tool (`diff.external`, e.g. difftastic), no colour,
+/// and the `a/` `b/` prefixes `diff.noprefix` and `diff.mnemonicPrefix` would
+/// change. The diff panel parses what comes out.
+pub(crate) const PLAIN_PATCH: [&str; 4] = [
+    "--no-ext-diff",
+    "--no-color",
+    "--src-prefix=a/",
+    "--dst-prefix=b/",
+];
+
 /// Get diff for a specific commit (with full patch)
 pub fn get_commit_diff(repo: &Path, hash: &str) -> Option<String> {
-    git_command_stdout(repo, &["show", "--stat", "--patch", hash])
+    let mut args = vec!["show", "--stat", "--patch"];
+    args.extend(PLAIN_PATCH);
+    args.push(hash);
+    git_command_stdout(repo, &args)
 }
 
 /// Get file diff (for diff viewer)
 pub fn get_file_diff(repo: &Path, file: &Path, staged: bool) -> Option<String> {
     let file_str = file.to_string_lossy();
+    let mut args = vec!["diff"];
     if staged {
-        git_command_stdout(repo, &["diff", "--cached", "--", &file_str])
-    } else {
-        git_command_stdout(repo, &["diff", "--", &file_str])
+        args.push("--cached");
     }
+    args.extend(PLAIN_PATCH);
+    args.extend(["--", &file_str]);
+    git_command_stdout(repo, &args)
 }
 
 /// Detailed commit information for modal display.
@@ -212,4 +228,59 @@ pub fn get_file_diff_stats(repo: &Path, file: &Path, staged: bool) -> DiffStats 
         }
     }
     DiffStats::default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    /// The diff panel parses git's own patch format; a user's external diff
+    /// tool (difftastic is a common one), forced colour or dropped `a/` `b/`
+    /// prefixes would hand it something else.
+    #[test]
+    fn diffs_for_the_panel_ignore_the_user_s_diff_settings() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("f.txt"), "one\n").unwrap();
+        git(repo, &["add", "f.txt"]);
+        git(repo, &["commit", "-q", "-m", "one"]);
+        std::fs::write(repo.join("f.txt"), "one\ntwo\n").unwrap();
+        git(repo, &["add", "f.txt"]);
+        std::fs::write(repo.join("f.txt"), "one\ntwo\nthree\n").unwrap();
+        for (key, value) in [
+            ("diff.external", "echo EXTERNAL"),
+            ("color.diff", "always"),
+            ("color.ui", "always"),
+            ("diff.noprefix", "true"),
+            ("diff.mnemonicPrefix", "true"),
+        ] {
+            git(repo, &["config", key, value]);
+        }
+
+        let patches = [
+            get_file_diff(repo, Path::new("f.txt"), false),
+            get_file_diff(repo, Path::new("f.txt"), true),
+            get_commit_diff(repo, "HEAD"),
+        ];
+        for patch in patches {
+            let patch = patch.expect("a diff");
+            assert!(patch.contains("diff --git a/f.txt b/f.txt"), "{patch}");
+            assert!(patch.contains("+++ b/f.txt"), "{patch}");
+            assert!(!patch.contains("EXTERNAL"), "{patch}");
+            assert!(!patch.contains('\x1b'), "{patch}");
+        }
+    }
 }

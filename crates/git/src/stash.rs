@@ -141,7 +141,10 @@ pub fn stash_rename(repo: &Path, index: usize, new_message: &str) -> Result<(), 
 /// Runs `git stash show -p stash@{N}` which produces standard unified diff
 /// output (with `diff --git` headers), suitable for the diff panel parser.
 pub fn stash_diff(repo: &Path, stash_ref: &str) -> Option<String> {
-    git_command_stdout(repo, &["stash", "show", "-p", stash_ref])
+    let mut args = vec!["stash", "show", "-p"];
+    args.extend(crate::commits::PLAIN_PATCH);
+    args.push(stash_ref);
+    git_command_stdout(repo, &args)
 }
 
 /// Detailed information about a stash entry (for info modal).
