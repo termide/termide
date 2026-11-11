@@ -19,6 +19,7 @@ mod peers;
 mod pending;
 mod pickers;
 mod render;
+mod review;
 mod rewind;
 mod runtime;
 mod select;
@@ -151,6 +152,9 @@ const PROMPTS_ACTION: &str = "agent_prompts";
 const COMPACT_COMMAND: &str = "compact";
 /// The built-in `/undo` command.
 const UNDO_COMMAND: &str = "undo";
+/// The built-in `/changes` command: review the agent's changes in the diff
+/// panel. Not `/review` or `/diff`, which external agents have of their own.
+const CHANGES_COMMAND: &str = "changes";
 /// The built-in `/new` command: start a fresh session, keeping the current one
 /// in the list.
 const NEW_COMMAND: &str = "new";
@@ -225,12 +229,18 @@ struct Builtin {
 /// Every built-in `/name`, whatever the state; a template, script or skill
 /// of the same name never runs under it (see `slash`). What each one does is
 /// `submit`'s.
-const BUILTINS: [Builtin; 16] = [
+const BUILTINS: [Builtin; 17] = [
     Builtin {
         name: UNDO_COMMAND,
         hint: |_| "",
         description: |t| t.agent_cmd_desc_undo(),
         offer: Offer::Native,
+    },
+    Builtin {
+        name: CHANGES_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_changes(),
+        offer: Offer::Always,
     },
     Builtin {
         name: COMPACT_COMMAND,
@@ -332,6 +342,9 @@ fn builtin_names() -> Vec<&'static str> {
 const SAVE_CHAT_ACTION: &str = "agent_save_chat";
 /// Context-menu action that undoes the last request.
 const UNDO_ACTION: &str = "agent_undo";
+/// Context-menu action (also `/changes`) that opens the review of the
+/// agent's changes.
+const REVIEW_ACTION: &str = "agent_review";
 
 /// Everything the app resolves from configuration before opening the panel.
 ///
@@ -1979,6 +1992,7 @@ impl Panel for AgentPanel {
         } else {
             &[
                 (t.agent_session_info(), SESSION_INFO_ACTION),
+                (t.agent_review_changes(), REVIEW_ACTION),
                 (t.agent_rename(), RENAME_ACTION),
                 (t.agent_save_chat(), SAVE_CHAT_ACTION),
                 (t.agent_fork_session(), FORK_SESSION_ACTION),
@@ -2096,6 +2110,7 @@ impl Panel for AgentPanel {
             }
             PROMPTS_ACTION => self.prompt_picker(),
             UNDO_ACTION => self.ask_undo(),
+            REVIEW_ACTION => self.open_review(),
             AGENT_ACTION => vec![self.agent_picker()],
             CWD_ACTION => self.ask_change_cwd(),
             MODEL_ACTION if self.external => self.acp_model_picker(),

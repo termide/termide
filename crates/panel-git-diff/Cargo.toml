@@ -10,6 +10,7 @@ repository.workspace = true
 crossterm.workspace = true
 ratatui.workspace = true
 unicode-width.workspace = true
+log.workspace = true
 regex.workspace = true
 
 # Workspace crates

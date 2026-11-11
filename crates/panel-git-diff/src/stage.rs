@@ -40,12 +40,12 @@ impl Row {
 /// What an action takes: a whole file, or part of one.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Target {
-    path: PathBuf,
+    pub(crate) path: PathBuf,
     /// The staged side of the file rather than its working-tree side.
     staged: bool,
     untracked: bool,
     /// `None` for the whole file.
-    part: Option<PatchPart>,
+    pub(crate) part: Option<PatchPart>,
 }
 
 /// What the last discard took, to bring it back.
@@ -190,7 +190,7 @@ impl GitDiffPanel {
     /// Whether lines can be selected at the cursor: a line of a file whose
     /// changes can be taken in part.
     fn selectable(&self) -> bool {
-        self.can_stage()
+        (self.can_stage() || self.review.is_some())
             && matches!(self.row_at(self.cursor), Some(Row::Line(f, _, _)) if self.partial(f))
     }
 
@@ -211,15 +211,20 @@ impl GitDiffPanel {
     /// Whether the panel shows the working tree, whose changes it can
     /// stage, unstage and discard.
     pub(crate) fn can_stage(&self) -> bool {
-        self.given.is_none() && self.commit_hash.is_none()
+        self.given.is_none() && self.commit_hash.is_none() && self.review.is_none()
     }
 
     /// Whether file `file`'s changes can be taken a hunk or a line at a
-    /// time: untracked, renamed and binary files go whole.
+    /// time: untracked, renamed and binary files go whole, and in a review
+    /// files the agent created or deleted.
     fn partial(&self, file: usize) -> bool {
         let diff = &self.diffs[file];
-        !matches!(diff.status, FileStatus::Untracked | FileStatus::Renamed)
-            && !diff.hunks.is_empty()
+        let whole = match diff.status {
+            FileStatus::Untracked | FileStatus::Renamed => true,
+            FileStatus::Added | FileStatus::Deleted => self.review.is_some(),
+            FileStatus::Modified => false,
+        };
+        !whole && !diff.hunks.is_empty()
     }
 
     /// What the cursor and the selection stand for.
@@ -329,13 +334,7 @@ impl GitDiffPanel {
             Some(part) => git::apply_part(&repo, &target.path, action, part),
             None => whole_file(&repo, target, action).map_err(PatchError::Git),
         };
-        let t = termide_i18n::t();
-        self.status_message = match &result {
-            Ok(()) => None,
-            Err(PatchError::Stale) => Some(t.git_diff_stale().to_string()),
-            Err(PatchError::NothingChosen) => Some(t.git_diff_nothing_chosen().to_string()),
-            Err(PatchError::Git(error)) => Some(first_line(error)),
-        };
+        self.status_message = result.as_ref().err().map(error_text);
         if result.is_err() && action == PatchAction::Discard {
             self.last_discard = None;
         }
@@ -370,8 +369,18 @@ fn whole_file(repo: &Path, target: &Target, action: PatchAction) -> Result<(), S
     }
 }
 
+/// What the status line says of an action on part of a file that failed.
+pub(crate) fn error_text(error: &PatchError) -> String {
+    let t = termide_i18n::t();
+    match error {
+        PatchError::Stale => t.git_diff_stale().to_string(),
+        PatchError::NothingChosen => t.git_diff_nothing_chosen().to_string(),
+        PatchError::Git(error) => first_line(error),
+    }
+}
+
 /// Git's words fit the status line by their first line.
-fn first_line(text: &str) -> String {
+pub(crate) fn first_line(text: &str) -> String {
     text.lines().next().unwrap_or_default().to_string()
 }
 

@@ -1,0 +1,33 @@
+# Reviewing an agent's changes (doc/en/ui.md): the Claude Code stand-in
+# edits inventory/report.py through termide's MCP tools; /changes opens the
+# review in the diff panel, d rejects the hunk and puts the line back, and
+# the next request carries a note of the rejection to the agent.
+mock-acp claude_code
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Agent wants to run shell" 40
+type "1"
+wait "Want me to highlight" 40
+file-contains "inventory/report.py" "critical = item.on_hand"
+
+type "/changes"
+key Enter
+wait "|+            critical" 10
+snapshot review
+key ] d
+wait-gone "|+            critical" 10
+run "! grep -q 'critical = item.on_hand' inventory/report.py"
+snapshot rejected
+
+# Back to the agent: the next request tells it what was undone.
+key Alt+Left
+type "go on"
+key Enter
+mock-acp-got "<review-note>" 20
+mock-acp-got "inventory/report.py" 5
+quit --force

@@ -168,6 +168,8 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "select_lines",
             "prev_hunk",
             "next_hunk",
+            "keep_all",
+            "reject_all",
         ],
         5 => &["info", "view_diff", "refresh"],
         6 => &[
@@ -335,7 +337,9 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             undo_discard,
             select_lines,
             prev_hunk,
-            next_hunk
+            next_hunk,
+            keep_all,
+            reject_all
         ),
         5 => kb_get!(config.git_log.keybindings, name, info, view_diff, refresh),
         6 => kb_get!(
@@ -567,7 +571,9 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             undo_discard,
             select_lines,
             prev_hunk,
-            next_hunk
+            next_hunk,
+            keep_all,
+            reject_all
         ),
         5 => kb_set!(
             config.git_log.keybindings,

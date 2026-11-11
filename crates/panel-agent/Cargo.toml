@@ -18,6 +18,7 @@ serde_json.workspace = true
 termide-agent-core = { path = "../agent-core" }
 termide-config = { path = "../config" }
 termide-core = { path = "../core" }
+termide-git = { path = "../git" }
 termide-i18n = { path = "../i18n" }
 termide-panel-image = { path = "../panel-image" }
 termide-panel-markdown = { path = "../panel-markdown" }

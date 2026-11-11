@@ -320,6 +320,8 @@ pub trait Translation: Send + Sync {
     fn help_desc_select_lines(&self) -> &str;
     fn help_desc_prev_hunk(&self) -> &str;
     fn help_desc_next_hunk(&self) -> &str;
+    fn help_desc_keep_all(&self) -> &str;
+    fn help_desc_reject_all(&self) -> &str;
     fn help_desc_tree_search(&self) -> &str;
     fn help_desc_expand_dir(&self) -> &str;
     fn help_desc_collapse_dir(&self) -> &str;
@@ -729,6 +731,9 @@ pub trait Translation: Send + Sync {
     // Agent panel — `/`-command completion descriptions
     fn agent_cmd_desc_compact(&self) -> &str;
     fn agent_cmd_desc_undo(&self) -> &str;
+    fn agent_cmd_desc_changes(&self) -> &str;
+    /// Agent panel menu: open the review of the agent's changes
+    fn agent_review_changes(&self) -> &str;
     fn agent_cmd_desc_new(&self) -> &str;
     fn agent_cmd_desc_fork(&self) -> &str;
     fn agent_cmd_desc_clear(&self) -> &str;
@@ -1856,6 +1861,9 @@ pub trait Translation: Send + Sync {
     fn git_diff_stale(&self) -> &str;
     fn git_diff_nothing_chosen(&self) -> &str;
     fn git_diff_nothing_to_undo(&self) -> &str;
+    /// Agent review: the mark of a file both the user and the agent edited
+    fn git_diff_edited_by_both(&self) -> &str;
+    fn git_diff_reject_all_confirm(&self) -> &str;
     fn git_pushing(&self) -> &str;
     fn git_pulling(&self) -> &str;
     fn git_action_files_fmt(&self, action: &str, count: usize) -> String;
@@ -1878,6 +1886,9 @@ pub trait Translation: Send + Sync {
     fn git_diff_discard_confirm_fmt(&self, path: &str) -> String;
     fn git_diff_delete_untracked_fmt(&self, path: &str) -> String;
     fn git_diff_restored_fmt(&self, path: &str) -> String;
+    fn git_diff_review_title_fmt(&self, repo: &str, files: &str) -> String;
+    fn git_diff_reject_both_confirm_fmt(&self, path: &str) -> String;
+    fn git_diff_reject_all_skipped_fmt(&self, count: usize) -> String;
 
     // Git commit info modal
     fn git_commit_info_title(&self, hash: &str) -> String;

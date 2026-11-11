@@ -649,6 +649,14 @@ impl HelpGenerator {
                 description: t.help_desc_next_hunk().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.keep_all),
+                description: t.help_desc_keep_all().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.reject_all),
+                description: t.help_desc_reject_all().to_string(),
+            },
+            HelpEntry {
                 keys: Self::format_keys(&kb.scroll_half_up),
                 description: t.help_desc_scroll_half_up().to_string(),
             },

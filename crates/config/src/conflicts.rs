@@ -285,6 +285,8 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "git_diff", "select_lines", &gd.select_lines);
     push(&mut out, "git_diff", "prev_hunk", &gd.prev_hunk);
     push(&mut out, "git_diff", "next_hunk", &gd.next_hunk);
+    push(&mut out, "git_diff", "keep_all", &gd.keep_all);
+    push(&mut out, "git_diff", "reject_all", &gd.reject_all);
 
     let gl = &config.git_log.keybindings;
     push(&mut out, "git_log", "info", &gl.info);

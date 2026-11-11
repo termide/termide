@@ -100,6 +100,8 @@ impl GitDiffPanel {
                 let t = termide_i18n::t();
                 let staged_marker = if diff.staged {
                     format!(" [{}]", t.git_diff_staged_marker())
+                } else if self.edited_by_both(&diff.path) {
+                    format!(" [{}]", t.git_diff_edited_by_both())
                 } else {
                     String::new()
                 };

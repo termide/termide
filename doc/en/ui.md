@@ -255,6 +255,28 @@ file, `E`/`F4` opens it. A commit's or a stash's diff only shows changes, and
 `select_lines`, `prev_hunk`, `next_hunk`, `toggle_collapse`, `edit`,
 `refresh`, `scroll_half_up` and `scroll_half_down`.
 
+The same panel reviews an agent's changes: `/changes` in the agent panel, or
+**Review changes** in its menu, opens it on what the agent changed since you
+last accepted, and nothing else — your own edits made between requests stay
+out of it. Each request snapshots the working tree into git (trees under
+`refs/termide/review/`, which no log shows), so what shell commands and
+external agents change is covered too. The agent keeps working meanwhile;
+the review is after the fact.
+
+- `Space` keeps what the cursor stands for: it leaves the review and stays
+  in the file. Staging or committing a change keeps it as well.
+- `D` rejects it: it is undone in the working tree, and the agent hears of
+  it in its next request, in a short note appended to your message. `U`
+  takes the last rejection back, and the agent is not told of it.
+- `A` keeps everything; `X` rejects everything, after asking.
+- A file you edited between requests as well is marked `edited by you too`:
+  rejecting in it asks first, since your changes may be in the hunk, and `X`
+  leaves such files as they are.
+
+What you change while a request runs counts as the agent's. The keys are
+`keep_all` and `reject_all` under `[git_diff.keybindings]`, with
+`toggle_stage`, `discard`, `undo_discard` and `select_lines` reused.
+
 Opening a **binary file** (with `Enter` or `F3` in the file manager) shows a
 read-only **hex viewer** — `offset │ hex │ ASCII`, with the row width adapting to
 the panel in 16-byte sections — instead of handing it to the system viewer. A

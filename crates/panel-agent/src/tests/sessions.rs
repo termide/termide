@@ -151,6 +151,7 @@ fn sessions_can_be_listed_switched_and_resumed() {
         labels,
         vec![
             "Session info",
+            "Review changes",
             "Rename session",
             "Save chat as Markdown…",
             "Fork session",

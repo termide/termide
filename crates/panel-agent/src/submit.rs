@@ -17,11 +17,11 @@ use crate::pending::Pending;
 use crate::session_ops::discard;
 use crate::{
     builtin_names, millis, now_hms, slash, transcript, unfinished, Activity, AgentPanel, GoalTask,
-    Item, LoopTask, NoticeKind, Phase, BUILTINS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND,
-    FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_BUSY_DELAY, GOAL_JUDGE_RETRIES,
-    GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
-    NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
-    SHOW_PROMPT_ACTION, TRUST_COMMAND, UNDO_COMMAND, USAGE_COMMAND,
+    Item, LoopTask, NoticeKind, Phase, BUILTINS, CHANGES_COMMAND, CLEAR_COMMAND, COMPACT_COMMAND,
+    CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_BUSY_DELAY,
+    GOAL_JUDGE_RETRIES, GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS,
+    MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION,
+    RENAME_COMMAND, SHOW_PROMPT_ACTION, TRUST_COMMAND, UNDO_COMMAND, USAGE_COMMAND,
 };
 
 /// The opening of [`goal_continuation`], to tell its turns in the transcript.
@@ -120,6 +120,10 @@ impl AgentPanel {
             Some((UNDO_COMMAND, _)) => {
                 self.clear_input();
                 return self.ask_undo();
+            }
+            Some((CHANGES_COMMAND, _)) => {
+                self.clear_input();
+                return self.open_review();
             }
             Some((COMPACT_COMMAND, _)) if agent_compacts => text.clone(),
             Some((COMPACT_COMMAND, focus)) => {
@@ -439,6 +443,7 @@ impl AgentPanel {
                     .unwrap_or_else(PoisonError::into_inner)
                     .begin_run(leaf);
             }
+            let message = self.begin_review(message);
             match self.runtime.prompt(message) {
                 Ok(()) => {
                     self.busy = true;

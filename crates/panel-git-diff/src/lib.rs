@@ -6,6 +6,7 @@ mod load;
 mod model;
 mod navigation;
 mod render;
+mod review;
 mod stage;
 mod unified;
 
@@ -90,6 +91,9 @@ pub struct GitDiffPanel {
     /// The diff was handed over rather than loaded from git: it never
     /// refreshes, and the panel is not saved with the session.
     given: Option<Given>,
+    /// The review of an agent's changes the panel shows instead of the
+    /// working tree's diff.
+    review: Option<review::ReviewMode>,
 }
 
 /// What a panel showing a handed-over diff keeps of it.
@@ -120,6 +124,8 @@ fn build_git_diff_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("select_lines", &kb.select_lines);
     t.insert("prev_hunk", &kb.prev_hunk);
     t.insert("next_hunk", &kb.next_hunk);
+    t.insert("keep_all", &kb.keep_all);
+    t.insert("reject_all", &kb.reject_all);
     t
 }
 
@@ -194,6 +200,7 @@ impl GitDiffPanel {
             refresh_pending: false,
             is_loading: false,
             given: None,
+            review: None,
         }
     }
 
@@ -372,6 +379,14 @@ impl Panel for GitDiffPanel {
                 self.confirmed_discard();
                 CommandResult::NeedsRedraw(true)
             }
+            PanelCommand::Confirmed { action } if action == review::REJECT_ACTION => {
+                self.confirmed_reject();
+                CommandResult::NeedsRedraw(true)
+            }
+            PanelCommand::Confirmed { action } if action == review::REJECT_ALL_ACTION => {
+                self.confirmed_reject_all();
+                CommandResult::NeedsRedraw(true)
+            }
             PanelCommand::Cut => CommandResult::Handled(false),
             PanelCommand::Paste => CommandResult::Handled(false),
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
@@ -408,7 +423,9 @@ impl Panel for GitDiffPanel {
             format!("{} files", self.diffs.len())
         };
 
-        let title = if let Some(ref msg) = self.stash_message {
+        let title = if self.review.is_some() {
+            t.git_diff_review_title_fmt(&repo_name, &files)
+        } else if let Some(ref msg) = self.stash_message {
             // Stash diff: show message instead of hash
             format!("Diff: {} — {}", msg, files)
         } else if let Some(ref hash) = self.commit_hash {
@@ -464,6 +481,27 @@ impl Panel for GitDiffPanel {
         }
 
         // Configurable actions via HotkeyTable
+        if self.review.is_some() {
+            if self.hotkeys.matches("toggle_stage", &key) {
+                return self.keep();
+            }
+            if self.hotkeys.matches("discard", &key) {
+                return self.ask_reject();
+            }
+            if self.hotkeys.matches("undo_discard", &key) {
+                return self.undo_reject();
+            }
+            if self.hotkeys.matches("keep_all", &key) {
+                return self.keep_all();
+            }
+            if self.hotkeys.matches("reject_all", &key) {
+                return self.ask_reject_all();
+            }
+            if self.hotkeys.matches("select_lines", &key) {
+                self.toggle_selection();
+                return vec![];
+            }
+        }
         if self.hotkeys.matches("toggle_stage", &key) {
             if self.can_stage() {
                 return self.toggle_stage();
@@ -587,7 +625,7 @@ impl Panel for GitDiffPanel {
     }
 
     fn to_state(&self, _project_dir: &Path) -> Option<PanelState> {
-        if self.given.is_some() {
+        if self.given.is_some() || self.review.is_some() {
             return None;
         }
         Some(PanelState::GitDiff {
@@ -669,6 +707,7 @@ mod tests {
                     hunks: Vec::new(),
                 })
                 .collect(),
+            both: Vec::new(),
         })
         .expect("send");
         panel.refresh_rx = Some(rx);

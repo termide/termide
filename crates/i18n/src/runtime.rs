@@ -650,6 +650,8 @@ impl Translation for RuntimeTranslation {
         agent_cmd_dont_run,
         agent_cmd_desc_compact,
         agent_cmd_desc_undo,
+        agent_cmd_desc_changes,
+        agent_review_changes,
         agent_cmd_desc_new,
         agent_cmd_desc_fork,
         agent_cmd_desc_clear,
@@ -1125,6 +1127,8 @@ impl Translation for RuntimeTranslation {
         git_diff_stale,
         git_diff_nothing_chosen,
         git_diff_nothing_to_undo,
+        git_diff_edited_by_both,
+        git_diff_reject_all_confirm,
         git_pushing,
         git_pulling,
         git_commit_author,
@@ -1180,6 +1184,8 @@ impl Translation for RuntimeTranslation {
         help_desc_select_lines,
         help_desc_prev_hunk,
         help_desc_next_hunk,
+        help_desc_keep_all,
+        help_desc_reject_all,
         settings_tab_general,
         settings_tab_editor,
         settings_tab_file_manager,
@@ -2773,6 +2779,24 @@ impl Translation for RuntimeTranslation {
 
     fn git_diff_restored_fmt(&self, path: &str) -> String {
         self.format("git_diff_restored_fmt", &[("path", path)])
+    }
+
+    fn git_diff_review_title_fmt(&self, repo: &str, files: &str) -> String {
+        self.format(
+            "git_diff_review_title_fmt",
+            &[("repo", repo), ("files", files)],
+        )
+    }
+
+    fn git_diff_reject_both_confirm_fmt(&self, path: &str) -> String {
+        self.format("git_diff_reject_both_confirm_fmt", &[("path", path)])
+    }
+
+    fn git_diff_reject_all_skipped_fmt(&self, count: usize) -> String {
+        self.format(
+            "git_diff_reject_all_skipped_fmt",
+            &[("count", &count.to_string())],
+        )
     }
 
     fn git_commit_info_title(&self, hash: &str) -> String {

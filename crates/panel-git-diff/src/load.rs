@@ -23,6 +23,8 @@ static HUNK_HEADER_RE: LazyLock<Regex> =
 pub(crate) struct GitDiffRefreshResult {
     pub(crate) branch: Option<String>,
     pub(crate) diffs: Vec<FileDiff>,
+    /// In a review, the files both the user and the agent edited.
+    pub(crate) both: Vec<String>,
 }
 
 impl GitDiffPanel {
@@ -44,13 +46,24 @@ impl GitDiffPanel {
         let repo = self.repo_path.clone();
         let commit_hash = self.commit_hash.clone();
         let is_stash = self.is_stash;
+        let session = self.review.as_ref().map(|review| review.session.clone());
 
         let (tx, rx) = mpsc::channel();
         self.refresh_rx = Some(rx);
         thread::spawn(move || {
             let branch = git::get_current_branch(&repo);
-            let diffs = load_diffs(&repo, commit_hash.as_deref(), is_stash);
-            let _ = tx.send(GitDiffRefreshResult { branch, diffs });
+            let (diffs, both) = match &session {
+                Some(session) => load_review(&repo, session),
+                None => (
+                    load_diffs(&repo, commit_hash.as_deref(), is_stash),
+                    Vec::new(),
+                ),
+            };
+            let _ = tx.send(GitDiffRefreshResult {
+                branch,
+                diffs,
+                both,
+            });
         });
     }
 
@@ -76,6 +89,9 @@ impl GitDiffPanel {
 
         self.branch = result.branch;
         self.diffs = result.diffs;
+        if let Some(review) = self.review.as_mut() {
+            review.both = result.both;
+        }
 
         // Apply file filter if set
         if let Some(ref filter) = self.file_filter {
@@ -140,18 +156,42 @@ fn load_diffs(repo: &Path, commit_hash: Option<&str>, is_stash: bool) -> Vec<Fil
     diffs
 }
 
+/// What waits for review of the agent of `session`, and the files both
+/// the user and the agent edited.
+fn load_review(repo: &Path, session: &str) -> (Vec<FileDiff>, Vec<String>) {
+    let Some(review) = git::Review::open(repo, session) else {
+        return (Vec::new(), Vec::new());
+    };
+    match review.diff() {
+        Ok(Some(diff)) => (
+            parse_patch(&diff.patch),
+            diff.both
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect(),
+        ),
+        Ok(None) => (Vec::new(), Vec::new()),
+        Err(error) => {
+            log::warn!("cannot load the review of {session}: {error}");
+            (Vec::new(), Vec::new())
+        }
+    }
+}
+
 /// Parse `git show` / `git stash show -p` output into per-file diffs.
 fn load_commit_diff(repo: &Path, hash: &str, is_stash: bool) -> Vec<FileDiff> {
-    let mut diffs = Vec::new();
-
     let diff_output = if is_stash {
         git::stash_diff(repo, hash)
     } else {
         git::get_commit_diff(repo, hash)
     };
-    let Some(diff_output) = diff_output else {
-        return diffs;
-    };
+    diff_output.map_or_else(Vec::new, |output| parse_patch(&output))
+}
+
+/// Parse a patch of several files, after whatever heads it, into per-file
+/// diffs.
+fn parse_patch(diff_output: &str) -> Vec<FileDiff> {
+    let mut diffs = Vec::new();
 
     // Parse git show output (contains multiple files)
     // Format:

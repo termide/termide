@@ -172,6 +172,7 @@ impl AgentPanel {
                         .unwrap_or_else(PoisonError::into_inner)
                         .end_run();
                 }
+                self.end_review();
                 if self.prompt_stale {
                     self.sync_system_prompt();
                 }

@@ -229,6 +229,7 @@ impl App {
             for (panel_idx, panel) in group.panels().iter().enumerate() {
                 if let Some(diff) = panel.downcast_ref::<GitDiffPanel>() {
                     if diff.loads_from_git()
+                        && diff.review_session().is_none()
                         && diff.repo_path() == repo_path
                         && diff.commit_hash() == commit_hash.as_deref()
                         && diff.file_filter() == file_filter_str.as_deref()
@@ -250,5 +251,25 @@ impl App {
         self.auto_save_layout();
 
         Ok(())
+    }
+
+    /// Open the review of the agent session's changes, or bring forward the
+    /// panel that shows it already.
+    pub(super) fn event_open_agent_review(&mut self, repo_path: PathBuf, session: String) {
+        use termide_panel_git_diff::GitDiffPanel;
+
+        self.close_help_panels();
+        for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
+            for (panel_idx, panel) in group.panels().iter().enumerate() {
+                if let Some(diff) = panel.downcast_ref::<GitDiffPanel>() {
+                    if diff.review_session() == Some(session.as_str()) {
+                        self.layout_manager.focus = group_idx;
+                        group.set_expanded(panel_idx);
+                        return;
+                    }
+                }
+            }
+        }
+        self.add_panel(Box::new(GitDiffPanel::new_for_review(repo_path, session)));
     }
 }

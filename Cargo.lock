@@ -5617,6 +5617,7 @@ dependencies = [
  "termide-agent-core",
  "termide-config",
  "termide-core",
+ "termide-git",
  "termide-i18n",
  "termide-panel-image",
  "termide-panel-markdown",
@@ -5791,6 +5792,7 @@ name = "termide-panel-git-diff"
 version = "0.49.0"
 dependencies = [
  "crossterm",
+ "log",
  "ratatui",
  "regex",
  "tempfile",

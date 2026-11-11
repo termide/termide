@@ -819,6 +819,10 @@ pub enum PanelEvent {
         file_path: Option<PathBuf>,
     },
 
+    /// Open the diff panel's review of the changes the agent of `session`
+    /// made in the repository at `repo_path`.
+    OpenAgentReview { repo_path: PathBuf, session: String },
+
     /// Open git log panel for repository, showing `branch` (`None` = HEAD)
     OpenGitLog {
         repo_path: PathBuf,

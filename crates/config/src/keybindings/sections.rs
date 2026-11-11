@@ -254,6 +254,10 @@ pub struct GitDiffKeybindings {
     pub prev_hunk: Option<KeyBinding>,
     /// Jump to the next hunk
     pub next_hunk: Option<KeyBinding>,
+    /// In an agent review: keep every change that waits
+    pub keep_all: Option<KeyBinding>,
+    /// In an agent review: reject every change that waits
+    pub reject_all: Option<KeyBinding>,
 }
 
 impl GitDiffKeybindings {
@@ -282,6 +286,8 @@ impl GitDiffKeybindings {
         set_default!(select_lines, "V");
         set_default!(prev_hunk, "[");
         set_default!(next_hunk, "]");
+        set_default!(keep_all, "A");
+        set_default!(reject_all, "X");
     }
 }
 
