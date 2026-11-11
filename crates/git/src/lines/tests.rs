@@ -108,12 +108,19 @@ fn a_conflicted_file_is_refused() {
     git(&repo, &["checkout", "-q", "main"]);
     std::fs::write(repo.join("f"), text(&[(1, Some("ours"))])).unwrap();
     git(&repo, &["commit", "-qam", "ours"]);
+    // The identity is given here too: a runner without one (CI's Ubuntu)
+    // refuses the merge before it gets to the conflict.
     let merge = Command::new("git")
+        .args(["-c", "user.name=t", "-c", "user.email=t@t"])
         .args(["merge", "-q", "other"])
         .current_dir(&repo)
         .output()
         .unwrap();
     assert!(!merge.status.success());
+    assert!(
+        !git(&repo, &["ls-files", "-u"]).is_empty(),
+        "no conflict: {merge:?}"
+    );
     let error = stage_lines(&repo.join("f"), "x\n", 0..=0).unwrap_err();
     assert!(error.contains("merge conflict"), "{error}");
 }
