@@ -58,6 +58,16 @@ ignore = [
     # ← termide-panel-terminal and termide-detach. It only provides pinning
     # macros. Re-evaluate when portable-pty moves to a `nix` without it.
     "RUSTSEC-2026-0441",
+    # RUSTSEC-2026-0459 — the SQLite bundled before 3.54 can return stale
+    # page-cache memory when it opens a database with a `-wal` file of another
+    # page size. Path: `libsqlite3-sys 0.30` ← `sqlx-sqlite` ← termide-db ←
+    # the database panel. Termide is exposed: the panel opens any database the
+    # user picks, so a crafted pair from a less trusted source could leak bytes
+    # of termide's memory into query results; nothing is written. The fix is
+    # `libsqlite3-sys` 0.39, which no sqlx release allows yet (0.9.0 caps it
+    # below 0.38); transact-rs/sqlx#4502 lifts the cap on its main branch.
+    # Remove this entry with the sqlx release that ships #4502.
+    "RUSTSEC-2026-0459",
 ]
 
 [licenses]
