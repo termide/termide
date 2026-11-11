@@ -575,9 +575,7 @@ agent_rewind_files_only = "仅恢复文件"
 # Agent panel — rollback picker
 # Agent panel — plan-mode card
 agent_plan_carry_title = "计划模式：执行该计划？"
-agent_plan_clean_edits = "是，接受修改，并清理上下文"
 agent_plan_accept_edits = "是，接受修改"
-agent_plan_configured = "是，按配置的规则"
 agent_plan_keep = "继续规划"
 # Agent panel — handoff card
 agent_handoff_ready_title = "交接简报已就绪"
@@ -1354,6 +1352,8 @@ agent_queued_ahead_fmt = "正在等待空闲槽位，前面还有 {ahead} 个"
 agent_notice_no_connection_fmt = "没有连接 {name}"
 agent_notice_no_agent_fmt = "没有名为 {name} 的代理"
 agent_notice_agent_fmt = "代理：{name}"
+agent_plan_clean_mode_fmt = "是，在 {mode} 模式下，并清理上下文"
+agent_plan_mode_fmt = "是，在 {mode} 模式下"
 agent_notice_cannot_switch_agent_fmt = "无法切换代理：{error}"
 agent_notice_cannot_switch_model_fmt = "无法切换模型：{error}"
 agent_notice_cannot_change_reasoning_fmt = "无法更改推理：{error}"

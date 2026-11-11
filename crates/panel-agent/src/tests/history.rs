@@ -360,10 +360,20 @@ fn plan_mode_adds_its_instructions_and_offers_to_carry_the_plan_out() {
     assert!(panel.pending.is_none());
     assert_eq!(panel.mode.get(), Mode::Plan);
 
+    // The plan is carried out in the mode it was planned from.
     panel.offer_plan();
+    let t = termide_i18n::t();
+    assert_eq!(
+        panel.pending.as_ref().expect("plan card").form().options(),
+        [
+            t.agent_plan_clean_mode_fmt("configured"),
+            t.agent_plan_mode_fmt("configured"),
+            t.agent_plan_accept_edits().to_string(),
+        ]
+    );
     panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
     let _ = panel.tick();
-    assert_eq!(panel.mode.get(), Mode::Edit);
+    assert_eq!(panel.mode.get(), Mode::Configured);
     settle(&mut panel);
     let users: Vec<&str> = panel
         .transcript()
@@ -403,13 +413,17 @@ fn an_external_agent_following_the_modes_is_offered_to_carry_the_plan_out() {
     let t = termide_i18n::t();
     assert_eq!(
         form.options(),
-        [t.agent_plan_accept_edits(), t.agent_plan_configured()]
+        [
+            t.agent_plan_mode_fmt("configured"),
+            t.agent_plan_accept_edits().to_string(),
+        ]
     );
 
-    // The first row accepts edits and sends the request that keeps the context.
+    // The first row goes back to the mode planned from and sends the
+    // request that keeps the context.
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
     let _ = panel.tick();
-    assert_eq!(panel.mode.get(), Mode::Edit);
+    assert_eq!(panel.mode.get(), Mode::Configured);
     settle(&mut panel);
     let users: Vec<&str> = panel
         .transcript()
@@ -471,7 +485,7 @@ fn a_plan_carried_out_from_a_clean_context_leaves_the_exploration_out() {
     assert!(panel.pending.is_some(), "plan card");
 
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
-    assert_eq!(panel.mode.get(), Mode::Edit);
+    assert_eq!(panel.mode.get(), Mode::Configured);
     // The request "edits" a file, so it has a checkpoint to undo. The run
     // began inside `handle_key` and ends only when a tick drains its events,
     // so the file is saved before any tick, however fast the reply comes.
@@ -528,4 +542,100 @@ fn a_plan_carried_out_from_a_clean_context_leaves_the_exploration_out() {
         .checkpoints();
     assert_eq!(checkpoints.len(), 1);
     assert_eq!(checkpoints[0].leaf_before, cleared.parent_id);
+}
+
+/// Work in `from`, go on to plan mode with `Shift+Tab` through the modes
+/// between, let the agent answer, and return the plan card's rows with the
+/// panel.
+fn planned_from(from: Mode) -> (AgentPanel, Vec<String>, tempfile::TempDir) {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        plan_prompt: PlanPrompt::from_file("---\nrequest: Do it.\n---\nPlan first."),
+        ..setup(vec![reply("looked"), reply("the plan"), reply("done")])
+    });
+    let _ = panel.set_mode(from);
+    type_text(&mut panel, "look around");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    while panel.mode.get() != Mode::Plan {
+        panel.handle_key(chord(KeyCode::BackTab, KeyModifiers::SHIFT));
+    }
+    type_text(&mut panel, "add a feature");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    let rows = panel
+        .pending
+        .as_ref()
+        .expect("plan card")
+        .form()
+        .options()
+        .to_vec();
+    (panel, rows, dir)
+}
+
+#[test]
+fn a_plan_is_carried_out_in_the_mode_it_was_planned_from() {
+    let t = termide_i18n::t();
+    let (mut panel, rows, _dir) = planned_from(Mode::Auto);
+    assert_eq!(
+        rows,
+        [
+            t.agent_plan_clean_mode_fmt("auto"),
+            t.agent_plan_mode_fmt("auto"),
+            t.agent_plan_accept_edits().to_string(),
+        ]
+    );
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
+    assert_eq!(panel.mode.get(), Mode::Auto);
+
+    // Accepting edits stays on offer as its own row.
+    let (mut panel, _, _dir) = planned_from(Mode::Auto);
+    panel.handle_key(chord(KeyCode::Char('3'), KeyModifiers::NONE));
+    assert_eq!(panel.mode.get(), Mode::Edit);
+}
+
+#[test]
+fn a_plan_made_from_edit_offers_no_second_edit_row() {
+    let t = termide_i18n::t();
+    let (_panel, rows, _dir) = planned_from(Mode::Edit);
+    assert_eq!(
+        rows,
+        [
+            t.agent_plan_clean_mode_fmt("edit"),
+            t.agent_plan_mode_fmt("edit"),
+        ]
+    );
+}
+
+#[test]
+fn a_plan_made_from_ask_is_carried_out_under_the_configured_rules() {
+    let (mut panel, _, _dir) = planned_from(Mode::Ask);
+    panel.handle_key(chord(KeyCode::Char('2'), KeyModifiers::NONE));
+    assert_eq!(panel.mode.get(), Mode::Configured);
+}
+
+#[test]
+fn a_session_reopened_in_plan_mode_returns_to_the_mode_planned_from() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::create(dir.path(), Path::new("/tmp")).unwrap()),
+        ..setup(vec![])
+    });
+    let _ = panel.set_mode(Mode::Auto);
+    panel
+        .session
+        .as_mut()
+        .unwrap()
+        .append_message(&Message::User(UserMessage::text("look around")))
+        .unwrap();
+    let _ = panel.set_mode(Mode::Ask);
+    let _ = panel.set_mode(Mode::Plan);
+    let path = panel.session.as_ref().unwrap().path().to_path_buf();
+    drop(panel);
+
+    let panel = reopen(&path, dir.path(), vec![]);
+    assert_eq!(panel.mode.get(), Mode::Plan);
+    assert_eq!(panel.plan_carry_mode(), Mode::Auto);
 }

@@ -576,9 +576,7 @@ agent_rewind_files_only = "Restore the files only"
 # Agent panel — rollback picker
 # Agent panel — plan-mode card
 agent_plan_carry_title = "Plan mode: carry the plan out?"
-agent_plan_clean_edits = "Yes, accepting edits, from a clean context"
 agent_plan_accept_edits = "Yes, accepting edits"
-agent_plan_configured = "Yes, under the configured rules"
 agent_plan_keep = "Keep planning"
 # Agent panel — handoff card
 agent_handoff_ready_title = "Handoff brief ready"
@@ -1374,6 +1372,8 @@ agent_queued_ahead_fmt = "waiting for a free slot, {ahead} ahead"
 agent_notice_no_connection_fmt = "no connection {name}"
 agent_notice_no_agent_fmt = "no agent named {name}"
 agent_notice_agent_fmt = "agent: {name}"
+agent_plan_clean_mode_fmt = "Yes, in {mode} mode, from a clean context"
+agent_plan_mode_fmt = "Yes, in {mode} mode"
 agent_notice_cannot_switch_agent_fmt = "cannot switch the agent: {error}"
 agent_notice_cannot_switch_model_fmt = "cannot switch the model: {error}"
 agent_notice_cannot_change_reasoning_fmt = "cannot change reasoning: {error}"

@@ -615,9 +615,17 @@ prompt while the mode is on (the panel updates the worker's prompt on the
 toggle, or at the end of the run if one is in flight) — a prompt suffix
 rather than Claude Code's per-turn reminder, so the log holds only the user's
 words. No exit tool: when the run ends in plan mode with an answer, the panel
-shows a `ChoiceForm` — carry out accepting edits, carry out asking, keep
-planning — and accepting switches the mode and sends the `request:` from the
-same file, so the plan stays in context. The plan is the answer in the
+shows a `ChoiceForm` — carry out in the mode the user planned from, or
+accepting edits, or keep planning — and accepting switches the mode and sends
+the `request:` from the same file, so the plan stays in context. The mode
+planned from, not `edit`, is the default because `edit` sets the configured
+`allow` rules aside: every command the plan runs would ask, even one the user
+allowed for good. The mode planned from is the one the last message outside
+plan mode was sent in (else the one the session was set up in), not the last
+mode set: the `Shift+Tab` cycle reaches `plan` through `all` and `ask`, so
+the last mode set would nearly always be `ask`. A reopened session finds it
+in the log the same way (`Session::working_mode`). From `ask`, or with none
+known, the plan goes to `configured`. The plan is the answer in the
 session, not a file: the session log is the record, and the panel's `/undo`
 checkpoints cover the changes the accepted plan then makes. Not covered: MCP tools with
 a read-only annotation are blocked too, since annotations are not plumbed.

@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use termide_agent_core::{
     AgentCommand, CancelToken, CommandScript, Decision, DefinitionProblem, GoalOutcome, Message,
-    PromptError, Session, SkillInfo, Timing, UserMessage,
+    Mode, PromptError, Session, SkillInfo, Timing, UserMessage,
 };
 use termide_core::{Panel, PanelEvent};
 use termide_ui::ChoiceForm;
@@ -377,6 +377,11 @@ impl AgentPanel {
     /// Send `message`: as the next request, or queued for the running one.
     pub(crate) fn send_message(&mut self, message: UserMessage) -> Vec<PanelEvent> {
         self.follow = true;
+        // Work goes on in this mode: a plan made later returns to it.
+        let mode = self.mode.get();
+        if mode != Mode::Plan {
+            self.working_mode = mode;
+        }
         self.count_hops(&message);
         if self.is_busy() {
             let from_user = message.origin.is_none();

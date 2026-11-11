@@ -137,6 +137,11 @@ impl AgentPanel {
         if let Some(mode) = session.as_ref().and_then(Session::current_mode) {
             self.rules.mode = mode;
         }
+        // The mode a plan returns to: the session's, else the one worked in
+        // so far.
+        if let Some(mode) = session.as_ref().and_then(Session::working_mode) {
+            self.working_mode = mode;
+        }
         self.toolset_off = toolset_off;
         self.sync_blocked();
         let blocked = Arc::clone(&self.blocked);

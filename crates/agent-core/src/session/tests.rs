@@ -1069,6 +1069,30 @@ fn the_permission_mode_survives_reopen() {
 }
 
 #[test]
+fn the_working_mode_is_the_one_a_message_was_last_sent_in_outside_plan() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+    let say = |session: &mut Session| {
+        session
+            .append_message(&Message::User(UserMessage::text("go")))
+            .unwrap();
+    };
+    // Sent in the mode the session was set up in: not on record.
+    say(&mut session);
+    assert_eq!(session.working_mode(), None);
+    session.append_mode_change(Mode::Auto).unwrap();
+    assert_eq!(session.working_mode(), None);
+    say(&mut session);
+    // Passed through on the way to plan mode, then planned in it.
+    session.append_mode_change(Mode::All).unwrap();
+    session.append_mode_change(Mode::Ask).unwrap();
+    session.append_mode_change(Mode::Plan).unwrap();
+    say(&mut session);
+    let reopened = Session::open(session.path()).unwrap();
+    assert_eq!(reopened.working_mode(), Some(Mode::Auto));
+}
+
+#[test]
 fn the_toolset_survives_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();

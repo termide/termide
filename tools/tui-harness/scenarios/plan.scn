@@ -1,0 +1,38 @@
+# Plan mode's carry-out card returns to the mode worked in before planning,
+# not to the modes Shift+Tab passes through on the way. The mock model's
+# task runs in `configured`; a message is then sent in `all`, Shift+Tab goes
+# on through `ask` to `plan`, and the card offers `all`, with accepting edits
+# as a row of its own.
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Agent wants to run shell" 20
+type "1"
+wait "Want me to highlight critical rows" 30
+wait-gone "[■]" 15
+# configured → auto → all, and work there.
+key Shift+Tab Shift+Tab
+type "thanks"
+key Enter
+wait-gone "[■]" 15
+# all → ask → plan: passed through, not worked in.
+key Shift+Tab Shift+Tab
+type "plan highlighting the critical rows"
+key Enter
+wait "Plan mode: carry the plan out?" 30
+expect "Yes, in all mode, from a clean context"
+expect "Yes, in all mode"
+expect "Yes, accepting edits"
+expect-not "Yes, in ask mode"
+snapshot card
+type "2"
+wait-gone "Plan mode: carry the plan out?" 10
+wait-gone "[■]" 15
+expect "Permissions: all"
+snapshot carried
+quit

@@ -583,9 +583,7 @@ agent_rewind_files_only = "Восстановить только файлы"
 # Agent panel — rollback picker
 # Agent panel — plan-mode card
 agent_plan_carry_title = "Режим плана: выполнить план?"
-agent_plan_clean_edits = "Да, принимая правки, с чистого контекста"
 agent_plan_accept_edits = "Да, принимая правки"
-agent_plan_configured = "Да, по правилам из настроек"
 agent_plan_keep = "Продолжить планирование"
 # Agent panel — handoff card
 agent_handoff_ready_title = "Бриф передачи готов"
@@ -1374,6 +1372,8 @@ agent_queued_ahead_fmt = "ждёт свободный слот, впереди {
 agent_notice_no_connection_fmt = "нет подключения {name}"
 agent_notice_no_agent_fmt = "нет агента с именем {name}"
 agent_notice_agent_fmt = "агент: {name}"
+agent_plan_clean_mode_fmt = "Да, в режиме {mode}, с чистого контекста"
+agent_plan_mode_fmt = "Да, в режиме {mode}"
 agent_notice_cannot_switch_agent_fmt = "не удалось сменить агента: {error}"
 agent_notice_cannot_switch_model_fmt = "не удалось сменить модель: {error}"
 agent_notice_cannot_change_reasoning_fmt = "не удалось изменить рассуждения: {error}"

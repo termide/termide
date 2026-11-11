@@ -638,9 +638,7 @@ impl Translation for RuntimeTranslation {
         agent_rewind_conversation_only,
         agent_rewind_files_only,
         agent_plan_carry_title,
-        agent_plan_clean_edits,
         agent_plan_accept_edits,
-        agent_plan_configured,
         agent_plan_keep,
         agent_handoff_ready_title,
         agent_handoff_save,
@@ -1625,6 +1623,14 @@ impl Translation for RuntimeTranslation {
 
     fn agent_notice_agent_fmt(&self, name: &str) -> String {
         self.format("agent_notice_agent_fmt", &[("name", name)])
+    }
+
+    fn agent_plan_clean_mode_fmt(&self, mode: &str) -> String {
+        self.format("agent_plan_clean_mode_fmt", &[("mode", mode)])
+    }
+
+    fn agent_plan_mode_fmt(&self, mode: &str) -> String {
+        self.format("agent_plan_mode_fmt", &[("mode", mode)])
     }
 
     fn agent_notice_cannot_switch_agent_fmt(&self, error: &str) -> String {

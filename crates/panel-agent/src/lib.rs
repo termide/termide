@@ -971,6 +971,10 @@ pub struct AgentPanel {
     configured_model: ModelSpec,
     /// Live permission mode, shared with the hooks on the agent thread.
     mode: ModeHandle,
+    /// The mode the last message outside plan mode was sent in, or the one
+    /// the panel was set up in: the one carrying out a plan returns to.
+    /// Modes only passed through with `Shift+Tab` do not count.
+    working_mode: Mode,
     /// Models offered by the last picker, in the order they were shown.
     model_choices: Vec<ModelInfo>,
     /// The external (ACP) agent's models, filled while its picker is open.
@@ -1379,6 +1383,12 @@ impl AgentPanel {
         }
         // The mode the session last ran in outlives a reopen, over the
         // agent's and the configured one.
+        // The mode a plan returns to: the one the session last sent a message
+        // in outside plan mode, else the one it was set up in.
+        let working_mode = session
+            .as_ref()
+            .and_then(Session::working_mode)
+            .unwrap_or(setup.rules.mode);
         if let Some(mode) = session.as_ref().and_then(Session::current_mode) {
             setup.rules.mode = mode;
         }
@@ -1495,6 +1505,7 @@ impl AgentPanel {
             offered_skills,
             mcp_arrived: Vec::new(),
             mode,
+            working_mode,
             model_choices: Vec::new(),
             acp_models: Vec::new(),
             acp_has_models: false,

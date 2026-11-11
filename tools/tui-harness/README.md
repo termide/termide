@@ -78,8 +78,9 @@ A scenario that does not `quit` is killed at its end. The examples:
 `terminal` (a command in a terminal panel), `terminal-keys` (Alt, Esc and Ctrl+F reaching the shell and less, the title following them), `agent` (the mock model's task
 with a permission card), `acp-codex` (the same task through Codex over
 ACP), `delegate` (a background subagent's row and report, on the model
-`[ai.subagents]` names) and `goal` (`/goal` with its judge on the model
-`[ai.goal_judge]` names).
+`[ai.subagents]` names), `goal` (`/goal` with its judge on the model
+`[ai.goal_judge]` names) and `plan` (plan mode's carry-out card going back
+to the mode worked in, past the ones `Shift+Tab` passes through).
 
 ## Writing one
 

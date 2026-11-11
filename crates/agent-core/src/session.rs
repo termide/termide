@@ -1566,6 +1566,27 @@ impl Session {
             })
     }
 
+    /// The permission mode the last user message outside plan mode was sent
+    /// in on the current branch: the mode a plan made now was planned from.
+    /// A mode only passed through on the way to another is not one. `None`
+    /// when no such message was sent after a recorded mode change.
+    #[must_use]
+    pub fn working_mode(&self) -> Option<Mode> {
+        let mut mode = None;
+        let mut working = None;
+        for entry in self.branch() {
+            match &entry.kind {
+                EntryKind::ModeChange { mode: changed } => mode = Some(*changed),
+                EntryKind::Message {
+                    message: Message::User(_),
+                    ..
+                } if mode != Some(Mode::Plan) => working = mode.or(working),
+                _ => {}
+            }
+        }
+        working
+    }
+
     /// Record that the external agent `agent` opened its own session
     /// `session_id` for this branch.
     pub fn append_external_session(

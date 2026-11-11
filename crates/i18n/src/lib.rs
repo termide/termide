@@ -688,13 +688,13 @@ pub trait Translation: Send + Sync {
     // Agent panel — plan-mode carry-out card
     /// The plan card's question when the plan is ready
     fn agent_plan_carry_title(&self) -> &str;
-    /// Plan card: carry it out, accepting edits, with the exploration
-    /// cleared from the context
-    fn agent_plan_clean_edits(&self) -> &str;
+    /// Plan card: carry it out in the mode it was planned from, with the
+    /// exploration cleared from the context
+    fn agent_plan_clean_mode_fmt(&self, mode: &str) -> String;
+    /// Plan card: carry it out in the mode it was planned from
+    fn agent_plan_mode_fmt(&self, mode: &str) -> String;
     /// Plan card: carry it out, accepting edits
     fn agent_plan_accept_edits(&self) -> &str;
-    /// Plan card: carry it out under the configured rules
-    fn agent_plan_configured(&self) -> &str;
     /// Plan card: cancel and keep planning
     fn agent_plan_keep(&self) -> &str;
 

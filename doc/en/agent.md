@@ -1799,15 +1799,20 @@ risks and the checks.
 When the agent answers, a card asks what to do with the plan:
 
 ```
-┌ Plan mode: carry the plan out? ──────────────┐
-│ 1. Yes, accepting edits, from a clean context│
-│ 2. Yes, accepting edits                      │
-│ 3. Yes, under the configured rules           │
-│ 4. Keep planning                             │
-└──────────────────────────────────────────────┘
+┌ Plan mode: carry the plan out? ─────────────┐
+│ 1. Yes, in auto mode, from a clean context  │
+│ 2. Yes, in auto mode                        │
+│ 3. Yes, accepting edits                     │
+│ 4. Keep planning                            │
+└─────────────────────────────────────────────┘
 ```
 
-The first three leave plan mode for edit or configured and send the request
+The first two go back to the mode you worked in before planning, `auto`
+above: the one you last sent a message in, or the one the session started
+in; the modes `Shift+Tab` only passes through on the way to plan do not
+count. From `ask`, which would ask about every step, and in a session that
+started in plan mode, they go to `configured`. The third goes to `edit`, and is left
+out when you planned from `edit`. All three leave plan mode and send the request
 named in the front matter of `system/plan.md`, so the same session goes on to
 carry the plan out; the last (or `Esc`) keeps plan mode, and whatever you
 type next refines the plan. The plan is the agent's answer in the session,

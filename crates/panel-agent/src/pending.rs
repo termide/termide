@@ -820,10 +820,12 @@ impl AgentPanel {
     }
 
     /// In plan mode, once the agent has answered: offer to carry the plan
-    /// out, in accept-edits from a clean context or with the exploration in
-    /// it, or asking, or to keep planning. An external agent that follows
-    /// the panel's modes is offered the same, save the clean context: its
-    /// history is its own, so there is nothing of ours to clear.
+    /// out in the mode it was planned from (`configured` for `ask`, which
+    /// would ask about every step), from a clean context or with the
+    /// exploration in it, or accepting edits, or to keep planning. An
+    /// external agent that follows the panel's modes is offered the same,
+    /// save the clean context: its history is its own, so there is nothing
+    /// of ours to clear.
     pub(crate) fn offer_plan(&mut self) {
         if (self.external && !self.runtime.follows_mode())
             || self.mode.get() != Mode::Plan
@@ -846,21 +848,27 @@ impl AgentPanel {
             return;
         }
         let t = termide_i18n::t();
-        let mut rows = vec![
-            (t.agent_plan_clean_edits(), (Mode::Edit, true)),
-            (t.agent_plan_accept_edits(), (Mode::Edit, false)),
-            (t.agent_plan_configured(), (Mode::Configured, false)),
-        ];
-        if self.external {
-            rows.retain(|(_, (_, clean))| !clean);
+        let back = self.plan_carry_mode();
+        let mut rows = Vec::new();
+        if !self.external {
+            rows.push((t.agent_plan_clean_mode_fmt(back.label()), (back, true)));
         }
-        let (labels, choices): (Vec<_>, Vec<_>) = rows
-            .into_iter()
-            .map(|(label, choice)| (label.to_string(), choice))
-            .unzip();
+        rows.push((t.agent_plan_mode_fmt(back.label()), (back, false)));
+        if back != Mode::Edit {
+            rows.push((t.agent_plan_accept_edits().to_string(), (Mode::Edit, false)));
+        }
+        let (labels, choices): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         let form =
             ChoiceForm::new(t.agent_plan_carry_title(), labels).with_cancel(t.agent_plan_keep());
         self.pending = Some(Pending::Plan { form, choices });
+    }
+
+    /// The mode the plan card's first rows carry a plan out in.
+    pub(crate) fn plan_carry_mode(&self) -> Mode {
+        match self.working_mode {
+            Mode::Ask | Mode::Plan => Mode::Configured,
+            mode => mode,
+        }
     }
 
     /// The plan was accepted: leave plan mode for `mode` and send the
@@ -1006,7 +1014,7 @@ impl AgentPanel {
                 let (mode, clean) = choices
                     .get(index)
                     .copied()
-                    .unwrap_or((Mode::Configured, false));
+                    .unwrap_or((self.plan_carry_mode(), false));
                 self.pending = None;
                 let events = self.carry_out_plan(mode, clean);
                 self.pending_events.extend(events);
