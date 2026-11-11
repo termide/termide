@@ -85,14 +85,7 @@ pub fn apply_part(
     args.extend(["--", &file]);
     let diff = git_command_stdout_bytes(repo, &args)
         .ok_or_else(|| PatchError::Git(format!("git diff failed for {file}")))?;
-    let patch = RawPatch::parse(&diff);
-    let hunk = patch.hunks.get(part.hunk).ok_or(PatchError::Stale)?;
-    if trim_cr(&hunk.header) != part.header.as_bytes() {
-        return Err(PatchError::Stale);
-    }
-    let text = patch
-        .cut(part.hunk, part.lines, action.reverse())
-        .ok_or(PatchError::NothingChosen)?;
+    let text = cut_part(&diff, part, action.reverse())?;
 
     let mut apply = vec!["apply", "--recount", "--whitespace=nowarn"];
     if action != PatchAction::Discard {
@@ -105,6 +98,49 @@ pub fn apply_part(
     run_git_with_input(repo, &apply, &text)
         .map(drop)
         .map_err(PatchError::Git)
+}
+
+/// The patch of `part` of one file's `diff`, to apply forwards or, with
+/// `reverse`, backwards; refused as stale when the hunk no longer reads as
+/// the caller saw it.
+pub(crate) fn cut_part(
+    diff: &[u8],
+    part: &PatchPart,
+    reverse: bool,
+) -> Result<Vec<u8>, PatchError> {
+    let patch = RawPatch::parse(diff);
+    let hunk = patch.hunks.get(part.hunk).ok_or(PatchError::Stale)?;
+    if trim_cr(&hunk.header) != part.header.as_bytes() {
+        return Err(PatchError::Stale);
+    }
+    patch
+        .cut(part.hunk, part.lines, reverse)
+        .ok_or(PatchError::NothingChosen)
+}
+
+/// The `@@` headers of one file's `diff`, in order, without a trailing CR.
+pub(crate) fn hunk_headers(diff: &[u8]) -> Vec<String> {
+    RawPatch::parse(diff)
+        .hunks
+        .iter()
+        .map(|hunk| String::from_utf8_lossy(trim_cr(&hunk.header)).into_owned())
+        .collect()
+}
+
+/// The `+` and `-` lines `part` takes of one file's `diff`, as text.
+pub(crate) fn chosen_changes(diff: &[u8], part: &PatchPart) -> Vec<String> {
+    let patch = RawPatch::parse(diff);
+    let Some(hunk) = patch.hunks.get(part.hunk) else {
+        return Vec::new();
+    };
+    hunk.lines
+        .iter()
+        .enumerate()
+        .filter(|(i, line)| {
+            line.bytes[0] != b' ' && part.lines.is_none_or(|(a, b)| (a..=b).contains(i))
+        })
+        .map(|(_, line)| String::from_utf8_lossy(trim_cr(&line.bytes)).into_owned())
+        .collect()
 }
 
 /// Keep the file's current content in the object store, byte for byte, and

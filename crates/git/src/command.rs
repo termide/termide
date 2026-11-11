@@ -188,8 +188,28 @@ pub(crate) fn run_git_with_input(
     args: &[&str],
     input: &[u8],
 ) -> Result<Vec<u8>, String> {
+    run_with_input(hardened_git(repo, args), args, Some(input))
+}
+
+/// Run `cmd`, a git command for `args`, feeding it `input` when given;
+/// its stdout, or git's own words on failure.
+pub(crate) fn run_with_input(
+    mut cmd: Command,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>, String> {
     use std::io::Write;
-    let mut child = hardened_git(repo, args)
+    let Some(input) = input else {
+        let output = cmd
+            .output()
+            .map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))?;
+        return if output.status.success() {
+            Ok(output.stdout)
+        } else {
+            Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+        };
+    };
+    let mut child = cmd
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

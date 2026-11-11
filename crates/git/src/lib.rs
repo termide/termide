@@ -19,6 +19,7 @@ mod patch;
 mod remote_url;
 mod repo_manager;
 mod repo_tree;
+mod review;
 mod stash;
 mod status;
 
@@ -52,6 +53,7 @@ pub use repo_manager::{project_repos, RepoManager};
 pub use repo_tree::{
     flat_rows, relative_name, repo_tree, repo_tree_indexed, tree_prefixes, RepoFolds, RepoRow,
 };
+pub use review::{Rejected, Review, ReviewDiff};
 pub use stash::{
     stash_apply, stash_diff, stash_drop, stash_info, stash_list, stash_pop, stash_push,
     stash_rename, StashEntry, StashInfo,
