@@ -217,7 +217,11 @@ impl App {
         // If shell picker nested submenu is open, check clicks on it first
         if self.state.ui.tools_nested.open {
             let shell_items = get_shell_items(
-                &self.state.cache.shells,
+                self.state
+                    .cache
+                    .shells
+                    .iter()
+                    .map(|shell| (shell.name.as_str(), shell.path.as_str())),
                 self.state.config.terminal.default_shell.as_deref(),
             );
             if !shell_items.is_empty() {

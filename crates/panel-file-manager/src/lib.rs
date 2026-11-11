@@ -71,6 +71,7 @@ use std::sync::mpsc;
 use termide_config::{constants, Config, FileManagerSettings};
 use termide_core::{
     CommandResult, HotkeyTable, Panel, PanelCommand, PanelEvent, PanelState, RenderContext,
+    StatusSegment,
 };
 use termide_git::{GitStatus, GitStatusAsyncResult, GitStatusCache};
 use termide_modal::{ActionButton, ActiveModal, FindBar, InfoActionModal};
@@ -114,7 +115,7 @@ pub struct FileManager {
     /// Memo of the last directory whose immediate child count was read for the
     /// status bar: `(path, count)`. Avoids a `read_dir` on every redraw while
     /// the cursor stays on the same folder; refreshed when it moves.
-    dir_item_count_memo: Option<(PathBuf, usize)>,
+    dir_item_count_memo: std::cell::RefCell<Option<(PathBuf, usize)>>,
     /// Directories waiting for a bounded size walk, FIFO. Results land
     /// in the process-wide `utils::shared_dir_size_cache()`, not here.
     dir_size_queue: VecDeque<PathBuf>,
@@ -307,7 +308,7 @@ impl FileManager {
             plugin_statuses: Default::default(),
             git_status_receiver: None,
             dir_size_receiver: None,
-            dir_item_count_memo: None,
+            dir_item_count_memo: Default::default(),
             dir_size_queue: VecDeque::new(),
             dir_size_pending: None,
             dir_size_cache_generation: 0,
@@ -578,6 +579,10 @@ impl FileManager {
 impl Panel for FileManager {
     fn name(&self) -> &'static str {
         "file_manager"
+    }
+
+    fn status_segments(&self) -> Vec<StatusSegment> {
+        self.status_bar_segments()
     }
 
     fn title(&self) -> String {

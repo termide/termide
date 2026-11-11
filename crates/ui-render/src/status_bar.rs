@@ -1,7 +1,3 @@
-// Allow clippy lints for status bar
-#![allow(clippy::too_many_arguments)]
-#![allow(clippy::vec_init_then_push)]
-
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -14,9 +10,6 @@ use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use termide_core::{SegmentKind, StatusSegment};
 use termide_i18n as i18n;
-use termide_panel_editor::EditorInfo;
-use termide_panel_file_manager::FileInfo;
-use termide_panel_terminal::TerminalInfo;
 use termide_system_monitor::{DiskSpaceInfo, DiskSpaceInfoExt};
 use termide_theme::Theme;
 
@@ -45,6 +38,7 @@ fn segment_style(kind: SegmentKind, theme: &Theme) -> Style {
         SegmentKind::Value => base.fg(theme.accented_fg),
         // Clickable / changeable value: normal colour, bold to signal it.
         SegmentKind::Active => base.fg(theme.accented_fg).add_modifier(Modifier::BOLD),
+        SegmentKind::Success => base.fg(theme.success).add_modifier(Modifier::BOLD),
         SegmentKind::Warn => base.fg(theme.warning).add_modifier(Modifier::BOLD),
         SegmentKind::Error => base.fg(theme.error).add_modifier(Modifier::BOLD),
     }
@@ -314,28 +308,15 @@ impl StatusBar {
         area: Rect,
         params: &StatusBarParams<'_>,
         panel_title: &str,
-        selected_count: Option<usize>,
-        file_info: Option<&FileInfo>,
         disk_space: Option<&DiskSpaceInfo>,
-        editor_info: Option<&EditorInfo>,
-        terminal_info: Option<&TerminalInfo>,
-        segments: Option<&[StatusSegment]>,
+        segments: &[StatusSegment],
     ) {
         if area.height == 0 {
             return;
         }
 
-        let status_text = Self::get_status_text(
-            params,
-            panel_title,
-            selected_count,
-            file_info,
-            disk_space,
-            editor_info,
-            terminal_info,
-            segments,
-            area.width,
-        );
+        let status_text =
+            Self::get_status_text(params, panel_title, disk_space, segments, area.width);
 
         // Fill entire line with background color from theme
         // Pre-compute style outside loop to avoid per-pixel allocation
@@ -373,19 +354,15 @@ impl StatusBar {
     fn get_status_text<'a>(
         params: &'a StatusBarParams<'a>,
         panel_title: &'a str,
-        selected_count: Option<usize>,
-        file_info: Option<&'a FileInfo>,
         disk_space: Option<&'a DiskSpaceInfo>,
-        editor_info: Option<&'a EditorInfo>,
-        terminal_info: Option<&'a TerminalInfo>,
-        segments: Option<&'a [StatusSegment]>,
+        segments: &'a [StatusSegment],
         total_width: u16,
     ) -> Vec<Span<'a>> {
         let t = i18n::t();
         let theme = params.theme;
 
-        // If there's an ERROR message, show it with priority
-        // Info messages don't block file_info display (unless git operation in progress)
+        // An error message takes priority over everything; info messages
+        // give way to a panel's own segments.
         if let Some((message, is_error)) = params.status_message {
             if *is_error {
                 let msg_style = Style::default()
@@ -407,10 +384,9 @@ impl StatusBar {
             )
         };
 
-        // Generic path: a focused panel that contributes its own segments takes
-        // precedence over the typed editor/FM/terminal layouts.
-        if let Some(segs) = segments.filter(|s| !s.is_empty()) {
-            let (left, right) = split_segments(segs);
+        // A panel that contributes its own segments shows them.
+        if !segments.is_empty() {
+            let (left, right) = split_segments(segments);
             let mut right = segment_spans(right, theme);
             right.extend(trailing_spans(params, disk_space));
             return align_right(segment_spans(left, theme), right, total_width, theme);
@@ -423,173 +399,42 @@ impl StatusBar {
             .bg(theme.accented_bg)
             .add_modifier(Modifier::BOLD);
 
-        // Show different information depending on panel type
-        // If terminal_info is passed, this is Terminal
-        if let Some(info) = terminal_info {
-            // Terminal: user@host | /path on the left, disk space on the right
-            let mut spans = vec![];
+        // No panel-specific info - check for info messages (e.g., VFS connection status)
+        if let Some((message, _is_error)) = params.status_message {
+            return vec![Span::styled(format!(" {} ", message), highlight_style)];
+        }
 
-            spans.push(Span::styled(" ", base_style));
-            spans.push(Span::styled(info.user_host.as_str(), highlight_style));
-            spans.push(Span::styled(" | ", base_style));
-            spans.push(Span::styled(info.cwd.as_str(), highlight_style));
-
-            finish(spans)
-        } else if let Some(info) = file_info {
-            // File manager: show information about current file
-            let mut spans = vec![];
-
-            // Layout: "Dir:/File: name [→ target] | Mod: 0755 | Owner: nvn:users | Size: …"
-            // where Size is the byte size for files and "<size> (N items)" for
-            // directories.
-
-            if info.file_type == "Directory" || (info.file_type == "Symlink" && info.target_is_dir)
-            {
-                spans.push(Span::styled(format!(" {} ", t.status_dir()), base_style));
-            } else {
-                spans.push(Span::styled(format!(" {} ", t.status_file()), base_style));
-            }
-            spans.push(Span::styled(info.name.as_str(), highlight_style));
-
-            if let Some(ref target) = info.symlink_target {
-                spans.push(Span::styled(" → ", base_style));
-                spans.push(Span::styled(target.as_str(), highlight_style));
-            }
-
-            spans.push(Span::styled(
-                format!("{}{} ", t.ui_hint_separator(), t.status_mod()),
-                base_style,
-            ));
-            spans.push(Span::styled(info.mode.as_str(), highlight_style));
-
-            spans.push(Span::styled(
-                format!("{}{} ", t.ui_hint_separator(), t.status_owner()),
-                base_style,
-            ));
-            spans.push(Span::styled(
-                format!("{}:{}", info.owner, info.group),
+        // Fall through to disk_space or default handling
+        if disk_space.is_some() {
+            // Panels with disk space info (like git status): show title + disk info
+            return finish(vec![Span::styled(
+                format!(" {}", panel_title),
                 highlight_style,
-            ));
+            )]);
+        }
 
-            // Size, to the right of Owner. Files: byte size. Directories:
-            // "<recursive size> (N items)" (same as the info modal).
-            spans.push(Span::styled(
-                format!("{}{} ", t.ui_hint_separator(), t.status_size()),
-                base_style,
-            ));
-            spans.push(Span::styled(info.size.as_str(), highlight_style));
+        // Default: simple title display
+        match panel_title {
+            "Debug" => {
+                // Debug: layout mode and dimensions
+                let terminal_info = format!("{}x{}", params.terminal_width, params.terminal_height);
 
-            // If there are selected files, add their count
-            if let Some(count) = selected_count {
-                if count > 0 {
-                    spans.push(Span::styled(
-                        format!("{}{} ", t.ui_hint_separator(), t.status_selected()),
+                finish(vec![
+                    Span::styled(format!(" {} ", t.status_terminal()), base_style),
+                    Span::styled(terminal_info, highlight_style),
+                    Span::styled(
+                        format!("{}{} ", t.ui_hint_separator(), t.status_layout()),
                         base_style,
-                    ));
-                    spans.push(Span::styled(
-                        format!("{}", count),
-                        Style::default()
-                            .fg(theme.success)
-                            .bg(theme.accented_bg)
-                            .add_modifier(Modifier::BOLD),
-                    ));
-                }
+                    ),
+                    Span::styled(params.recommended_layout.to_string(), highlight_style),
+                ])
             }
-
-            finish(spans)
-        } else if let Some(info) = editor_info {
-            // Editor: cursor position, tab size, encoding, file type, modes on the left
-            // disk space on the right
-            let mut spans = vec![];
-
-            // Position
-            spans.push(Span::styled(format!(" {} ", t.status_pos()), base_style));
-            spans.push(Span::styled(
-                format!("{}:{}", info.line, info.column),
-                highlight_style,
-            ));
-
-            // Tab size
-            spans.push(Span::styled(
-                format!("{}{} ", t.ui_hint_separator(), t.status_tab()),
-                base_style,
-            ));
-            spans.push(Span::styled(format!("{}", info.tab_size), highlight_style));
-
-            // Line ending
-            spans.push(Span::styled(t.ui_hint_separator(), base_style));
-            spans.push(Span::styled(info.line_ending.as_str(), highlight_style));
-
-            // Encoding
-            spans.push(Span::styled(t.ui_hint_separator(), base_style));
-            spans.push(Span::styled(info.encoding.as_str(), highlight_style));
-
-            // File type
-            spans.push(Span::styled(t.ui_hint_separator(), base_style));
-            if info.syntax_highlighting {
-                spans.push(Span::styled(info.file_type.as_str(), highlight_style));
-            } else {
-                spans.push(Span::styled(t.status_plain_text(), highlight_style));
-            }
-
-            // Read-only indicator
-            if info.read_only {
-                spans.push(Span::styled(t.ui_hint_separator(), base_style));
-                spans.push(Span::styled(t.status_readonly(), highlight_style));
-            }
-
-            // Vim mode indicator
-            if let Some(mode) = info.vim_mode {
-                spans.push(Span::styled(t.ui_hint_separator(), base_style));
-                spans.push(Span::styled(
-                    mode,
-                    Style::default()
-                        .fg(theme.warning)
-                        .bg(theme.accented_bg)
-                        .add_modifier(Modifier::BOLD),
-                ));
-            }
-
-            finish(spans)
-        } else {
-            // No panel-specific info - check for info messages (e.g., VFS connection status)
-            if let Some((message, _is_error)) = params.status_message {
-                return vec![Span::styled(format!(" {} ", message), highlight_style)];
-            }
-
-            // Fall through to disk_space or default handling
-            if disk_space.is_some() {
-                // Panels with disk space info (like git status): show title + disk info
-                return finish(vec![Span::styled(
+            _ => {
+                // Default: simple title display
+                finish(vec![Span::styled(
                     format!(" {}", panel_title),
                     highlight_style,
-                )]);
-            }
-
-            // Default: simple title display
-            match panel_title {
-                "Debug" => {
-                    // Debug: layout mode and dimensions
-                    let terminal_info =
-                        format!("{}x{}", params.terminal_width, params.terminal_height);
-
-                    finish(vec![
-                        Span::styled(format!(" {} ", t.status_terminal()), base_style),
-                        Span::styled(terminal_info, highlight_style),
-                        Span::styled(
-                            format!("{}{} ", t.ui_hint_separator(), t.status_layout()),
-                            base_style,
-                        ),
-                        Span::styled(params.recommended_layout.to_string(), highlight_style),
-                    ])
-                }
-                _ => {
-                    // Default: simple title display
-                    finish(vec![Span::styled(
-                        format!(" {}", panel_title),
-                        highlight_style,
-                    )])
-                }
+                )])
             }
         }
     }
@@ -759,8 +604,7 @@ mod tests {
             plugin_status: Some("PROBE"),
         };
         let segs = vec![StatusSegment::new("left", SegmentKind::Value)];
-        let spans =
-            StatusBar::get_status_text(&params, "", None, None, None, None, None, Some(&segs), 30);
+        let spans = StatusBar::get_status_text(&params, "", None, &segs, 30);
         let drawn = line(&spans);
         assert!(drawn.ends_with(" | PROBE  | ⟳ Copy "), "{drawn:?}");
         let trailing = status_trailing_width(Some("PROBE"), params.background_ops.as_ref(), None);
@@ -789,8 +633,7 @@ mod tests {
             StatusSegment::spacer(),
             StatusSegment::clickable("12k", SegmentKind::Value, "k"),
         ];
-        let spans =
-            StatusBar::get_status_text(&params, "", None, None, None, None, None, Some(&segs), 25);
+        let spans = StatusBar::get_status_text(&params, "", None, &segs, 25);
         let drawn = line(&spans);
         assert_eq!(drawn, "Agent: defa…12k | ⟳ Copy ");
         let width = 25 - status_trailing_width(None, params.background_ops.as_ref(), None);
@@ -833,18 +676,7 @@ mod tests {
         ];
         let area = Rect::new(0, 0, 20, 1);
         let mut buf = Buffer::empty(area);
-        StatusBar::render(
-            &mut buf,
-            area,
-            &params,
-            "",
-            None,
-            None,
-            None,
-            None,
-            None,
-            Some(&segs),
-        );
+        StatusBar::render(&mut buf, area, &params, "", None, &segs);
 
         assert_eq!(buf[(0, 0)].symbol(), "漢");
         assert_eq!(buf[(2, 0)].symbol(), "字");

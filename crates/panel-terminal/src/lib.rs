@@ -43,7 +43,7 @@ use terminal::{KeyboardProtocolMode, MouseTrackingMode, TerminalScreen};
 use termide_config::{Config, TerminalKeybindings};
 use termide_core::{
     get_terminal_caps, CommandResult, HotkeyTable, Panel, PanelCommand, PanelEvent, PanelState,
-    RenderContext, WidthPreference,
+    RenderContext, SegmentKind, StatusSegment, WidthPreference,
 };
 use termide_modal::FindBar;
 use termide_theme::Theme;
@@ -1024,6 +1024,17 @@ impl Terminal {
 impl Panel for Terminal {
     fn name(&self) -> &'static str {
         "terminal"
+    }
+
+    /// ` user@host | /cwd`.
+    fn status_segments(&self) -> Vec<StatusSegment> {
+        let info = self.get_terminal_info();
+        vec![
+            StatusSegment::new(" ", SegmentKind::Label),
+            StatusSegment::new(info.user_host, SegmentKind::Active),
+            StatusSegment::new(" | ", SegmentKind::Label),
+            StatusSegment::new(info.cwd, SegmentKind::Active),
+        ]
     }
 
     fn width_preference(&self) -> WidthPreference {

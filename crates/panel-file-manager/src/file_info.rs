@@ -2,6 +2,7 @@ use std::fs;
 use std::sync::mpsc;
 
 use super::{utils, FileManager};
+use termide_core::{SegmentKind, StatusSegment};
 use termide_modal::{ActionButton, ActiveModal};
 use termide_state::{DirSizeResult, PendingAction};
 use termide_ui::system_monitor::DiskSpaceInfo;
@@ -22,7 +23,7 @@ pub struct FileInfo {
 
 impl FileManager {
     /// Get information about the currently selected file
-    pub fn get_current_file_info(&mut self) -> Option<FileInfo> {
+    pub fn get_current_file_info(&self) -> Option<FileInfo> {
         let te = self.entry_under_cursor()?;
         let entry = &te.file_entry;
 
@@ -141,8 +142,6 @@ impl FileManager {
             (owner, String::new(), mode)
         };
 
-        // Capture the name before touching `self` mutably below (this is the
-        // last read through the `te`/`entry` borrow).
         let name = entry.name.clone();
 
         // Size string. Files: the plain byte size. Directories: the recursive
@@ -150,13 +149,14 @@ impl FileManager {
         // populates; `…` until known) plus the immediate, non-recursive child
         // count in parentheses — matching the info modal, e.g. "3.0 KB (5 items)".
         let size = if target_is_dir {
-            let count = match &self.dir_item_count_memo {
-                // Memoized by path so repeated redraws on the same folder don't
-                // re-read the directory.
+            // Memoized by path so repeated redraws on the same folder don't
+            // re-read the directory.
+            let mut memo = self.dir_item_count_memo.borrow_mut();
+            let count = match &*memo {
                 Some((p, n)) if *p == file_path => *n,
                 _ => {
                     let n = fs::read_dir(&file_path).map(|rd| rd.count()).unwrap_or(0);
-                    self.dir_item_count_memo = Some((file_path.clone(), n));
+                    *memo = Some((file_path.clone(), n));
                     n
                 }
             };
@@ -181,6 +181,16 @@ impl FileManager {
             symlink_target,
             target_is_dir,
         })
+    }
+
+    /// The status bar for the file under the cursor:
+    /// ` Dir:/File: name [→ target] | Mod: 0755 | Owner: user:group | Size: … [| Selected: N]`.
+    /// Empty when there is no such file, leaving the bar to status messages.
+    pub(crate) fn status_bar_segments(&self) -> Vec<StatusSegment> {
+        let Some(info) = self.get_current_file_info() else {
+            return Vec::new();
+        };
+        file_info_segments(info, self.get_selected_count())
     }
 
     /// Show file/directory information (Space)
@@ -551,5 +561,92 @@ impl FileManager {
             return None;
         }
         termide_system_monitor::get_disk_space_info(&self.current_path)
+    }
+}
+
+/// [`FileManager::status_bar_segments`] for `info` and `selected` items.
+fn file_info_segments(info: FileInfo, selected: usize) -> Vec<StatusSegment> {
+    let t = termide_i18n::t();
+    let label = |text: String| StatusSegment::new(text, SegmentKind::Label);
+    let value = |text: String| StatusSegment::new(text, SegmentKind::Active);
+    let field = |name: &str| label(format!("{}{} ", t.ui_hint_separator(), name));
+
+    let is_dir =
+        info.file_type == "Directory" || (info.file_type == "Symlink" && info.target_is_dir);
+    let kind = if is_dir {
+        t.status_dir()
+    } else {
+        t.status_file()
+    };
+    let mut segments = vec![label(format!(" {kind} ")), value(info.name)];
+    if let Some(target) = info.symlink_target {
+        segments.extend([label(" → ".to_string()), value(target)]);
+    }
+    segments.extend([
+        field(t.status_mod()),
+        value(info.mode),
+        field(t.status_owner()),
+        value(format!("{}:{}", info.owner, info.group)),
+        // Files: byte size. Directories: "<recursive size> (N items)", as in
+        // the info modal.
+        field(t.status_size()),
+        value(info.size),
+    ]);
+    if selected > 0 {
+        segments.extend([
+            field(t.status_selected()),
+            StatusSegment::new(selected.to_string(), SegmentKind::Success),
+        ]);
+    }
+    segments
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn info(file_type: &str, symlink_target: Option<&str>) -> FileInfo {
+        FileInfo {
+            name: "src".into(),
+            file_type: file_type.into(),
+            size: "4 KB".into(),
+            owner: "me".into(),
+            group: "staff".into(),
+            mode: "0755".into(),
+            symlink_target: symlink_target.map(Into::into),
+            target_is_dir: true,
+        }
+    }
+
+    fn line(segments: &[StatusSegment]) -> String {
+        segments.iter().map(|s| s.text.as_str()).collect()
+    }
+
+    #[test]
+    fn the_status_bar_lays_out_the_file_fields() {
+        let t = termide_i18n::t();
+        let sep = t.ui_hint_separator();
+        let segments = file_info_segments(info("Directory", None), 0);
+        assert_eq!(
+            line(&segments),
+            format!(
+                " {} src{sep}{} 0755{sep}{} me:staff{sep}{} 4 KB",
+                t.status_dir(),
+                t.status_mod(),
+                t.status_owner(),
+                t.status_size()
+            )
+        );
+        assert!(segments
+            .iter()
+            .all(|s| matches!(s.kind, SegmentKind::Label | SegmentKind::Active)));
+    }
+
+    #[test]
+    fn a_symlink_shows_its_target_and_a_selection_its_count() {
+        let segments = file_info_segments(info("Symlink", Some("~/x")), 3);
+        assert!(line(&segments).contains("src → ~/x"));
+        let last = segments.last().unwrap();
+        assert_eq!((last.text.as_str(), last.kind), ("3", SegmentKind::Success));
     }
 }

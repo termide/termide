@@ -16,9 +16,6 @@ termide-config = { path = "../config" }
 termide-core = { path = "../core" }
 termide-git = { path = "../git" }
 termide-i18n = { path = "../i18n" }
-termide-panel-editor = { path = "../panel-editor" }
-termide-panel-file-manager = { path = "../panel-file-manager" }
-termide-panel-terminal = { path = "../panel-terminal" }
 termide-system-monitor = { path = "../system-monitor" }
 termide-theme = { path = "../theme" }
 termide-ui = { path = "../ui" }

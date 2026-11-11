@@ -595,20 +595,20 @@ pub const TOOLS_SUBMENU_AGENT: usize = 11;
 /// Get shell picker submenu items from discovered shells.
 ///
 /// Marks the default shell with a `●` indicator.
-pub fn get_shell_items(
-    shells: &[termide_panel_terminal::shell_utils::ShellInfo],
+/// `shells` are `(name, path)` pairs.
+pub fn get_shell_items<'a>(
+    shells: impl IntoIterator<Item = (&'a str, &'a str)>,
     default_shell: Option<&str>,
 ) -> Vec<DropdownItem> {
     shells
-        .iter()
-        .map(|shell| {
-            let is_default = default_shell.map(|d| d == shell.path).unwrap_or(false);
-            let label = if is_default {
-                format!("{} ●", shell.name)
+        .into_iter()
+        .map(|(name, path)| {
+            let label = if default_shell == Some(path) {
+                format!("{name} ●")
             } else {
-                shell.name.clone()
+                name.to_string()
             };
-            DropdownItem::new(label, &shell.path)
+            DropdownItem::new(label, path)
         })
         .collect()
 }

@@ -4,13 +4,9 @@ use ratatui::{
     widgets::Block,
     Frame,
 };
-use std::any::Any;
 
 use termide_app::AppState;
 use termide_layout::LayoutManager;
-use termide_panel_editor::Editor;
-use termide_panel_file_manager::FileManager;
-use termide_panel_terminal::Terminal;
 use termide_theme::Theme;
 use termide_ui_render::{
     get_ai_items, get_bookmarks_group_items, get_bookmarks_items, get_commands_group_items,
@@ -63,7 +59,11 @@ fn render_dropdowns_and_modals(
         // Render shell picker nested submenu if open (Terminal selected)
         if state.ui.tools_nested.open && state.ui.tools_submenu.selected == TOOLS_SUBMENU_TERMINAL {
             let shell_items = get_shell_items(
-                &state.cache.shells,
+                state
+                    .cache
+                    .shells
+                    .iter()
+                    .map(|shell| (shell.name.as_str(), shell.path.as_str())),
                 state.config.terminal.default_shell.as_deref(),
             );
             if !shell_items.is_empty() {
@@ -808,26 +808,8 @@ fn render_status_bar_for_active(
     let active_panel = layout_manager.active_panel_mut();
 
     if let Some(panel) = active_panel {
-        // Get information depending on panel type
-        let (selected_count, file_info, editor_info, terminal_info) = if let Some(fm) =
-            (&mut **panel as &mut dyn Any).downcast_mut::<FileManager>()
-        {
-            (
-                Some(fm.get_selected_count()),
-                fm.get_current_file_info(),
-                None,
-                None,
-            )
-        } else if let Some(editor) = (&mut **panel as &mut dyn Any).downcast_mut::<Editor>() {
-            (None, None, Some(editor.get_editor_info()), None)
-        } else if let Some(terminal) = (&mut **panel as &mut dyn Any).downcast_mut::<Terminal>() {
-            (None, None, None, Some(terminal.get_terminal_info()))
-        } else {
-            (None, None, None, None)
-        };
-        // Segments a panel contributes for the generic status-bar path
-        // (e.g. binary viewer offset + Hex/Text toggle). Empty for panels on
-        // the typed editor/FM/terminal path.
+        // Segments the panel contributes; empty leaves the bar to status
+        // messages and the panel title.
         let segments = panel.status_segments();
 
         // Disk space is read from the tick-updated cache instead of calling statvfs per render.
@@ -853,12 +835,8 @@ fn render_status_bar_for_active(
             area,
             &params,
             &panel.title(),
-            selected_count,
-            file_info.as_ref(),
             disk_space,
-            editor_info.as_ref(),
-            terminal_info.as_ref(),
-            Some(segments.as_slice()),
+            &segments,
         );
     }
 }

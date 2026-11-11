@@ -237,6 +237,8 @@ pub enum SegmentKind {
     Active,
     /// Inactive option of a toggle.
     Inactive,
+    /// Good-news emphasis (e.g. a count of selected items).
+    Success,
     /// Warning emphasis.
     Warn,
     /// Error emphasis.
