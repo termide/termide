@@ -107,6 +107,11 @@ jobs:
       - name: cargo machete
         run: cargo machete
 
+      # The install instructions, the flake and the AUR packages repeat the
+      # version; a copy left behind by a bump fails here, not at release.
+      - name: Release version in every copy
+        run: tools/release/version.sh --check
+
   deny:
     name: Supply-chain audit
     runs-on: ubuntu-latest

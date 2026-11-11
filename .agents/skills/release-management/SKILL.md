@@ -302,100 +302,24 @@ Proceed? [yes/no]
 
 ### Step 5: Update Version in All Files
 
-Update version `NEW_VERSION` in these 10 files (plus `Cargo.lock`). Build the
-authoritative list first, so a file added since this skill was written is not
-missed:
-
 ```bash
-git grep -c 'OLD_VERSION_ESCAPED' -- ':!CHANGELOG.md' ':!Cargo.lock'
+tools/release/version.sh NEW_VERSION
 ```
 
-(`OLD_VERSION_ESCAPED` is `OLD_VERSION` with the dots escaped, e.g. `0\.35\.0`.)
-Every hit below is the release version itself, so a literal replace of all
-occurrences is safe in each file; review the grep output once in case a new
-file shows up with an unrelated match.
-
-#### 1. Cargo.toml
-```toml
-[workspace.package]
-version = "NEW_VERSION"
-```
-Line 9 (under `[workspace.package]`, which every crate inherits), exact match:
-`version = "OLD_VERSION"`
-
-#### 2. flake.nix (2 occurrences)
-```nix
-version = "NEW_VERSION";
-```
-One in `packages.default` (around line 84) and one in `packages.termide-static`
-(around line 117). Both are the exact match `version = "OLD_VERSION";` — use
-replace_all=true.
-
-#### 3. README.md, README.ru.md, README.zh.md (23 occurrences each)
-All occurrences are release asset file names in download URLs and commands:
-```
-termide-OLD_VERSION-x86_64-unknown-linux-gnu.tar.gz   (also musl, aarch64, apple-darwin)
-termide-OLD_VERSION-x86_64-pc-windows-msvc.zip
-termide_OLD_VERSION-1_amd64.deb
-termide-OLD_VERSION-1.x86_64.rpm
-```
-Replace all occurrences of `OLD_VERSION` (note the `.deb` uses `termide_`, so a
-`termide-VERSION-` pattern alone would miss it). URLs go through
-`releases/latest/download/`, so there is no version in the URL path itself.
-
-#### 4. doc/en/installation.md, doc/ru/installation.md, doc/zh/installation.md (16 occurrences each)
-Same asset names as the READMEs; replace all occurrences.
-
-#### 5. packaging/aur/PKGBUILD
-```bash
-pkgver=NEW_VERSION
-```
-Line 4, simple replacement. Reset `pkgrel=1` if it was bumped.
-
-#### 6. packaging/aur/PKGBUILD-bin
-```bash
-pkgver=NEW_VERSION
-```
-Line 4, simple replacement. Reset `pkgrel=1` if it was bumped.
-
-#### 7. Cargo.lock
-The workspace crates' versions in `Cargo.lock` follow `Cargo.toml`, and the AUR
-build uses `cargo fetch --locked`, so the lock file must be committed with the
-new version. Refresh it after editing `Cargo.toml`:
-```bash
-cargo update --workspace
-```
-This touches only the workspace members' entries, not dependency versions.
+The script reads the current version from `[workspace.package]` in
+`Cargo.toml`, replaces it in every file that repeats it — `Cargo.toml`,
+`flake.nix` (2), the three READMEs (23 each: release asset names), the three
+`installation.md` (16 each), `packaging/aur/PKGBUILD` and `PKGBUILD-bin` —
+resets the AUR `pkgrel` to 1, refreshes the workspace's entries in
+`Cargo.lock` (`cargo update --workspace`; the AUR build fetches `--locked`),
+and checks the result. It fails when a file names the version a different
+number of times than expected, or when a file it does not know names it:
+add such a file to `EXPECTED` in the script rather than edit it by hand. CI
+runs `tools/release/version.sh --check` on every pull request.
 
 **Not bumped:** `packaging/crates-io-redirect/` is a standalone tombstone crate
-for the `termide` name on crates.io. Its `version` is unrelated to the release
-(it must exceed the crates.io maximum and is set only when that crate is
-republished by hand) — leave it alone. There is no Homebrew formula in the tree.
-
-**Batch Update Strategy:**
-All files above can be updated in one pass (the version is not a substring of
-anything else in them):
-```bash
-git grep -l 'OLD_VERSION_ESCAPED' -- ':!CHANGELOG.md' ':!Cargo.lock' \
-  | xargs sed -i '' 's/OLD_VERSION_ESCAPED/NEW_VERSION/g'   # GNU sed: -i without ''
-cargo update --workspace
-```
-Or use the Edit tool with replace_all=true per file.
-
-**Verification:**
-After updates, grep for the old version to ensure all replaced — this must
-print nothing:
-```bash
-git grep -n 'OLD_VERSION_ESCAPED' -- ':!CHANGELOG.md'
-```
-`Cargo.lock` is included on purpose: a leftover there means the workspace
-entries were not refreshed (unless a third-party dependency happens to share
-the old version number — check the `name` above any hit). Then confirm the new version landed everywhere
-with the expected counts (Cargo.toml 1, flake.nix 2, each README 23, each
-installation.md 16, each PKGBUILD 1):
-```bash
-git grep -c 'NEW_VERSION_ESCAPED' -- ':!CHANGELOG.md' ':!Cargo.lock'
-```
+for the `termide` name on crates.io; its `version` is unrelated to the release.
+CHANGELOG.md and `changelog.d/` are Step 7's.
 
 ### Step 6: Documentation Actuality Check
 
