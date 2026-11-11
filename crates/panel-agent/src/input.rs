@@ -3,7 +3,9 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use termide_agent_core::{now_millis, CommandScript, ToolResultMessage, UserMessage};
-use termide_core::{KeyChord, LinkTarget, Panel, PanelEvent};
+use termide_core::{
+    AgentSnippet, KeyChord, LinkTarget, Panel, PanelEvent, SnippetSource, SnippetWanted,
+};
 use termide_ui::textarea::TextArea;
 use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList, FieldEdit};
 
@@ -45,6 +47,86 @@ pub(crate) struct MentionSpan {
     row: usize,
     start: usize,
     end: usize,
+}
+
+/// The `@` entries that stand for another panel's text rather than a file.
+const SNIPPET_MENTIONS: [(&str, SnippetWanted); 2] = [
+    ("@selection", SnippetWanted::Selection),
+    ("@term", SnippetWanted::Terminal),
+];
+
+/// What the `@` entry `value` stands for, when it is one of
+/// [`SNIPPET_MENTIONS`] rather than a path.
+fn snippet_wanted(value: &str) -> Option<SnippetWanted> {
+    SNIPPET_MENTIONS
+        .iter()
+        .find(|(mention, _)| *mention == value)
+        .map(|(_, wanted)| *wanted)
+}
+
+/// The [`SNIPPET_MENTIONS`] that `prefix`, the text after `@`, begins.
+pub(crate) fn snippet_completions(prefix: &str) -> Vec<CompletionItem> {
+    let t = termide_i18n::t();
+    SNIPPET_MENTIONS
+        .iter()
+        .filter(|(mention, _)| mention[1..].starts_with(prefix))
+        .map(|(mention, wanted)| {
+            let description = match wanted {
+                SnippetWanted::Selection => t.agent_mention_selection(),
+                SnippetWanted::Terminal => t.agent_mention_term(),
+            };
+            CompletionItem::new(mention.to_string()).with_description(description.to_string())
+        })
+        .collect()
+}
+
+/// A snippet as it stands in the prompt and as the model reads it: the
+/// placeholder's label, and the text with a header saying where it is
+/// from, fenced. A path under `cwd` is given from there.
+pub(crate) fn snippet_text(snippet: &AgentSnippet, cwd: &std::path::Path) -> (String, String) {
+    let t = termide_i18n::t();
+    let body = snippet.text.trim_end_matches('\n');
+    let (label, header) = match &snippet.source {
+        SnippetSource::Editor { path, first, last } => {
+            let span = if first == last {
+                first.to_string()
+            } else {
+                format!("{first}-{last}")
+            };
+            let lines = if first == last { "line" } else { "lines" };
+            match path {
+                Some(path) => {
+                    let shown = path.strip_prefix(cwd).unwrap_or(path).display().to_string();
+                    (
+                        t.agent_snippet_selection_fmt(&format!("{shown}:{span}")),
+                        format!("Selected in {shown}, {lines} {span}:"),
+                    )
+                }
+                None => (
+                    t.agent_snippet_selection_fmt(&span),
+                    format!("Selected in an unsaved editor buffer, {lines} {span}:"),
+                ),
+            }
+        }
+        SnippetSource::Terminal {
+            title,
+            name,
+            selection,
+        } => {
+            let count = body.lines().count();
+            let label = t.agent_snippet_terminal_fmt(name, &t.agent_paste_lines_fmt(count));
+            let header = if *selection {
+                format!("Selected in the terminal \"{title}\":")
+            } else {
+                format!("The last {count} lines of the terminal \"{title}\":")
+            };
+            (label, header)
+        }
+    };
+    // A fence longer than any run of backticks inside cannot be closed by it.
+    let longest = body.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest.max(2) + 1);
+    (label, format!("{header}\n{fence}\n{body}\n{fence}\n"))
 }
 
 /// Files and directories under `root` matching `prefix` (the text after `@`),
@@ -237,6 +319,36 @@ impl AgentPanel {
             text: String::new(),
             picture: Some(picture),
         });
+    }
+
+    /// Hold another panel's text for the next message under a
+    /// `[#n selection …]` or `[#n terminal …]` placeholder on a line of its
+    /// own at the cursor, spliced in with a header on send as a large paste
+    /// is; focus goes to the prompt.
+    pub fn attach_snippet(&mut self, snippet: AgentSnippet) {
+        self.chat_focus = false;
+        let (label, text) = snippet_text(&snippet, &self.cwd);
+        self.paste_seq += 1;
+        let placeholder = format!("[#{} {label}]", self.paste_seq);
+        let cursor = self.input_area().cursor();
+        let line = self
+            .input_area()
+            .lines()
+            .get(cursor.row)
+            .cloned()
+            .unwrap_or_default();
+        let before: String = line.chars().take(cursor.col).collect();
+        if !before.trim().is_empty() {
+            self.input_area_mut().insert('\n');
+        }
+        self.input_area_mut().insert_str(&placeholder);
+        self.input_area_mut().insert('\n');
+        self.pastes.push(Paste {
+            placeholder,
+            text,
+            picture: None,
+        });
+        self.after_edit();
     }
 
     /// The pictures whose placeholder is still in `text`, as `(media_type,
@@ -849,7 +961,8 @@ impl AgentPanel {
             self.completion = None;
             return;
         };
-        let items = file_completions(&self.cwd, &prefix);
+        let mut items = snippet_completions(&prefix);
+        items.extend(file_completions(&self.cwd, &prefix));
         if items.is_empty() {
             self.completion = None;
             return;
@@ -862,14 +975,31 @@ impl AgentPanel {
     }
 
     /// Put the highlighted completion into the input. A `/`-command replaces
-    /// the whole input; an `@`-file mention replaces just its span.
-    pub(crate) fn accept_completion(&mut self) -> bool {
+    /// the whole input; an `@`-file mention replaces just its span, and
+    /// `@selection` or `@term` gives way to the text it names, which the app
+    /// fetches and hands back through [`AgentPanel::attach_snippet`].
+    pub(crate) fn accept_completion(&mut self) -> Vec<PanelEvent> {
+        let redraw = vec![PanelEvent::NeedsRedraw];
         let Some(list) = self.completion.take() else {
-            return false;
+            return redraw;
         };
         let Some(item) = list.selected_item().cloned() else {
-            return false;
+            return redraw;
         };
+        if let (Some(span), Some(wanted)) = (self.completion_span, snippet_wanted(&item.value)) {
+            self.completion_span = None;
+            self.input_area_mut().set_cursor(span.row, span.end);
+            for _ in span.start..span.end {
+                self.input_area_mut().backspace();
+            }
+            return vec![
+                PanelEvent::WantSnippet {
+                    panel: self.panel_id(),
+                    wanted,
+                },
+                PanelEvent::NeedsRedraw,
+            ];
+        }
         match self.completion_span.take() {
             None => {
                 let text = format!("/{} ", item.value);
@@ -895,7 +1025,7 @@ impl AgentPanel {
                 }
             }
         }
-        true
+        redraw
     }
 
     /// The input changed by typing: history browsing ends, the popup follows.
@@ -1153,8 +1283,7 @@ impl AgentPanel {
                 if exact {
                     return self.submit();
                 }
-                self.accept_completion();
-                return vec![PanelEvent::NeedsRedraw];
+                return self.accept_completion();
             }
             CompletionAction::NotHandled => {}
         }
@@ -1650,8 +1779,7 @@ impl AgentPanel {
                 if let Some(list) = &mut self.completion {
                     if let Some(index) = list.hit(event.column, event.row) {
                         list.select(index);
-                        self.accept_completion();
-                        return vec![PanelEvent::NeedsRedraw];
+                        return self.accept_completion();
                     }
                 }
                 if let Some(picker) = &self.rewind_picker {

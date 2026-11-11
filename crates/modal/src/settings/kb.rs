@@ -129,6 +129,7 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "stage_change",
             "unstage_change",
             "revert_change",
+            "send_to_agent",
         ],
         2 => &[
             "rename",
@@ -184,6 +185,7 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "scroll_bottom",
             "search",
             "switch_directory",
+            "send_to_agent",
         ],
         7 => &[
             "sort",
@@ -291,7 +293,8 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             prev_change,
             stage_change,
             unstage_change,
-            revert_change
+            revert_change,
+            send_to_agent
         ),
         2 => kb_get!(
             config.file_manager.keybindings,
@@ -360,7 +363,8 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             scroll_top,
             scroll_bottom,
             search,
-            switch_directory
+            switch_directory,
+            send_to_agent
         ),
         7 => kb_get!(
             config.database.keybindings,
@@ -527,7 +531,8 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             prev_change,
             stage_change,
             unstage_change,
-            revert_change
+            revert_change,
+            send_to_agent
         ),
         2 => kb_set!(
             config.file_manager.keybindings,
@@ -607,7 +612,8 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             scroll_top,
             scroll_bottom,
             search,
-            switch_directory
+            switch_directory,
+            send_to_agent
         ),
         7 => kb_set!(
             config.database.keybindings,

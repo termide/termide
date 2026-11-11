@@ -89,6 +89,16 @@ works across the entire scrollback buffer and the visible screen:
 
 The search keybinding defaults to `Ctrl+F` (instead of `Ctrl+Shift+F`) because most host terminals intercept `Ctrl+Shift+F` for their own search. While a full-screen program has the alternate screen up, the key goes to it — page-down in `less` and `vim` — since the scrollback the bar searches is not what the program shows; at the shell's screen readline's `forward-char` is on `Right`.
 
+## Sending to the Agent
+
+The panel's `[≡]` menu (`Alt+K`) offers **Send to agent**: the terminal's
+selection, or without one its last 200 lines (screen and scrollback, the blank
+lines below the prompt left out), goes into the prompt of the agent panel you
+last used, or of a new one, under a `[#1 terminal …, 80 lines]` placeholder,
+and that panel takes focus. `send_to_agent` under `[terminal.keybindings]` has
+no key by default. From the agent's side, `@term` takes the same text; see the
+[agent](agent.md) page.
+
 ## Shell Selection
 
 You can choose which shell to launch via the **Windows > Terminal** submenu. The submenu lists all shells detected on your system:

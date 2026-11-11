@@ -17,10 +17,12 @@ use termide_agent_core::{
     ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision, ToolResultMessage, ToolUpdate,
     Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION,
 };
-use termide_core::{ConfirmAction, LinkTarget, PanelConfig, SegmentKind};
+use termide_core::{
+    AgentSnippet, ConfirmAction, LinkTarget, PanelConfig, SegmentKind, SnippetSource, SnippetWanted,
+};
 use termide_ui::{ChoiceAction, ChoiceForm};
 
-use crate::input::file_completions;
+use crate::input::{file_completions, snippet_text};
 use crate::pending::Pending;
 use crate::render::context_bar;
 use crate::runtime::{push_history, session_model};

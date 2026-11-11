@@ -23,7 +23,8 @@ use termide_theme::Theme;
 use crate::keyboard;
 use crate::{
     CLEAR_BREAKPOINTS_ACTION, CONFIGURE_DEBUG_ACTION, RESTART_LANGUAGE_SERVER_ACTION,
-    REVERT_CHANGE_ACTION, STAGE_CHANGE_ACTION, START_DEBUG_ACTION, UNSTAGE_CHANGE_ACTION,
+    REVERT_CHANGE_ACTION, SEND_TO_AGENT_ACTION, STAGE_CHANGE_ACTION, START_DEBUG_ACTION,
+    UNSTAGE_CHANGE_ACTION,
 };
 
 use super::{build_editor_hotkey_table, Editor};
@@ -393,6 +394,12 @@ impl Panel for Editor {
                 REVERT_CHANGE_ACTION.into(),
             ));
         }
+        if self.selection.as_ref().is_some_and(|s| !s.is_empty()) {
+            items.push((
+                t.help_desc_send_to_agent().to_string(),
+                SEND_TO_AGENT_ACTION.into(),
+            ));
+        }
         items.extend([
             (
                 t.menu_view_as_diagram().to_string(),
@@ -481,6 +488,7 @@ impl Panel for Editor {
             STAGE_CHANGE_ACTION => self.stage_change(),
             UNSTAGE_CHANGE_ACTION => self.unstage_change(),
             REVERT_CHANGE_ACTION => self.revert_change(),
+            SEND_TO_AGENT_ACTION => self.send_to_agent(),
             RESTART_LANGUAGE_SERVER_ACTION => match self.file_path() {
                 Some(file) => vec![PanelEvent::RestartLanguageServer {
                     file: file.to_path_buf(),
@@ -930,6 +938,9 @@ impl Editor {
         }
         if self.hotkeys.matches("revert_change", &key) {
             return self.revert_change();
+        }
+        if self.hotkeys.matches("send_to_agent", &key) {
+            return self.send_to_agent();
         }
 
         // Collect events from internal state

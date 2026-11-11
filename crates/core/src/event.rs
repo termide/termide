@@ -547,6 +547,46 @@ pub struct ChecklistOutcome {
     pub checked: Vec<String>,
 }
 
+/// A piece of another panel's text handed to an agent panel: an editor's
+/// selection or a terminal's output. The agent's prompt holds it under a
+/// short placeholder and splices it in when the message is sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSnippet {
+    /// Where the text was taken from, for the placeholder and the header.
+    pub source: SnippetSource,
+    /// The text itself.
+    pub text: String,
+}
+
+/// Where an [`AgentSnippet`] was taken from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SnippetSource {
+    /// An editor's selection, over 1-based lines `first..=last` of `path`
+    /// (`None` for an unsaved buffer).
+    Editor {
+        path: Option<PathBuf>,
+        first: usize,
+        last: usize,
+    },
+    /// A terminal's output: its selection when `selection`, else the last
+    /// lines of its screen and scrollback. `title` names the terminal in
+    /// full, `name` short (the program running in it), for the placeholder.
+    Terminal {
+        title: String,
+        name: String,
+        selection: bool,
+    },
+}
+
+/// What an agent panel asks for with [`PanelEvent::WantSnippet`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SnippetWanted {
+    /// The selection of the editor last used.
+    Selection,
+    /// The output of the terminal last used.
+    Terminal,
+}
+
 /// Events emitted by panels to communicate with the application.
 #[derive(Debug, Clone)]
 pub enum PanelEvent {
@@ -954,6 +994,16 @@ pub enum PanelEvent {
     /// Emitted by a panel following another agent's task when its input, which
     /// names the delegating agent, is clicked: focus goes back to that agent.
     FocusAgentPanel(u64),
+
+    /// Hand `AgentSnippet` to the agent panel last used, opening one when
+    /// none is, and focus it. Emitted by an editor or a terminal for its
+    /// "Send to agent" action.
+    SendToAgent(AgentSnippet),
+
+    /// Fetch what `wanted` names from the editor or terminal last used and
+    /// hand it to the agent panel `panel`. Emitted by an agent panel when
+    /// `@selection` or `@term` is picked in its `@` list.
+    WantSnippet { panel: u64, wanted: SnippetWanted },
 
     /// Let the user pick another working directory for a fresh agent panel
     /// working in `cwd`, on the session log at `session`. On a pick the app

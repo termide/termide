@@ -147,6 +147,10 @@ pub struct EditorKeybindings {
     pub stage_change: Option<KeyBinding>,
     pub unstage_change: Option<KeyBinding>,
     pub revert_change: Option<KeyBinding>,
+
+    // The selection into the agent's prompt; no default key, the panel menu
+    // offers it while text is selected.
+    pub send_to_agent: Option<KeyBinding>,
 }
 
 /// File manager keybindings (file_manager.keybindings section).
@@ -411,6 +415,9 @@ pub struct TerminalKeybindings {
     pub scroll_bottom: Option<KeyBinding>,
     pub search: Option<KeyBinding>,
     pub switch_directory: Option<KeyBinding>,
+    /// The selection or the last lines into the agent's prompt; no default
+    /// key, the panel menu offers it.
+    pub send_to_agent: Option<KeyBinding>,
 }
 
 // =============================================================================

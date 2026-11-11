@@ -41,3 +41,4 @@ pub const RESTART_LANGUAGE_SERVER_ACTION: &str = "restart_language_server";
 pub const STAGE_CHANGE_ACTION: &str = "stage_change";
 pub const UNSTAGE_CHANGE_ACTION: &str = "unstage_change";
 pub const REVERT_CHANGE_ACTION: &str = "revert_change";
+pub const SEND_TO_AGENT_ACTION: &str = "send_to_agent";

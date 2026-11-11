@@ -84,7 +84,9 @@ A scenario that does not `quit` is killed at its end. The examples:
 `terminal` (a command in a terminal panel), `terminal-keys` (Alt, Esc and Ctrl+F reaching the shell and less, the title following them), `git-diff-staging` (a hunk and lines staged from the diff panel, a discard confirmed and undone), `editor-git-changes` (F7 to a change, staged, unstaged and reverted from the editor's menu), `agent` (the mock model's task
 with a permission card), `acp-codex` (the same task through Codex over
 ACP), `agent-review` (the Claude Code stand-in's edit reviewed with
-`/changes`, a hunk rejected and the agent told of it),
+`/changes`, a hunk rejected and the agent told of it), `agent-snippets`
+(an editor's selection and a terminal's last lines sent from their menus
+and with `@term`, as the Claude Code stand-in receives them),
 `agent-lsp-errors` and `agent-lsp-new-errors` (rust-analyzer's errors in
 the mock model's edit result, for a file no editor has, and the new ones
 alone for one an editor has; both need rust-analyzer on `PATH`), `delegate` (a background subagent's row and report, on the model

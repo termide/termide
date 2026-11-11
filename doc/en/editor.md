@@ -243,6 +243,17 @@ arrives in one piece.
 | `Ctrl+X`          | Cut selected text                          |
 | `Ctrl+V`          | Paste from system clipboard                |
 
+## Sending to the Agent
+
+While text is selected, the panel's `[≡]` menu (`Alt+K`) offers **Send to
+agent**: the selection goes into the prompt of the agent panel you last used,
+or of a new one, under a placeholder naming the file and its lines, and that
+panel takes focus. The selection is sent as it is at that moment, with the
+lines it spans; a selection ending at the start of a line leaves that line
+out. `send_to_agent` under `[editor.keybindings]` has no key by default. From
+the agent's side, `@selection` takes the same text; see the
+[agent](agent.md) page.
+
 ## Mouse Support
 
 - **Single click**: Set cursor to click position

@@ -49,6 +49,8 @@ pub(crate) mod live;
 mod lsp_check;
 pub(in crate::app) use lsp_check::LspChecks;
 mod peers;
+mod snippets;
+pub(in crate::app) use snippets::SnippetSources;
 pub(crate) mod terminals;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};
 pub(super) use peers::same_dir;

@@ -23,6 +23,38 @@ impl Editor {
         selection::get_selected_text(&self.buffer, self.selection.as_ref())
     }
 
+    /// The selection as a snippet for an agent's prompt, with the lines it
+    /// spans; `None` without a selection. A selection ending at the start of
+    /// a line does not count that line.
+    pub fn agent_snippet(&self) -> Option<termide_core::AgentSnippet> {
+        let text = self.get_selected_text().filter(|text| !text.is_empty())?;
+        let selection = self.selection.as_ref()?;
+        let (start, end) = (selection.start(), selection.end());
+        let last = if end.column == 0 && end.line > start.line {
+            end.line
+        } else {
+            end.line + 1
+        };
+        Some(termide_core::AgentSnippet {
+            source: termide_core::SnippetSource::Editor {
+                path: self.file_path().map(|path| path.to_path_buf()),
+                first: start.line + 1,
+                last,
+            },
+            text,
+        })
+    }
+
+    /// Hand the selection to the agent last used, or say there is none.
+    pub(crate) fn send_to_agent(&self) -> Vec<termide_core::PanelEvent> {
+        match self.agent_snippet() {
+            Some(snippet) => vec![termide_core::PanelEvent::SendToAgent(snippet)],
+            None => vec![termide_core::PanelEvent::ShowMessage(
+                termide_i18n::t().agent_snippet_no_selection().to_string(),
+            )],
+        }
+    }
+
     /// Delete selected text
     pub(crate) fn delete_selection(&mut self) -> Result<()> {
         let is_multiline = self
@@ -606,5 +638,59 @@ impl Editor {
     /// Clamp cursor position to valid values
     pub(crate) fn clamp_cursor(&mut self) {
         cursor::physical::clamp_cursor(&mut self.cursor, &self.buffer);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use termide_buffer::{Cursor, Selection};
+    use termide_core::{Panel, PanelEvent, SnippetSource};
+
+    use crate::{Editor, SEND_TO_AGENT_ACTION};
+
+    fn offered(e: &Editor) -> bool {
+        Panel::context_menu_items(e)
+            .iter()
+            .any(|(_, action)| action == SEND_TO_AGENT_ACTION)
+    }
+
+    /// The menu offers the selection only while there is one, and lines a
+    /// selection merely reaches the start of do not count.
+    #[test]
+    fn a_selection_goes_to_the_agent_with_the_lines_it_spans() {
+        let mut e = Editor::from_text("a\nb\nc\nd\n", "t".into());
+        assert!(!offered(&e));
+        assert!(e.agent_snippet().is_none());
+        assert!(matches!(
+            e.handle_status_action(SEND_TO_AGENT_ACTION)[..],
+            [PanelEvent::ShowMessage(_)]
+        ));
+
+        e.selection = Some(Selection::new(Cursor::at(1, 0), Cursor::at(3, 0)));
+        assert!(offered(&e));
+        let snippet = e.agent_snippet().unwrap();
+        assert_eq!(snippet.text, "b\nc\n");
+        assert_eq!(
+            snippet.source,
+            SnippetSource::Editor {
+                path: None,
+                first: 2,
+                last: 3
+            }
+        );
+        e.selection = Some(Selection::new(Cursor::at(2, 1), Cursor::at(2, 0)));
+        let snippet = e.agent_snippet().unwrap();
+        assert!(matches!(
+            snippet.source,
+            SnippetSource::Editor {
+                first: 3,
+                last: 3,
+                ..
+            }
+        ));
+        assert!(matches!(
+            e.handle_status_action(SEND_TO_AGENT_ACTION)[..],
+            [PanelEvent::SendToAgent(_)]
+        ));
     }
 }

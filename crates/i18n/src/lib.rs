@@ -237,6 +237,14 @@ pub trait Translation: Send + Sync {
     fn help_desc_stage_change(&self) -> &str;
     fn help_desc_unstage_change(&self) -> &str;
     fn help_desc_revert_change(&self) -> &str;
+    // Editor and terminal text handed to the agent
+    fn help_desc_send_to_agent(&self) -> &str;
+    fn agent_mention_selection(&self) -> &str;
+    fn agent_mention_term(&self) -> &str;
+    fn agent_snippet_no_selection(&self) -> &str;
+    fn agent_snippet_no_editor(&self) -> &str;
+    fn agent_snippet_no_terminal(&self) -> &str;
+    fn agent_snippet_empty_terminal(&self) -> &str;
     fn editor_no_change_here(&self) -> &str;
     fn editor_no_changes(&self) -> &str;
     fn editor_stage_failed_fmt(&self, error: &str) -> String;
@@ -951,6 +959,8 @@ pub trait Translation: Send + Sync {
     fn agent_paste_lines_fmt(&self, count: usize) -> String;
     fn agent_paste_chars_fmt(&self, count: usize) -> String;
     fn agent_paste_image_fmt(&self, width: u32, height: u32) -> String;
+    fn agent_snippet_selection_fmt(&self, place: &str) -> String;
+    fn agent_snippet_terminal_fmt(&self, title: &str, lines: &str) -> String;
     fn agent_project_command_fmt(&self, description: &str) -> String;
     /// The description of a skill kept to the user, marked as such.
     fn agent_user_skill_fmt(&self, description: &str) -> String;

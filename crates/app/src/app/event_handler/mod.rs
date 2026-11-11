@@ -545,6 +545,9 @@ impl App {
             // A view shown over the layout moves into a panel of its own.
             PanelEvent::DockOverlay => self.dock_overlay(),
 
+            PanelEvent::SendToAgent(snippet) => self.send_to_agent(snippet)?,
+            PanelEvent::WantSnippet { panel, wanted } => self.want_snippet(panel, wanted),
+
             PanelEvent::FocusAgentPanel(id) => {
                 let found = self.layout_manager.focus_panel_where(|candidate| {
                     candidate

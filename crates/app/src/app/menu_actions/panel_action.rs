@@ -64,7 +64,7 @@ impl App {
                 p.context_menu_items()
                     .into_iter()
                     .map(|(label, action)| {
-                        let shortcut = self.context_item_shortcut(&action);
+                        let shortcut = self.context_item_shortcut(p.name(), &action);
                         DropdownItem::new(&label, action).with_shortcut(shortcut)
                     })
                     .collect()
@@ -79,10 +79,15 @@ impl App {
     }
 
     /// The key of a panel's own menu entry, for those a keybinding also does.
-    fn context_item_shortcut(&self, action: &str) -> Option<String> {
-        let binding = match action {
-            termide_panel_editor::START_DEBUG_ACTION => {
-                &self.state.config.editor.keybindings.start_debug
+    fn context_item_shortcut(&self, panel: &str, action: &str) -> Option<String> {
+        let config = &self.state.config;
+        let binding = match (panel, action) {
+            (_, termide_panel_editor::START_DEBUG_ACTION) => &config.editor.keybindings.start_debug,
+            ("editor", termide_panel_editor::SEND_TO_AGENT_ACTION) => {
+                &config.editor.keybindings.send_to_agent
+            }
+            ("terminal", termide_panel_terminal::SEND_TO_AGENT_ACTION) => {
+                &config.terminal.keybindings.send_to_agent
             }
             _ => return None,
         };

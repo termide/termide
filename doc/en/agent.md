@@ -1026,6 +1026,18 @@ in `/` and reopens the list for its contents, so you can drill in. The agent
 reads the file you name; `@` is only quick path entry, nothing is attached
 behind your back.
 
+Two entries lead that list and stand for text rather than a file:
+`@selection` for the text selected in the editor you last used, and `@term`
+for what the terminal you last used shows: its selection, or else its last
+200 lines with the blank ones below the prompt left out. Picking one puts a
+`[#2 selection src/main.rs:10-24]` or `[#3 terminal …, 80 lines]` placeholder
+on a line of its own, holding the text as it was then; on send it is spliced in
+with a line saying where it is from, fenced, as a large paste is. Deleting the
+placeholder drops it. The editor's `[≡]` menu (while text is selected) and the
+terminal's offer **Send to agent**, which does the same from their side: the
+text goes to the agent panel you last used, or to a new one, which takes focus.
+This works with external agents too, since the text goes in the message.
+
 A large paste (more than five lines or 2000 characters) is held out of the
 prompt box as a short `[#1 pasted 40 lines]` placeholder instead of flooding
 it; the full text is spliced back in place of the placeholder when you send,

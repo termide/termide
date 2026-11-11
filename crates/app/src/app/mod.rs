@@ -106,6 +106,9 @@ pub struct App {
     /// Agents' checks of the files they changed, waiting for the language
     /// servers.
     lsp_checks: agent_panel::LspChecks,
+    /// The editor, terminal and agent panel last used, for the text the
+    /// user hands an agent.
+    snippet_sources: agent_panel::SnippetSources,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
     /// raw `KeyEvent`s on the dispatch boundary so that all matchers
     /// downstream see canonical keys while text-input and PTY paths
@@ -244,6 +247,7 @@ impl App {
             debug_revealed: None,
             debug_waiters: Vec::new(),
             lsp_checks: Default::default(),
+            snippet_sources: Default::default(),
             debug_terminal_pid: None,
             debug_last_launch: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
@@ -354,6 +358,7 @@ impl App {
             debug_revealed: None,
             debug_waiters: Vec::new(),
             lsp_checks: Default::default(),
+            snippet_sources: Default::default(),
             debug_terminal_pid: None,
             debug_last_launch: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
@@ -923,7 +928,9 @@ impl App {
     /// When input moves focus to a git panel, reload it so changes made
     /// outside the panel appear automatically (no manual Ctrl+R). Detected by
     /// comparing a (focus group, active panel name) signature across inputs.
+    /// Every input also notes the panel used, for the text handed to agents.
     fn refresh_git_panel_on_focus_change(&mut self) {
+        self.note_snippet_source();
         let sig = self
             .layout_manager
             .active_panel()

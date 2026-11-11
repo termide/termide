@@ -380,6 +380,13 @@ impl Translation for RuntimeTranslation {
         help_desc_stage_change,
         help_desc_unstage_change,
         help_desc_revert_change,
+        help_desc_send_to_agent,
+        agent_mention_selection,
+        agent_mention_term,
+        agent_snippet_no_selection,
+        agent_snippet_no_editor,
+        agent_snippet_no_terminal,
+        agent_snippet_empty_terminal,
         editor_no_change_here,
         editor_no_changes,
         debug_select_title,
@@ -2312,6 +2319,17 @@ impl Translation for RuntimeTranslation {
         self.format(
             "agent_paste_chars_fmt",
             &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn agent_snippet_selection_fmt(&self, place: &str) -> String {
+        self.format("agent_snippet_selection_fmt", &[("where", place)])
+    }
+
+    fn agent_snippet_terminal_fmt(&self, title: &str, lines: &str) -> String {
+        self.format(
+            "agent_snippet_terminal_fmt",
+            &[("title", title), ("lines", lines)],
         )
     }
 

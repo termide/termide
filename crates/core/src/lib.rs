@@ -38,10 +38,10 @@ pub mod wide_cells;
 pub use command::{CommandResult, PanelCommand};
 pub use credentials::{CredentialAttempt, SecretText};
 pub use event::{
-    ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome, ChecklistRefresh,
-    ChecklistSwitch, ConfirmAction, ConflictResolution, DelegateRestart, Event, EventHandler,
-    GitOperationType, InputAction, PanelEvent, ReferenceLocation, SelectAction, SplitDirection,
-    VimPanelDirection,
+    AgentSnippet, ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome,
+    ChecklistRefresh, ChecklistSwitch, ConfirmAction, ConflictResolution, DelegateRestart, Event,
+    EventHandler, GitOperationType, InputAction, PanelEvent, ReferenceLocation, SelectAction,
+    SnippetSource, SnippetWanted, SplitDirection, VimPanelDirection,
 };
 pub use graphics_cells::GraphicsCells;
 pub use hotkey_table::HotkeyTable;

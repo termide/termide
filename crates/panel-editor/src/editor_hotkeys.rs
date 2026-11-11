@@ -51,6 +51,7 @@ pub(crate) fn build_editor_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("stage_change", &kb.stage_change);
     t.insert("unstage_change", &kb.unstage_change);
     t.insert("revert_change", &kb.revert_change);
+    t.insert("send_to_agent", &kb.send_to_agent);
 
     // Viewer: swap this text file to the hex viewer (shared viewer binding).
     t.insert("viewer_toggle_hex", &config.viewer.keybindings.toggle_hex);

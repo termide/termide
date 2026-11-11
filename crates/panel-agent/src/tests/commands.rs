@@ -64,6 +64,82 @@ fn file_completions_list_paths_and_at_mentions_insert_them() {
         .any(|i| i.value == "src/main.rs"));
 }
 
+/// `@selection` and `@term` lead the `@` list; picking one takes back what
+/// was typed and asks the app for the text, which comes back held under a
+/// placeholder on a line of its own and goes out with a header, fenced.
+#[test]
+fn a_snippet_mention_asks_for_the_text_and_holds_it_under_a_placeholder() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        cwd: dir.path().to_path_buf(),
+        ..setup(vec![])
+    });
+    type_text(&mut panel, "why @");
+    let values: Vec<String> = panel
+        .completion
+        .as_ref()
+        .expect("an @ popup")
+        .items()
+        .iter()
+        .map(|i| i.value.clone())
+        .collect();
+    assert_eq!(values[..2], ["@selection", "@term"]);
+    type_text(&mut panel, "te");
+    let events = panel.handle_key(chord(KeyCode::Tab, KeyModifiers::NONE));
+    assert!(events.iter().any(|event| matches!(
+        event,
+        PanelEvent::WantSnippet { panel: id, wanted: SnippetWanted::Terminal } if *id == panel.panel_id()
+    )));
+    assert_eq!(panel.input_text(), "why ");
+
+    panel.attach_snippet(AgentSnippet {
+        source: SnippetSource::Terminal {
+            title: "me@host/src (zsh)".into(),
+            name: "zsh".into(),
+            selection: false,
+        },
+        text: "$ cargo test\nerror: ```x``` failed\n".into(),
+    });
+    type_text(&mut panel, "fails");
+    assert_eq!(
+        panel.input_text(),
+        "why \n[#1 terminal zsh, 2 lines]\nfails"
+    );
+    assert_eq!(
+        panel.expand_pastes(&panel.input_text()),
+        "why \nThe last 2 lines of the terminal \"me@host/src (zsh)\":\n````\n$ cargo test\n\
+         error: ```x``` failed\n````\n\nfails"
+    );
+}
+
+#[test]
+fn an_editor_selection_is_named_by_its_path_from_the_panel_and_its_lines() {
+    let cwd = std::path::Path::new("/work");
+    let selection = |path: Option<&str>, first, last| AgentSnippet {
+        source: SnippetSource::Editor {
+            path: path.map(std::path::PathBuf::from),
+            first,
+            last,
+        },
+        text: "fn main() {}".into(),
+    };
+    let (label, text) = snippet_text(&selection(Some("/work/src/main.rs"), 10, 24), cwd);
+    assert_eq!(label, "selection src/main.rs:10-24");
+    assert_eq!(
+        text,
+        "Selected in src/main.rs, lines 10-24:\n```\nfn main() {}\n```\n"
+    );
+    let (label, text) = snippet_text(&selection(Some("/elsewhere/a.rs"), 3, 3), cwd);
+    assert_eq!(label, "selection /elsewhere/a.rs:3");
+    assert!(
+        text.starts_with("Selected in /elsewhere/a.rs, line 3:\n"),
+        "{text}"
+    );
+    let (label, text) = snippet_text(&selection(None, 1, 2), cwd);
+    assert_eq!(label, "selection 1-2");
+    assert!(text.starts_with("Selected in an unsaved editor buffer, lines 1-2:"));
+}
+
 /// A mistyped name lists the built-ins the `/` list offers, no more and
 /// no fewer.
 #[test]

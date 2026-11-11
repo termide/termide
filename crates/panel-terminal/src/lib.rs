@@ -203,12 +203,20 @@ fn reap_exited(child: &Mutex<Box<dyn Child + Send + Sync>>) {
     }
 }
 
+/// The `[≡]` menu action handing the terminal's text to an agent, named
+/// after the keybinding that does the same.
+pub const SEND_TO_AGENT_ACTION: &str = "send_to_agent";
+
+/// How many of its last lines a terminal without a selection hands an agent.
+pub const AGENT_TAIL_LINES: usize = 200;
+
 fn build_terminal_hotkey_table(config: &Config) -> HotkeyTable {
     let mut t = HotkeyTable::new();
     let kb = &config.terminal.keybindings;
 
     t.insert("search", &kb.search);
     t.insert("switch_directory", &kb.switch_directory);
+    t.insert("send_to_agent", &kb.send_to_agent);
     t.insert("scroll_up", &kb.scroll_up);
     t.insert("scroll_down", &kb.scroll_down);
     t.insert("scroll_top", &kb.scroll_top);
@@ -780,6 +788,42 @@ impl Terminal {
         }
     }
 
+    /// What the terminal hands an agent: its selection, else its last
+    /// [`AGENT_TAIL_LINES`] lines; `None` while it shows nothing.
+    pub fn agent_snippet(&self) -> Option<termide_core::AgentSnippet> {
+        let selected = clipboard::get_selected_text(&self.screen);
+        let (text, selection) = if selected.trim().is_empty() {
+            (
+                clipboard::tail_text(&self.screen, AGENT_TAIL_LINES).0,
+                false,
+            )
+        } else {
+            (selected, true)
+        };
+        if text.trim().is_empty() {
+            return None;
+        }
+        Some(termide_core::AgentSnippet {
+            source: termide_core::SnippetSource::Terminal {
+                title: self.title(),
+                name: self.get_foreground_command(),
+                selection,
+            },
+            text,
+        })
+    }
+
+    /// Hand [`Terminal::agent_snippet`] to the agent last used, or say the
+    /// terminal shows nothing.
+    fn send_to_agent(&self) -> Vec<PanelEvent> {
+        match self.agent_snippet() {
+            Some(snippet) => vec![PanelEvent::SendToAgent(snippet)],
+            None => vec![PanelEvent::ShowMessage(
+                termide_i18n::t().agent_snippet_empty_terminal().to_string(),
+            )],
+        }
+    }
+
     /// Copy selected text to clipboard
     fn copy_selection_to_clipboard(&self) -> Result<()> {
         clipboard::copy_selection_to_clipboard(&self.screen)
@@ -1060,6 +1104,20 @@ impl Panel for Terminal {
         WidthPreference::PreferWide
     }
 
+    fn context_menu_items(&self) -> Vec<(String, String)> {
+        vec![(
+            termide_i18n::t().help_desc_send_to_agent().to_string(),
+            SEND_TO_AGENT_ACTION.into(),
+        )]
+    }
+
+    fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
+        match action {
+            SEND_TO_AGENT_ACTION => self.send_to_agent(),
+            _ => vec![],
+        }
+    }
+
     fn title(&self) -> String {
         let foreground = self.get_foreground_command();
         match &self.title {
@@ -1237,6 +1295,9 @@ impl Panel for Terminal {
         // `PanelCommand::Copy`/`Paste` (see handle_command), not matched here.
         if self.hotkeys.matches("switch_directory", &key) {
             return vec![PanelEvent::OpenDirectorySwitcher];
+        }
+        if self.hotkeys.matches("send_to_agent", &key) {
+            return self.send_to_agent();
         }
         if self.hotkeys.matches("scroll_up", &key) {
             let mut screen = self.write_screen();

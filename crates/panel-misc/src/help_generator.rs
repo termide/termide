@@ -557,6 +557,10 @@ impl HelpGenerator {
                 description: t.help_desc_revert_change().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.send_to_agent),
+                description: t.help_desc_send_to_agent().to_string(),
+            },
+            HelpEntry {
                 keys: "Ctrl+←/→".to_string(),
                 description: t.help_desc_word_nav().to_string(),
             },
@@ -752,6 +756,10 @@ impl HelpGenerator {
             HelpEntry {
                 keys: Self::format_keys(&kb.switch_directory),
                 description: t.help_desc_switch_directory().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.send_to_agent),
+                description: t.help_desc_send_to_agent().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.scroll_up),
