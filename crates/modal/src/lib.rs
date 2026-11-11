@@ -42,6 +42,7 @@ pub mod find_bar;
 pub mod info;
 pub mod info_action;
 pub mod input;
+pub mod output;
 mod path_field;
 pub mod projects;
 pub mod rename_pattern;
@@ -74,6 +75,7 @@ pub use info_action::{
     ActionButton, InfoActionModal, InfoActionResult, PermAccess, PermissionsState,
 };
 pub use input::{InputModal, Suggest};
+pub use output::{ModalOutput, ModalPayload};
 pub use path_field::{DestinationKind, QuickDestination};
 pub use projects::{ProjectAction, ProjectItem, ProjectsModal};
 pub use rename_pattern::RenamePatternModal;
@@ -134,12 +136,10 @@ pub enum ActiveModal {
     DbRowEdit(Box<DbRowEditModal>),
 }
 
-/// Helper to convert a typed ModalResult into a type-erased ModalResult<Box<dyn Any>>.
-fn erase_modal_result<T: 'static>(result: ModalResult<T>) -> ModalResult<Box<dyn std::any::Any>> {
+/// A modal's typed result as the [`ModalOutput`] every modal shares.
+fn erase_modal_result<T: ModalPayload>(result: ModalResult<T>) -> ModalResult<ModalOutput> {
     match result {
-        ModalResult::Confirmed(value) => {
-            ModalResult::Confirmed(Box::new(value) as Box<dyn std::any::Any>)
-        }
+        ModalResult::Confirmed(value) => ModalResult::Confirmed(value.wrap()),
         ModalResult::Cancelled => ModalResult::Cancelled,
     }
 }
@@ -209,20 +209,20 @@ macro_rules! dispatch_modal_erased {
 }
 
 impl ActiveModal {
-    /// Handle keyboard event, returning type-erased result.
+    /// Handle keyboard event, returning its [`ModalOutput`].
     pub fn handle_key_erased(
         &mut self,
         chord: termide_core::KeyChord,
-    ) -> Result<Option<ModalResult<Box<dyn std::any::Any>>>> {
+    ) -> Result<Option<ModalResult<ModalOutput>>> {
         Ok(dispatch_modal_erased!(self, handle_key, chord))
     }
 
-    /// Handle mouse event, returning type-erased result.
+    /// Handle mouse event, returning its [`ModalOutput`].
     pub fn handle_mouse_erased(
         &mut self,
         mouse: crossterm::event::MouseEvent,
         modal_area: Rect,
-    ) -> Result<Option<ModalResult<Box<dyn std::any::Any>>>> {
+    ) -> Result<Option<ModalResult<ModalOutput>>> {
         Ok(dispatch_modal_erased!(
             self,
             handle_mouse,

@@ -356,25 +356,29 @@ impl App {
     }
 
     /// The user answered window `request`: hand the answer to its plugin.
-    pub(super) fn answer_plugin_window(&mut self, request: u64, value: &dyn std::any::Any) {
+    pub(super) fn answer_plugin_window(
+        &mut self,
+        request: u64,
+        value: &termide_modal::ModalOutput,
+    ) {
         let Some(window) = self.plugins.windows.open.take_if(|w| w.request == request) else {
             return;
         };
         let answer = match &window.kind {
-            Kind::Confirm { .. } => json!(value.downcast_ref::<bool>().copied().unwrap_or(false)),
+            Kind::Confirm { .. } => json!(value.get::<bool>().copied().unwrap_or(false)),
             Kind::Message { .. } => Value::Null,
             Kind::Choose { .. } => value
-                .downcast_ref::<Vec<usize>>()
+                .get::<Vec<usize>>()
                 .and_then(|picked| picked.first())
                 .map_or(Value::Null, |index| json!(index)),
             Kind::Input { .. } => value
-                .downcast_ref::<String>()
+                .get::<String>()
                 .map_or(Value::Null, |text| json!(text)),
             Kind::Form { fields } => value
-                .downcast_ref::<termide_modal::CommandParamsResult>()
+                .get::<termide_modal::CommandParamsResult>()
                 .map_or(Value::Null, |result| form_answer(fields, &result.values)),
             Kind::Dialog(spec) => value
-                .downcast_ref::<termide_modal::dialog::DialogAnswer>()
+                .get::<termide_modal::dialog::DialogAnswer>()
                 .map_or(Value::Null, |answer| dialog_answer(spec, answer)),
         };
         self.plugins

@@ -191,12 +191,12 @@ impl App {
     /// The launch picked from the list `start_debug` opened.
     pub(in crate::app) fn handle_debug_choice(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         let Some(choices) = self.debug_choices.take() else {
             return Ok(());
         };
-        match picked_choice(value.as_ref(), choices) {
+        match picked_choice(&value, choices) {
             Some(choice) => self.run_debug_choice(choice),
             None => Ok(()),
         }
@@ -747,8 +747,8 @@ fn project_breakpoints(all: &[Breakpoint], root: &Path) -> Vec<Breakpoint> {
 
 /// The launch the list's answer names. A `SelectModal` answers with the
 /// picked indices (`Vec<usize>`), one here; anything else picks nothing.
-fn picked_choice<T>(value: &dyn std::any::Any, choices: Vec<T>) -> Option<T> {
-    let index = value.downcast_ref::<Vec<usize>>()?.first().copied()?;
+fn picked_choice<T>(value: &termide_modal::ModalOutput, choices: Vec<T>) -> Option<T> {
+    let index = value.get::<Vec<usize>>()?.first().copied()?;
     choices.into_iter().nth(index)
 }
 
@@ -762,7 +762,7 @@ mod tests {
         use termide_core::KeyChord;
         use termide_modal::{ActiveModal, ModalResult, SelectModal};
 
-        // The answer as the app gets it: through the type-erased modal.
+        // The answer as the app gets it: through the `ModalOutput` every modal shares.
         let mut modal = ActiveModal::Select(Box::new(SelectModal::single(
             "Debug",
             "",
@@ -778,10 +778,13 @@ mod tests {
             panic!("Enter should confirm the list");
         };
         assert_eq!(
-            picked_choice(value.as_ref(), vec!["app", "main.py"]),
+            picked_choice(&value, vec!["app", "main.py"]),
             Some("main.py")
         );
-        assert_eq!(picked_choice(&7usize, vec!["app"]), None);
+        assert_eq!(
+            picked_choice(&termide_modal::ModalPayload::wrap(7usize), vec!["app"]),
+            None
+        );
     }
 
     #[test]

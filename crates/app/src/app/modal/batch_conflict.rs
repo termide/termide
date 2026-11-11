@@ -20,11 +20,11 @@ impl App {
     pub(in crate::app) fn handle_continue_batch_operation(
         &mut self,
         mut operation: BatchOperation,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         use termide_modal::ConflictResolution;
 
-        if let Some(resolution) = value.downcast_ref::<ConflictResolution>() {
+        if let Some(resolution) = value.get::<ConflictResolution>() {
             match resolution {
                 ConflictResolution::Overwrite => {
                     // Overwrite this file - execute operation directly
@@ -255,9 +255,9 @@ impl App {
         &mut self,
         mut operation: BatchOperation,
         original_name: String,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(pattern_str) = value.downcast_ref::<String>() {
+        if let Some(pattern_str) = value.get::<String>() {
             use termide_state::RenamePattern;
 
             let pattern = RenamePattern::new(pattern_str.clone());

@@ -370,10 +370,13 @@ impl App {
     }
 
     /// Handle the projects modal result
-    pub(super) fn handle_switch_project(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
+    pub(super) fn handle_switch_project(
+        &mut self,
+        value: termide_modal::ModalOutput,
+    ) -> Result<()> {
         use termide_modal::ProjectAction;
 
-        if let Some(action) = value.downcast_ref::<ProjectAction>() {
+        if let Some(action) = value.get::<ProjectAction>() {
             match action {
                 ProjectAction::Switch(path) => {
                     self.switch_to_project(path.clone())?;
@@ -452,9 +455,9 @@ impl App {
     /// Handle new project modal result - create/switch to a project in selected directory
     pub(super) fn handle_new_project_result(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(project_path) = value.downcast_ref::<std::path::PathBuf>() {
+        if let Some(project_path) = value.get::<std::path::PathBuf>() {
             self.create_new_project(project_path.clone())?;
         }
         Ok(())
@@ -536,9 +539,9 @@ impl App {
     /// Handle change root path modal result - move the project to a new directory
     pub(super) fn handle_change_root_path_result(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(new_path) = value.downcast_ref::<std::path::PathBuf>() {
+        if let Some(new_path) = value.get::<std::path::PathBuf>() {
             self.move_project_to(new_path.clone())?;
         }
         Ok(())
@@ -728,10 +731,13 @@ impl App {
     }
 
     /// Handle switch directory modal result - change active panel's working directory
-    pub(super) fn handle_switch_directory(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
+    pub(super) fn handle_switch_directory(
+        &mut self,
+        value: termide_modal::ModalOutput,
+    ) -> Result<()> {
         use crate::panel_ext::PanelExt;
 
-        if let Some(path) = value.downcast_ref::<std::path::PathBuf>() {
+        if let Some(path) = value.get::<std::path::PathBuf>() {
             let t = i18n::t();
 
             // Get active panel and switch based on panel type

@@ -120,7 +120,10 @@ impl App {
 
     /// Remember the directory a path prompt about to close was confirmed
     /// with.
-    pub(super) fn remember_destination(&mut self, result: &ModalResult<Box<dyn std::any::Any>>) {
+    pub(super) fn remember_destination(
+        &mut self,
+        result: &ModalResult<termide_modal::ModalOutput>,
+    ) {
         let ModalResult::Confirmed(value) = result else {
             return;
         };
@@ -128,7 +131,7 @@ impl App {
         else {
             return;
         };
-        if let Some(dir) = confirmed_destination(modal, action, value.as_ref()) {
+        if let Some(dir) = confirmed_destination(modal, action, value) {
             self.recent_destinations.record(&self.project_root, dir);
         }
     }
@@ -140,7 +143,7 @@ impl App {
 fn confirmed_destination(
     modal: &ActiveModal,
     action: &PendingAction,
-    value: &dyn std::any::Any,
+    value: &termide_modal::ModalOutput,
 ) -> Option<String> {
     match (modal, action) {
         (
@@ -155,24 +158,24 @@ fn confirmed_destination(
                 target_directory,
             },
         ) => {
-            let input = value.downcast_ref::<String>()?;
+            let input = value.get::<String>()?;
             let base = target_directory
                 .clone()
                 .or_else(|| sources.first()?.parent().map(Path::to_path_buf))?;
             destination_dir(&base, input, sources.len() == 1)
         }
         (ActiveModal::EditableSelect(_), PendingAction::PackPaths { sources, .. }) => {
-            let input = value.downcast_ref::<String>()?;
+            let input = value.get::<String>()?;
             destination_dir(sources.first()?.parent()?, input, true)
         }
         (ActiveModal::EditableSelect(_), PendingAction::UnpackArchives { archives }) => {
-            unpack_destination_dir(archives, value.downcast_ref::<String>()?)
+            unpack_destination_dir(archives, value.get::<String>()?)
         }
         (
             ActiveModal::SaveAs(_),
             PendingAction::SaveFileAs { directory }
             | PendingAction::SaveContentAs { directory, .. },
-        ) => destination_dir(directory, &value.downcast_ref::<SaveAsResult>()?.path, true),
+        ) => destination_dir(directory, &value.get::<SaveAsResult>()?.path, true),
         _ => None,
     }
 }
@@ -212,9 +215,9 @@ mod tests {
             create_symlink: false,
             create_relative_symlink: false,
         };
-        let typed: Box<dyn std::any::Any> = Box::new("/nowhere/out/a.txt".to_string());
+        let typed = termide_modal::ModalPayload::wrap("/nowhere/out/a.txt".to_string());
         assert_eq!(
-            confirmed_destination(&path_prompt(), &copy, typed.as_ref()).as_deref(),
+            confirmed_destination(&path_prompt(), &copy, &typed).as_deref(),
             Some("/nowhere/out/")
         );
 
@@ -223,8 +226,8 @@ mod tests {
             target_directory: Some(PathBuf::from("/nowhere/src")),
         };
         let input = ActiveModal::Input(Box::new(termide_modal::InputModal::new("t", "p")));
-        let typed: Box<dyn std::any::Any> = Box::new("b.txt".to_string());
-        assert_eq!(confirmed_destination(&input, &rename, typed.as_ref()), None);
+        let typed = termide_modal::ModalPayload::wrap("b.txt".to_string());
+        assert_eq!(confirmed_destination(&input, &rename, &typed), None);
     }
 
     #[test]
@@ -233,12 +236,12 @@ mod tests {
             directory: PathBuf::from("/nowhere/doc"),
         };
         let modal = ActiveModal::SaveAs(Box::new(termide_modal::SaveAsModal::new("t", "")));
-        let saved: Box<dyn std::any::Any> = Box::new(SaveAsResult {
+        let saved = termide_modal::ModalPayload::wrap(SaveAsResult {
             path: "notes/x.md".to_string(),
             executable: false,
         });
         assert_eq!(
-            confirmed_destination(&modal, &save, saved.as_ref()).as_deref(),
+            confirmed_destination(&modal, &save, &saved).as_deref(),
             Some("/nowhere/doc/notes/")
         );
     }

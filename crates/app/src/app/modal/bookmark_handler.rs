@@ -10,13 +10,13 @@ impl App {
     /// Returns an error message if the bookmark could not be saved.
     pub(in crate::app) fn handle_add_bookmark_result(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<Option<String>> {
         use std::path::Path;
         use termide_config::Bookmark;
         use termide_modal::BookmarkAddResult;
 
-        let Some(result) = value.downcast_ref::<BookmarkAddResult>() else {
+        let Some(result) = value.get::<BookmarkAddResult>() else {
             return Ok(None);
         };
 
@@ -66,7 +66,7 @@ impl App {
     /// Returns an error message if saving failed.
     pub(in crate::app) fn handle_edit_bookmark_result(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         original_path: &str,
         original_group: Option<&str>,
         was_project: bool,
@@ -75,7 +75,7 @@ impl App {
         use termide_config::Bookmark;
         use termide_modal::BookmarkAddResult;
 
-        let Some(result) = value.downcast_ref::<BookmarkAddResult>() else {
+        let Some(result) = value.get::<BookmarkAddResult>() else {
             return Ok(None);
         };
 

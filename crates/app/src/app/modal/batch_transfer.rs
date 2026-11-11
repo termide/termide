@@ -77,26 +77,25 @@ impl App {
         operation_type: BatchOperationType,
         sources: Vec<PathBuf>,
         target_directory: Option<PathBuf>,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         // A typed destination answers the copy/move prompt of the active
         // panel, the one the sources were selected in. A bare confirmation
         // answers a paste, which runs in the destination panel instead.
-        let source_location = if value.is::<String>() {
+        let source_location = if value.get::<String>().is_some() {
             self.active_panel_source_location()
         } else {
             SourceLocation::Unknown
         };
 
         // Extract destination string first to check if it's a remote URL
-        let destination_str: Option<String> = if let Some(confirmed) = value.downcast_ref::<bool>()
-        {
+        let destination_str: Option<String> = if let Some(confirmed) = value.get::<bool>() {
             if !confirmed {
                 return Ok(()); // Operation cancelled by user
             }
             // Use target_directory as string for Ctrl+V confirmation
             target_directory.as_ref().map(|p| p.display().to_string())
-        } else if let Some(s) = value.downcast_ref::<String>() {
+        } else if let Some(s) = value.get::<String>() {
             Some(s.clone())
         } else {
             return Ok(()); // Invalid response type
@@ -496,7 +495,7 @@ impl App {
         target_directory: Option<PathBuf>,
         create_symlink: bool,
         create_relative_symlink: bool,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         if create_symlink {
             return self.handle_create_symlinks(
@@ -514,7 +513,7 @@ impl App {
         &mut self,
         sources: Vec<PathBuf>,
         target_directory: Option<PathBuf>,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         self.handle_file_operation(BatchOperationType::Move, sources, target_directory, value)
     }

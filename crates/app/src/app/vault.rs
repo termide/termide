@@ -307,16 +307,16 @@ impl VaultState {
     }
 }
 
-fn user_name(value: &dyn std::any::Any) -> Option<String> {
+fn user_name(value: &termide_modal::ModalOutput) -> Option<String> {
     value
-        .downcast_ref::<String>()
+        .get::<String>()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
 }
 
-fn secret(value: &dyn std::any::Any) -> Option<SecretText> {
+fn secret(value: &termide_modal::ModalOutput) -> Option<SecretText> {
     value
-        .downcast_ref::<String>()
+        .get::<String>()
         .filter(|s| !s.is_empty())
         .map(|s| SecretText::new(s.as_str()))
 }
@@ -753,12 +753,12 @@ impl App {
     }
 
     /// A vault prompt was confirmed with `value`.
-    pub(super) fn vault_prompt_confirmed(&mut self, value: &dyn std::any::Any) {
+    pub(super) fn vault_prompt_confirmed(&mut self, value: &termide_modal::ModalOutput) {
         self.answer_vault_prompt(value);
         self.continue_key_changes();
     }
 
-    fn answer_vault_prompt(&mut self, value: &dyn std::any::Any) {
+    fn answer_vault_prompt(&mut self, value: &termide_modal::ModalOutput) {
         let Some(prompt) = self.vault.prompt.take() else {
             return;
         };
@@ -829,7 +829,7 @@ impl App {
                 None => self.ask_new_master(save, false),
             },
             Prompt::MoveBookmarkPassword { url, back } => {
-                let yes = value.downcast_ref::<bool>().copied().unwrap_or(false);
+                let yes = value.get::<bool>().copied().unwrap_or(false);
                 if yes {
                     self.move_bookmark_password(url, back.is_project);
                 }

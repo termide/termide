@@ -302,9 +302,9 @@ impl App {
     /// Route the dead-remote-session recovery dialog's button to the active
     /// file manager (reconnect / open local) or close the panel. Plain VFS
     /// "OK" modals return id "ok" and fall through to the no-op arm.
-    fn handle_vfs_message_action(&mut self, value: Box<dyn std::any::Any>) {
+    fn handle_vfs_message_action(&mut self, value: termide_modal::ModalOutput) {
         use termide_modal::InfoActionResult;
-        let Some(InfoActionResult::Action(id)) = value.downcast_ref::<InfoActionResult>() else {
+        let Some(InfoActionResult::Action(id)) = value.get::<InfoActionResult>() else {
             return;
         };
         match id.as_str() {
@@ -357,7 +357,7 @@ impl App {
     }
 
     /// Handle modal window result
-    pub(super) fn handle_modal_result(&mut self, value: Box<dyn std::any::Any>) -> Result<()> {
+    pub(super) fn handle_modal_result(&mut self, value: termide_modal::ModalOutput) -> Result<()> {
         use termide_state::PendingAction;
 
         if let Some(action) = self.state.take_pending_action() {
@@ -365,7 +365,7 @@ impl App {
                 PendingAction::PanelChecklist { action } => {
                     // Like a selection, to the focused panel that raised it;
                     // cancelling changes nothing.
-                    if let Some(outcome) = value.downcast_ref::<termide_core::ChecklistOutcome>() {
+                    if let Some(outcome) = value.get::<termide_core::ChecklistOutcome>() {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::ChecklistDone {
                                 action,
@@ -382,7 +382,7 @@ impl App {
                     // first that happens to handle it, so with several panels of
                     // the same kind open the answer lands where it was asked.
                     if let Some(index) = value
-                        .downcast_ref::<Vec<usize>>()
+                        .get::<Vec<usize>>()
                         .and_then(|picked| picked.first().copied())
                     {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
@@ -399,7 +399,7 @@ impl App {
                     // prompt (e.g. renaming a session), not the first panel that
                     // recognises the action — otherwise, with several agent
                     // panels open, the wrong session would be renamed.
-                    if let Some(text) = value.downcast_ref::<String>() {
+                    if let Some(text) = value.get::<String>() {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::InputSubmitted {
                                 action,
@@ -413,7 +413,7 @@ impl App {
                     // Only an accepted confirmation reaches the panel; on cancel
                     // it stays as it was. As with the input and selection
                     // prompts, deliver to the focused panel that raised it.
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         // A view shown over the layout raised it if one is up.
                         let panel = match self.layout_manager.overlay.as_mut() {
                             Some(overlay) => Some(overlay),
@@ -432,7 +432,7 @@ impl App {
                     self.handle_view_path(base_dir, value)?;
                 }
                 PendingAction::Vault => {
-                    self.vault_prompt_confirmed(value.as_ref());
+                    self.vault_prompt_confirmed(&value);
                 }
                 PendingAction::CreateDirectory { directory } => {
                     self.handle_create_directory(directory, value)?;
@@ -450,7 +450,7 @@ impl App {
                     // when cancel arrived before any byte hit the
                     // server) go to the log instead of a modal so
                     // the user isn't bothered with an expected outcome.
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         let op = vfs_manager.delete(&path);
                         match op.recv() {
                             Ok(()) => log::info!(
@@ -481,7 +481,7 @@ impl App {
                     self.handle_save_content_as(directory, content, value)?;
                 }
                 PendingAction::SaveBinary => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
                             if let Some(bin) = panel
                                 .as_any_mut()
@@ -509,7 +509,7 @@ impl App {
                     self.handle_close_editor_with_save(value)?;
                 }
                 PendingAction::StopEditing { path } => {
-                    if let Some(&choice) = value.downcast_ref::<usize>() {
+                    if let Some(&choice) = value.get::<usize>() {
                         self.stop_editing(&path, choice);
                     }
                 }
@@ -542,8 +542,7 @@ impl App {
                     // gone. Only on a confirmed Yes: cancelling keeps the cut
                     // alive, and only for a matching list, so renaming an
                     // unrelated file does not drop a live cut.
-                    if *value.downcast_ref::<bool>().unwrap_or(&false)
-                        && termide_clipboard::is_cut(&sources)
+                    if *value.get::<bool>().unwrap_or(&false) && termide_clipboard::is_cut(&sources)
                     {
                         termide_clipboard::clear_cut();
                     }
@@ -562,21 +561,21 @@ impl App {
                     self.handle_unpack_password(plan, value)?;
                 }
                 PendingAction::SelectByMask { select } => {
-                    if let Some(mask) = value.downcast_ref::<String>() {
+                    if let Some(mask) = value.get::<String>() {
                         if let Some(fm) = self.active_file_manager_mut() {
                             fm.apply_selection_mask(mask, select);
                         }
                     }
                 }
                 PendingAction::ArchivePassword { archive } => {
-                    if let Some(password) = value.downcast_ref::<String>() {
+                    if let Some(password) = value.get::<String>() {
                         if let Some(fm) = self.active_file_manager_mut() {
                             fm.open_archive_with_password(archive, password.clone());
                         }
                     }
                 }
                 PendingAction::HostKey { url, fingerprint } => {
-                    self.answer_host_key(&url, &fingerprint, host_key_answer(&*value));
+                    self.answer_host_key(&url, &fingerprint, host_key_answer(&value));
                 }
                 PendingAction::BatchFileOperation { operation } => {
                     self.process_batch_operation(operation);
@@ -591,7 +590,7 @@ impl App {
                     self.handle_rename_with_pattern(operation, original_name, value)?;
                 }
                 PendingAction::ChangeEditorTabSize => {
-                    if let Some(text) = value.downcast_ref::<String>() {
+                    if let Some(text) = value.get::<String>() {
                         if let Ok(n) = text.trim().parse::<usize>() {
                             let n = n.clamp(1, 16);
                             if let Some(panel) = self.layout_manager.active_panel_mut() {
@@ -603,7 +602,7 @@ impl App {
                     }
                 }
                 PendingAction::GotoLine => {
-                    if let Some(text) = value.downcast_ref::<String>() {
+                    if let Some(text) = value.get::<String>() {
                         // Accept "line" or "line:column" (1-based, matching the
                         // status-bar Pos display).
                         let raw = text.trim();
@@ -627,7 +626,7 @@ impl App {
                     // this match checks that bool and this one did not, so a
                     // quit the user refused — or an answer from any other modal
                     // — ended the application.
-                    if quit_is_confirmed(&*value) {
+                    if quit_is_confirmed(&value) {
                         self.state.quit();
                     }
                 }
@@ -635,13 +634,13 @@ impl App {
                 PendingAction::Settings => {}
                 PendingAction::CancelOperation(op_id) => {
                     // User confirmed cancelling the background operation.
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         self.event_cancel_operation(op_id);
                     }
                 }
                 PendingAction::ReplaceInContent { replace_with } => {
                     // User confirmed replacing all content-search matches.
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         if let Some(fm) = self.active_file_manager_mut() {
                             let (files, count) = fm.replace_all_in_content_results(&replace_with);
                             fm.close_file_search();
@@ -658,7 +657,7 @@ impl App {
                     self.handle_switch_project(value)?;
                 }
                 PendingAction::CloseProject { root, from } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         self.close_project(&root, from)?;
                     } else {
                         self.return_to_projects(from)?;
@@ -668,7 +667,7 @@ impl App {
                     self.handle_new_project_result(value)?;
                 }
                 PendingAction::DeleteProject { path, from } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         self.handle_delete_project(&path, from)?;
                     } else {
                         self.return_to_projects(from)?;
@@ -680,7 +679,7 @@ impl App {
                     group,
                     selected,
                 } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         if is_project {
                             if let Some(ref mut proj) = self.state.project_bookmarks {
                                 proj.remove_in_group(&path, group.as_deref());
@@ -707,7 +706,7 @@ impl App {
                     is_project,
                     selected,
                 } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         if is_project {
                             if let Some(ref mut proj) = self.state.project_bookmarks {
                                 proj.remove_group(&group);
@@ -736,14 +735,12 @@ impl App {
                 } => {
                     use termide_modal::BookmarkAddResult;
                     let result_group = value
-                        .downcast_ref::<BookmarkAddResult>()
+                        .get::<BookmarkAddResult>()
                         .and_then(|r| r.group.clone());
                     let result_is_project = value
-                        .downcast_ref::<BookmarkAddResult>()
+                        .get::<BookmarkAddResult>()
                         .is_some_and(|r| r.is_project);
-                    let result_path = value
-                        .downcast_ref::<BookmarkAddResult>()
-                        .map(|r| r.path.clone());
+                    let result_path = value.get::<BookmarkAddResult>().map(|r| r.path.clone());
                     if let Some(err) = self.handle_edit_bookmark_result(
                         value,
                         &original_path,
@@ -805,14 +802,12 @@ impl App {
                 PendingAction::AddBookmark { selected, .. } => {
                     use termide_modal::BookmarkAddResult;
                     let result_group = value
-                        .downcast_ref::<BookmarkAddResult>()
+                        .get::<BookmarkAddResult>()
                         .and_then(|r| r.group.clone());
                     let result_is_project = value
-                        .downcast_ref::<BookmarkAddResult>()
+                        .get::<BookmarkAddResult>()
                         .is_some_and(|r| r.is_project);
-                    let result_path = value
-                        .downcast_ref::<BookmarkAddResult>()
-                        .map(|r| r.path.clone());
+                    let result_path = value.get::<BookmarkAddResult>().map(|r| r.path.clone());
                     if let Some(err) = self.handle_add_bookmark_result(value)? {
                         self.show_bookmark_error(&err);
                     } else if let Some(path) = result_path {
@@ -884,7 +879,7 @@ impl App {
                 }
                 // Git stash rename: change message
                 PendingAction::GitStashRename { repo_path, index } => {
-                    if let Some(new_message) = value.downcast_ref::<String>() {
+                    if let Some(new_message) = value.get::<String>() {
                         let new_message = new_message.trim();
                         if !new_message.is_empty() {
                             match termide_git::stash_rename(&repo_path, index, new_message) {
@@ -909,7 +904,7 @@ impl App {
                 }
                 PendingAction::CreateCommand => {
                     use termide_modal::CommandConfigResult;
-                    if let Some(result) = value.downcast_ref::<CommandConfigResult>() {
+                    if let Some(result) = value.get::<CommandConfigResult>() {
                         self.handle_command_config_result(result)?;
                     }
                     self.state.cache.commands_registry = None;
@@ -921,7 +916,7 @@ impl App {
                     ..
                 } => {
                     use termide_modal::CommandConfigResult;
-                    if let Some(result) = value.downcast_ref::<CommandConfigResult>() {
+                    if let Some(result) = value.get::<CommandConfigResult>() {
                         self.handle_edit_command_config_result(command_name, is_project, result)?;
                     }
                 }
@@ -930,15 +925,15 @@ impl App {
                 }
                 PendingAction::DebugSetup => {
                     use termide_modal::CommandParamsResult;
-                    if let Some(result) = value.downcast_ref::<CommandParamsResult>() {
+                    if let Some(result) = value.get::<CommandParamsResult>() {
                         self.handle_debug_setup(&result.values)?;
                     }
                 }
                 PendingAction::PluginWindow { request } => {
-                    self.answer_plugin_window(request, &*value);
+                    self.answer_plugin_window(request, &value);
                 }
                 PendingAction::ConfirmProjectCommand { command } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         // The command as it was shown, not as the file may
                         // read by now.
                         self.approve_shown_command(&command);
@@ -947,7 +942,7 @@ impl App {
                 }
                 PendingAction::RunCommandWithParams { command } => {
                     use termide_modal::CommandParamsResult;
-                    if let Some(result) = value.downcast_ref::<CommandParamsResult>() {
+                    if let Some(result) = value.get::<CommandParamsResult>() {
                         self.run_command_with_params(&command, &result.values)?;
                     }
                 }
@@ -956,7 +951,7 @@ impl App {
                     is_project,
                     ..
                 } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         let config_dir = if is_project {
                             self.project_root.join(".termide")
                         } else {
@@ -981,7 +976,7 @@ impl App {
                     selected,
                 } => {
                     let mut taken = None;
-                    if let Some(new_name) = value.downcast_ref::<String>() {
+                    if let Some(new_name) = value.get::<String>() {
                         let sanitized = termide_modal::sanitize_filename(new_name.trim());
                         if !sanitized.is_empty() && sanitized != command_name {
                             let config_dir = if is_project {
@@ -1016,18 +1011,18 @@ impl App {
                     section,
                     scope_global,
                 } => {
-                    if let Some(name) = value.downcast_ref::<String>() {
+                    if let Some(name) = value.get::<String>() {
                         self.ai_create_item(section, scope_global, name)?;
                     }
                 }
                 PendingAction::AiDelete { section, path } => {
-                    if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+                    if value.get::<bool>().copied().unwrap_or(false) {
                         self.ai_delete_item(section, &path)?;
                         self.reopen_ai_menu(section);
                     }
                 }
                 PendingAction::AiRename { section, path } => {
-                    if let Some(new_name) = value.downcast_ref::<String>() {
+                    if let Some(new_name) = value.get::<String>() {
                         self.ai_rename_item(section, &path, new_name)?;
                     }
                     self.reopen_ai_menu(section);
@@ -1038,7 +1033,7 @@ impl App {
                     is_project,
                     selected,
                 } => {
-                    if let Some(new_name) = value.downcast_ref::<String>() {
+                    if let Some(new_name) = value.get::<String>() {
                         if !new_name.is_empty() {
                             let config = if is_project {
                                 self.state.project_bookmarks.as_mut()
@@ -1062,7 +1057,7 @@ impl App {
                 }
                 PendingAction::DbFilter => {
                     use termide_modal::DbFilterResult;
-                    if let Some(result) = value.downcast_ref::<DbFilterResult>() {
+                    if let Some(result) = value.get::<DbFilterResult>() {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
                             if let Some(db) = panel
                                 .as_any_mut()
@@ -1080,7 +1075,7 @@ impl App {
                     insert,
                 } => {
                     use termide_modal::DbRowEditResult;
-                    if let Some(result) = value.downcast_ref::<DbRowEditResult>() {
+                    if let Some(result) = value.get::<DbRowEditResult>() {
                         // A copy button reports itself instead of changes; the
                         // formats travelled with the action so no call back into
                         // the panel is needed.
@@ -1111,9 +1106,7 @@ impl App {
                 }
                 PendingAction::DbConnectionError => {
                     use termide_modal::InfoActionResult;
-                    if let Some(InfoActionResult::Action(id)) =
-                        value.downcast_ref::<InfoActionResult>()
-                    {
+                    if let Some(InfoActionResult::Action(id)) = value.get::<InfoActionResult>() {
                         match id.as_str() {
                             "reconnect" => {
                                 if let Some(panel) = self.layout_manager.active_panel_mut() {
@@ -1142,8 +1135,8 @@ impl App {
 /// value means the answer did not come from that confirmation — an
 /// `InfoModal` reports `()` — and quitting on it would end the application
 /// on a keystroke that only dismissed a message.
-fn quit_is_confirmed(value: &dyn std::any::Any) -> bool {
-    value.downcast_ref::<bool>().copied().unwrap_or(false)
+fn quit_is_confirmed(value: &termide_modal::ModalOutput) -> bool {
+    value.get::<bool>().copied().unwrap_or(false)
 }
 
 /// Give a paste to the open modal, if any. An open modal takes the paste
@@ -1161,9 +1154,11 @@ fn paste_into_modal(modal: Option<&mut termide_modal::ActiveModal>, text: &str) 
 
 /// The host-key answer a dialog result stands for: the button pressed, and
 /// Cancel for anything else.
-fn host_key_answer(value: &dyn std::any::Any) -> termide_panel_file_manager::HostKeyAnswer {
+fn host_key_answer(
+    value: &termide_modal::ModalOutput,
+) -> termide_panel_file_manager::HostKeyAnswer {
     use termide_panel_file_manager::HostKeyAnswer;
-    match value.downcast_ref::<termide_modal::InfoActionResult>() {
+    match value.get::<termide_modal::InfoActionResult>() {
         Some(termide_modal::InfoActionResult::Action(id)) => HostKeyAnswer::from_action(id),
         _ => HostKeyAnswer::Cancel,
     }
@@ -1188,7 +1183,7 @@ fn dismissed_host_key(
 #[cfg(test)]
 mod tests {
     use super::{dismissed_host_key, host_key_answer, paste_into_modal, quit_is_confirmed};
-    use termide_modal::{ActiveModal, ConfirmModal};
+    use termide_modal::{ActiveModal, ConfirmModal, ModalPayload};
 
     #[test]
     fn an_open_modal_swallows_a_paste_it_has_no_field_for() {
@@ -1217,7 +1212,7 @@ mod tests {
         assert_eq!(url, "sftp://example.com:2222/");
         assert_eq!(fingerprint, "SHA256:abc");
         assert_eq!(answer, HostKeyAnswer::Cancel);
-        assert_eq!(answer, host_key_answer(&()));
+        assert_eq!(answer, host_key_answer(&().wrap()));
 
         // Other actions are left alone.
         assert!(dismissed_host_key(&PendingAction::QuitApplication).is_none());
@@ -1227,7 +1222,7 @@ mod tests {
     fn host_key_buttons_give_their_answers() {
         use termide_modal::InfoActionResult;
         use termide_panel_file_manager::HostKeyAnswer;
-        let pressed = |id: &str| host_key_answer(&InfoActionResult::Action(id.to_string()));
+        let pressed = |id: &str| host_key_answer(&InfoActionResult::Action(id.to_string()).wrap());
         assert_eq!(pressed(HostKeyAnswer::REMEMBER), HostKeyAnswer::Remember);
         assert_eq!(pressed(HostKeyAnswer::ONCE), HostKeyAnswer::Once);
         assert_eq!(pressed(HostKeyAnswer::CANCEL), HostKeyAnswer::Cancel);
@@ -1235,8 +1230,8 @@ mod tests {
 
     #[test]
     fn only_an_accepted_confirmation_quits() {
-        assert!(quit_is_confirmed(&true));
-        assert!(!quit_is_confirmed(&false));
+        assert!(quit_is_confirmed(&true.wrap()));
+        assert!(!quit_is_confirmed(&false.wrap()));
     }
 
     /// The report of a finished command is an `InfoModal`, whose Enter
@@ -1244,7 +1239,7 @@ mod tests {
     /// earlier used to stay pending, and the next modal's Enter ran it.
     #[test]
     fn a_message_modal_answering_nothing_does_not_quit() {
-        assert!(!quit_is_confirmed(&()));
-        assert!(!quit_is_confirmed(&String::from("yes")));
+        assert!(!quit_is_confirmed(&().wrap()));
+        assert!(!quit_is_confirmed(&String::from("yes").wrap()));
     }
 }

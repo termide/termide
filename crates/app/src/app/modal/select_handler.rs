@@ -115,12 +115,12 @@ impl App {
     /// Handle editor closure with saving
     pub(in crate::app) fn handle_close_editor_with_save(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         // Store info needed for LSP notification (before mutable borrow)
         let mut lsp_info: Option<(String, PathBuf)> = None;
 
-        if let Some(&selected) = value.downcast_ref::<usize>() {
+        if let Some(&selected) = value.get::<usize>() {
             // The binary hex editor reuses this Save / Don't save / Cancel
             // dialog; handle it up-front (its save path differs from the editor).
             if self.layout_manager.active_panel().map(|p| p.name()) == Some("binary") {
@@ -233,9 +233,9 @@ impl App {
     /// Handle editor closure with external changes (file changed on disk)
     pub(in crate::app) fn handle_close_editor_external(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(&selected) = value.downcast_ref::<usize>() {
+        if let Some(&selected) = value.get::<usize>() {
             match selected {
                 0 => {
                     // Overwrite disk with current content
@@ -274,9 +274,9 @@ impl App {
     /// Handle editor closure with conflict (local + external changes)
     pub(in crate::app) fn handle_close_editor_conflict(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(&selected) = value.downcast_ref::<usize>() {
+        if let Some(&selected) = value.get::<usize>() {
             match selected {
                 0 => {
                     // Overwrite disk with my changes
@@ -324,10 +324,10 @@ impl App {
         all_dest_paths: Vec<PathBuf>,
         is_directory: bool,
         _batch_operation: Option<Box<termide_state::BatchOperation>>,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         // ChoiceModal returns usize (button index)
-        if let Some(&selected) = value.downcast_ref::<usize>() {
+        if let Some(&selected) = value.get::<usize>() {
             if is_directory {
                 // Directory copy cancellation - always 3 options:
                 // 0 = Keep all (keep everything as is)

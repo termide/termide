@@ -230,11 +230,11 @@ impl App {
     /// its tools, agents, hooks and shell all come from where it works.
     pub(in crate::app) fn handle_change_agent_cwd(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         session: Option<&Path>,
         cwd: &Path,
     ) -> Result<()> {
-        let Some(new_cwd) = value.downcast_ref::<PathBuf>() else {
+        let Some(new_cwd) = value.get::<PathBuf>() else {
             return Ok(());
         };
         if new_cwd == cwd {

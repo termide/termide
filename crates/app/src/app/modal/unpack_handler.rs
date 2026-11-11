@@ -106,9 +106,9 @@ impl App {
     pub(in crate::app) fn handle_unpack_archives(
         &mut self,
         archives: Vec<PathBuf>,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        let Some(input) = value.downcast_ref::<String>() else {
+        let Some(input) = value.get::<String>() else {
             return Ok(());
         };
         let input = input.trim();
@@ -199,9 +199,9 @@ impl App {
     pub(in crate::app) fn handle_unpack_password(
         &mut self,
         mut plan: UnpackPlan,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        let Some(password) = value.downcast_ref::<String>() else {
+        let Some(password) = value.get::<String>() else {
             return Ok(());
         };
         let Some(archive) = plan.archives.get(plan.checked).cloned() else {
@@ -234,9 +234,9 @@ impl App {
     pub(in crate::app) fn handle_confirm_unpack(
         &mut self,
         mut plan: UnpackPlan,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if value.downcast_ref::<bool>().copied().unwrap_or(false) {
+        if value.get::<bool>().copied().unwrap_or(false) {
             plan.confirmed = true;
             self.continue_unpack(plan);
         }

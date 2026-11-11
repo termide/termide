@@ -12,9 +12,9 @@ impl App {
         &mut self,
         repo_path: std::path::PathBuf,
         index: usize,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(&confirmed) = value.downcast_ref::<bool>() {
+        if let Some(&confirmed) = value.get::<bool>() {
             if confirmed {
                 match termide_git::stash_drop(&repo_path, index) {
                     Ok(()) => {
@@ -37,10 +37,10 @@ impl App {
         repo_path: std::path::PathBuf,
         index: usize,
         ref_str: String,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         use termide_modal::InfoActionResult;
-        let Some(result) = value.downcast_ref::<InfoActionResult>() else {
+        let Some(result) = value.get::<InfoActionResult>() else {
             return Ok(());
         };
         let action_id = match result {
@@ -102,14 +102,14 @@ impl App {
 
     pub(in crate::app) fn handle_git_file_action(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         file_path: &std::path::Path,
         repo_path: &std::path::Path,
         is_staged: bool,
     ) -> Result<()> {
         use termide_modal::InfoActionResult;
 
-        if let Some(result) = value.downcast_ref::<InfoActionResult>() {
+        if let Some(result) = value.get::<InfoActionResult>() {
             match result {
                 InfoActionResult::Action(action) => match action.as_str() {
                     "git_status" => {
@@ -185,11 +185,11 @@ impl App {
     /// Handle git commit action from CommitModal
     pub(in crate::app) fn handle_git_commit(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         repo_path: &std::path::Path,
     ) -> Result<()> {
         // value is the commit message (String)
-        if let Some(message) = value.downcast_ref::<String>() {
+        if let Some(message) = value.get::<String>() {
             match termide_git::commit(repo_path, message) {
                 Ok(commit_id) => {
                     self.state.set_info(format!(
@@ -210,13 +210,13 @@ impl App {
     /// Handle git revert file action (after confirmation)
     pub(in crate::app) fn handle_git_revert_file(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         file_path: &std::path::Path,
         repo_path: &std::path::Path,
         is_staged: bool,
     ) -> Result<()> {
         // value is bool from ConfirmModal
-        if let Some(&confirmed) = value.downcast_ref::<bool>() {
+        if let Some(&confirmed) = value.get::<bool>() {
             if confirmed {
                 // If file is staged, unstage it first
                 if is_staged {
@@ -241,10 +241,10 @@ impl App {
     /// Handle git revert ALL changes action (after confirmation)
     pub(in crate::app) fn handle_git_revert_all(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         repo_path: &std::path::Path,
     ) -> Result<()> {
-        if let Some(&confirmed) = value.downcast_ref::<bool>() {
+        if let Some(&confirmed) = value.get::<bool>() {
             if confirmed {
                 // Unstage everything first
                 if let Err(e) = termide_git::unstage_all(repo_path) {
@@ -293,7 +293,7 @@ impl App {
     /// Returns true if the action was handled (and modal should stay open or closed by us)
     pub(in crate::app) fn handle_git_push_pull_from_modal(
         &mut self,
-        result: &ModalResult<Box<dyn std::any::Any>>,
+        result: &ModalResult<termide_modal::ModalOutput>,
     ) -> Result<bool> {
         use termide_core::GitOperationType;
         use termide_modal::InfoActionResult;
@@ -311,7 +311,7 @@ impl App {
 
         // Check if result is push, pull, or cancel operation
         if let ModalResult::Confirmed(value) = result {
-            if let Some(action_result) = value.downcast_ref::<InfoActionResult>() {
+            if let Some(action_result) = value.get::<InfoActionResult>() {
                 match action_result {
                     InfoActionResult::Action(action) => {
                         let operation = match action.as_str() {

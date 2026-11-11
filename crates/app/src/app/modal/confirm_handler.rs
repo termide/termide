@@ -15,9 +15,9 @@ impl App {
     pub(in crate::app) fn handle_delete_path(
         &mut self,
         paths: Vec<PathBuf>,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(confirmed) = value.downcast_ref::<bool>() {
+        if let Some(confirmed) = value.get::<bool>() {
             if *confirmed && !paths.is_empty() {
                 let source_display = if paths.len() == 1 {
                     path_utils::get_file_name_str(&paths[0]).to_string()
@@ -38,9 +38,9 @@ impl App {
         &mut self,
         paths: Vec<VfsPath>,
         vfs_manager: Arc<VfsManager>,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(confirmed) = value.downcast_ref::<bool>() {
+        if let Some(confirmed) = value.get::<bool>() {
             if *confirmed && !paths.is_empty() {
                 let source_display = if paths.len() == 1 {
                     paths[0]
@@ -89,9 +89,9 @@ impl App {
     /// Handle panel closure
     pub(in crate::app) fn handle_close_panel(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(confirmed) = value.downcast_ref::<bool>() {
+        if let Some(confirmed) = value.get::<bool>() {
             if *confirmed {
                 // Terminate processes in active panel (for terminal); an
                 // agent's terminal is handed back to the agent, not killed.

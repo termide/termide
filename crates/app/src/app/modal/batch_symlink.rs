@@ -65,10 +65,10 @@ impl App {
         sources: Vec<PathBuf>,
         target_directory: Option<PathBuf>,
         create_relative_symlink: bool,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         // Extract destination string
-        let dest_str = if let Some(s) = value.downcast_ref::<String>() {
+        let dest_str = if let Some(s) = value.get::<String>() {
             s.clone()
         } else {
             return Ok(());

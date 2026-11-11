@@ -27,9 +27,9 @@ impl App {
     pub(in crate::app) fn handle_view_path(
         &mut self,
         base_dir: PathBuf,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        let Some(input) = value.downcast_ref::<String>() else {
+        let Some(input) = value.get::<String>() else {
             return Ok(());
         };
         let input = input.trim();
@@ -97,7 +97,7 @@ impl App {
     pub(in crate::app) fn handle_create_file(
         &mut self,
         _directory: PathBuf,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         self.create_entry_in_file_manager(value, false)
     }
@@ -106,7 +106,7 @@ impl App {
     pub(in crate::app) fn handle_create_directory(
         &mut self,
         _directory: PathBuf,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         self.create_entry_in_file_manager(value, true)
     }
@@ -114,10 +114,10 @@ impl App {
     /// Shared helper for creating a file or directory in the active FileManager.
     fn create_entry_in_file_manager(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         is_directory: bool,
     ) -> Result<()> {
-        if let Some(name) = value.downcast_ref::<String>() {
+        if let Some(name) = value.get::<String>() {
             let t = i18n::t();
             let result = if let Some(panel) = self.layout_manager.active_panel_mut() {
                 if let Some(fm) = panel.as_file_manager_mut() {
@@ -172,7 +172,7 @@ impl App {
     pub(in crate::app) fn handle_save_file_as(
         &mut self,
         directory: PathBuf,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         // Store info needed for LSP notification (before mutable borrow)
         let mut lsp_info: Option<(String, PathBuf)> = None;
@@ -181,7 +181,7 @@ impl App {
         #[cfg(unix)]
         let mut make_executable = false;
 
-        if let Some(result) = value.downcast_ref::<SaveAsResult>() {
+        if let Some(result) = value.get::<SaveAsResult>() {
             let t = i18n::t();
             #[cfg(unix)]
             {
@@ -257,9 +257,9 @@ impl App {
         &mut self,
         directory: PathBuf,
         content: String,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(result) = value.downcast_ref::<SaveAsResult>() {
+        if let Some(result) = value.get::<SaveAsResult>() {
             let t = i18n::t();
             let input_path = termide_ui::expand_tilde(&result.path);
             let file_path = if input_path.is_absolute() {
@@ -283,9 +283,9 @@ impl App {
     pub(in crate::app) fn handle_git_stash_push(
         &mut self,
         repo_path: std::path::PathBuf,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        let message = match value.downcast_ref::<String>() {
+        let message = match value.get::<String>() {
             Some(s) => s.trim().to_string(),
             None => return Ok(()),
         };
@@ -309,9 +309,9 @@ impl App {
         _file_path: std::path::PathBuf,
         line: usize,
         column: usize,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> anyhow::Result<()> {
-        let new_name = match value.downcast_ref::<String>() {
+        let new_name = match value.get::<String>() {
             Some(s) => s.trim().to_string(),
             None => return Ok(()),
         };

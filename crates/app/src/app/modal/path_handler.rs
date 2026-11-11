@@ -63,12 +63,12 @@ impl App {
     pub(in crate::app) fn handle_resolve_operation_conflict(
         &mut self,
         operation_id: termide_file_ops::OperationId,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
         use termide_file_ops::ConflictResolution as FileOpsResolution;
         use termide_modal::ConflictResolution as ModalResolution;
 
-        if let Some(modal_resolution) = value.downcast_ref::<ModalResolution>() {
+        if let Some(modal_resolution) = value.get::<ModalResolution>() {
             // Convert modal resolution to file-ops resolution
             let file_ops_resolution = match modal_resolution {
                 ModalResolution::Overwrite => FileOpsResolution::Overwrite,
@@ -103,9 +103,9 @@ impl App {
     pub(in crate::app) fn handle_goto_path(
         &mut self,
         current_directory: &Path,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        let Some(input) = value.downcast_ref::<String>() else {
+        let Some(input) = value.get::<String>() else {
             return Ok(());
         };
         let input = input.trim();
@@ -158,12 +158,12 @@ impl App {
     /// Handle follow symlink action from InfoActionModal
     pub(in crate::app) fn handle_follow_symlink(
         &mut self,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
         target_path: &std::path::Path,
     ) -> Result<()> {
         use termide_modal::InfoActionResult;
 
-        if let Some(InfoActionResult::Action(action)) = value.downcast_ref::<InfoActionResult>() {
+        if let Some(InfoActionResult::Action(action)) = value.get::<InfoActionResult>() {
             if action == "follow" {
                 if target_path.is_dir() {
                     if let Some(panel) = self.layout_manager.active_panel_mut() {

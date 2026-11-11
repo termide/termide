@@ -39,9 +39,9 @@ impl App {
         &mut self,
         sources: Vec<PathBuf>,
         level: CompressionLevel,
-        value: Box<dyn std::any::Any>,
+        value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        let Some(input) = value.downcast_ref::<String>() else {
+        let Some(input) = value.get::<String>() else {
             return Ok(());
         };
         let Some(first) = sources.first() else {
