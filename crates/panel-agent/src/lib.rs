@@ -199,26 +199,135 @@ const MCP_COMMAND: &str = "mcp";
 /// The built-in `/trust` command: what the project brings that runs
 /// programs and waits for approval, and approving it.
 const TRUST_COMMAND: &str = "trust";
+/// When a built-in command is offered: in the `/` list, and in the list a
+/// mistyped name gets.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Offer {
+    Always,
+    /// Run by termide's own agent loop, which an external agent replaces.
+    Native,
+    /// The panel keeps a session log to start, fork, clear or name.
+    WithSessions,
+    /// A run is under way that can be paused.
+    Pausable,
+    /// A pause, a pending pause or a failed request to carry on.
+    Continuable,
+}
+
+/// A built-in `/name`: what the `/` list shows of it and when.
+struct Builtin {
+    name: &'static str,
+    hint: fn(&dyn termide_i18n::Translation) -> &str,
+    description: fn(&dyn termide_i18n::Translation) -> &str,
+    offer: Offer,
+}
+
 /// Every built-in `/name`, whatever the state; a template, script or skill
-/// of the same name never runs under it (see `slash`).
-const BUILTIN_COMMANDS: [&str; 16] = [
-    UNDO_COMMAND,
-    COMPACT_COMMAND,
-    NEW_COMMAND,
-    FORK_COMMAND,
-    CLEAR_COMMAND,
-    RENAME_COMMAND,
-    NAME_COMMAND,
-    PAUSE_COMMAND,
-    CONTINUE_COMMAND,
-    LOOP_COMMAND,
-    GOAL_COMMAND,
-    HANDOFF_COMMAND,
-    USAGE_COMMAND,
-    PROMPT_COMMAND,
-    MCP_COMMAND,
-    TRUST_COMMAND,
+/// of the same name never runs under it (see `slash`). What each one does is
+/// `submit`'s.
+const BUILTINS: [Builtin; 16] = [
+    Builtin {
+        name: UNDO_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_undo(),
+        offer: Offer::Native,
+    },
+    Builtin {
+        name: COMPACT_COMMAND,
+        hint: |_| "[focus]",
+        description: |t| t.agent_cmd_desc_compact(),
+        offer: Offer::Native,
+    },
+    Builtin {
+        name: NEW_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_new(),
+        offer: Offer::WithSessions,
+    },
+    Builtin {
+        name: FORK_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_fork(),
+        offer: Offer::WithSessions,
+    },
+    Builtin {
+        name: CLEAR_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_clear(),
+        offer: Offer::WithSessions,
+    },
+    Builtin {
+        name: RENAME_COMMAND,
+        hint: |_| "[name]",
+        description: |t| t.agent_cmd_desc_rename(),
+        offer: Offer::WithSessions,
+    },
+    Builtin {
+        name: NAME_COMMAND,
+        hint: |_| "[name]",
+        description: |t| t.agent_cmd_desc_rename(),
+        offer: Offer::WithSessions,
+    },
+    Builtin {
+        name: PAUSE_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_pause(),
+        offer: Offer::Pausable,
+    },
+    Builtin {
+        name: CONTINUE_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_continue(),
+        offer: Offer::Continuable,
+    },
+    Builtin {
+        name: LOOP_COMMAND,
+        hint: |t| t.agent_hint_loop(),
+        description: |t| t.agent_cmd_desc_loop(),
+        offer: Offer::Always,
+    },
+    Builtin {
+        name: GOAL_COMMAND,
+        hint: |t| t.agent_hint_goal(),
+        description: |t| t.agent_cmd_desc_goal(),
+        offer: Offer::Always,
+    },
+    Builtin {
+        name: HANDOFF_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_handoff(),
+        offer: Offer::Always,
+    },
+    Builtin {
+        name: USAGE_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_usage(),
+        offer: Offer::Always,
+    },
+    Builtin {
+        name: PROMPT_COMMAND,
+        hint: |_| "",
+        description: |t| t.agent_cmd_desc_prompt(),
+        offer: Offer::Always,
+    },
+    Builtin {
+        name: MCP_COMMAND,
+        hint: |t| t.agent_hint_mcp(),
+        description: |t| t.agent_cmd_desc_mcp(),
+        offer: Offer::Native,
+    },
+    Builtin {
+        name: TRUST_COMMAND,
+        hint: |t| t.agent_hint_trust(),
+        description: |t| t.agent_cmd_desc_trust(),
+        offer: Offer::Native,
+    },
 ];
+
+/// The built-in names, for checking what else a name may run.
+fn builtin_names() -> Vec<&'static str> {
+    BUILTINS.iter().map(|b| b.name).collect()
+}
 /// Context-menu action (also `Ctrl+S`) that saves the chat as Markdown.
 const SAVE_CHAT_ACTION: &str = "agent_save_chat";
 /// Context-menu action that undoes the last request.

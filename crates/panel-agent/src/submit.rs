@@ -16,8 +16,8 @@ use termide_ui::ChoiceForm;
 use crate::pending::Pending;
 use crate::session_ops::discard;
 use crate::{
-    millis, now_hms, slash, transcript, unfinished, Activity, AgentPanel, GoalTask, Item, LoopTask,
-    NoticeKind, Phase, BUILTIN_COMMANDS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND,
+    builtin_names, millis, now_hms, slash, transcript, unfinished, Activity, AgentPanel, GoalTask,
+    Item, LoopTask, NoticeKind, Phase, BUILTINS, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND,
     FORK_COMMAND, GOAL_COMMAND, GOAL_IDLE_TURNS, GOAL_JUDGE_BUSY_DELAY, GOAL_JUDGE_RETRIES,
     GOAL_JUDGE_RETRY_DELAY, HANDOFF_COMMAND, LOOP_COMMAND, LOOP_MAX_ITERATIONS, MCP_COMMAND,
     NAME_COMMAND, NEW_COMMAND, PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND,
@@ -304,27 +304,12 @@ impl AgentPanel {
                     names.extend(self.agent_commands().into_iter().map(|c| c.name));
                     names.extend(self.catalog.commands().into_iter().map(|c| c.name));
                     names.extend(self.slash_skills().into_iter().map(|(name, _)| name));
-                    names.push(COMPACT_COMMAND.to_string());
-                    if self.session_dir.is_some() {
-                        names.push(NEW_COMMAND.to_string());
-                        names.push(FORK_COMMAND.to_string());
-                        names.push(CLEAR_COMMAND.to_string());
-                        names.push(RENAME_COMMAND.to_string());
-                        names.push(NAME_COMMAND.to_string());
-                    }
-                    if self.is_busy() {
-                        names.push(PAUSE_COMMAND.to_string());
-                    }
-                    if self.paused || self.pause_requested {
-                        names.push(CONTINUE_COMMAND.to_string());
-                    }
-                    names.push(LOOP_COMMAND.to_string());
-                    names.push(GOAL_COMMAND.to_string());
-                    names.push(HANDOFF_COMMAND.to_string());
-                    names.push(USAGE_COMMAND.to_string());
-                    names.push(PROMPT_COMMAND.to_string());
-                    names.push(MCP_COMMAND.to_string());
-                    names.push(TRUST_COMMAND.to_string());
+                    names.extend(
+                        BUILTINS
+                            .iter()
+                            .filter(|b| self.offers(b.offer))
+                            .map(|b| b.name.to_string()),
+                    );
                     self.notice(
                         termide_i18n::t().agent_notice_no_command_fmt(name, &names.join(", ")),
                         NoticeKind::Warn,
@@ -1073,7 +1058,7 @@ impl AgentPanel {
             .into_iter()
             .map(|skill| {
                 let name = skill.name.as_str();
-                let taken = BUILTIN_COMMANDS.contains(&name)
+                let taken = BUILTINS.iter().any(|b| b.name == name)
                     || prompts.iter().any(|p| p.name == name)
                     || commands.iter().any(|c| c.name == name);
                 let reach = if taken {
@@ -1089,7 +1074,7 @@ impl AgentPanel {
     /// The `/name`s more than one kind defines, see [`slash::conflicts`].
     pub(crate) fn slash_conflicts(&self) -> Vec<slash::Conflict> {
         slash::conflicts(
-            &BUILTIN_COMMANDS,
+            &builtin_names(),
             &self.catalog.prompts(),
             &self.catalog.commands(),
             &self.catalog.skills(),

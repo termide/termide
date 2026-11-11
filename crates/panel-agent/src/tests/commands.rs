@@ -64,6 +64,49 @@ fn file_completions_list_paths_and_at_mentions_insert_them() {
         .any(|i| i.value == "src/main.rs"));
 }
 
+/// A mistyped name lists the built-ins the `/` list offers, no more and
+/// no fewer.
+#[test]
+fn a_mistyped_command_lists_the_built_ins_on_offer() {
+    let mut panel = panel(vec![reply("ok")]);
+    type_text(&mut panel, "/");
+    let offered: Vec<String> = panel
+        .completion
+        .as_ref()
+        .expect("a completion popup")
+        .items()
+        .iter()
+        .map(|i| i.value.clone())
+        .filter(|name| BUILTINS.iter().any(|b| b.name == name))
+        .collect();
+    assert!(offered.iter().any(|n| n == "undo"), "{offered:?}");
+    assert!(!offered.iter().any(|n| n == "pause"), "{offered:?}");
+    panel.clear_input();
+    type_text(&mut panel, "/nope");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    let notice = panel
+        .transcript()
+        .items()
+        .iter()
+        .find_map(|item| match item {
+            Item::Notice { text, .. } => Some(text.clone()),
+            _ => None,
+        })
+        .expect("a notice");
+    let listed: Vec<&str> = notice
+        .rsplit_once(": ")
+        .expect("a list of names")
+        .1
+        .split(", ")
+        .filter(|name| BUILTINS.iter().any(|b| b.name == *name))
+        .collect();
+    let mut listed: Vec<String> = listed.into_iter().map(String::from).collect();
+    let mut offered = offered;
+    listed.sort();
+    offered.sort();
+    assert_eq!(listed, offered);
+}
+
 #[test]
 fn slash_commands_expand_prompt_templates() {
     let mut expanding = panel(vec![reply("done")]);

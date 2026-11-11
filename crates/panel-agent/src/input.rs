@@ -9,11 +9,8 @@ use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList,
 
 use crate::slash::user_skill_description;
 use crate::{
-    pan, select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Paste, RunButton,
-    ViewButton, CLEAR_COMMAND, COMPACT_COMMAND, CONTINUE_COMMAND, FORK_COMMAND, GOAL_COMMAND,
-    HANDOFF_COMMAND, LOOP_COMMAND, MCP_COMMAND, NAME_COMMAND, NEW_COMMAND, NEW_SESSION_ACTION,
-    PAUSE_COMMAND, PROMPT_COMMAND, RENAME_ACTION, RENAME_COMMAND, RESUME_ACTION, TRUST_COMMAND,
-    UNDO_COMMAND, USAGE_COMMAND,
+    pan, select, transcript, AgentPanel, BannerHit, FoldMode, Item, NoticeKind, Offer, Paste,
+    RunButton, ViewButton, BUILTINS, NEW_SESSION_ACTION, RENAME_ACTION, RESUME_ACTION,
 };
 
 /// A paste past either bound is held as a short placeholder rather than
@@ -729,6 +726,21 @@ impl AgentPanel {
         None
     }
 
+    /// Whether a built-in command applies now, see [`Offer`].
+    pub(crate) fn offers(&self, offer: Offer) -> bool {
+        match offer {
+            Offer::Always => true,
+            Offer::Native => !self.external,
+            Offer::WithSessions => self.session_dir.is_some(),
+            Offer::Pausable => self.is_busy() && self.runtime.can_pause(),
+            Offer::Continuable => {
+                self.paused
+                    || self.pause_requested
+                    || (!self.is_busy() && (self.retry_wait.is_some() || self.retry_ready))
+            }
+        }
+    }
+
     pub(crate) fn refresh_completion(&mut self) {
         self.completion_span = None;
         // A shell command is not a slash command or a mention: `/usr/bin` and
@@ -792,130 +804,16 @@ impl AgentPanel {
                 );
             }
         }
-        if UNDO_COMMAND.starts_with(prefix) && !self.external {
-            items.push(
-                CompletionItem::new(UNDO_COMMAND)
-                    .with_label(format!("/{UNDO_COMMAND}"))
-                    .with_description(termide_i18n::t().agent_cmd_desc_undo()),
-            );
-        }
-        if COMPACT_COMMAND.starts_with(prefix) && !self.external {
-            items.push(
-                CompletionItem::new(COMPACT_COMMAND)
-                    .with_label(format!("/{COMPACT_COMMAND}"))
-                    .with_hint("[focus]")
-                    .with_description(termide_i18n::t().agent_cmd_desc_compact()),
-            );
-        }
-        if self.session_dir.is_some() {
-            if NEW_COMMAND.starts_with(prefix) {
+        let t = termide_i18n::t();
+        for builtin in BUILTINS.iter().filter(|b| self.offers(b.offer)) {
+            if builtin.name.starts_with(prefix) {
                 items.push(
-                    CompletionItem::new(NEW_COMMAND)
-                        .with_label(format!("/{NEW_COMMAND}"))
-                        .with_description(termide_i18n::t().agent_cmd_desc_new()),
+                    CompletionItem::new(builtin.name)
+                        .with_label(format!("/{}", builtin.name))
+                        .with_hint((builtin.hint)(t))
+                        .with_description((builtin.description)(t)),
                 );
             }
-            if FORK_COMMAND.starts_with(prefix) {
-                items.push(
-                    CompletionItem::new(FORK_COMMAND)
-                        .with_label(format!("/{FORK_COMMAND}"))
-                        .with_description(termide_i18n::t().agent_cmd_desc_fork()),
-                );
-            }
-            if CLEAR_COMMAND.starts_with(prefix) {
-                items.push(
-                    CompletionItem::new(CLEAR_COMMAND)
-                        .with_label(format!("/{CLEAR_COMMAND}"))
-                        .with_description(termide_i18n::t().agent_cmd_desc_clear()),
-                );
-            }
-            if RENAME_COMMAND.starts_with(prefix) {
-                items.push(
-                    CompletionItem::new(RENAME_COMMAND)
-                        .with_label(format!("/{RENAME_COMMAND}"))
-                        .with_hint("[name]")
-                        .with_description(termide_i18n::t().agent_cmd_desc_rename()),
-                );
-            }
-            if NAME_COMMAND.starts_with(prefix) {
-                items.push(
-                    CompletionItem::new(NAME_COMMAND)
-                        .with_label(format!("/{NAME_COMMAND}"))
-                        .with_hint("[name]")
-                        .with_description(termide_i18n::t().agent_cmd_desc_rename()),
-                );
-            }
-        }
-        // Run control is offered only when it applies.
-        if self.is_busy() && self.runtime.can_pause() && PAUSE_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(PAUSE_COMMAND)
-                    .with_label(format!("/{PAUSE_COMMAND}"))
-                    .with_description(termide_i18n::t().agent_cmd_desc_pause()),
-            );
-        }
-        let can_continue = self.paused
-            || self.pause_requested
-            || (!self.is_busy() && (self.retry_wait.is_some() || self.retry_ready));
-        if can_continue && CONTINUE_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(CONTINUE_COMMAND)
-                    .with_label(format!("/{CONTINUE_COMMAND}"))
-                    .with_description(termide_i18n::t().agent_cmd_desc_continue()),
-            );
-        }
-        if LOOP_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(LOOP_COMMAND)
-                    .with_label(format!("/{LOOP_COMMAND}"))
-                    .with_hint(termide_i18n::t().agent_hint_loop())
-                    .with_description(termide_i18n::t().agent_cmd_desc_loop()),
-            );
-        }
-        if GOAL_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(GOAL_COMMAND)
-                    .with_label(format!("/{GOAL_COMMAND}"))
-                    .with_hint(termide_i18n::t().agent_hint_goal())
-                    .with_description(termide_i18n::t().agent_cmd_desc_goal()),
-            );
-        }
-        if HANDOFF_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(HANDOFF_COMMAND)
-                    .with_label(format!("/{HANDOFF_COMMAND}"))
-                    .with_description(termide_i18n::t().agent_cmd_desc_handoff()),
-            );
-        }
-        if USAGE_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(USAGE_COMMAND)
-                    .with_label(format!("/{USAGE_COMMAND}"))
-                    .with_description(termide_i18n::t().agent_cmd_desc_usage()),
-            );
-        }
-        if PROMPT_COMMAND.starts_with(prefix) {
-            items.push(
-                CompletionItem::new(PROMPT_COMMAND)
-                    .with_label(format!("/{PROMPT_COMMAND}"))
-                    .with_description(termide_i18n::t().agent_cmd_desc_prompt()),
-            );
-        }
-        if MCP_COMMAND.starts_with(prefix) && !self.external {
-            items.push(
-                CompletionItem::new(MCP_COMMAND)
-                    .with_label(format!("/{MCP_COMMAND}"))
-                    .with_hint(termide_i18n::t().agent_hint_mcp())
-                    .with_description(termide_i18n::t().agent_cmd_desc_mcp()),
-            );
-        }
-        if TRUST_COMMAND.starts_with(prefix) && !self.external {
-            items.push(
-                CompletionItem::new(TRUST_COMMAND)
-                    .with_label(format!("/{TRUST_COMMAND}"))
-                    .with_hint(termide_i18n::t().agent_hint_trust())
-                    .with_description(termide_i18n::t().agent_cmd_desc_trust()),
-            );
         }
         // The external agent's own commands, but those termide's take.
         for command in self.agent_commands() {
