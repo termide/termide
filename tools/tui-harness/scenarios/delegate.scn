@@ -1,0 +1,27 @@
+# A task delegated in the background (the mock model's second script): the
+# subagent's row in the strip under the conversation while it works, the
+# side model of [ai.subagents] it runs on, and its report coming back to
+# the agent, which quotes it.
+config side-models.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "delegate the stock scan"
+key Enter
+wait "I'll hand the stock scan to a subagent." 20
+# Delegating asks first under the configured permissions.
+wait "Agent wants to run task" 15
+type "1"
+wait-gone "Agent wants to run task" 10
+# The subagent's row in the strip: the agent it went to and the task's first
+# line, while it works.
+wait-re "^│& Delegating to · default +SUBTASK: list the items" 10
+snapshot running
+# Back from the subagent, on the model [ai.subagents] names.
+wait "The subagent is back: 3 items, checked on qwen3-coder-subagent" 30
+wait-gone "[■]" 15
+snapshot done
+quit

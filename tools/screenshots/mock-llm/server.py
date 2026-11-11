@@ -117,6 +117,30 @@ SCRIPT = [
     },
 ]
 
+# A second conversation, played when the user asks to "delegate the stock
+# scan": the agent hands a task to a subagent in the background, says
+# so, and quotes the subagent's report when it comes back. The subagent
+# knows its task by SUBTASK, takes SUBAGENT_DELAY seconds so its row stays in
+# sight, and names the model it was asked for, which shows where a side
+# model setting sent it.
+DELEGATE = "delegate the stock scan"
+SUBTASK = "SUBTASK: list the items under their reorder point"
+SUBREPORT = "SUBREPORT: 3 items under their reorder point, checked on "
+SUBAGENT_DELAY = 4
+DELEGATE_SCRIPT = [
+    {
+        "reasoning": "",
+        "text": "I'll hand the stock scan to a subagent.",
+        "tool": ("task", {"agent": "default", "prompt": SUBTASK, "background": True}),
+    },
+    {"reasoning": "", "text": "The scan runs in the background.", "tool": None},
+]
+
+
+def content_of(message):
+    return json.dumps(message.get("content"))
+
+
 # Pacing: a visible spinner and a believable tokens-per-second figure.
 CHUNK_DELAY = 0.04
 PREFILL_DELAY = 0.6
@@ -176,10 +200,34 @@ class Handler(BaseHTTPRequestHandler):
         else:
             done = sum(1 for m in messages if m.get("role") == "tool")
             step = SCRIPT[min(done, len(SCRIPT) - 1)]
+            users = [content_of(m) for m in messages if m.get("role") == "user"]
+            model = request.get("model") or MODELS[FLAVOR][0]["id"]
+            # Only the user's request says DELEGATE: the subagent's task does
+            # not, though the report back may repeat the task.
+            main = any(DELEGATE in u for u in users)
+            if not main and any("SUBTASK" in u for u in users):
+                time.sleep(SUBAGENT_DELAY)
+                step = {"reasoning": "", "text": SUBREPORT + model + ".", "tool": None}
+            elif main:
+                if any("SUBREPORT" in u for u in users):
+                    report = next(u for u in users if "SUBREPORT" in u)
+                    found = report[report.index("checked on ") :].split(".")[0]
+                    step = {
+                        "reasoning": "",
+                        "text": "The subagent is back: 3 items, " + found + ".",
+                        "tool": None,
+                    }
+                else:
+                    step = DELEGATE_SCRIPT[min(done, len(DELEGATE_SCRIPT) - 1)]
         kwargs = request.get("chat_template_kwargs") or {}
         if kwargs.get("enable_thinking") is False:
             step = dict(step, reasoning="")
         self.model = request.get("model") or MODELS[FLAVOR][0]["id"]
+        # Which model each call asked for, read by the TUI harness's
+        # `mock-llm-asked` step.
+        kind = "tools" if request.get("tools") else "service"
+        sys.stderr.write("mock-llm: asked %s (%s)\n" % (self.model, kind))
+        sys.stderr.flush()
         self.caches = not (
             FLAVOR == "openrouter"
             and self.model.startswith("anthropic/")

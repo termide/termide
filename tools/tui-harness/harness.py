@@ -446,6 +446,20 @@ class Run:
             f"{text!r} in {rel}",
         )
 
+    def v_mock_llm_asked(self, model, timeout=DEFAULT_TIMEOUT):
+        """Wait until the mock model has had a request for `model`: where a
+        side model setting (subagents, goal judge, handoff, reviewer) sent its
+        call. The mock logs `asked MODEL (tools|service)` for each one."""
+        if not self.mock_llm:
+            raise Failure("mock-llm-asked needs mock-llm")
+        log = self.out / "mock-llm.log"
+        line = re.compile(rf"^mock-llm: asked {re.escape(model)} ", re.MULTILINE)
+        self.wait_until(
+            lambda: line.search(log.read_text(errors="replace")),
+            timeout,
+            f"a request for the model {model!r}",
+        )
+
     def v_snapshot(self, name):
         self.need_term().pump(0.05)
         self.snapshots += 1

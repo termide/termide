@@ -1,0 +1,38 @@
+# The configuration of the side model scenarios (delegate, goal): the shared
+# config.toml with a model of its own for subagents and for the goal judge.
+# `{mock_llm_port}` is the port of the scenario's mock model.
+[general]
+language = "en"
+icon_mode = "unicode"
+# The status bar's resource figures change on their own; keep them still.
+resource_monitor_interval = 60000
+
+[editor]
+show_blame = false
+
+[ai]
+connection = "local"
+
+[ai.connections.local]
+provider = "openai_compatible"
+base_url = "http://127.0.0.1:{mock_llm_port}/v1"
+model = "qwen3-coder-30b-a3b"
+
+# Each runs on another model of the same connection: the mock logs the model
+# every call asked for (`mock-llm-asked`), and its subagent names it too.
+[ai.subagents]
+connection = "local"
+model = "qwen3-coder-subagent"
+
+[ai.goal_judge]
+connection = "local"
+model = "qwen3-coder-judge"
+
+[ai.permissions]
+mode = "configured"
+
+[ai.permissions.edit]
+"inventory/**" = "allow"
+
+[ai.permissions.shell]
+"python3 *" = "ask"

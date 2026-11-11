@@ -20,7 +20,7 @@ moment; the exit code is non-zero when one failed. Its screens land in
 `target/tui-harness/out/<scenario>/`: the `snapshot`s, `final.txt` (the
 screen when it ended) and `output.bin` (every byte termide wrote). `--bin`
 or `TERMIDE_BIN` picks another binary, e.g. a release build;
-`CARGO_TARGET_DIR` is honoured. A run of all of them takes about half a
+`CARGO_TARGET_DIR` is honoured. A run of all of them takes under a
 minute.
 
 ## What each run gets
@@ -38,7 +38,9 @@ minute.
 - **Mock agents** on request: `mock-llm` starts
   `tools/screenshots/mock-llm/server.py` on a free port and points the
   `local` connection at it; it plays a fixed task (read
-  `inventory/report.py`, edit it, run the tests, answer). `mock-acp codex`
+  `inventory/report.py`, edit it, run the tests, answer), or, asked to
+  "delegate the stock scan", hands a task to a subagent in the background
+  and quotes its report. It logs the model every call asks for. `mock-acp codex`
   (or `claude_code`, `gemini_cli`) makes that ACP agent the connection and
   puts the stand-in adapters of `tools/screenshots/mock-acp` first on
   `PATH`. Neither touches the network.
@@ -65,6 +67,7 @@ Timeouts are in seconds and default to 10.
 | `expect "TEXT"` / `expect-not "TEXT"` / `expect-re "REGEX"` | Check the screen now |
 | `expect-row N "REGEX"` | Check row N (0 is the top, -1 the bottom) |
 | `file-contains PATH "TEXT" [T]` | Wait until the project's file PATH holds TEXT |
+| `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
 | `run "COMMAND"` | Run a shell command in the project, outside termide |
 | `snapshot NAME` | Save the screen as text |
 | `sleep S` | Let termide run for S seconds |
@@ -73,8 +76,10 @@ Timeouts are in seconds and default to 10.
 A scenario that does not `quit` is killed at its end. The examples:
 `smoke` (start and quit), `editor` (file manager → editor → save),
 `terminal` (a command in a terminal panel), `agent` (the mock model's task
-with a permission card) and `acp-codex` (the same task through Codex over
-ACP).
+with a permission card), `acp-codex` (the same task through Codex over
+ACP), `delegate` (a background subagent's row and report, on the model
+`[ai.subagents]` names) and `goal` (`/goal` with its judge on the model
+`[ai.goal_judge]` names).
 
 ## Writing one
 

@@ -1,0 +1,21 @@
+# /goal with the judge on a side model ([ai.goal_judge] in side-models.toml):
+# the mock model's task runs, then the judge is asked on its own model, not
+# the session's, and its verdict ends the goal.
+config side-models.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "/goal flag critical low-stock items in the reorder report, tests green"
+key Enter
+wait "Agent wants to run shell" 30
+type "1"
+wait "Want me to highlight critical rows" 30
+mock-llm-asked qwen3-coder-judge 30
+# The goal's row stays until the verdict is in.
+wait "goal reached: Critical items are flagged" 15
+wait-gone "Heading for the goal" 10
+snapshot judged
+quit
