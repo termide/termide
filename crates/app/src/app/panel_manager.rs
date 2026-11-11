@@ -53,11 +53,11 @@ impl App {
         // One following another agent's task gives the cards it holds back
         // to the panel that delegated it.
         let mut cards = None;
-        if let Some(agent) = self.layout_manager.active_panel_mut().and_then(|panel| {
-            panel
-                .as_any_mut()
-                .downcast_mut::<termide_panel_agent::AgentPanel>()
-        }) {
+        if let Some(agent) = self
+            .layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.downcast_mut::<termide_panel_agent::AgentPanel>())
+        {
             termide_panel_agent::live::stop_all(agent.panel_id());
             // Nothing parked at a limit waits for a panel that is gone; its
             // own log stays where it stopped, and a reopen offers it again.
@@ -258,10 +258,7 @@ impl App {
                 if gi == focus && pi == group.expanded_index() {
                     continue;
                 }
-                if !panel
-                    .as_any()
-                    .is::<termide_panel_file_manager::FileManager>()
-                {
+                if !panel.is::<termide_panel_file_manager::FileManager>() {
                     continue;
                 }
                 if let Some(path) = panel.get_working_directory_display() {

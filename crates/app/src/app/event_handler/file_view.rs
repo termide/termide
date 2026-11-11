@@ -189,7 +189,7 @@ impl App {
             || self
                 .layout_manager
                 .active_panel()
-                .and_then(|p| p.as_any().downcast_ref::<BinaryPanel>())
+                .and_then(|p| p.downcast_ref::<BinaryPanel>())
                 .map(|b| b.is_editable())
                 .unwrap_or(false);
         let config = if editable {
@@ -349,7 +349,7 @@ impl App {
         // Reuse an existing binary viewer if one is open, focusing it like
         // opening a text viewer focuses its panel.
         if let Some(panel) = self.layout_manager.focus_and_expand_panel_by_name("binary") {
-            if let Some(bin) = panel.as_any_mut().downcast_mut::<BinaryPanel>() {
+            if let Some(bin) = panel.downcast_mut::<BinaryPanel>() {
                 bin.set_file(file_path);
                 self.state.needs_redraw = true;
                 return Ok(());
@@ -409,7 +409,7 @@ impl App {
         if is_image && ImagePanel::graphics_available() {
             // Try to reuse existing ImagePanel
             if let Some(panel) = self.layout_manager.find_and_expand_panel_by_name("image") {
-                if let Some(image_panel) = panel.as_any_mut().downcast_mut::<ImagePanel>() {
+                if let Some(image_panel) = panel.downcast_mut::<ImagePanel>() {
                     image_panel.set_image(file_path);
                     self.state.needs_redraw = true;
                     return Ok(());
@@ -480,10 +480,7 @@ impl App {
 
         // Get VfsManager from active FileManager panel
         let vfs_manager = if let Some(panel) = self.layout_manager.active_panel() {
-            if let Some(fm) = panel
-                .as_any()
-                .downcast_ref::<termide_panel_file_manager::FileManager>()
-            {
+            if let Some(fm) = panel.downcast_ref::<termide_panel_file_manager::FileManager>() {
                 fm.vfs_state().manager_arc()
             } else {
                 let error_msg = "No file manager panel available for remote file access";

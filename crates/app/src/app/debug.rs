@@ -559,10 +559,7 @@ impl App {
             return;
         };
         for panel in self.all_editor_panels_mut() {
-            if let Some(terminal) = panel
-                .as_any_mut()
-                .downcast_mut::<termide_panel_terminal::Terminal>()
-            {
+            if let Some(terminal) = panel.downcast_mut::<termide_panel_terminal::Terminal>() {
                 if terminal.child_pid() == Some(pid) {
                     termide_core::Panel::kill_processes(terminal);
                 }

@@ -33,10 +33,7 @@ impl App {
         // 3. No editors — clear outline
         for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                if let Some(outline) = panel
-                    .as_any_mut()
-                    .downcast_mut::<termide_panel_outline::OutlinePanel>()
-                {
+                if let Some(outline) = panel.downcast_mut::<termide_panel_outline::OutlinePanel>() {
                     outline.clear();
                     return;
                 }
@@ -70,10 +67,7 @@ impl App {
             .panel_groups
             .iter_mut()
             .flat_map(|g| g.panels_mut())
-            .find_map(|p| {
-                p.as_any_mut()
-                    .downcast_mut::<termide_panel_outline::OutlinePanel>()
-            })
+            .find_map(|p| p.downcast_mut::<termide_panel_outline::OutlinePanel>())
             .is_some_and(|outline| outline.needs_repopulate());
         if needs_repopulate {
             self.populate_outline_from_any_editor();
@@ -129,10 +123,7 @@ impl App {
     fn sync_outline_cursor(&mut self, cursor_line: usize) {
         for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                if let Some(outline) = panel
-                    .as_any_mut()
-                    .downcast_mut::<termide_panel_outline::OutlinePanel>()
-                {
+                if let Some(outline) = panel.downcast_mut::<termide_panel_outline::OutlinePanel>() {
                     outline.sync_cursor_line(cursor_line);
                     return;
                 }
@@ -164,10 +155,7 @@ impl App {
     fn find_outline_tracked_file(&self) -> Option<std::path::PathBuf> {
         for group in &self.layout_manager.panel_groups {
             for panel in group.panels() {
-                if let Some(outline) = panel
-                    .as_any()
-                    .downcast_ref::<termide_panel_outline::OutlinePanel>()
-                {
+                if let Some(outline) = panel.downcast_ref::<termide_panel_outline::OutlinePanel>() {
                     return outline.tracked_file().map(|p| p.to_path_buf());
                 }
             }
@@ -214,9 +202,8 @@ impl App {
             let mut result = None;
             for group in &mut self.layout_manager.panel_groups {
                 for panel in group.panels_mut() {
-                    if let Some(outline) = panel
-                        .as_any_mut()
-                        .downcast_mut::<termide_panel_outline::OutlinePanel>()
+                    if let Some(outline) =
+                        panel.downcast_mut::<termide_panel_outline::OutlinePanel>()
                     {
                         result = outline.take_pending_navigation();
                         break;
@@ -274,10 +261,7 @@ impl App {
         let mut symbol_lines_for_editor = Vec::new();
         'outer: for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                if let Some(outline) = panel
-                    .as_any_mut()
-                    .downcast_mut::<termide_panel_outline::OutlinePanel>()
-                {
+                if let Some(outline) = panel.downcast_mut::<termide_panel_outline::OutlinePanel>() {
                     outline.update_content(path, content, language);
                     if let Some(line) = cursor_line {
                         outline.sync_cursor_line(line);

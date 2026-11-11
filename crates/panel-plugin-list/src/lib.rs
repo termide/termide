@@ -10,7 +10,6 @@
 
 mod rows;
 
-use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -851,14 +850,6 @@ impl Panel for PluginListPanel {
             Some(index) => self.run(index),
             None => vec![],
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

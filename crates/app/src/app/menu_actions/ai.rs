@@ -216,7 +216,6 @@ impl App {
         // method to the `Panel` trait (which lives in another committed crate).
         let already_open = self.layout_manager.focus_panel_where(|panel| {
             panel
-                .as_any()
                 .downcast_ref::<termide_panel_agent::AgentPanel>()
                 .and_then(|agent| agent.session_path())
                 .is_some_and(|open| open == path.as_path())

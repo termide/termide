@@ -37,8 +37,6 @@
 //! }
 //! ```
 
-use std::any::Any;
-
 use termide_core::Panel;
 use termide_modal::ActiveModal;
 use termide_panel_db::DbPanel;
@@ -84,27 +82,27 @@ pub trait PanelExt {
 
 impl PanelExt for dyn Panel {
     fn as_editor(&self) -> Option<&Editor> {
-        (self as &dyn Any).downcast_ref::<Editor>()
+        self.downcast_ref::<Editor>()
     }
 
     fn as_editor_mut(&mut self) -> Option<&mut Editor> {
-        (self as &mut dyn Any).downcast_mut::<Editor>()
+        self.downcast_mut::<Editor>()
     }
 
     fn as_file_manager_mut(&mut self) -> Option<&mut FileManager> {
-        (self as &mut dyn Any).downcast_mut::<FileManager>()
+        self.downcast_mut::<FileManager>()
     }
 
     fn as_terminal_mut(&mut self) -> Option<&mut Terminal> {
-        (self as &mut dyn Any).downcast_mut::<Terminal>()
+        self.downcast_mut::<Terminal>()
     }
 
     fn as_diagnostics_panel_mut(&mut self) -> Option<&mut DiagnosticsPanel> {
-        (self as &mut dyn Any).downcast_mut::<DiagnosticsPanel>()
+        self.downcast_mut::<DiagnosticsPanel>()
     }
 
     fn is_journal(&self) -> bool {
-        (self as &dyn Any).is::<JournalPanel>()
+        self.is::<JournalPanel>()
     }
 
     /// Collect a pending modal request from whichever panel type has one.
@@ -118,16 +116,16 @@ impl PanelExt for dyn Panel {
         if let Some(editor) = self.as_editor_mut() {
             return editor.take_modal_request();
         }
-        if let Some(git_status) = (self as &mut dyn Any).downcast_mut::<GitStatusPanel>() {
+        if let Some(git_status) = self.downcast_mut::<GitStatusPanel>() {
             return git_status.take_modal_request();
         }
-        if let Some(git_log) = (self as &mut dyn Any).downcast_mut::<GitLogPanel>() {
+        if let Some(git_log) = self.downcast_mut::<GitLogPanel>() {
             return git_log.take_modal_request();
         }
-        if let Some(journal) = (self as &mut dyn Any).downcast_mut::<JournalPanel>() {
+        if let Some(journal) = self.downcast_mut::<JournalPanel>() {
             return journal.editor_mut().take_modal_request();
         }
-        if let Some(db) = (self as &mut dyn Any).downcast_mut::<DbPanel>() {
+        if let Some(db) = self.downcast_mut::<DbPanel>() {
             return db.take_modal_request();
         }
         None

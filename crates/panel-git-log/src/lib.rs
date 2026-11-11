@@ -9,7 +9,6 @@ mod selection;
 
 use refresh::{GitLogRefreshResult, LogView, Reload};
 
-use std::any::Any;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -457,14 +456,6 @@ impl Panel for GitLogPanel {
         self.repo_manager.current().map(|repo| PanelState::GitLog {
             repo_path: repo.to_path_buf(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

@@ -19,7 +19,6 @@ mod stream;
 pub use render::{render_markdown, render_markdown_with};
 pub use stream::{render_streamed, StreamedHead};
 
-use std::any::Any;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -731,14 +730,6 @@ impl Panel for MarkdownPanel {
         Some(PanelState::Markdown {
             path: self.file_path.clone(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

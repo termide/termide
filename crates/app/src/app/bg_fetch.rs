@@ -263,7 +263,7 @@ fn image_into_placeholder(
         escape_html(&url).replace('"', "&quot;"),
         escape_html(&title).replace('"', "&quot;"),
     );
-    if let Some(html) = slot.as_any_mut().downcast_mut::<HtmlPanel>() {
+    if let Some(html) = slot.downcast_mut::<HtmlPanel>() {
         html.apply_fetched(title, page, url);
     }
     match open::that(&path) {
@@ -392,7 +392,7 @@ mod tests {
             Ok(fetched("https://ex.com/a", "text/html", "<p>hi</p>")),
         );
         assert!(matches!(follow, FollowUp::Done));
-        let html = slot.as_any().downcast_ref::<HtmlPanel>().unwrap();
+        let html = slot.downcast_ref::<HtmlPanel>().unwrap();
         assert_eq!(html.loading_id(), None);
         assert!(!html.is_placeholder());
         assert_eq!(slot.title(), "https://ex.com/a");
@@ -406,7 +406,7 @@ mod tests {
             Ok(fetched("https://ex.com/r.md", "text/markdown", "# r")),
         );
         assert!(matches!(follow, FollowUp::Done));
-        assert!(slot.as_any().downcast_ref::<MarkdownPanel>().is_some());
+        assert!(slot.downcast_ref::<MarkdownPanel>().is_some());
     }
 
     #[test]
@@ -416,13 +416,7 @@ mod tests {
             deliver(&mut slot, Err("timed out".to_string())),
             FollowUp::Done
         ));
-        assert_eq!(
-            slot.as_any()
-                .downcast_ref::<HtmlPanel>()
-                .unwrap()
-                .loading_id(),
-            None
-        );
+        assert_eq!(slot.downcast_ref::<HtmlPanel>().unwrap().loading_id(), None);
 
         let mut page = HtmlPanel::from_source(
             "a".into(),
@@ -435,7 +429,7 @@ mod tests {
             deliver(&mut slot, Err("timed out".to_string())),
             FollowUp::ErrorModal(m) if m == "Fetch failed: timed out"
         ));
-        let html = slot.as_any().downcast_ref::<HtmlPanel>().unwrap();
+        let html = slot.downcast_ref::<HtmlPanel>().unwrap();
         assert_eq!(html.loading_id(), None);
         assert_eq!(slot.title(), "https://ex.com/a");
     }
@@ -457,6 +451,6 @@ mod tests {
             follow,
             FollowUp::OpenNew(ViewKind::Markdown(_), _)
         ));
-        assert!(slot.as_any().downcast_ref::<HtmlPanel>().is_some());
+        assert!(slot.downcast_ref::<HtmlPanel>().is_some());
     }
 }

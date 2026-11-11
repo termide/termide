@@ -278,7 +278,7 @@ impl App {
         let number = self
             .layout_manager
             .active_panel()
-            .and_then(|panel| panel.as_any().downcast_ref::<AgentPanel>())
+            .and_then(|panel| panel.downcast_ref::<AgentPanel>())
             .map(AgentPanel::panel_id);
         let Some(panel) =
             restore_numbered_agent_panel(&settings, new_cwd.clone(), moved, agent, setup, number)
@@ -2822,7 +2822,7 @@ impl App {
             .layout_manager
             .iter_all_panels_mut()
             .filter_map(|panel| {
-                let agent = panel.as_any_mut().downcast_mut::<AgentPanel>()?;
+                let agent = panel.downcast_mut::<AgentPanel>()?;
                 Some((
                     agent.panel_id(),
                     agent.agent_name().to_string(),

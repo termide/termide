@@ -12,7 +12,6 @@ use ratatui::{
     text::Line,
     widgets::{Paragraph, Widget},
 };
-use std::any::Any;
 
 use termide_config::{is_go_end, is_go_home, is_move_down, is_move_up, Config};
 use termide_core::{
@@ -231,14 +230,6 @@ impl Panel for HelpPanel {
     fn captures_escape(&self) -> bool {
         // Help panel doesn't need to capture Escape
         false
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn is_help_panel(&self) -> bool {

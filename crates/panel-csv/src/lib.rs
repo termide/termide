@@ -20,7 +20,6 @@
 mod index;
 mod table;
 
-use std::any::Any;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -701,14 +700,6 @@ impl Panel for CsvPanel {
         Some(PanelState::Csv {
             path: self.path.clone(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

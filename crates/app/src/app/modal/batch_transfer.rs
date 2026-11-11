@@ -43,10 +43,11 @@ impl App {
 
     /// Where the entries selected in the active panel live.
     fn active_panel_source_location(&self) -> SourceLocation {
-        let Some(fm) = self.layout_manager.active_panel().and_then(|p| {
-            p.as_any()
-                .downcast_ref::<termide_panel_file_manager::FileManager>()
-        }) else {
+        let Some(fm) = self
+            .layout_manager
+            .active_panel()
+            .and_then(|p| p.downcast_ref::<termide_panel_file_manager::FileManager>())
+        else {
             return SourceLocation::Unknown;
         };
         if fm.is_remote() {
@@ -129,10 +130,7 @@ impl App {
             let active_is_remote = self
                 .layout_manager
                 .active_panel()
-                .and_then(|p| {
-                    p.as_any()
-                        .downcast_ref::<termide_panel_file_manager::FileManager>()
-                })
+                .and_then(|p| p.downcast_ref::<termide_panel_file_manager::FileManager>())
                 .map(|fm| fm.is_remote())
                 .unwrap_or(false);
 
@@ -471,10 +469,7 @@ impl App {
     )> {
         for group in &self.layout_manager.panel_groups {
             for panel in group.panels() {
-                if let Some(fm) = panel
-                    .as_any()
-                    .downcast_ref::<termide_panel_file_manager::FileManager>()
-                {
+                if let Some(fm) = panel.downcast_ref::<termide_panel_file_manager::FileManager>() {
                     if fm.is_remote() {
                         let fm_path = fm.vfs_state().current_path();
                         // Check if same connection (protocol + host + username)

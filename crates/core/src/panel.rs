@@ -478,12 +478,6 @@ pub trait Panel: Any {
         None
     }
 
-    /// Downcast to concrete type (immutable).
-    fn as_any(&self) -> &dyn Any;
-
-    /// Downcast to concrete type (mutable).
-    fn as_any_mut(&mut self) -> &mut dyn Any;
-
     // === Additional methods for application integration ===
 
     /// Get current working directory (for file manager and terminals).
@@ -549,3 +543,38 @@ pub trait Panel: Any {
         Line::from(Span::styled(truncated.to_string(), base_style))
     }
 }
+
+/// Reaching the concrete panel behind a `dyn Panel`, through the trait's
+/// `Any` supertrait.
+macro_rules! panel_downcasts {
+    ($($dyn:ty),*) => {$(
+        impl $dyn {
+            /// This panel as `Any`.
+            pub fn as_any(&self) -> &dyn Any {
+                self
+            }
+
+            /// This panel as mutable `Any`.
+            pub fn as_any_mut(&mut self) -> &mut dyn Any {
+                self
+            }
+
+            /// The panel as a `T`, if it is one.
+            pub fn downcast_ref<T: Panel>(&self) -> Option<&T> {
+                self.as_any().downcast_ref()
+            }
+
+            /// The panel as a mutable `T`, if it is one.
+            pub fn downcast_mut<T: Panel>(&mut self) -> Option<&mut T> {
+                self.as_any_mut().downcast_mut()
+            }
+
+            /// Whether the panel is a `T`.
+            pub fn is<T: Panel>(&self) -> bool {
+                self.as_any().is::<T>()
+            }
+        }
+    )*};
+}
+
+panel_downcasts!(dyn Panel, dyn Panel + Send);

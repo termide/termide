@@ -33,7 +33,6 @@ use nix::sys::signal::{self, Signal};
 use nix::unistd::Pid;
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use ratatui::{buffer::Buffer, layout::Rect, prelude::Widget, style::Style, text::Line};
-use std::any::Any;
 use std::io::Read;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
@@ -1662,14 +1661,6 @@ impl Panel for Terminal {
         Some(PanelState::Terminal {
             working_dir: self.shell_cwd(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<std::path::PathBuf> {

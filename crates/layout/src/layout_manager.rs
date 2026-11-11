@@ -470,7 +470,6 @@ impl Default for LayoutManager {
 mod tests {
     use super::*;
     use ratatui::{buffer::Buffer, layout::Rect};
-    use std::any::Any;
     use termide_core::{PanelEvent, RenderContext, WidthPreference};
 
     /// Minimal mock panel for layout tests.
@@ -500,12 +499,6 @@ mod tests {
         fn render(&mut self, _area: Rect, _buf: &mut Buffer, _ctx: &RenderContext) {}
         fn handle_key(&mut self, _chord: termide_core::KeyChord) -> Vec<PanelEvent> {
             vec![]
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn as_any_mut(&mut self) -> &mut dyn Any {
-            self
         }
         fn width_preference(&self) -> WidthPreference {
             self.width_pref

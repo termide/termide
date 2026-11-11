@@ -73,7 +73,7 @@ impl App {
         let Some(hex) = self
             .layout_manager
             .iter_all_panels_mut()
-            .filter_map(|panel| panel.as_any_mut().downcast_mut::<BinaryPanel>())
+            .filter_map(|panel| panel.downcast_mut::<BinaryPanel>())
             .find(|hex| hex.file_path() == path)
         else {
             return;

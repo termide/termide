@@ -33,7 +33,6 @@ mod transcript;
 mod unfinished;
 mod watch;
 
-use std::any::Any;
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Receiver;
@@ -2357,14 +2356,6 @@ impl Panel for AgentPanel {
 
     fn get_working_directory(&self) -> Option<PathBuf> {
         Some(self.cwd.clone())
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

@@ -16,7 +16,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::Widget,
 };
-use std::any::Any;
 
 use termide_core::{PanelEvent, ReferenceLocation, RenderContext, ThemeColors, WidthPreference};
 use termide_theme::Theme;
@@ -273,14 +272,6 @@ impl termide_core::Panel for ReferencesPanel {
             _ => {}
         }
         vec![]
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

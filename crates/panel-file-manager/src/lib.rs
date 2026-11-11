@@ -63,7 +63,6 @@ fn sort_entries(entries: &mut [FileEntry]) {
 
 use anyhow::Result;
 use ratatui::{buffer::Buffer, layout::Rect, prelude::Widget, widgets::Paragraph};
-use std::any::Any;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::mpsc;
@@ -974,14 +973,6 @@ impl Panel for FileManager {
         } else {
             Some(PanelState::FileManager { path_or_url })
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

@@ -814,7 +814,6 @@ mod tests {
     use super::*;
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
-    use std::any::Any;
     use termide_core::{HeightMode, Panel, PanelEvent, RenderContext};
 
     struct DummyPanel(&'static str);
@@ -829,12 +828,6 @@ mod tests {
         fn render(&mut self, _area: Rect, _buf: &mut Buffer, _ctx: &RenderContext) {}
         fn handle_key(&mut self, _chord: termide_core::KeyChord) -> Vec<PanelEvent> {
             vec![]
-        }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn as_any_mut(&mut self) -> &mut dyn Any {
-            self
         }
     }
 
@@ -861,12 +854,6 @@ mod tests {
         fn height_mode(&self) -> HeightMode {
             HeightMode::FitContent(self.0.get())
         }
-        fn as_any(&self) -> &dyn Any {
-            self
-        }
-        fn as_any_mut(&mut self) -> &mut dyn Any {
-            self
-        }
     }
 
     fn make_fit_panel(rows: u16) -> Box<dyn Panel> {
@@ -883,7 +870,6 @@ mod tests {
 
     fn set_fit_rows(g: &PanelGroup, index: usize, rows: u16) {
         g.panels()[index]
-            .as_any()
             .downcast_ref::<FitPanel>()
             .unwrap()
             .0

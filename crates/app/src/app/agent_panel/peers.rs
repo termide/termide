@@ -350,7 +350,7 @@ impl App {
     fn agent_panels(&mut self) -> impl Iterator<Item = &mut AgentPanel> {
         self.layout_manager
             .iter_all_panels_mut()
-            .filter_map(|panel| panel.as_any_mut().downcast_mut::<AgentPanel>())
+            .filter_map(|panel| panel.downcast_mut::<AgentPanel>())
     }
 
     fn list_peers(&mut self, from: Option<u64>) -> Result<Vec<PeerInfo>, String> {

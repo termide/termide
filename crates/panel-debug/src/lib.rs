@@ -5,8 +5,6 @@
 //! The session lives in a slot shared with the app, which starts it and
 //! polls its adapter; the panel reads it to draw and calls it on keys.
 
-use std::any::Any;
-
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
@@ -588,14 +586,6 @@ impl Panel for DebugPanel {
             }
             _ => CommandResult::None,
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

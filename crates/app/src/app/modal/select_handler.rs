@@ -23,7 +23,7 @@ impl App {
         let editor_file_path = self
             .layout_manager
             .active_panel()
-            .and_then(|p| p.as_any().downcast_ref::<termide_panel_editor::Editor>())
+            .and_then(|p| p.downcast_ref::<termide_panel_editor::Editor>())
             .and_then(|e| e.file_path().map(|p| p.to_path_buf()));
 
         let upload_info = {
@@ -126,10 +126,11 @@ impl App {
             if self.layout_manager.active_panel().map(|p| p.name()) == Some("binary") {
                 match selected {
                     0 => {
-                        if let Some(bin) = self.layout_manager.active_panel_mut().and_then(|p| {
-                            p.as_any_mut()
-                                .downcast_mut::<termide_panel_binary::BinaryPanel>()
-                        }) {
+                        if let Some(bin) = self
+                            .layout_manager
+                            .active_panel_mut()
+                            .and_then(|p| p.downcast_mut::<termide_panel_binary::BinaryPanel>())
+                        {
                             if let Err(e) = bin.save() {
                                 self.show_error_modal(format!("Save failed: {e}"));
                                 return Ok(());
@@ -149,7 +150,7 @@ impl App {
                     let editor_file_path = self
                         .layout_manager
                         .active_panel()
-                        .and_then(|p| p.as_any().downcast_ref::<termide_panel_editor::Editor>())
+                        .and_then(|p| p.downcast_ref::<termide_panel_editor::Editor>())
                         .and_then(|e| e.file_path().map(|p| p.to_path_buf()));
 
                     if let Some(panel) = self.layout_manager.active_panel_mut() {

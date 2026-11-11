@@ -271,7 +271,7 @@ impl App {
             // Update existing panel with new results, then focus it
             let mut update_data = Some((locations, symbol_name));
             for panel in self.layout_manager.iter_all_panels_mut() {
-                if let Some(refs_panel) = panel.as_any_mut().downcast_mut::<ReferencesPanel>() {
+                if let Some(refs_panel) = panel.downcast_mut::<ReferencesPanel>() {
                     if let Some((locs, sym)) = update_data.take() {
                         refs_panel.update(locs, sym);
                     }

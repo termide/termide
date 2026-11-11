@@ -766,10 +766,7 @@ impl App {
             // Its agent panels go with it, and the tasks they handed over
             // stop with them, as when a panel is closed.
             for panel in parked.layout.iter_all_panels_mut() {
-                if let Some(agent) = panel
-                    .as_any()
-                    .downcast_ref::<termide_panel_agent::AgentPanel>()
-                {
+                if let Some(agent) = panel.downcast_ref::<termide_panel_agent::AgentPanel>() {
                     termide_panel_agent::live::stop_all(agent.panel_id());
                     termide_panel_agent::live::clear_parked_of(agent.panel_id());
                 }

@@ -16,7 +16,6 @@ mod filter;
 mod format;
 mod render;
 
-use std::any::Any;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 
@@ -1097,14 +1096,6 @@ impl Panel for DbPanel {
             url: self.login_url(),
             label: self.label.clone(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

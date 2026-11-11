@@ -286,12 +286,6 @@ mod tests {
         fn handle_key(&mut self, _: termide_core::KeyChord) -> Vec<termide_core::PanelEvent> {
             vec![]
         }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-        fn as_any_mut(&mut self) -> &mut dyn std::any::Any {
-            self
-        }
         fn needs_attention(&self) -> bool {
             self.0
         }

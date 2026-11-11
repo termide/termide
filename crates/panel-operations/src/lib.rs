@@ -7,7 +7,6 @@
 
 pub mod rendering;
 
-use std::any::Any;
 use std::path::Path;
 use std::time::Instant;
 
@@ -424,14 +423,6 @@ impl Panel for OperationsPanel {
     fn to_state(&self, _project_dir: &Path) -> Option<PanelState> {
         // Operations panel is transient, don't persist to the layout
         None
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }
 

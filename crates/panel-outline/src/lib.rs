@@ -10,7 +10,6 @@ mod regex_fallback;
 pub mod symbols;
 mod treesitter;
 
-use std::any::Any;
 use std::path::PathBuf;
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -594,13 +593,5 @@ impl Panel for OutlinePanel {
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<termide_core::PanelState> {
         Some(termide_core::PanelState::Outline)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

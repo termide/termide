@@ -10,7 +10,6 @@
 //! wrapping. The configured toggle-view hotkey (or the `Edit` status chip) swaps
 //! the panel in place for the editable source.
 
-use std::any::Any;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -760,14 +759,6 @@ impl Panel for HtmlPanel {
         Some(PanelState::Html {
             path: self.file_path.clone(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

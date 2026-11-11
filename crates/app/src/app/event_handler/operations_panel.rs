@@ -82,9 +82,8 @@ impl App {
         // Find operations panel and update its data
         for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
-                if let Some(ops_panel) = panel
-                    .as_any_mut()
-                    .downcast_mut::<termide_panel_operations::OperationsPanel>()
+                if let Some(ops_panel) =
+                    panel.downcast_mut::<termide_panel_operations::OperationsPanel>()
                 {
                     let ops_list = self.state.operations_list();
                     ops_panel.update_operations(&ops_list, &self.project_root);
@@ -240,9 +239,8 @@ impl App {
         // Find the operations panel, update its data and select the operation
         for group in self.layout_manager.panel_groups.iter_mut() {
             for panel in group.panels_mut().iter_mut() {
-                if let Some(ops_panel) = panel
-                    .as_any_mut()
-                    .downcast_mut::<termide_panel_operations::OperationsPanel>()
+                if let Some(ops_panel) =
+                    panel.downcast_mut::<termide_panel_operations::OperationsPanel>()
                 {
                     // Update operations snapshot
                     let ops_list = self.state.operations_list();

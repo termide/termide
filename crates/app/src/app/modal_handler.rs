@@ -483,9 +483,8 @@ impl App {
                 PendingAction::SaveBinary => {
                     if value.get::<bool>().copied().unwrap_or(false) {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            if let Some(bin) = panel
-                                .as_any_mut()
-                                .downcast_mut::<termide_panel_binary::BinaryPanel>()
+                            if let Some(bin) =
+                                panel.downcast_mut::<termide_panel_binary::BinaryPanel>()
                             {
                                 match bin.save() {
                                     Ok(Some(bak)) => {
@@ -1059,10 +1058,7 @@ impl App {
                     use termide_modal::DbFilterResult;
                     if let Some(result) = value.get::<DbFilterResult>() {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            if let Some(db) = panel
-                                .as_any_mut()
-                                .downcast_mut::<termide_panel_db::DbPanel>()
-                            {
+                            if let Some(db) = panel.downcast_mut::<termide_panel_db::DbPanel>() {
                                 db.apply_filter_result(result.clone());
                             }
                         }
@@ -1095,10 +1091,7 @@ impl App {
                                 }
                             }
                         } else if let Some(panel) = self.layout_manager.active_panel_mut() {
-                            if let Some(db) = panel
-                                .as_any_mut()
-                                .downcast_mut::<termide_panel_db::DbPanel>()
-                            {
+                            if let Some(db) = panel.downcast_mut::<termide_panel_db::DbPanel>() {
                                 db.apply_row_edit(row, result.clone());
                             }
                         }
@@ -1110,9 +1103,8 @@ impl App {
                         match id.as_str() {
                             "reconnect" => {
                                 if let Some(panel) = self.layout_manager.active_panel_mut() {
-                                    if let Some(db) = panel
-                                        .as_any_mut()
-                                        .downcast_mut::<termide_panel_db::DbPanel>()
+                                    if let Some(db) =
+                                        panel.downcast_mut::<termide_panel_db::DbPanel>()
                                     {
                                         db.reconnect();
                                     }

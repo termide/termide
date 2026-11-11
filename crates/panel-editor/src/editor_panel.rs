@@ -5,7 +5,6 @@
 //! input dispatch (handle_key, handle_mouse, handle_scroll), and the
 //! cross-panel command bus (handle_command).
 
-use std::any::Any;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -762,14 +761,6 @@ impl Panel for Editor {
             // Unnamed buffer without changes - don't save
             None
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

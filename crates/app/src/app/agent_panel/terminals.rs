@@ -482,12 +482,9 @@ impl crate::app::App {
             }
             Expand::Shown(pid) => {
                 self.layout_manager.focus_panel_where(|panel| {
-                    panel
-                        .as_any()
-                        .downcast_ref::<Terminal>()
-                        .is_some_and(|terminal| {
-                            terminal.is_agent_shell() && terminal.child_pid() == pid
-                        })
+                    panel.downcast_ref::<Terminal>().is_some_and(|terminal| {
+                        terminal.is_agent_shell() && terminal.child_pid() == pid
+                    })
                 });
             }
             Expand::Missing => {}
@@ -500,7 +497,6 @@ impl crate::app::App {
     pub(in crate::app) fn collapse_agent_terminal(&mut self) -> bool {
         let shown = self.layout_manager.active_panel().is_some_and(|panel| {
             panel
-                .as_any()
                 .downcast_ref::<Terminal>()
                 .is_some_and(Terminal::is_agent_shell)
         });
@@ -530,7 +526,6 @@ impl crate::app::App {
 /// running — so a close that kills the panel's processes must skip it.
 pub(crate) fn ends_on_close(panel: &dyn termide_core::Panel) -> bool {
     !panel
-        .as_any()
         .downcast_ref::<Terminal>()
         .is_some_and(Terminal::is_agent_shell)
 }
@@ -546,7 +541,6 @@ impl crate::app::App {
         let ended = self.layout_manager.remove_panels_where(
             |panel| {
                 panel
-                    .as_any()
                     .downcast_ref::<Terminal>()
                     .is_some_and(|terminal| terminal.is_agent_shell() && !terminal.is_alive())
             },

@@ -486,7 +486,6 @@ impl App {
                     .iter_all_panels_mut()
                     .find_map(|candidate| {
                         candidate
-                            .as_any_mut()
                             .downcast_mut::<termide_panel_agent::AgentPanel>()
                             .filter(|agent| agent.panel_id() == panel)
                             .map(|agent| (agent.catalog(), agent.agent().to_string()))
@@ -510,7 +509,6 @@ impl App {
                             .iter_all_panels_mut()
                             .find_map(|candidate| {
                                 candidate
-                                    .as_any_mut()
                                     .downcast_mut::<termide_panel_agent::AgentPanel>()
                                     .filter(|agent| agent.panel_id() == panel)
                             })
@@ -531,7 +529,6 @@ impl App {
             PanelEvent::FocusDelegate { panel, call } => {
                 let found = self.layout_manager.focus_panel_where(|candidate| {
                     candidate
-                        .as_any()
                         .downcast_ref::<termide_panel_agent::AgentPanel>()
                         .is_some_and(|agent| agent.runs_task(panel, &call))
                 });
@@ -547,7 +544,6 @@ impl App {
             PanelEvent::FocusAgentPanel(id) => {
                 let found = self.layout_manager.focus_panel_where(|candidate| {
                     candidate
-                        .as_any()
                         .downcast_ref::<termide_panel_agent::AgentPanel>()
                         .is_some_and(|agent| agent.panel_id() == id)
                 });

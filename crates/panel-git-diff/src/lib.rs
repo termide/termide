@@ -10,7 +10,6 @@ mod unified;
 
 pub use model::{DiffHunk, DiffLine, FileDiff, FileStatus, LineKind};
 
-use std::any::Any;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
@@ -572,14 +571,6 @@ impl Panel for GitDiffPanel {
             }],
             _ => vec![],
         }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

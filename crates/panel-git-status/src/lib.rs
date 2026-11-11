@@ -18,7 +18,6 @@ use refresh::GitStatusRefreshResult;
 use types::FileTree;
 pub use types::{Button, Section, Selection};
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
@@ -582,14 +581,6 @@ impl Panel for GitStatusPanel {
             .map(|repo| PanelState::GitStatus {
                 repo_path: repo.to_path_buf(),
             })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

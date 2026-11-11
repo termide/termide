@@ -3,7 +3,6 @@
 //! Displays a list of all LSP diagnostics (errors, warnings, hints, info)
 //! with navigation and filtering capabilities.
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -638,13 +637,5 @@ impl Panel for DiagnosticsPanel {
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<termide_core::PanelState> {
         Some(termide_core::PanelState::Diagnostics)
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 }

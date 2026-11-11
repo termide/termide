@@ -22,7 +22,6 @@
 //! without changing the file length. `Ctrl+S` saves after a confirmation,
 //! backing the original up to `<file>.bak` (or a free `<file>.bak.N`) first.
 
-use std::any::Any;
 use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -672,14 +671,6 @@ impl Panel for BinaryPanel {
         Some(PanelState::Binary {
             path: self.file_path.clone(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

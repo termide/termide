@@ -226,10 +226,7 @@ impl App {
     )> {
         for group in &self.layout_manager.panel_groups {
             for panel in group.panels() {
-                if let Some(fm) = panel
-                    .as_any()
-                    .downcast_ref::<termide_panel_file_manager::FileManager>()
-                {
+                if let Some(fm) = panel.downcast_ref::<termide_panel_file_manager::FileManager>() {
                     if fm.is_remote() {
                         return Some((
                             fm.vfs_state().manager_arc(),

@@ -10,7 +10,6 @@
 pub mod inline;
 mod view;
 
-use std::any::Any;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -326,14 +325,6 @@ impl Panel for ImagePanel {
         Some(PanelState::Image {
             path: self.file_path.clone(),
         })
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
-    }
-
-    fn as_any_mut(&mut self) -> &mut dyn Any {
-        self
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {

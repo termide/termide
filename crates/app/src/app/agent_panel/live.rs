@@ -130,7 +130,7 @@ impl App {
         self.layout_manager
             .overlay
             .as_mut()
-            .and_then(|panel| panel.as_any_mut().downcast_mut::<AgentPanel>())
+            .and_then(|panel| panel.downcast_mut::<AgentPanel>())
     }
 
     /// Close the view shown over the layout: the delegate's cards it holds go
@@ -139,7 +139,7 @@ impl App {
         let Some(mut panel) = self.layout_manager.overlay.take() else {
             return;
         };
-        if let Some(view) = panel.as_any_mut().downcast_mut::<AgentPanel>() {
+        if let Some(view) = panel.downcast_mut::<AgentPanel>() {
             let parent = view.delegated_by();
             let cards = view.release_cards();
             // The view goes first, so the task's cards are no longer set
@@ -158,7 +158,7 @@ impl App {
         let Some(mut panel) = self.layout_manager.overlay.take() else {
             return;
         };
-        if let Some(view) = panel.as_any_mut().downcast_mut::<AgentPanel>() {
+        if let Some(view) = panel.downcast_mut::<AgentPanel>() {
             view.set_in_overlay(false);
         }
         self.add_panel(panel);
@@ -170,7 +170,6 @@ impl App {
     pub(in crate::app) fn give_cards(&mut self, parent: u64, cards: Vec<Card>) {
         let Some(target) = self.layout_manager.iter_all_panels_mut().find_map(|panel| {
             panel
-                .as_any_mut()
                 .downcast_mut::<AgentPanel>()
                 .filter(|agent| agent.panel_id() == parent)
         }) else {
@@ -187,7 +186,7 @@ impl App {
     pub(in crate::app) fn route_delegate_cards(&mut self) {
         let mut moving = Vec::new();
         for panel in self.layout_manager.iter_all_panels_mut() {
-            if let Some(agent) = panel.as_any_mut().downcast_mut::<AgentPanel>() {
+            if let Some(agent) = panel.downcast_mut::<AgentPanel>() {
                 let parent = agent.panel_id();
                 moving.extend(
                     agent
@@ -202,7 +201,6 @@ impl App {
                 Some(view) if view.runs_task(parent, &call) => Some(view),
                 _ => self.layout_manager.iter_all_panels_mut().find_map(|panel| {
                     panel
-                        .as_any_mut()
                         .downcast_mut::<AgentPanel>()
                         .filter(|agent| agent.runs_task(parent, &call))
                 }),
