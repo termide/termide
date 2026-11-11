@@ -191,6 +191,13 @@ pub struct AiSettings {
     /// an agent session may have open at once.
     #[serde(default = "agent_defaults::max_terminal_sessions")]
     pub max_terminal_sessions: usize,
+
+    /// How many messages the agents of the panels may pass one another —
+    /// `send_message`, a `fork`, a background task's answer — before the
+    /// user writes again. Past it the agent asks the user whether to allow
+    /// as many more; zero sets no limit. Open panels take a change at once.
+    #[serde(default = "agent_defaults::max_agent_messages")]
+    pub max_agent_messages: u32,
 }
 
 /// One connection to a model: the wire protocol or CLI agent, where it
@@ -760,6 +767,7 @@ impl Default for AiSettings {
             bell_on_attention: agent_defaults::bell_on_attention(),
             on_limit: termide_agent_core::LimitPolicy::default(),
             max_terminal_sessions: agent_defaults::max_terminal_sessions(),
+            max_agent_messages: agent_defaults::max_agent_messages(),
         }
     }
 }
@@ -1232,6 +1240,9 @@ mod agent_defaults {
     pub fn max_terminal_sessions() -> usize {
         10
     }
+    pub fn max_agent_messages() -> u32 {
+        10
+    }
     /// On: termide names itself to an endpoint that files usage by app, since
     /// it already sends its name in `User-Agent` to every endpoint. See
     /// [`Connection::app_attribution`].
@@ -1671,6 +1682,18 @@ mod terminal_settings_tests {
 #[cfg(test)]
 mod ai_settings_tests {
     use super::*;
+
+    #[test]
+    fn agent_messages_default_to_ten_and_are_read() {
+        let ai = |text: &str| toml::from_str::<Config>(text).unwrap().ai;
+        assert_eq!(ai("").max_agent_messages, 10);
+        assert_eq!(
+            ai("[ai]\nbell_on_attention = false\n").max_agent_messages,
+            10
+        );
+        assert_eq!(ai("[ai]\nmax_agent_messages = 0\n").max_agent_messages, 0);
+        assert_eq!(ai("[ai]\nmax_agent_messages = 40\n").max_agent_messages, 40);
+    }
 
     #[test]
     fn a_pasted_key_is_told_from_a_variable_name() {

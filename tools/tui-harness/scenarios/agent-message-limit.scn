@@ -1,0 +1,35 @@
+# The limit of messages agents pass one another without the user
+# (`ai.max_agent_messages`, 1 here): the first background task's answer is
+# that one message, so handing the scan over again asks the user on a card
+# whether to allow as many more; allowing lets the second task go, and its
+# answer comes back.
+config agent-message-limit.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "delegate the stock scan and again"
+key Enter
+wait "I'll hand the stock scan to a subagent." 20
+wait "Agent wants to run task" 15
+type "1"
+wait-gone "Agent wants to run task" 10
+# The first report starts the agent anew, one message without the user: the
+# second hand-over meets the limit.
+wait "Once more, in the background." 30
+wait "Agent wants to run task" 15
+type "1"
+wait "The agents have used up their messages without you (1)" 10
+expect "Allow 1 more"
+expect "Stop here"
+snapshot asked
+key Enter
+wait-gone "Allow 1 more" 10
+# Allowed: the second task runs, and its answer comes back.
+wait "Waiting for the second scan." 20
+wait "The subagent is back: 3 items" 40
+wait-gone "[■]" 15
+snapshot done
+quit

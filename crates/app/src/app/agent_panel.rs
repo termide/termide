@@ -1006,6 +1006,7 @@ pub(crate) fn publish_shell(configured: Option<&str>) {
 pub(crate) fn publish_ai_settings(settings: &AiSettings) {
     *APPLIED_AI.write().unwrap_or_else(PoisonError::into_inner) = Some(settings.clone());
     terminals::agent_terminals().set_limit(settings.max_terminal_sessions);
+    peers::set_hop_limit(settings.max_agent_messages);
     // A limit changed in the settings reaches the requests already queued.
     for (name, connection) in &settings.connections {
         if !connection.is_cli() {
@@ -1972,7 +1973,11 @@ impl Subagents {
         };
         // Its answer starts the delegating agent anew, so it counts among the
         // messages agents pass one another.
-        peers::may_hand_over(&self.project_root, parent)?;
+        peers::clear_to_pass(
+            ctx,
+            &self.project_root,
+            "hand nothing more over in the background",
+        )?;
         // Its answer is for the session that handed it over, wherever that
         // is by the time it comes.
         let parent_session = ctx.session.as_ref().and_then(|session| session.id.clone());
@@ -3260,6 +3265,7 @@ fn agent_setup(
     let provider_kind = connection.provider.clone();
     let provider = connection_provider(&connection_name, &connection);
     terminals::agent_terminals().set_limit(settings.max_terminal_sessions);
+    peers::set_hop_limit(settings.max_agent_messages);
 
     let mut catalog = FsCatalog::new(&cwd, project_root);
     let web = shared_web(&settings.web, &catalog.dirs);

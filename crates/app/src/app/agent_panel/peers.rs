@@ -6,16 +6,20 @@
 //! open in when it arrives, or, when it is open in none, into its log, to go
 //! with its next request once the user opens it again. It goes in as the
 //! sending agent's, headed with its name and panel, and counts how many messages agents have passed one another since the user
-//! last wrote: past [`MAX_HOPS`] the next is refused, so two agents cannot
-//! keep each other going without anyone watching.
+//! last wrote: past `ai.max_agent_messages` the agent asks the user whether
+//! to allow as many more, and without a yes the next is refused, so two
+//! agents cannot keep each other going without anyone watching.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
 
-use termide_agent_core::{MessageOrigin, OriginKind, Session, Tool, ToolContext, UserMessage};
+use termide_agent_core::{
+    MessageOrigin, OriginKind, Question, QuestionOption, QuestionReply, Session, Tool, ToolContext,
+    UserMessage,
+};
 use termide_agent_tools::{AgentsTool, ForkRequest, ForkTool, PeerInfo, SendMessageTool};
 use termide_panel_agent::AgentPanel;
 
@@ -23,8 +27,25 @@ use super::Handover;
 use crate::app::App;
 
 /// How many messages agents may pass one another before the user writes
-/// again.
+/// again, until the settings say otherwise.
 pub(super) const MAX_HOPS: u32 = 10;
+
+/// The applied `ai.max_agent_messages`; zero sets no limit.
+static HOP_LIMIT: AtomicU32 = AtomicU32::new(MAX_HOPS);
+
+/// Apply `ai.max_agent_messages`: open panels take it at once.
+pub(super) fn set_hop_limit(limit: u32) {
+    HOP_LIMIT.store(limit, Ordering::Relaxed);
+}
+
+/// How many messages agents may pass one another before the user writes
+/// again; `None` for no limit.
+fn hop_limit() -> Option<u32> {
+    match HOP_LIMIT.load(Ordering::Relaxed) {
+        0 => None,
+        limit => Some(limit),
+    }
+}
 
 /// How long a call waits for the app to answer.
 const REPLY_WAIT: Duration = Duration::from_secs(10);
@@ -88,6 +109,13 @@ enum Request {
         panel: u64,
         reply: Sender<Result<u32, String>>,
     },
+    /// The user allowed the agents more: start the count of panel `panel`
+    /// again.
+    Renew {
+        project_root: PathBuf,
+        panel: u64,
+        reply: Sender<Result<(), String>>,
+    },
 }
 
 fn port() -> &'static (Sender<Request>, Mutex<Receiver<Request>>) {
@@ -137,6 +165,7 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
     let agent = caller.to_string();
     let send = Arc::new(
         move |ctx: &ToolContext, to: &str, kind: OriginKind, text: &str| {
+            clear_to_pass(ctx, &root, "send no more")?;
             let (reply, answer) = mpsc::channel();
             ask(
                 Request::Send {
@@ -165,6 +194,7 @@ pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
     let root = project_root.to_path_buf();
     let agent = caller.to_string();
     let fork = Arc::new(move |ctx: &ToolContext, request: &ForkRequest| {
+        clear_to_pass(ctx, &root, "fork no more")?;
         let (reply, answer) = mpsc::channel();
         ask(
             Request::Fork {
@@ -184,26 +214,94 @@ pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
     Arc::new(ForkTool::new(fork))
 }
 
-/// Whether panel `panel` may hand a task over in the background: its
-/// answer is one more message passed without the user, refused past
-/// [`MAX_HOPS`] as any other.
-pub(super) fn may_hand_over(project_root: &Path, panel: u64) -> Result<(), String> {
+/// How many messages agents passed one another to get the run of panel
+/// `panel` going.
+fn hops_of(project_root: &Path, panel: u64) -> Result<u32, String> {
     let (reply, answer) = mpsc::channel();
-    let hops = ask(
+    ask(
         Request::Hops {
             project_root: project_root.to_path_buf(),
             panel,
             reply,
         },
         &answer,
-    )?;
-    next_hops(hops).map(drop).map_err(|_| {
-        format!(
-            "the agents have passed {MAX_HOPS} messages to one another without the user: \
-             hand nothing more over in the background, finish what you can and tell the user \
-             where things stand"
-        )
-    })
+    )
+}
+
+/// Whether panel `panel` may hand a task over in the background without
+/// asking anyone: its answer is one more message passed without the user.
+pub(super) fn may_hand_over(project_root: &Path, panel: u64) -> Result<(), String> {
+    next_hops(hops_of(project_root, panel)?).map(drop)
+}
+
+/// Before the agent of the panel `ctx` comes from passes one more message
+/// without the user — `refused` says what it is to stop doing otherwise:
+/// past the limit, the user is asked whether to allow as many more, which
+/// starts the count again as a message of theirs would. With no one to ask,
+/// or no yes, the message is refused.
+pub(super) fn clear_to_pass(
+    ctx: &ToolContext,
+    project_root: &Path,
+    refused: &str,
+) -> Result<(), String> {
+    let (Some(panel), Some(limit)) = (ctx.panel, hop_limit()) else {
+        return Ok(());
+    };
+    if hops_of(project_root, panel)? < limit {
+        return Ok(());
+    }
+    let refusal = |why: &str| format!("{}{why}", spent(limit, refused));
+    let Some(asker) = &ctx.asker else {
+        return Err(refusal(""));
+    };
+    let t = termide_i18n::t();
+    let allow = t.agent_hop_limit_allow_fmt(limit as usize);
+    let question = Question {
+        header: t.agent_hop_limit_header().to_string(),
+        question: t.agent_hop_limit_question_fmt(limit as usize),
+        options: vec![
+            QuestionOption {
+                label: allow.clone(),
+                description: t.agent_hop_limit_allow_description().to_string(),
+            },
+            QuestionOption {
+                label: t.agent_hop_limit_stop().to_string(),
+                description: t.agent_hop_limit_stop_description().to_string(),
+            },
+        ],
+        multi_select: false,
+    };
+    match asker.ask(vec![question]) {
+        QuestionReply::Answered(answers) => {
+            let answer = answers.into_iter().next().unwrap_or_default();
+            if answer.chosen.contains(&allow) {
+                let (reply, answer) = mpsc::channel();
+                return ask(
+                    Request::Renew {
+                        project_root: project_root.to_path_buf(),
+                        panel,
+                        reply,
+                    },
+                    &answer,
+                );
+            }
+            match answer.custom {
+                Some(words) => Err(refusal(&format!(" The user answered: {words}"))),
+                None => Err(refusal(" The user chose to stop here.")),
+            }
+        }
+        QuestionReply::Declined => Err(refusal(" The user dismissed the question.")),
+    }
+}
+
+/// Why one more message may not go: `limit` were passed without the user,
+/// and the agent is to stop doing what `refused` says.
+fn spent(limit: u32, refused: &str) -> String {
+    format!(
+        "the agents have passed {limit} messages to one another without the user \
+         (`ai.max_agent_messages`): {refused}, finish what you can and tell the user where \
+         things stand."
+    )
 }
 
 /// Hand the answer of a background task the delegate `agent` ran to the
@@ -325,6 +423,16 @@ impl App {
                     let hops = self.in_project(&project_root, |app| app.agent_hops_of(panel));
                     let _ = reply.send(hops);
                 }
+                Request::Renew {
+                    project_root,
+                    panel,
+                    reply,
+                } => {
+                    let renewed = self
+                        .in_project(&project_root, |app| app.renew_agent_hops(panel))
+                        .and_then(|renewed| renewed);
+                    let _ = reply.send(renewed);
+                }
                 Request::Report {
                     project_root,
                     to,
@@ -393,6 +501,15 @@ impl App {
         self.agent_panels()
             .find(|panel| panel.panel_id() == id)
             .map_or(0, |panel| panel.agent_hops())
+    }
+
+    /// The user allowed the agents more: start the count of panel `id`
+    /// again, as a message of theirs would.
+    fn renew_agent_hops(&mut self, id: u64) -> Result<(), String> {
+        self.agent_panels()
+            .find(|panel| panel.panel_id() == id)
+            .map(AgentPanel::renew_agent_hops)
+            .ok_or_else(|| "the panel this call comes from is gone".to_string())
     }
 
     /// Deliver a background task's answer to the session `parent` that
@@ -600,14 +717,16 @@ fn leave_in_log(
 /// The count a message from a panel whose run `sent` messages got going
 /// carries, or why it may not go.
 fn next_hops(sent: u32) -> Result<u32, String> {
-    let hops = sent + 1;
-    if hops > MAX_HOPS {
-        return Err(format!(
-            "the agents have passed {MAX_HOPS} messages to one another without the user: \
-             send no more, finish what you can and tell the user where things stand"
-        ));
+    next_hops_within(sent, hop_limit())
+}
+
+/// [`next_hops`] under `limit`, `None` for none.
+fn next_hops_within(sent: u32, limit: Option<u32>) -> Result<u32, String> {
+    let hops = sent.saturating_add(1);
+    match limit {
+        Some(limit) if hops > limit => Err(spent(limit, "send no more")),
+        _ => Ok(hops),
     }
-    Ok(hops)
 }
 
 /// A `fork` call on its way to the app.
@@ -652,6 +771,9 @@ pub(super) fn serve_for_test(
                 Ok(Request::Hops { reply, .. }) => {
                     let _ = reply.send(Ok(hops));
                 }
+                Ok(Request::Renew { reply, .. }) => {
+                    let _ = reply.send(Ok(()));
+                }
                 Ok(Request::Report { text, .. }) => {
                     let _ = reports.send(text);
                 }
@@ -668,11 +790,76 @@ mod tests {
 
     #[test]
     fn a_chain_of_messages_without_the_user_is_cut_off() {
-        assert_eq!(next_hops(0), Ok(1));
-        assert_eq!(next_hops(MAX_HOPS - 1), Ok(MAX_HOPS));
-        assert!(next_hops(MAX_HOPS)
-            .unwrap_err()
-            .contains("without the user"));
+        let limit = Some(MAX_HOPS);
+        assert_eq!(next_hops_within(0, limit), Ok(1));
+        assert_eq!(next_hops_within(MAX_HOPS - 1, limit), Ok(MAX_HOPS));
+        let refused = next_hops_within(MAX_HOPS, limit).unwrap_err();
+        assert!(refused.contains("without the user"), "{refused}");
+        assert!(refused.contains("ai.max_agent_messages"), "{refused}");
+        assert!(next_hops_within(40, Some(50)).is_ok());
+        // No limit: the chain goes on.
+        assert_eq!(next_hops_within(u32::MAX, None), Ok(u32::MAX));
+    }
+
+    /// Past the limit the agent asks its user: a yes starts the count again
+    /// and lets the message go, anything else refuses it, and with no one
+    /// to ask it is refused outright.
+    #[test]
+    fn past_the_limit_the_user_is_asked_whether_to_allow_more() {
+        let (reports, _) = mpsc::channel();
+        let serving = CancelToken::new();
+        let server = serve_for_test(MAX_HOPS, reports, serving.clone());
+        let root = Path::new("/proj");
+        let with_asker = || {
+            let (asker, questions) = termide_agent_core::question_channel(CancelToken::new());
+            let mut ctx = ToolContext::new("/proj");
+            ctx.panel = Some(7);
+            ctx.asker = Some(asker);
+            (ctx, questions)
+        };
+        let answering = |questions: Receiver<termide_agent_core::QuestionEnvelope>,
+                         pick: Option<usize>| {
+            std::thread::spawn(move || {
+                let envelope = questions.recv().unwrap();
+                let question = &envelope.questions[0];
+                assert!(question.question.contains(&MAX_HOPS.to_string()));
+                let reply = match pick {
+                    Some(index) => {
+                        QuestionReply::Answered(vec![termide_agent_core::QuestionAnswer {
+                            chosen: vec![question.options[index].label.clone()],
+                            custom: None,
+                        }])
+                    }
+                    None => QuestionReply::Declined,
+                };
+                envelope.reply.send(reply).unwrap();
+            })
+        };
+
+        let (ctx, questions) = with_asker();
+        let user = answering(questions, Some(0));
+        assert_eq!(clear_to_pass(&ctx, root, "send no more"), Ok(()));
+        user.join().unwrap();
+
+        let (ctx, questions) = with_asker();
+        let user = answering(questions, Some(1));
+        let refused = clear_to_pass(&ctx, root, "send no more").unwrap_err();
+        assert!(refused.contains("chose to stop"), "{refused}");
+        user.join().unwrap();
+
+        let (ctx, questions) = with_asker();
+        let user = answering(questions, None);
+        let refused = clear_to_pass(&ctx, root, "send no more").unwrap_err();
+        assert!(refused.contains("dismissed"), "{refused}");
+        user.join().unwrap();
+
+        let (mut ctx, _questions) = with_asker();
+        ctx.asker = None;
+        let refused = clear_to_pass(&ctx, root, "fork no more").unwrap_err();
+        assert!(refused.contains("fork no more"), "{refused}");
+
+        serving.cancel();
+        server.join().unwrap();
     }
 
     fn from_peer(text: &str) -> UserMessage {

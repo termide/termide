@@ -284,6 +284,10 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_agent_handoff_model(),
                 field_type: FieldType::OptionalText,
             },
+            FieldDescriptor {
+                label: t.settings_agent_max_agent_messages(),
+                field_type: FieldType::Number,
+            },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
@@ -381,6 +385,10 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             }
             AI_PERMISSION_MODE_FIELD => permission_mode_label(config.ai.permission_mode()),
             AI_ON_LIMIT_FIELD => on_limit_label(config.ai.on_limit),
+            AI_MAX_AGENT_MESSAGES_FIELD => match config.ai.max_agent_messages {
+                0 => i18n::t().settings_value_no_limit().to_string(),
+                n => n.to_string(),
+            },
             index => match side_field(config, index) {
                 Some((side, false)) => side_connection_label(&side.connection),
                 Some((side, true)) if side.model.is_empty() => i18n::t()
@@ -692,6 +700,9 @@ fn cycle_fold_blocks(config: &mut Config, forward: bool) {
 
 /// The AI tab's field for what a run stopped by a limit or an outage does.
 pub(super) const AI_ON_LIMIT_FIELD: usize = 10;
+/// The AI tab's field for how many messages agents pass one another
+/// without the user.
+pub(super) const AI_MAX_AGENT_MESSAGES_FIELD: usize = 17;
 
 /// A limit policy's localized name.
 fn on_limit_label(policy: LimitPolicy) -> String {
@@ -1079,9 +1090,9 @@ mod field_index_tests {
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            17,
-            "the permission mode, its reviewer and model, the limit policy and the side \
-             models follow the web fields"
+            18,
+            "the permission mode, its reviewer and model, the limit policy, the side \
+             models and the agent message limit follow the web fields"
         );
         assert!(matches!(fields[6].field_type, FieldType::OptionalText));
         assert!(matches!(fields[7].field_type, FieldType::Enum));

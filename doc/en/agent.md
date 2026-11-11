@@ -25,6 +25,7 @@ fold_blocks = "immediately"        # immediately (default) | on-finish | never
 bell_on_attention = true           # default; ring the bell when a panel out of sight waits for you
 on_limit = "ask"                   # default; ask | ask_else_wait | wait | stop — see "When a run fails"
 max_terminal_sessions = 10         # default; terminals one agent session keeps open at most — see "Terminal sessions"
+max_agent_messages = 10            # default; messages agents pass one another without you, 0 for no limit — see "Talking to other panels"
 
 [ai.connections.local]
 provider = "openai_compatible"     # openai_compatible (default), anthropic_compatible, claude_code, codex, gemini_cli
@@ -2259,15 +2260,15 @@ gets `jobs` only by naming it. Subagents have neither.
 | Work | Set going by | Its row above the input | Stopped by | What comes back | Bounded by |
 |---|---|---|---|---|---|
 | A subagent waited for | the agent's `task` | `& Delegating to · agent` | `✕`, `Esc` | its answer, as the call's result | 50 model calls (`max_turns`) |
-| A task in the background | `task` with `background`, or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message | the ten messages agents pass without you |
+| A task in the background | `task` with `background`, or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message | the messages agents pass without you (`max_agent_messages`) |
 | A parked task | a limit that passes on its own | `↻ Parked at a limit · agent 21:50` | `✕`, `jobs` (both give it up) | its answer once it goes again and ends | six tries |
 | A task left unfinished | termide closing while it ran | `& Delegating to · agent · left unfinished` | its session's carry-on card | its answer once carried on | — |
 | A call moved to the background | an external agent, to take a message typed while it ran | `$ Running  cargo test` | `✕`, `jobs`, `Esc` | its result, to the agent, which goes on by itself | — |
 | A terminal | `shell` with `session` or `background` | `$ Terminal · name` | `✕`, `terminals close` | what it printed, when the agent reads it | 2 MiB in memory, 256 MiB of log |
 | A `/goal` | you | `◎ Heading for the goal` | `✕`, `/goal stop`, `Esc` | the judge's verdict | the judge; it pauses when the agent only talks |
 | A `/loop` | you | `↺ Repeating every 5m · 3/100` | `✕`, `/loop stop`, `Esc` | each run, in the transcript | 100 runs |
-| A fork | the agent's `fork` | none: a panel of its own | closing its panel | nothing | the ten messages agents pass without you |
-| A message to another panel | the agent's `send_message` | none | — | an answer, as a message, when one is asked | the ten messages agents pass without you |
+| A fork | the agent's `fork` | none: a panel of its own | closing its panel | nothing | the messages agents pass without you (`max_agent_messages`) |
+| A message to another panel | the agent's `send_message` | none | — | an answer, as a message, when one is asked | the messages agents pass without you (`max_agent_messages`) |
 
 `⏸` in the session lists means only a session left with work to carry on —
 the parked task's own session among them; in the strip, `‖` is the panel's
@@ -2306,9 +2307,15 @@ agent opens with `&` in the transcript, the verb saying which way it goes:
 for a message sent, `& Listing agent panels` for `agents`. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
 in plan mode none goes; `agents` only reads. Agents may pass ten messages to
-one another without you; the next is refused and the agent told to finish
-and tell you where things stand, and anything you write starts the count
-again. Codex and Gemini CLI, on tools of their own, do not have these two.
+one another without you — `max_agent_messages` under `[ai]`, also on the
+settings window's AI page, sets how many, `0` for no limit, and open panels
+take a change at once. Before the next, the agent asks you on a card whether
+to allow as many more: allowing counts as a message of yours and starts the
+count again; stopping, dismissing the card or an answer of your own refuses
+the message, and the agent is told to finish and tell you where things
+stand. With no one to ask, the message is refused. Anything you write starts
+the count again too. Codex and Gemini CLI, on tools of their own, do not
+have these two.
 
 Agents in different panels may work on the same files. So that one does not
 undo another's change unseen, termide notes which panel read and changed

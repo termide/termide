@@ -236,7 +236,12 @@ counter; `ToolContext::panel` carries it to the tools, from termide's loop
 sender is known without a session id. The calls go down a channel the app
 serves on its tick, like the delegations; the app delivers the message as a
 `MessageOrigin` with the sender's panel (the frame's `panel="…"`, for the
-answer) and a hop count: the sender panel's count plus one, refused past ten.
+answer) and a hop count: the sender panel's count plus one, refused past
+`ai.max_agent_messages` (ten by default, zero for none, a process-wide atomic
+`publish_ai_settings` sets). Before refusing, `clear_to_pass` asks the user
+on the sending agent's thread, through its `UserAsker`; a yes sends
+`Request::Renew`, which zeroes the sender panel's count as a message of the
+user's does. The UI-thread check stays behind it.
 A panel takes the count of the message that starts its run (the highest,
 while steered ones join it) and zero from anything the user sends. A panel
 running a delegated task refuses messages. Codex and Gemini CLI get only
@@ -325,7 +330,9 @@ the same path; its call returns at once, so the registry lists it in the
 delegating panel's state strip, with a `✕`. Its cards outlive a stop of
 that panel's run (`detached`), since stopping the run does not reach it;
 closing the panel stops it, after a confirmation that counts such tasks.
-The hop limit is checked before it starts, through the peers channel.
+The hop limit is checked before it starts, through the peers channel, asking
+the user past it as a message does; a waited task the user's message moves
+aside is only checked, nobody being there to ask on that thread.
 
 ## 3b. Web tools
 

@@ -41,7 +41,8 @@ minute.
   `local` connection at it; it plays a fixed task (read
   `inventory/report.py`, edit it, run the tests, answer), or, asked to
   "delegate the stock scan", hands a task to a subagent in the background
-  and quotes its report; asked to "break the count", it makes a number a
+  and quotes its report ("… and again" hands it over a second time when the
+  first report comes back); asked to "break the count", it makes a number a
   string in a Cargo project's `src/main.rs` and repeats what the edit's
   result said of the language server's errors. It logs the model every call asks for. `mock-acp codex`
   (or `claude_code`, `gemini_cli`) makes that ACP agent the connection and
@@ -88,7 +89,9 @@ ACP), `agent-review` (the Claude Code stand-in's edit reviewed with
 `agent-lsp-errors` and `agent-lsp-new-errors` (rust-analyzer's errors in
 the mock model's edit result, for a file no editor has, and the new ones
 alone for one an editor has; both need rust-analyzer on `PATH`), `delegate` (a background subagent's row and report, on the model
-`[ai.subagents]` names), `goal` (`/goal` with its judge on the model
+`[ai.subagents]` names), `agent-message-limit` (past
+`max_agent_messages` the card asking whether to allow more, and the task
+going on once allowed), `goal` (`/goal` with its judge on the model
 `[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
 to the mode worked in, past the ones `Shift+Tab` passes through) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in

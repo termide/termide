@@ -595,9 +595,10 @@ impl SettingsModal {
                     Field(16), // its model
                     Spacer,
                     Header(t.settings_header_permissions()),
-                    Field(7), // permission mode for new sessions
-                    Field(8), // auto mode reviewer
-                    Field(9), // its model
+                    Field(7),  // permission mode for new sessions
+                    Field(8),  // auto mode reviewer
+                    Field(9),  // its model
+                    Field(17), // messages between agents without the user
                     Spacer,
                     Header(t.settings_header_transcript()),
                     Field(2), // autofold
@@ -917,11 +918,13 @@ impl SettingsModal {
                 1 => self.config.vault.lock_after_mins = val,
                 _ => {}
             },
-            SettingsTab::Ai => {
-                if index == 0 {
-                    self.config.ai.max_tokens_per_turn = i64::try_from(val).unwrap_or(i64::MAX);
+            SettingsTab::Ai => match index {
+                0 => self.config.ai.max_tokens_per_turn = i64::try_from(val).unwrap_or(i64::MAX),
+                super::fields::AI_MAX_AGENT_MESSAGES_FIELD => {
+                    self.config.ai.max_agent_messages = u32::try_from(val).unwrap_or(u32::MAX);
                 }
-            }
+                _ => {}
+            },
             SettingsTab::Connection => self.apply_connection_number(index, val),
             _ => {}
         }
@@ -1042,6 +1045,33 @@ mod content_row_tests {
         modal.commit_edit();
         assert_eq!(modal.config.terminal.scrollback_lines, 2500);
         assert_eq!(modal.config.terminal.default_shell, None);
+    }
+
+    #[test]
+    fn the_agent_messages_field_edits_the_limit_and_zero_lifts_it() {
+        let field = super::super::fields::AI_MAX_AGENT_MESSAGES_FIELD;
+        let mut modal = SettingsModal::new(Config::default(), Config::default(), false);
+        modal.active_tab = SettingsTab::Ai;
+        modal.field_cursor = modal
+            .content_rows()
+            .iter()
+            .position(|row| *row == ContentRow::Field(field))
+            .expect("the agent messages field is shown");
+        assert_eq!(modal.field_value(field), "10");
+
+        let set = |modal: &mut SettingsModal, text: &str| {
+            modal.start_edit();
+            modal.edit_input = termide_ui::TextInput::with_text(text.to_string());
+            modal.commit_edit();
+        };
+        set(&mut modal, "40");
+        assert_eq!(modal.config.ai.max_agent_messages, 40);
+        set(&mut modal, "0");
+        assert_eq!(modal.config.ai.max_agent_messages, 0);
+        assert_eq!(
+            modal.field_value(field),
+            termide_i18n::t().settings_value_no_limit()
+        );
     }
 }
 
