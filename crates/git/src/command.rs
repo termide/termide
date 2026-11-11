@@ -181,6 +181,36 @@ pub(crate) fn run_git_with_stderr(repo: &Path, args: &[&str], op_name: &str) -> 
     }
 }
 
+/// Run a git command that reads `input` on stdin, returning its stdout, or
+/// git's own words on failure.
+pub(crate) fn run_git_with_input(
+    repo: &Path,
+    args: &[&str],
+    input: &[u8],
+) -> Result<Vec<u8>, String> {
+    use std::io::Write;
+    let mut child = hardened_git(repo, args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))?;
+    // Written from a thread: a large input would otherwise fill the pipe
+    // while git, writing its own output, waits for us to read it.
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("git {}: {e}", args.first().unwrap_or(&"")))?;
+    let _ = writer.join();
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{network_command, SshAuth};

@@ -5474,6 +5474,7 @@ dependencies = [
  "log",
  "similar",
  "tempfile",
+ "termide-fsutil",
  "termide-i18n",
 ]
 

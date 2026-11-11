@@ -15,6 +15,7 @@ mod files;
 pub mod graph;
 mod log_stream;
 mod operations;
+mod patch;
 mod remote_url;
 mod repo_manager;
 mod repo_tree;
@@ -45,6 +46,7 @@ pub use operations::{
     commit, init_repo, revert_all, revert_file, stage_all, stage_file, stage_files, unstage_all,
     unstage_file, unstage_files,
 };
+pub use patch::{apply_part, restore_blob, save_blob, PatchAction, PatchError, PatchPart};
 pub use remote_url::{get_commit_web_url, remote_host};
 pub use repo_manager::{project_repos, RepoManager};
 pub use repo_tree::{

@@ -14,6 +14,7 @@ log.workspace = true
 similar.workspace = true
 
 # Workspace crates
+termide-fsutil = { path = "../fsutil" }
 termide-i18n = { path = "../i18n" }
 
 [dev-dependencies]
