@@ -615,21 +615,28 @@ impl Backend for AcpRuntime {
         ) {
             return Err(PromptError::Stopped);
         }
-        if self
-            .shared
-            .busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
         {
-            return Err(PromptError::Busy);
+            // The turn is claimed and its message queued under the queue's
+            // lock, which `kick` decides under: a kick from the handshake
+            // finishing in between would otherwise find a claimed turn with
+            // nothing to run and end it, stranding the message.
+            let mut queue = self
+                .shared
+                .queue
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if self
+                .shared
+                .busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return Err(PromptError::Busy);
+            }
+            self.shared.cancel.reset();
+            let _ = self.shared.events.send(AgentEvent::AgentStart);
+            queue.insert(0, message);
         }
-        self.shared.cancel.reset();
-        let _ = self.shared.events.send(AgentEvent::AgentStart);
-        self.shared
-            .queue
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(0, message);
         self.shared.kick();
         Ok(())
     }
@@ -647,17 +654,25 @@ impl Backend for AcpRuntime {
         ) {
             return Err(PromptError::Stopped);
         }
-        if self
-            .shared
-            .busy
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
         {
-            return Err(PromptError::Busy);
+            // Claimed under the queue's lock, as in `prompt`.
+            let _queue = self
+                .shared
+                .queue
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            if self
+                .shared
+                .busy
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                return Err(PromptError::Busy);
+            }
+            self.shared.retry_pending.store(true, Ordering::Release);
+            self.shared.cancel.reset();
+            let _ = self.shared.events.send(AgentEvent::AgentStart);
         }
-        self.shared.retry_pending.store(true, Ordering::Release);
-        self.shared.cancel.reset();
-        let _ = self.shared.events.send(AgentEvent::AgentStart);
         self.shared.kick();
         Ok(())
     }
@@ -1592,7 +1607,11 @@ impl Shared {
                 return;
             }
         };
+        // Decided under the queue's lock, which `prompt` and `retry` claim a
+        // turn under: a turn seen claimed has its message or retry in place.
+        let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
         if self.retry_pending.swap(false, Ordering::AcqRel) {
+            drop(queue);
             let prompt = self.retry_blocks();
             let this = Arc::clone(self);
             std::thread::spawn(move || this.run_retry(&session_id, prompt));
@@ -1602,10 +1621,10 @@ impl Shared {
         // usually one thought written in pieces. A command's output or
         // another agent's message goes on its own, keeping its mark.
         let message = {
-            let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
             let run = UserMessage::merged_run(queue.iter());
             UserMessage::merge(queue.drain(..run).collect())
         };
+        drop(queue);
         let Some(message) = message else {
             let _ = self.events.send(AgentEvent::AgentEnd);
             self.busy.store(false, Ordering::Release);
