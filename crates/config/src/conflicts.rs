@@ -320,6 +320,14 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         &t.switch_directory,
     );
     push(&mut out, "terminal", "send_to_agent", &t.send_to_agent);
+    push(&mut out, "terminal", "prev_prompt", &t.prev_prompt);
+    push(&mut out, "terminal", "next_prompt", &t.next_prompt);
+    push(
+        &mut out,
+        "terminal",
+        "copy_command_output",
+        &t.copy_command_output,
+    );
 
     out
 }

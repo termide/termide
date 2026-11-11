@@ -186,6 +186,9 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "search",
             "switch_directory",
             "send_to_agent",
+            "prev_prompt",
+            "next_prompt",
+            "copy_command_output",
         ],
         7 => &[
             "sort",
@@ -364,7 +367,10 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             scroll_bottom,
             search,
             switch_directory,
-            send_to_agent
+            send_to_agent,
+            prev_prompt,
+            next_prompt,
+            copy_command_output
         ),
         7 => kb_get!(
             config.database.keybindings,
@@ -613,7 +619,10 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             scroll_bottom,
             search,
             switch_directory,
-            send_to_agent
+            send_to_agent,
+            prev_prompt,
+            next_prompt,
+            copy_command_output
         ),
         7 => kb_set!(
             config.database.keybindings,

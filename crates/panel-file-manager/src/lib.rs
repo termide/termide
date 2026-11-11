@@ -1923,6 +1923,7 @@ mod tests {
             terminal_width: 30,
             terminal_height: 12,
             border_right_x: Some(29),
+            border_left_x: None,
             border_bottom_y: Some(11),
         };
         let mut buf = Buffer::empty(Rect::new(0, 0, 30, 12));

@@ -239,6 +239,12 @@ pub trait Translation: Send + Sync {
     fn help_desc_revert_change(&self) -> &str;
     // Editor and terminal text handed to the agent
     fn help_desc_send_to_agent(&self) -> &str;
+    // Terminal shell integration: commands the shell marks
+    fn help_desc_prev_prompt(&self) -> &str;
+    fn help_desc_next_prompt(&self) -> &str;
+    fn help_desc_copy_command_output(&self) -> &str;
+    fn terminal_no_command_output(&self) -> &str;
+    fn terminal_command_output_copied(&self, lines: usize) -> String;
     fn agent_mention_selection(&self) -> &str;
     fn agent_mention_term(&self) -> &str;
     fn agent_snippet_no_selection(&self) -> &str;
@@ -1617,6 +1623,7 @@ pub trait Translation: Send + Sync {
     // Settings modal — Terminal fields
     fn settings_terminal_default_shell(&self) -> &str;
     fn settings_terminal_scrollback_lines(&self) -> &str;
+    fn settings_terminal_shell_integration(&self) -> &str;
 
     // Settings modal — LSP fields
     fn settings_lsp_enabled(&self) -> &str;

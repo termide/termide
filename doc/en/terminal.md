@@ -31,6 +31,8 @@ The terminal panel provides a full-featured terminal emulator with pseudotermina
 | `Shift+PageDown`       | Scroll output history down                 |
 | `Shift+Home`           | Go to beginning of output history          |
 | `Shift+End`            | Go to current line (end of history)        |
+| `Ctrl+Shift+Up`        | Previous command's prompt (see [Shell Integration](#shell-integration)) |
+| `Ctrl+Shift+Down`      | Next command's prompt                      |
 
 **Keyboard Layout Support:**
 
@@ -89,15 +91,47 @@ works across the entire scrollback buffer and the visible screen:
 
 The search keybinding defaults to `Ctrl+F` (instead of `Ctrl+Shift+F`) because most host terminals intercept `Ctrl+Shift+F` for their own search. While a full-screen program has the alternate screen up, the key goes to it — page-down in `less` and `vim` — since the scrollback the bar searches is not what the program shows; at the shell's screen readline's `forward-char` is on `Right`.
 
+## Shell Integration
+
+A terminal starts bash, zsh and fish so that they mark each prompt and each
+command they run (the `OSC 133` escape sequences other terminals use too).
+They still read your own startup files as they would anyway — `~/.bashrc`;
+zsh's `.zshenv`, `.zprofile`, `.zshrc` and `.zlogin` from your `ZDOTDIR`;
+fish's configuration — and nothing else of yours changes: only the marks are
+added (fish 4 marks its commands itself). Other shells start as they are, and
+any shell that prints these marks itself gets the same features. With the
+marks:
+
+- **`Ctrl+Shift+Up` / `Ctrl+Shift+Down`** scroll the prompt of the command
+  above or below the top of the view to the top; past the last prompt, the
+  view goes back to the live screen. While a full-screen program has the
+  alternate screen up, the keys go to it. They are `prev_prompt` and
+  `next_prompt` under `[terminal.keybindings]`
+- **A failed command** — one that ended with a non-zero exit code — is
+  marked on the panel's left border, in the theme's error colour, along the
+  rows of its prompt and output
+- **Copy command output** in the panel's `[≡]` menu copies the output of the
+  last command, without its prompt; `copy_command_output` under
+  `[terminal.keybindings]` has no key by default
+- **Send to agent** and `@term` take the last command — see below
+
+A command at a prompt in a shell without the marks (one started inside the
+terminal, a remote one over SSH) is not marked, and the commands of a
+cleared screen are forgotten with it. Turn it off with
+`shell_integration = false` under `[terminal]` (`Alt+P` → Terminal); the
+terminals opened after the change start their shells as they are.
+
 ## Sending to the Agent
 
 The panel's `[≡]` menu (`Alt+K`) offers **Send to agent**: the terminal's
-selection, or without one its last 200 lines (screen and scrollback, the blank
-lines below the prompt left out), goes into the prompt of the agent panel you
-last used, or of a new one, under a `[#1 terminal …, 80 lines]` placeholder,
-and that panel takes focus. `send_to_agent` under `[terminal.keybindings]` has
-no key by default. From the agent's side, `@term` takes the same text; see the
-[agent](agent.md) page.
+selection; without one, the last command the shell marked — its prompt line
+and its output, at most the last 1,000 lines of it — with its exit code, or
+that it still runs; without marks, its last 200 lines (screen and scrollback,
+the blank lines below the prompt left out). The text goes into the prompt of
+the agent panel you last used, or of a new one, under a
+`[#1 terminal …, 80 lines]` placeholder, and that panel takes focus.
+`send_to_agent` under `[terminal.keybindings]` has no key by default. From the
+agent's side, `@term` takes the same text; see the [agent](agent.md) page.
 
 ## Shell Selection
 

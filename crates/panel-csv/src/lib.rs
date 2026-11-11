@@ -747,6 +747,7 @@ mod tests {
             terminal_width: area.width,
             terminal_height: area.height,
             border_right_x: None,
+            border_left_x: None,
             border_bottom_y: None,
         };
         panel.render(area, buf, &ctx);

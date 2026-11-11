@@ -176,6 +176,10 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_terminal_scrollback_lines(),
                 field_type: FieldType::Number,
             },
+            FieldDescriptor {
+                label: t.settings_terminal_shell_integration(),
+                field_type: FieldType::Bool,
+            },
         ],
         SettingsTab::Lsp => vec![
             FieldDescriptor {
@@ -343,6 +347,7 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
                 .clone()
                 .unwrap_or_else(|| i18n::t().settings_value_auto().to_string()),
             1 => config.terminal.scrollback_lines.to_string(),
+            2 => bool_str(config.terminal.shell_integration),
             _ => String::new(),
         },
         SettingsTab::Lsp => match index {
@@ -493,6 +498,11 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
             if index == 2 {
                 config.file_manager.dir_size_in_wide_view =
                     !config.file_manager.dir_size_in_wide_view;
+            }
+        }
+        SettingsTab::Terminal => {
+            if index == 2 {
+                config.terminal.shell_integration = !config.terminal.shell_integration;
             }
         }
         _ => {}

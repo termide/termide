@@ -1029,8 +1029,10 @@ behind your back.
 
 Two entries lead that list and stand for text rather than a file:
 `@selection` for the text selected in the editor you last used, and `@term`
-for what the terminal you last used shows: its selection, or else its last
-200 lines with the blank ones below the prompt left out. Picking one puts a
+for what the terminal you last used shows: its selection, or else the last
+command its shell marked with its output and exit code (see
+[Shell Integration](terminal.md#shell-integration)), or else its last 200
+lines with the blank ones below the prompt left out. Picking one puts a
 `[#2 selection src/main.rs:10-24]` or `[#3 terminal …, 80 lines]` placeholder
 on a line of its own, holding the text as it was then; on send it is spliced in
 with a line saying where it is from, fenced, as a large paste is. Deleting the

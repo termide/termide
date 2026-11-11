@@ -777,6 +777,18 @@ impl HelpGenerator {
                 keys: Self::format_keys(&kb.scroll_bottom),
                 description: t.help_desc_scroll_bottom().to_string(),
             },
+            HelpEntry {
+                keys: Self::format_keys(&kb.prev_prompt),
+                description: t.help_desc_prev_prompt().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.next_prompt),
+                description: t.help_desc_next_prompt().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.copy_command_output),
+                description: t.help_desc_copy_command_output().to_string(),
+            },
         ];
 
         HelpSection {

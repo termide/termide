@@ -1034,6 +1034,10 @@ pub struct TerminalSettings {
     /// Terminals opened after a change take it.
     #[serde(default = "default_scrollback_lines")]
     pub scrollback_lines: usize,
+    /// Start bash, zsh and fish so that they mark their prompts and
+    /// commands (OSC 133). Terminals opened after a change take it.
+    #[serde(default = "default_true")]
+    pub shell_integration: bool,
     /// Terminal keyboard shortcuts
     #[serde(default)]
     pub keybindings: TerminalKeybindings,
@@ -1044,6 +1048,7 @@ impl Default for TerminalSettings {
         Self {
             default_shell: None,
             scrollback_lines: default_scrollback_lines(),
+            shell_integration: true,
             keybindings: TerminalKeybindings::default(),
         }
     }

@@ -82,6 +82,7 @@ fn render(panel: &mut DebugPanel) -> Vec<String> {
         terminal_width: 50,
         terminal_height: 20,
         border_right_x: None,
+        border_left_x: None,
         border_bottom_y: None,
     };
     panel.render(area, &mut buf, &ctx);

@@ -18,7 +18,8 @@ use termide_agent_core::{
     Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION,
 };
 use termide_core::{
-    AgentSnippet, ConfirmAction, LinkTarget, PanelConfig, SegmentKind, SnippetSource, SnippetWanted,
+    AgentSnippet, ConfirmAction, LinkTarget, PanelConfig, SegmentKind, SnippetSource,
+    SnippetWanted, TerminalPart,
 };
 use termide_ui::{ChoiceAction, ChoiceForm};
 
@@ -399,6 +400,7 @@ fn render_buf_focused(panel: &mut AgentPanel, width: u16, height: u16, is_focuse
         terminal_width: width,
         terminal_height: height,
         border_right_x: None,
+        border_left_x: None,
         border_bottom_y: None,
     };
     panel.render(area, &mut buf, &ctx);

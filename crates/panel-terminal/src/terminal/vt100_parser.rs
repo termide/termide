@@ -381,6 +381,7 @@ impl Perform for VtPerformer {
                             for r in (row + 1)..buffer.len() {
                                 buffer[r].fill(empty_cell);
                             }
+                            screen.erased_below(row + usize::from(col > 0));
                             // Force cache invalidation to show cleared content immediately
                             screen.force_cache_invalidation = true;
                         }
@@ -405,6 +406,7 @@ impl Perform for VtPerformer {
                             }
                             // Move cursor to home position (compatibility with old behavior)
                             screen.cursor = (0, 0);
+                            screen.erased_below(0);
                             // Force cache invalidation to show cleared screen immediately
                             screen.force_cache_invalidation = true;
                         }
@@ -417,9 +419,12 @@ impl Perform for VtPerformer {
                             }
                             // Clear scrollback only for main screen
                             if !is_alt {
+                                let dropped = screen.scrollback.len();
+                                screen.marks.drop_front(dropped);
                                 screen.scrollback.clear();
                                 screen.scrollback_wrapped.clear();
                             }
+                            screen.erased_below(0);
                             screen.cursor = (0, 0);
                             // Force cache invalidation to show cleared screen immediately
                             screen.force_cache_invalidation = true;
@@ -683,6 +688,19 @@ impl Perform for VtPerformer {
     }
 
     fn osc_dispatch(&mut self, params: &[&[u8]], _bell_terminated: bool) {
+        if params.first() == Some(&&b"133"[..]) {
+            // The mark is where the cursor is after all the text before it.
+            self.flush();
+            let kind = params.get(1).and_then(|kind| kind.first()).copied();
+            let exit = params
+                .get(2)
+                .and_then(|code| std::str::from_utf8(code).ok())
+                .and_then(|code| code.parse().ok());
+            if let (Some(kind), Ok(mut screen)) = (kind, self.screen.write()) {
+                screen.shell_mark(kind, exit);
+            }
+            return;
+        }
         if !matches!(params.first(), Some(&b"7") | Some(&b"9")) {
             return;
         }
@@ -785,6 +803,42 @@ mod tests {
         assert_eq!(row_text(&screen, 0), "");
         feed(&mut performer, "\x1b[1;1H中文x\x1b[4G\x1b[1X".as_bytes());
         assert_eq!(row_text(&screen, 0), "中  x");
+    }
+
+    /// OSC 133 marks land where the text before them left the cursor,
+    /// and the end mark carries the exit code; in a full-screen program
+    /// they mean nothing.
+    #[test]
+    fn shell_marks_are_placed_at_the_cursor() {
+        use crate::terminal::marks::ShellCommand;
+        let (mut performer, _capture, screen) = performer();
+        feed(
+            &mut performer,
+            b"]133;A$ ls
+]133;Ca
+b]133;D;2
+]133;A;click_events=1\\$ ",
+        );
+        feed(&mut performer, b"[?1049h]133;A");
+        let commands: Vec<ShellCommand> =
+            screen.read().unwrap().marks.commands().copied().collect();
+        assert_eq!(
+            commands,
+            vec![
+                ShellCommand {
+                    prompt: 0,
+                    output: Some(1),
+                    end: Some(3),
+                    exit: Some(2),
+                },
+                ShellCommand {
+                    prompt: 3,
+                    output: None,
+                    end: None,
+                    exit: None,
+                },
+            ]
+        );
     }
 
     #[test]

@@ -192,6 +192,7 @@ mod tests {
             terminal_width: 40,
             terminal_height: 10,
             border_right_x: None,
+            border_left_x: None,
             border_bottom_y: None,
         };
         let content = Rect::new(1, 1, 38, 8);

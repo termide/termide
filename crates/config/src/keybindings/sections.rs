@@ -415,9 +415,16 @@ pub struct TerminalKeybindings {
     pub scroll_bottom: Option<KeyBinding>,
     pub search: Option<KeyBinding>,
     pub switch_directory: Option<KeyBinding>,
-    /// The selection or the last lines into the agent's prompt; no default
-    /// key, the panel menu offers it.
+    /// The selection, the last command or the last lines into the agent's
+    /// prompt; no default key, the panel menu offers it.
     pub send_to_agent: Option<KeyBinding>,
+    /// Scroll the prompt of the command before the view's top to the top.
+    pub prev_prompt: Option<KeyBinding>,
+    /// Scroll the prompt of the command after the view's top to the top.
+    pub next_prompt: Option<KeyBinding>,
+    /// Copy the last command's output; no default key, the panel menu
+    /// offers it.
+    pub copy_command_output: Option<KeyBinding>,
 }
 
 // =============================================================================
@@ -826,5 +833,7 @@ impl TerminalKeybindings {
         set_default!(scroll_bottom, "Shift+End");
         set_default!(search, "Ctrl+F");
         set_default!(switch_directory, "Ctrl+\\");
+        set_default!(prev_prompt, "Ctrl+Shift+Up");
+        set_default!(next_prompt, "Ctrl+Shift+Down");
     }
 }

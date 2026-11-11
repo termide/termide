@@ -89,6 +89,9 @@ impl App {
             ("terminal", termide_panel_terminal::SEND_TO_AGENT_ACTION) => {
                 &config.terminal.keybindings.send_to_agent
             }
+            ("terminal", termide_panel_terminal::COPY_COMMAND_OUTPUT_ACTION) => {
+                &config.terminal.keybindings.copy_command_output
+            }
             _ => return None,
         };
         binding.as_ref().map(|k| k.display().to_string())

@@ -815,6 +815,7 @@ mod tests {
             terminal_width: 80,
             terminal_height: 12,
             border_right_x: Some(79),
+            border_left_x: None,
             border_bottom_y: Some(11),
         };
         p.render(area, &mut buf, &ctx);

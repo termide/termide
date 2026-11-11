@@ -1,0 +1,39 @@
+# Shell integration (doc/en/terminal.md): bash in a terminal panel marks
+# its prompts and commands. A failed command is marked on the panel's left
+# border, Ctrl+Shift+Up and Ctrl+Shift+Down jump from prompt to prompt, and
+# "Send to agent" hands over the last command with its output and exit code.
+mock-acp claude_code
+start
+wait "README.md"
+key Alt+T
+wait "demo$"
+type "seq 101 160"
+key Enter
+wait "160"
+type "ls nope"
+key Enter
+wait "No such file"
+expect "┃"
+type "echo harness-$((6 * 7))"
+key Enter
+wait "harness-42"
+snapshot live
+
+key Ctrl+Shift+Up
+wait "demo$ seq 101 160"
+expect "101"
+expect-not "harness-42"
+snapshot jumped
+key Ctrl+Shift+Down
+wait "harness-42"
+
+key Alt+K
+wait "Send to agent"
+key Enter
+wait "[#1 terminal bash, 2 lines]"
+type "and this"
+key Enter
+mock-acp-got "The last command in the terminal" 20
+mock-acp-got "(exit code 0)" 5
+mock-acp-got "harness-42" 5
+quit --force

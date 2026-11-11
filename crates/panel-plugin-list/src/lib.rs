@@ -1124,6 +1124,7 @@ mod tests {
             terminal_width: 30,
             terminal_height: 10,
             border_right_x: None,
+            border_left_x: None,
             border_bottom_y: None,
         };
         panel.render(area, &mut buf, &ctx);

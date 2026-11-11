@@ -3,6 +3,7 @@
 //! This module provides a full-featured terminal emulator with PTY support.
 
 mod csi_handlers;
+pub mod marks;
 mod osc_cwd;
 pub mod vt100_parser;
 
@@ -305,6 +306,8 @@ pub struct TerminalScreen {
     /// The program rang the bell (BEL) since the panel was last shown
     /// focused: it waits for the user.
     pub bell: bool,
+    /// The shell's commands, as its OSC 133 marks report them.
+    pub marks: marks::ShellMarks,
 }
 
 /// How many lines a new screen keeps in its scrollback: the
@@ -361,6 +364,7 @@ impl TerminalScreen {
             force_cache_invalidation: false,
             reported_cwd: None,
             bell: false,
+            marks: marks::ShellMarks::default(),
         }
     }
 
@@ -742,6 +746,7 @@ impl TerminalScreen {
         // Limit scrollback size - O(1) with VecDeque
         if self.scrollback.len() > self.max_scrollback {
             self.scrollback.pop_front();
+            self.marks.drop_front(1);
         }
         if self.scrollback_wrapped.len() > self.max_scrollback {
             self.scrollback_wrapped.pop_front();
@@ -892,6 +897,9 @@ impl TerminalScreen {
         fresh.max_scrollback = self.max_scrollback;
         fresh.reported_cwd = self.reported_cwd.take();
         fresh.bell = self.bell;
+        fresh.marks = std::mem::take(&mut self.marks);
+        let top = fresh.marks.stable(fresh.scrollback.len());
+        fresh.marks.screen_cleared(top);
         fresh.sync_output_ended = self.sync_output;
         fresh.force_cache_invalidation = true;
         *self = fresh;
@@ -980,6 +988,39 @@ impl TerminalScreen {
             self.saved_cursor = Some((row.min(rows - 1), col.min(cols - 1)));
         }
         self.dirty = true;
+    }
+
+    /// An OSC 133 mark of `kind` (`A` prompt, `C` output, `D` end, with
+    /// its exit code) at the cursor. Full-screen programs have no prompts:
+    /// marks in the alternate screen are ignored.
+    pub fn shell_mark(&mut self, kind: u8, exit: Option<i32>) {
+        if self.use_alt_screen {
+            return;
+        }
+        let row = self.marks.stable(self.scrollback.len() + self.cursor.0);
+        match kind {
+            b'A' => self.marks.prompt_start(row),
+            b'C' => self.marks.command_start(row),
+            b'D' => {
+                let col = if self.wrap_pending {
+                    self.cols
+                } else {
+                    self.cursor.1
+                };
+                self.marks.command_end(row, col, exit);
+            }
+            _ => return,
+        }
+        self.dirty = true;
+    }
+
+    /// The main screen was erased from row `row` down: the commands on it
+    /// went with it.
+    pub fn erased_below(&mut self, row: usize) {
+        if !self.use_alt_screen {
+            let top = self.marks.stable(self.scrollback.len() + row);
+            self.marks.screen_cleared(top);
+        }
     }
 
     /// Convert visual row (0-based on screen) to absolute buffer index

@@ -96,7 +96,11 @@ fn a_snippet_mention_asks_for_the_text_and_holds_it_under_a_placeholder() {
         source: SnippetSource::Terminal {
             title: "me@host/src (zsh)".into(),
             name: "zsh".into(),
-            selection: false,
+            part: TerminalPart::Command {
+                running: false,
+                exit: Some(101),
+                omitted: 0,
+            },
         },
         text: "$ cargo test\nerror: ```x``` failed\n".into(),
     });
@@ -107,7 +111,8 @@ fn a_snippet_mention_asks_for_the_text_and_holds_it_under_a_placeholder() {
     );
     assert_eq!(
         panel.expand_pastes(&panel.input_text()),
-        "why \nThe last 2 lines of the terminal \"me@host/src (zsh)\":\n````\n$ cargo test\n\
+        "why \nThe last command in the terminal \"me@host/src (zsh)\", at its prompt, and its \
+         output (exit code 101):\n````\n$ cargo test\n\
          error: ```x``` failed\n````\n\nfails"
     );
 }

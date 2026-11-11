@@ -173,6 +173,7 @@ impl App {
         state.detach_available = Self::detect_detach_available();
         agent_panel::publish_shell(state.config.terminal.default_shell.as_deref());
         termide_panel_terminal::set_scrollback_lines(state.config.terminal.scrollback_lines);
+        termide_panel_terminal::set_shell_integration(state.config.terminal.shell_integration);
 
         // Get project root from current working directory
         let project_root = std::env::current_dir().unwrap_or_else(|_| {
@@ -287,6 +288,7 @@ impl App {
         state.detach_available = Self::detect_detach_available();
         agent_panel::publish_shell(state.config.terminal.default_shell.as_deref());
         termide_panel_terminal::set_scrollback_lines(state.config.terminal.scrollback_lines);
+        termide_panel_terminal::set_shell_integration(state.config.terminal.shell_integration);
 
         // Get project root from current working directory
         let project_root = std::env::current_dir()
@@ -754,6 +756,7 @@ impl App {
             agent_panel::publish_shell(config.terminal.default_shell.as_deref());
         }
         termide_panel_terminal::set_scrollback_lines(config.terminal.scrollback_lines);
+        termide_panel_terminal::set_shell_integration(config.terminal.shell_integration);
         if config.plugins != old.plugins {
             self.plugins.mark_dirty();
         }

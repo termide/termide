@@ -1,6 +1,6 @@
 # Editor and terminal text handed to the agent (doc/en/agent.md): the
 # editor's menu sends its selection to a new agent panel, the terminal's
-# menu sends its last lines to that panel, and `@term` in the prompt takes
+# menu sends its last command to that panel, and `@term` in the prompt takes
 # them again. Each waits under a placeholder; the message the external
 # agent gets holds the text with a line saying where it is from.
 mock-acp claude_code
@@ -25,17 +25,17 @@ wait "harness-42"
 key Alt+K
 wait "Send to agent"
 key Enter
-wait "[#2 terminal bash, 3 lines]"
+wait "[#2 terminal bash, 2 lines]"
 
 type "@te"
 wait "@term"
 key Tab
-wait "[#3 terminal bash, 3 lines]"
+wait "[#3 terminal bash, 2 lines]"
 snapshot placeholders
 type "what do these say"
 key Enter
 mock-acp-got "Selected in zz.txt, line 1:" 20
 mock-acp-got "alpha" 5
-mock-acp-got "lines of the terminal" 5
-mock-acp-got "harness-42" 5
+mock-acp-got "The last command in the terminal" 5
+mock-acp-got "demo$ echo harness" 5
 quit --force

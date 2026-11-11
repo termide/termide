@@ -735,6 +735,7 @@ fn a_click_in_the_find_bar_places_its_cursor_and_a_drag_selects() {
         terminal_width: 60,
         terminal_height: 12,
         border_right_x: Some(59),
+        border_left_x: None,
         border_bottom_y: Some(11),
     };
     let area = Rect::new(0, 0, 60, 12);

@@ -568,14 +568,31 @@ pub enum SnippetSource {
         first: usize,
         last: usize,
     },
-    /// A terminal's output: its selection when `selection`, else the last
-    /// lines of its screen and scrollback. `title` names the terminal in
-    /// full, `name` short (the program running in it), for the placeholder.
+    /// A terminal's output, the `part` of it the snippet holds. `title`
+    /// names the terminal in full, `name` short (the program running in
+    /// it), for the placeholder.
     Terminal {
         title: String,
         name: String,
-        selection: bool,
+        part: TerminalPart,
     },
+}
+
+/// Which part of a terminal's output a [`SnippetSource::Terminal`] holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TerminalPart {
+    /// The terminal's selection.
+    Selection,
+    /// The last command the shell ran: its prompt line and its output, of
+    /// which the first `omitted` lines are left out. `exit` is its exit
+    /// code, when the shell reported one; `None` too while it runs.
+    Command {
+        running: bool,
+        exit: Option<i32>,
+        omitted: usize,
+    },
+    /// The last lines of the screen and the scrollback.
+    Tail,
 }
 
 /// What an agent panel asks for with [`PanelEvent::WantSnippet`].

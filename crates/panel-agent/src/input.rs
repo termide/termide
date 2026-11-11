@@ -5,6 +5,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent,
 use termide_agent_core::{now_millis, CommandScript, ToolResultMessage, UserMessage};
 use termide_core::{
     AgentSnippet, KeyChord, LinkTarget, Panel, PanelEvent, SnippetSource, SnippetWanted,
+    TerminalPart,
 };
 use termide_ui::textarea::TextArea;
 use termide_ui::{ChoiceAction, CompletionAction, CompletionItem, CompletionList, FieldEdit};
@@ -108,17 +109,37 @@ pub(crate) fn snippet_text(snippet: &AgentSnippet, cwd: &std::path::Path) -> (St
                 ),
             }
         }
-        SnippetSource::Terminal {
-            title,
-            name,
-            selection,
-        } => {
+        SnippetSource::Terminal { title, name, part } => {
             let count = body.lines().count();
             let label = t.agent_snippet_terminal_fmt(name, &t.agent_paste_lines_fmt(count));
-            let header = if *selection {
-                format!("Selected in the terminal \"{title}\":")
-            } else {
-                format!("The last {count} lines of the terminal \"{title}\":")
+            let header = match *part {
+                TerminalPart::Selection => format!("Selected in the terminal \"{title}\":"),
+                TerminalPart::Tail => {
+                    format!("The last {count} lines of the terminal \"{title}\":")
+                }
+                TerminalPart::Command {
+                    running,
+                    exit,
+                    omitted,
+                } => {
+                    let mut notes = Vec::new();
+                    if running {
+                        notes.push("still running".to_string());
+                    } else if let Some(code) = exit {
+                        notes.push(format!("exit code {code}"));
+                    }
+                    if omitted > 0 {
+                        notes.push(format!("the first {omitted} lines of its output left out"));
+                    }
+                    let notes = if notes.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" ({})", notes.join("; "))
+                    };
+                    format!(
+                        "The last command in the terminal \"{title}\", at its prompt, and its output{notes}:"
+                    )
+                }
             };
             (label, header)
         }

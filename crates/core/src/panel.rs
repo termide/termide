@@ -65,6 +65,8 @@ pub struct RenderContext<'a> {
     pub terminal_width: u16,
     /// Terminal height
     pub terminal_height: u16,
+    /// X position of the left border, for marks drawn on it.
+    pub border_left_x: Option<u16>,
     /// X position of right border (for scrollbar rendering on border)
     pub border_right_x: Option<u16>,
     /// Y position of the bottom border (for a horizontal scrollbar drawn on the

@@ -558,6 +558,7 @@ impl SettingsModal {
             SettingsTab::Terminal => vec![
                 Field(0), // default_shell
                 Field(1), // scrollback_lines
+                Field(2), // shell_integration
             ],
             SettingsTab::Lsp => {
                 let mut rows = vec![

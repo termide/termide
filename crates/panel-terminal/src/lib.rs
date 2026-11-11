@@ -3,6 +3,7 @@
 
 pub mod agent_shell;
 mod clipboard;
+mod commands;
 mod input_encoding;
 mod link_detection;
 #[cfg(target_os = "macos")]
@@ -12,6 +13,7 @@ mod pty_input;
 mod render;
 mod search;
 mod selection;
+mod shell_integration;
 pub mod shell_utils;
 mod tap;
 mod terminal;
@@ -19,6 +21,7 @@ mod terminal_info;
 #[cfg(windows)]
 mod windows_proc;
 
+pub use shell_integration::set_shell_integration;
 pub use tap::{OutputTap, TapChunk};
 pub use terminal::set_scrollback_lines;
 pub use terminal_info::TerminalInfo;
@@ -207,7 +210,12 @@ fn reap_exited(child: &Mutex<Box<dyn Child + Send + Sync>>) {
 /// after the keybinding that does the same.
 pub const SEND_TO_AGENT_ACTION: &str = "send_to_agent";
 
-/// How many of its last lines a terminal without a selection hands an agent.
+/// The `[≡]` menu action copying the last command's output, named after
+/// the keybinding that does the same.
+pub const COPY_COMMAND_OUTPUT_ACTION: &str = "copy_command_output";
+
+/// How many of its last lines a terminal without a selection, nor a
+/// command its shell marked, hands an agent.
 pub const AGENT_TAIL_LINES: usize = 200;
 
 fn build_terminal_hotkey_table(config: &Config) -> HotkeyTable {
@@ -217,6 +225,9 @@ fn build_terminal_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("search", &kb.search);
     t.insert("switch_directory", &kb.switch_directory);
     t.insert("send_to_agent", &kb.send_to_agent);
+    t.insert("prev_prompt", &kb.prev_prompt);
+    t.insert("next_prompt", &kb.next_prompt);
+    t.insert("copy_command_output", &kb.copy_command_output);
     t.insert("scroll_up", &kb.scroll_up);
     t.insert("scroll_down", &kb.scroll_down);
     t.insert("scroll_top", &kb.scroll_top);
@@ -433,6 +444,9 @@ impl Terminal {
         cmd.env("SHELL", shell_path);
         for (key, value) in env {
             cmd.env(key, value);
+        }
+        if !shell_path.starts_with("wsl ") {
+            shell_integration::integrate(&mut cmd, shell_path, env);
         }
 
         let child: SharedChild = Arc::new(Mutex::new(pair.slave.spawn_command(cmd)?));
@@ -788,17 +802,30 @@ impl Terminal {
         }
     }
 
-    /// What the terminal hands an agent: its selection, else its last
-    /// [`AGENT_TAIL_LINES`] lines; `None` while it shows nothing.
+    /// What the terminal hands an agent: its selection, else the last
+    /// command its shell marked, else its last [`AGENT_TAIL_LINES`] lines;
+    /// `None` while it shows nothing.
     pub fn agent_snippet(&self) -> Option<termide_core::AgentSnippet> {
+        use termide_core::TerminalPart;
         let selected = clipboard::get_selected_text(&self.screen);
-        let (text, selection) = if selected.trim().is_empty() {
+        let command = || {
+            let screen = self.read_screen();
+            commands::last_command(&screen, commands::AGENT_COMMAND_LINES)
+        };
+        let (text, part) = if !selected.trim().is_empty() {
+            (selected, TerminalPart::Selection)
+        } else if let Some(command) = command() {
+            let part = TerminalPart::Command {
+                running: command.running,
+                exit: command.exit,
+                omitted: command.omitted,
+            };
+            (command.text, part)
+        } else {
             (
                 clipboard::tail_text(&self.screen, AGENT_TAIL_LINES).0,
-                false,
+                TerminalPart::Tail,
             )
-        } else {
-            (selected, true)
         };
         if text.trim().is_empty() {
             return None;
@@ -807,10 +834,31 @@ impl Terminal {
             source: termide_core::SnippetSource::Terminal {
                 title: self.title(),
                 name: self.get_foreground_command(),
-                selection,
+                part,
             },
             text,
         })
+    }
+
+    /// Copy the output of the last command the shell marked, or say there
+    /// is none.
+    fn copy_command_output(&self) -> Vec<PanelEvent> {
+        let t = termide_i18n::t();
+        let Some(lines) = commands::last_output(&self.read_screen()) else {
+            return vec![PanelEvent::ShowMessage(
+                t.terminal_no_command_output().to_string(),
+            )];
+        };
+        match termide_ui::clipboard::copy(&lines.join("\n")) {
+            Ok(()) => vec![PanelEvent::SetStatusMessage {
+                message: t.terminal_command_output_copied(lines.len()),
+                is_error: false,
+            }],
+            Err(e) => vec![PanelEvent::SetStatusMessage {
+                message: format!("Clipboard error: {}", e),
+                is_error: true,
+            }],
+        }
     }
 
     /// Hand [`Terminal::agent_snippet`] to the agent last used, or say the
@@ -1105,15 +1153,24 @@ impl Panel for Terminal {
     }
 
     fn context_menu_items(&self) -> Vec<(String, String)> {
-        vec![(
-            termide_i18n::t().help_desc_send_to_agent().to_string(),
+        let t = termide_i18n::t();
+        let mut items = vec![(
+            t.help_desc_send_to_agent().to_string(),
             SEND_TO_AGENT_ACTION.into(),
-        )]
+        )];
+        if commands::last_output(&self.read_screen()).is_some() {
+            items.push((
+                t.help_desc_copy_command_output().to_string(),
+                COPY_COMMAND_OUTPUT_ACTION.into(),
+            ));
+        }
+        items
     }
 
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
         match action {
             SEND_TO_AGENT_ACTION => self.send_to_agent(),
+            COPY_COMMAND_OUTPUT_ACTION => self.copy_command_output(),
             _ => vec![],
         }
     }
@@ -1214,6 +1271,17 @@ impl Panel for Terminal {
             line.render(row, buf);
         }
 
+        // A failed command is marked on the left border, along its rows.
+        if let Some(x) = ctx.border_left_x {
+            let failed = commands::failed_rows(&self.read_screen(), area.height as usize);
+            for row in failed {
+                if let Some(cell) = buf.cell_mut((x, area.y + row as u16)) {
+                    cell.set_fg(theme.error);
+                    cell.set_symbol("┃");
+                }
+            }
+        }
+
         // Render color preview popup if active
         if let Some(ref preview) = self.color_preview {
             preview.render(buf, area);
@@ -1298,6 +1366,19 @@ impl Panel for Terminal {
         }
         if self.hotkeys.matches("send_to_agent", &key) {
             return self.send_to_agent();
+        }
+        if self.hotkeys.matches("copy_command_output", &key) {
+            return self.copy_command_output();
+        }
+        // A full-screen program has no prompts; the keys are its own there.
+        for (action, forward) in [("prev_prompt", false), ("next_prompt", true)] {
+            if self.hotkeys.matches(action, &key) && !self.read_screen().use_alt_screen {
+                let mut screen = self.write_screen();
+                if let Some(offset) = commands::prompt_offset(&screen, forward) {
+                    screen.set_scroll_offset(offset);
+                }
+                return vec![];
+            }
         }
         if self.hotkeys.matches("scroll_up", &key) {
             let mut screen = self.write_screen();

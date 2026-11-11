@@ -107,6 +107,37 @@ pub fn tail_text(screen: &RwLock<TerminalScreen>, max: usize) -> (String, usize)
     (lines.join("\n"), count)
 }
 
+/// The text of absolute rows `start..end` of the main screen and its
+/// scrollback, a line per entry: soft-wrapped rows joined, trailing spaces
+/// and blank lines at either end dropped.
+pub fn rows_lines(screen: &TerminalScreen, start: usize, end: usize) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    let mut joined = false;
+    for abs_row in start..end {
+        let mut text = String::new();
+        for cell in screen.get_line_by_absolute(abs_row).unwrap_or_default() {
+            cell.push_text(&mut text);
+        }
+        match lines.last_mut() {
+            Some(last) if joined => last.push_str(&text),
+            _ => lines.push(text),
+        }
+        joined = screen.get_wrapped_by_absolute(abs_row);
+    }
+    for line in &mut lines {
+        line.truncate(line.trim_end().len());
+    }
+    let first = lines
+        .iter()
+        .position(|l| !l.is_empty())
+        .unwrap_or(lines.len());
+    lines.drain(..first);
+    while lines.last().is_some_and(|l| l.is_empty()) {
+        lines.pop();
+    }
+    lines
+}
+
 /// Copy selected text to clipboard.
 pub fn copy_selection_to_clipboard(screen: &RwLock<TerminalScreen>) -> Result<()> {
     let text = get_selected_text(screen);

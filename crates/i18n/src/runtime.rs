@@ -381,6 +381,10 @@ impl Translation for RuntimeTranslation {
         help_desc_unstage_change,
         help_desc_revert_change,
         help_desc_send_to_agent,
+        help_desc_prev_prompt,
+        help_desc_next_prompt,
+        help_desc_copy_command_output,
+        terminal_no_command_output,
         agent_mention_selection,
         agent_mention_term,
         agent_snippet_no_selection,
@@ -962,6 +966,7 @@ impl Translation for RuntimeTranslation {
         settings_fm_dir_size_budget_ms,
         settings_terminal_default_shell,
         settings_terminal_scrollback_lines,
+        settings_terminal_shell_integration,
         settings_lsp_add_server,
         settings_lsp_delete_server,
         settings_lsp_server_language,
@@ -2210,6 +2215,13 @@ impl Translation for RuntimeTranslation {
 
     fn status_diagram_copied(&self, lines: usize) -> String {
         self.format("status_diagram_copied", &[("lines", &lines.to_string())])
+    }
+
+    fn terminal_command_output_copied(&self, lines: usize) -> String {
+        self.format(
+            "terminal_command_output_copied",
+            &[("lines", &lines.to_string())],
+        )
     }
 
     fn status_error_save(&self, error: &str) -> String {
