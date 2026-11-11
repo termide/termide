@@ -87,6 +87,14 @@ jobs:
         # reports a test that then passes as flaky.
         run: cargo nextest run --workspace --profile ci
 
+      - name: Grammar tests with the C code optimised as released
+        # The debug build compiles the grammars' C at -O0, which hid a heap
+        # write after realloc in the Haskell scanner that only strict
+        # aliasing at -O2 and up turns on (see .cargo/config.toml). glibc
+        # aborts on it, so Linux is where it shows.
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --release -p termide-highlight
+
   unused-deps:
     name: Manifest hygiene
     runs-on: ubuntu-latest

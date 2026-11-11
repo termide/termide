@@ -11,6 +11,9 @@ depends=('gcc-libs')
 makedepends=('rust' 'cargo')
 source=("$pkgname-$pkgver.tar.gz::https://github.com/termide/termide/archive/$pkgver.tar.gz")
 sha256sums=('SKIP')  # Updated automatically by CI
+# makepkg's LTO turns the grammars' C objects into GCC bytecode that rustc's
+# link cannot resolve (undefined tree_sitter_* symbols).
+options=('!lto')
 
 prepare() {
     cd "$pkgname-$pkgver"
@@ -19,6 +22,9 @@ prepare() {
 
 build() {
     cd "$pkgname-$pkgver"
+    # makepkg's CFLAGS replace the repository's (.cargo/config.toml): keep the
+    # grammars' C code off strict aliasing, which the Haskell scanner breaks.
+    export CFLAGS="$CFLAGS -fno-strict-aliasing"
     export RUSTUP_TOOLCHAIN=stable
     export CARGO_TARGET_DIR=target
     cargo build --frozen --release --all-features
@@ -26,6 +32,9 @@ build() {
 
 check() {
     cd "$pkgname-$pkgver"
+    # makepkg's CFLAGS replace the repository's (.cargo/config.toml): keep the
+    # grammars' C code off strict aliasing, which the Haskell scanner breaks.
+    export CFLAGS="$CFLAGS -fno-strict-aliasing"
     export RUSTUP_TOOLCHAIN=stable
     cargo test --frozen --all-features
 }
