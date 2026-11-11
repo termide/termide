@@ -20,7 +20,6 @@ mod repo_manager;
 mod repo_tree;
 mod stash;
 mod status;
-mod utils;
 
 // Public submodules
 pub mod diff;
@@ -59,7 +58,6 @@ pub use status::{
     get_git_status, get_git_status_async, get_repo_status, GitRepoStatus, GitStatus,
     GitStatusAsyncResult, GitStatusCache,
 };
-pub use utils::{truncate_left, truncate_right, truncate_to_width};
 
 // Re-export diff types
 pub use diff::{

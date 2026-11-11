@@ -264,7 +264,7 @@ impl Editor {
         }
 
         let annotation = entry.inline_text();
-        let truncated = termide_git::truncate_right(&annotation, available);
+        let truncated = termide_ui::path_utils::truncate_right(&annotation, available);
         let style = ratatui::style::Style::default().fg(theme.disabled);
         buf.set_string(ann_x, line_y, &truncated, style);
     }

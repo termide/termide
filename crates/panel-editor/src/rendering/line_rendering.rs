@@ -7,9 +7,10 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_segmentation::UnicodeSegmentation;
 
 use termide_buffer::{Cursor, TextBuffer, Viewport};
-use termide_git::{truncate_right, GitDiffCache, InlineChangeType};
+use termide_git::{GitDiffCache, InlineChangeType};
 use termide_highlight::LineHighlighter;
 use termide_theme::Theme;
+use termide_ui::path_utils::truncate_right;
 
 use super::{context::RenderContext, highlight_renderer, inline_diff};
 use crate::git;

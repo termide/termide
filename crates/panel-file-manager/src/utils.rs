@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
-use termide_git::truncate_right;
 use termide_ui::constants::{GIGABYTE, KILOBYTE, MEGABYTE};
 use termide_ui::path_utils;
+use termide_ui::path_utils::truncate_right;
 
 use super::FileEntry;
 

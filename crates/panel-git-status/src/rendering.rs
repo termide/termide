@@ -8,7 +8,8 @@ use ratatui::{
 use unicode_width::UnicodeWidthStr;
 
 use termide_core::ThemeColors;
-use termide_git::{self as git, truncate_left};
+use termide_git as git;
+use termide_ui::path_utils::truncate_left;
 use termide_ui::path_utils::truncate_to_width_str;
 use termide_ui::ScrollBar;
 use termide_ui_render::{

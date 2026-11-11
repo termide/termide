@@ -4,7 +4,8 @@ use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_width::UnicodeWidthStr;
 
 use termide_core::ThemeColors;
-use termide_git::{self as git, truncate_right, truncate_to_width};
+use termide_git as git;
+use termide_ui::path_utils::{truncate_right, truncate_to_width};
 use termide_ui::ScrollBar;
 use termide_ui_render::{
     dropdown_rows_width, dropdown_span, leading_selector_max_width, render_simple_dropdown,

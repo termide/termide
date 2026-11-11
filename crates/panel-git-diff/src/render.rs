@@ -3,7 +3,6 @@
 use ratatui::{buffer::Buffer, layout::Rect, style::Style};
 use unicode_width::UnicodeWidthStr;
 
-use termide_git::{self as git};
 use termide_ui::{diff_line_bg, ScrollBar};
 
 use crate::{FileStatus, GitDiffPanel, LineKind};
@@ -139,7 +138,10 @@ impl GitDiffPanel {
                 if current_line >= self.scroll && y < max_y {
                     // Truncate hunk header to fit
                     let header = if hunk.header.width() > content_area.width as usize {
-                        git::truncate_to_width(&hunk.header, content_area.width as usize)
+                        termide_ui::path_utils::truncate_to_width(
+                            &hunk.header,
+                            content_area.width as usize,
+                        )
                     } else {
                         hunk.header.clone()
                     };
@@ -204,7 +206,7 @@ impl GitDiffPanel {
                             (content_area.x + content_area.width).saturating_sub(x) as usize;
                         let expanded = termide_ui::expand_tabs(&line.content, self.tab_size);
                         let content = if expanded.width() > remaining_width {
-                            git::truncate_to_width(&expanded, remaining_width)
+                            termide_ui::path_utils::truncate_to_width(&expanded, remaining_width)
                         } else {
                             expanded.into_owned()
                         };
