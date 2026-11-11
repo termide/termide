@@ -1,0 +1,15 @@
+# cargo-nextest configuration, read by the pre-commit hook and CI alike.
+
+[profile.default]
+# A test that runs a minute is reported as slow; one that runs five is
+# killed, so a hung test fails the run rather than holding it forever.
+slow-timeout = { period = "60s", terminate-after = 5 }
+
+[profile.ci]
+# One retry in CI: a test that passes on it is reported as flaky, not red,
+# so a timing-sensitive test does not fail a pull request on its own while
+# still showing up in the log to be fixed.
+retries = 1
+# Report every failure, then their output once at the end.
+fail-fast = false
+failure-output = "final"

@@ -29,14 +29,13 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Check compilation
-        run: cargo check
-
+      # The same gates as ci.yml, over the whole workspace; clippy covers
+      # `cargo check`.
       - name: Run clippy (strict mode)
-        run: cargo clippy -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
-        run: cargo test
+        run: cargo test --workspace
 
       - name: Install cargo-deny
         # Rust-cache lets us skip rebuilding cargo-deny on every run;

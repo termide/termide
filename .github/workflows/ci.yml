@@ -37,7 +37,7 @@ concurrency:
 
 jobs:
   check:
-    name: fmt / check / clippy / test (${{ matrix.os }})
+    name: fmt / clippy / test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       # Report both platforms on a PR rather than hiding the second
@@ -75,16 +75,17 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all -- --check
 
-      - name: Check compilation
-        run: cargo check --workspace --all-targets
-
+      # No separate `cargo check`: clippy runs the full compiler checks
+      # itself, as the pre-commit hook relies on.
       - name: Run clippy (strict mode)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
         # nextest, like the pre-commit hook: one process per test binary in
         # parallel, and a non-zero exit on a test that fails to even start.
-        run: cargo nextest run --workspace
+        # The `ci` profile (.config/nextest.toml) retries a failure once and
+        # reports a test that then passes as flaky.
+        run: cargo nextest run --workspace --profile ci
 
   unused-deps:
     name: Manifest hygiene

@@ -69,7 +69,7 @@ Resolution rules:
 ## Validation
 
 - Run the narrowest useful checks first.
-- This repository has a local `pre-commit` hook that mirrors CI: `cargo fmt --check`, `cargo machete`, `cargo clippy -- -D warnings` (which covers CI's `cargo check`), and `cargo nextest run` (falling back to `cargo test` when nextest is absent).
+- This repository has a local `pre-commit` hook that mirrors CI: `cargo fmt --check`, `cargo machete`, `cargo clippy -- -D warnings` (which covers `cargo check`, so neither the hook nor CI runs one), and `cargo nextest run` (falling back to `cargo test` when nextest is absent). Nextest profiles live in `.config/nextest.toml`; CI uses `--profile ci`, which retries a failure once and reports a test that then passes as flaky.
 - The hook checks the staged tree, not the working tree: when the index and the working tree differ it materialises what is being committed in a worktree kept under `target/` (moved to each staged commit, so the build stays incremental). Splitting one edit session into several coherent commits therefore needs no `--no-verify`.
 - Do not rely on the hook as a substitute for targeted validation; use narrow crate-level checks to validate the changed area before committing.
 - Live-check UI and agent changes before committing with `tools/tui-harness/run.sh` (see its README): it runs the built binary headlessly against scenario scripts, with a throwaway HOME and the mock model or ACP agents. Add or extend a scenario for the behaviour you changed and run it with the existing ones; do not write throwaway pty scripts instead.
