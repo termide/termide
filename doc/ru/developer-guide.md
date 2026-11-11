@@ -73,6 +73,17 @@ CI прогоняет fmt / check / clippy / test на Linux и macOS; Windows �
 на macOS, снимки ToolHelp на Windows), таблицы монтирования (`/proc/mounts`
 против `getmntinfo`) и флагов расширенной клавиатуры.
 
+В Linux сборка компонуется компоновщиком по умолчанию из тулчейна: rust-lld на
+x86_64, системным `ld` на остальных архитектурах. Компоновка бинарника занимает
+около секунды с lld и вдвое меньше с [mold](https://github.com/rui314/mold),
+против шести с GNU `ld`; чтобы ваши сборки шли через mold (или `lld`),
+установите его и добавьте в `~/.cargo/config.toml`:
+
+```toml
+[target.aarch64-unknown-linux-gnu]   # или x86_64-unknown-linux-gnu
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+
 ### Запуск тестов
 
 ```bash

@@ -1,11 +1,9 @@
-# Configuration for tree-sitter C library linking
-# Force using standard cc linker and BFD instead of LLD
-
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "linker=cc", "-C", "link-arg=-fno-lto", "-C", "link-arg=-Wl,-fuse-ld=bfd"]
-
-[target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "linker=cc", "-C", "link-arg=-fno-lto", "-C", "link-arg=-Wl,-fuse-ld=bfd"]
+# Linux links with what the toolchain picks: rust-lld on x86_64 (rustc's
+# default since 1.90), the system's cc and ld elsewhere. GNU ld was forced
+# here until 2026-11 without a recorded reason; it links the binary in about
+# 6.4 s where lld takes 1.0 and mold 0.55 (arm64 Linux), and the tree-sitter
+# grammars link and pass their tests with all three. A faster linker of your
+# own goes in ~/.cargo/config.toml (doc/en/developer-guide.md, Platform notes).
 
 # macOS targets
 [target.x86_64-apple-darwin]

@@ -72,6 +72,17 @@ process introspection (`/proc` on Linux, libproc on macOS, ToolHelp snapshots
 on Windows), the mount table (`/proc/mounts` vs `getmntinfo`), and the
 keyboard enhancement flags.
 
+On Linux the build links with the toolchain's default: rust-lld on x86_64,
+the system's `ld` on other architectures. Linking the binary takes about a
+second with lld and half that with [mold](https://github.com/rui314/mold),
+against six with GNU `ld`; to use mold (or `lld`) for your own builds, install
+it and add to `~/.cargo/config.toml`:
+
+```toml
+[target.aarch64-unknown-linux-gnu]   # or x86_64-unknown-linux-gnu
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+
 ### Running Tests
 
 ```bash

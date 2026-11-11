@@ -68,6 +68,16 @@ CI 在 Linux 和 macOS 上运行 fmt / check / clippy / test 门禁；Windows �
 自省（Linux 上的 `/proc`、macOS 上的 libproc、Windows 上的 ToolHelp 快照）、挂载表
 （`/proc/mounts` 与 `getmntinfo`）以及键盘增强标志。
 
+在 Linux 上，构建使用工具链默认的链接器：x86_64 上是 rust-lld，其他架构上是系统的
+`ld`。链接本程序用 lld 约需一秒，用 [mold](https://github.com/rui314/mold) 只需一半，
+而 GNU `ld` 需要六秒；若想让自己的构建使用 mold（或 `lld`），请安装它并在
+`~/.cargo/config.toml` 中加入：
+
+```toml
+[target.aarch64-unknown-linux-gnu]   # 或 x86_64-unknown-linux-gnu
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+```
+
 ### 运行测试
 
 ```bash
