@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
 # Repository-wide pre-commit gate: the fmt / machete / clippy / test sequence
-# that .github/workflows/ci.yml runs on every pull request (its `cargo check`
-# is covered by clippy), so a commit that would fail CI fails here first.
+# that .github/workflows/ci.yml runs on every pull request, so a commit that
+# would fail CI fails here first.
 #
 # Versioned in the repository and activated with:
 #
@@ -34,13 +34,43 @@ fi
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 # ---------------------------------------------------------------------------
+# Docs-only commits
+#
+# A commit that touches only documentation compiles nothing: no test reads
+# doc/ or the top-level Markdown files. Formatting is all there is to check,
+# and that is Rust's, so nothing runs. Markdown elsewhere (crates/*/assets,
+# skills' scripts) can be compiled in or read by tests and goes through the
+# full gate.
+# ---------------------------------------------------------------------------
+
+is_doc() {
+    case "$1" in
+        doc/* | .agents/skills/*.md) return 0 ;;
+        */*) return 1 ;;      # Markdown anywhere else may be compiled in
+        *.md) return 0 ;;     # README.md, CHANGELOG.md, AGENTS.md, …
+        *) return 1 ;;
+    esac
+}
+
+docs_only=1
+staged_paths=0
+while IFS= read -r -d '' path; do
+    staged_paths=$((staged_paths + 1))
+    is_doc "$path" || docs_only=0
+done < <(git diff --cached --name-only -z)
+if [ "$staged_paths" -gt 0 ] && [ "$docs_only" -eq 1 ]; then
+    printf 'pre-commit: documentation only (%d files) — no build or tests needed.\n' "$staged_paths"
+    exit 0
+fi
+
+# ---------------------------------------------------------------------------
 # What gets checked
 #
 # A hook that tests the working tree answers the wrong question during a
 # partial commit: splitting one edit session into several coherent commits
 # leaves the tree ahead of the index, so the gate would pass or fail on code
 # that is not what is being recorded. When the index and the working tree
-# agree — `git add -A` and commit, the common case — check in place and reuse
+# agree — every change staged and committed — check in place and reuse
 # the warm target directory. When they differ, materialise the staged tree in
 # a separate worktree under target/ and check that instead.
 # ---------------------------------------------------------------------------
@@ -93,6 +123,18 @@ else
     # backtrace here would lose line numbers.
     export CARGO_PROFILE_DEV_DEBUG=none
     export CARGO_PROFILE_TEST_DEBUG=none
+fi
+
+# A target directory grows with every toolchain and dependency bump until
+# builds slow down for it; say so, once a day, rather than let it creep.
+SIZE_STAMP="$REPO_ROOT/target/.pre-commit-size-checked"
+if [ -d "$REPO_ROOT/target" ] && [ -z "$(find "$SIZE_STAMP" -mtime -1 2>/dev/null)" ]; then
+    touch "$SIZE_STAMP"
+    target_gib=$(du -sk "$REPO_ROOT/target" | awk '{ print int($1 / 1048576) }')
+    if [ "$target_gib" -ge 40 ]; then
+        printf 'pre-commit: target/ holds %d GiB; `cargo clean` (or `cargo sweep --time 14`) frees it.\n' \
+            "$target_gib"
+    fi
 fi
 
 printf 'pre-commit: checking %s\n' "$SCOPE"
