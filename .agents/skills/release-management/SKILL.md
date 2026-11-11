@@ -175,8 +175,9 @@ code stands at the tag. A key bound in one commit and rebound in the next
 appears once, as the final key; a design replaced inside the window (a
 panel that became a list, a command that became a dialog) appears only
 as what shipped; a fix to something this release introduced is no fix at
-all. This holds for an `[Unreleased]` section written commit by commit:
-re-read it against `git diff <last_tag>..HEAD` and the code, and rewrite
+all. This holds for the fragments in `changelog.d/`, written commit by
+commit (`tools/release/changelog-fragments.sh` prints them as sections):
+re-read them against `git diff <last_tag>..HEAD` and the code, and rewrite
 every entry that keeps an intermediate state, a superseded alternative or
 a sentence whose reference was lost to later insertions.
 
@@ -456,6 +457,14 @@ Then re-run this skill to continue.
 The CHANGELOG is **written for humans reading release notes**, not for
 agents reading git history. Work from the **themes** produced by Step 2
 synthesis, not from the raw commit log.
+
+**Start from the fragments.** Each user-visible change of the window left
+its entry in `changelog.d/<section>/` (see `changelog.d/README.md`);
+`tools/release/changelog-fragments.sh` prints them as the new version's
+sections. They are the draft, not the result: fold them into themes by the
+rules below, and add what the synthesis found that no fragment covers. Once
+the section is in `CHANGELOG.md`, run the script with `--remove` to `git rm`
+the fragments in the same release commit.
 
 **Read current CHANGELOG.md** to determine insert position (after header, before first ## version).
 

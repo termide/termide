@@ -45,7 +45,7 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 
 is_doc() {
     case "$1" in
-        doc/* | .agents/skills/*.md) return 0 ;;
+        doc/* | changelog.d/*.md | .agents/skills/*.md) return 0 ;;
         */*) return 1 ;;      # Markdown anywhere else may be compiled in
         *.md) return 0 ;;     # README.md, CHANGELOG.md, AGENTS.md, …
         *) return 1 ;;

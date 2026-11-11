@@ -1,0 +1,1 @@
+- **`Ctrl+F` reaches full-screen programs.** The terminal took it for its find bar even while `less`, `vim` or `emacs` had the screen, where it pages down or moves forward. With the alternate screen up the key now goes to the program.

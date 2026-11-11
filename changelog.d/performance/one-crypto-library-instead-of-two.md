@@ -1,0 +1,1 @@
+- **One crypto library instead of two.** SFTP's SSH ran on aws-lc while FTP's and the databases' TLS ran on ring; SSH now uses ring as well, which takes 0.7 MB off the binary and cmake off what building termide needs. Checked against OpenSSH with the ChaCha20-Poly1305, AES-GCM and AES-CTR ciphers and with ed25519 and RSA keys.

@@ -1,0 +1,1 @@
+- **A model that stutters is caught.** The loop guard counted repeated sentences only, so a model repeating one short piece ("PR PR PR …") ran on to the output limit; the last 2000 bytes repeating a piece of up to 64 bytes now count as a loop too.

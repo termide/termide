@@ -25,7 +25,7 @@ Platform note: agents that support frontmatter permissions may use `allowed-tool
    - `perf(scope): description` — performance improvement
    - `test(scope): description` — tests
    - `chore(scope): description` — maintenance
-   - Scope = affected crate or area (app, core, db, broker, i18n)
+   - Scope = affected crate or area (app, core, agent, config, i18n)
    - If changes span multiple scopes — use the primary one or omit
    - Commit body (after blank line) explains **why**, not what
    - Commit messages always in English

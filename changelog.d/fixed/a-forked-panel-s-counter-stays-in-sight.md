@@ -1,0 +1,1 @@
+- **A forked panel's counter stays in sight.** The title of an agent panel is cut from its end to fit, which took the counter off a fork's name — `Refactor (2)` and `Refactor (3)` both read `Agent: Refactor…`. The counter now sits next to the label, `Agent (2): Refactor`.

@@ -1,0 +1,1 @@
+- **An idle termide no longer redraws for figures it does not show.** Every resource sample that moved used RAM by a megabyte redrew the whole screen, though the menu bar shows it in gigabytes; a sample now redraws only when an indicator would read differently, or the clock turns a minute.

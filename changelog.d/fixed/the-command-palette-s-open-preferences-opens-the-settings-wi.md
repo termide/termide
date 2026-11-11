@@ -1,0 +1,1 @@
+- **The command palette's "Open preferences" opens the settings window.** It opened `config.toml` in an editor, while `Alt+P` and **Options → Edit preferences** open the settings window; all three now do the same.

@@ -1,0 +1,1 @@
+- **`task` describes `background` as it works.** The parameter's description told the model a background task ran in a panel of its own; it runs out of sight.

@@ -1,0 +1,1 @@
+- **A reply that hit the output limit with nothing in it no longer ends the run.** A server that holds a tool call back until it closes sends nothing of a model stuck inside one, and the run ended on the empty reply as if the model had answered. The panel now warns, the model is told and asked for a smaller step, and a second such reply, or a loop, stops the run.

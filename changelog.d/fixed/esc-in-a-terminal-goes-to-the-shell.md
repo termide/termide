@@ -1,0 +1,1 @@
+- **`Esc` in a terminal goes to the shell.** At an idle prompt `Esc` both reached the shell and asked to close the panel, so vi mode in bash or zsh raised the dialog on every press. A live terminal now gives `Esc` to its program and is closed with `Alt+W`; `Esc` still closes one whose program has ended.

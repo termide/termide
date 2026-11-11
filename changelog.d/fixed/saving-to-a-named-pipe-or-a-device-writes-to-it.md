@@ -1,0 +1,1 @@
+- **Saving to a named pipe or a device writes to it.** The editor's save renamed a temporary file over the target, which replaced a FIFO or a device node with a plain file; anything but a regular file is now written in place, as the agent's tools already did. The editor, the agent, the project store and the settings now share one atomic write.

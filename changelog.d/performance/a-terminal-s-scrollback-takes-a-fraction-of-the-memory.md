@@ -1,0 +1,1 @@
+- **A terminal's scrollback takes a fraction of the memory.** Each of its 10,000 lines was kept as wide as the screen, blank cells and all; a line is now kept up to its last visible cell. Ten thousand lines of `seq` in a terminal 66 columns wide took 9.8 MB and take 3.3 MB, and a full-width terminal saves more.

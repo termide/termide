@@ -1,0 +1,1 @@
+- **`/fork <focus>` forks with a focus.** The copy opens compacted on the focus, as `/compact <focus>` would, while the panel forked from stays as it is; `/fork` alone, `F5` and the menu entry fork the whole conversation as before.

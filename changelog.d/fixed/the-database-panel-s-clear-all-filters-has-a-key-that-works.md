@@ -1,0 +1,1 @@
+- **The database panel's "clear all filters" has a key that works.** Its default `Alt+F` is also the global "new file manager", which is matched first, so the key opened a file manager. It is now `Shift+F3`, beside the `F3` filter; a test keeps every panel default clear of the global keys.

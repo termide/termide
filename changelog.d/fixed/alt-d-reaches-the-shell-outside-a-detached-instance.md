@@ -1,0 +1,1 @@
+- **`Alt+D` reaches the shell outside a detached instance.** It only showed "not a detached instance"; in a terminal it now goes to the shell as readline's `kill-word`.

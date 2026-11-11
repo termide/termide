@@ -1,0 +1,1 @@
+- **A debugger is no longer looked up in a relative `PATH` entry.** A `PATH` with `.` or an empty entry made termide look for `lldb-dap`, `gdb`, `dlv` or Python in the directory it was started in, which may be a project's, and start whatever that project put there under the name. Only absolute entries are searched now, as for plugins.

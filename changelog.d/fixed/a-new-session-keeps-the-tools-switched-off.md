@@ -1,0 +1,1 @@
+- **A new session keeps the tools switched off.** A session started in an agent panel came up with every tool on, though it kept the permissions granted for the session; it now begins with the set the one left had switched off, kept out of its context and written to its log.

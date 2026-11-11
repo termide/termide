@@ -1,0 +1,1 @@
+- **The agent looks at its own terminals without asking.** `terminals` listing, `read`, `screen`, `interrupt` and `close` asked in every mode but `all`, and `agents` and the `debug` session's `state` were refused in plan mode, though both only read: the plan guard and the modes kept two lists of the calls that ask no one, and they had drifted apart. One list now serves both.

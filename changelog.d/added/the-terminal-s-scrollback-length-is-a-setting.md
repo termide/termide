@@ -1,0 +1,1 @@
+- **The terminal's scrollback length is a setting.** `scrollback_lines` under `[terminal]`, also on the settings window's Terminal page, sets how many lines a terminal keeps above its screen — 10,000 by default as before, `0` for none; terminals opened after the change take it. See [Terminal](doc/en/terminal.md).
