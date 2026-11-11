@@ -18,7 +18,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::time::{Duration, Instant};
@@ -245,12 +245,15 @@ struct Shared {
     context_limit: AtomicU64,
     /// The panel's live permission mode.
     mode: ModeHandle,
-    /// Plan mode's texts, for telling Claude Code of a switch.
+    /// Plan mode's texts, which Claude Code is told as notes.
     plan: PlanPrompt,
-    /// Whether what Claude Code was last told — its system prompt, then the
-    /// notes since — has plan mode on. The prompt is fixed for the session,
-    /// so a later switch reaches it as a note before the next turn.
-    told_plan: AtomicBool,
+    /// What Claude Code was last told of plan mode, a [`ToldPlan`]. Its
+    /// system prompt, fixed for the session, never holds the instructions:
+    /// they and `leave` reach it as notes before a turn.
+    told_plan: AtomicU8,
+    /// Whether the session log records plan mode: a resumed session of the
+    /// agent's may hold instructions it was not told are off.
+    plan_seen: bool,
     /// termide's tools Claude Code was last told it has — those its session
     /// started with, then those a note named — and those served now, which
     /// change as the session switches tools or MCP servers come and go; a
@@ -341,6 +344,31 @@ struct Shared {
     /// The id of the compaction that ended last: the agent may repeat its
     /// end, which must not reach the panel twice.
     compaction_ended: Mutex<Option<String>>,
+}
+
+/// What Claude Code was last told of plan mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+enum ToldPlan {
+    /// Nothing: the session has not been in plan mode.
+    Never,
+    /// The instructions, not taken back since.
+    On,
+    /// `leave`, after the instructions.
+    Off,
+    /// Something it may no longer hold: the next turn tells it the mode.
+    Stale,
+}
+
+impl From<u8> for ToldPlan {
+    fn from(value: u8) -> Self {
+        match value {
+            1 => Self::On,
+            2 => Self::Off,
+            3 => Self::Stale,
+            _ => Self::Never,
+        }
+    }
 }
 
 /// A compaction the agent runs on its own context, as its
@@ -550,7 +578,8 @@ impl AcpRuntime {
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             context_limit: AtomicU64::new(0),
-            told_plan: AtomicBool::new(setup.mode.get() == Mode::Plan),
+            told_plan: AtomicU8::new(ToldPlan::Never as u8),
+            plan_seen: setup.plan_seen,
             told_tools: Mutex::new(None),
             served_tools: Mutex::new(BTreeSet::new()),
             mode: setup.mode,
@@ -1293,6 +1322,12 @@ impl Shared {
                         value = json!({});
                     }
                     value["sessionId"] = json!(resume.session_id);
+                    // Its history may hold plan instructions it was not
+                    // told are off: the first turn tells it the mode.
+                    if self.plan_seen {
+                        self.told_plan
+                            .store(ToldPlan::Stale as u8, Ordering::Release);
+                    }
                     return Ok(value);
                 }
                 // Gone from the agent's own store, most likely: the
@@ -1656,18 +1691,41 @@ impl Shared {
     }
 
     /// Claude Code runs on termide's system prompt, fixed when its session
-    /// started, so a plan-mode switch since would leave it on the wrong
-    /// instructions: the next turn opens with a note of the switch, kept out
-    /// of the session log. Codex and Gemini CLI are switched to their own
-    /// modes instead.
+    /// started, so plan mode never goes into it, where it would outlive the
+    /// mode: a turn in plan mode the agent was not told of opens with the
+    /// instructions, the first after the mode went off with `leave`, as a
+    /// note kept out of the session log. Codex and Gemini CLI are switched
+    /// to their own modes instead.
     fn plan_switch_note(&self) -> Option<String> {
         if self.flavor != AcpFlavor::ClaudeCode {
             return None;
         }
         let on = self.mode.get() == Mode::Plan;
-        let told = self.told_plan.swap(on, Ordering::AcqRel);
-        let note = self.plan.switch_note(told, on)?;
+        let now = if on { ToldPlan::On } else { ToldPlan::Off };
+        let told = ToldPlan::from(self.told_plan.load(Ordering::Acquire));
+        // What the agent holds, as `switch_note` takes it: instructions not
+        // known to be off. A stale state tells the current one again.
+        let holds_plan = match told {
+            ToldPlan::On => true,
+            ToldPlan::Never | ToldPlan::Off => false,
+            ToldPlan::Stale => !on,
+        };
+        if told != ToldPlan::Never || on {
+            self.told_plan.store(now as u8, Ordering::Release);
+        }
+        let note = self.plan.switch_note(holds_plan, on)?;
         Some(format!("<system-reminder>\n{note}\n</system-reminder>"))
+    }
+
+    /// What the agent was told of plan mode may be gone from its context —
+    /// it compacted, or a session of its was resumed — so the next turn
+    /// tells it again. A session never told of plan mode needs nothing.
+    fn plan_told_stale(&self) {
+        let _ = self
+            .told_plan
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |told| {
+                (told != ToldPlan::Never as u8).then_some(ToldPlan::Stale as u8)
+            });
     }
 
     /// Claude Code's prompt speaks of the tools its session started with: a
@@ -3112,6 +3170,8 @@ impl Shared {
             .unwrap_or(open.tokens_before);
         let summary = open.summary.trim().to_string();
         let event = if status == "completed" {
+            // The notes of plan mode went with the history.
+            self.plan_told_stale();
             AgentEvent::Compacted {
                 // Claude Code keeps nothing of the history verbatim.
                 kept: 0,

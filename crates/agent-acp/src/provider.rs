@@ -456,6 +456,7 @@ fn service_setup(cwd: PathBuf) -> BackendSetup {
         mode: ModeHandle::new(Mode::Ask),
         system_prompt: String::new(),
         plan: PlanPrompt::default(),
+        plan_seen: false,
         goal: GoalPrompt::default(),
         handoff: HandoffPrompt::default(),
         reviewer: ReviewerSetup::default(),

@@ -16,6 +16,7 @@ with a reset time, for the limit card. Standard library only.
 
 import calendar
 import json
+import os
 import sys
 import threading
 import time
@@ -88,6 +89,14 @@ def send(message):
         sys.stdout.write(json.dumps(message) + "\n")
         sys.stdout.flush()
 
+
+def note(line):
+    """What it was sent, a line at a time, for the TUI harness to check:
+    only when $MOCK_ACP_LOG names a file, so the recordings write nothing."""
+    path = os.environ.get("MOCK_ACP_LOG")
+    if path:
+        with open(path, "a") as log:
+            log.write(line.replace("\n", " ")[:200] + "\n")
 
 def update(session_id, body):
     send({"method": "session/update", "params": {"sessionId": session_id, "update": body}})
@@ -230,6 +239,8 @@ def handle(message):
             "authMethods": [],
         }})
     elif method == "session/new":
+        prompt = ((params.get("_meta") or {}).get("systemPrompt")) or ""
+        note("session/new" + (" plan-in-system-prompt" if "# Plan mode" in prompt else ""))
         servers = [s for s in params.get("mcpServers", []) if s.get("type") == "http"]
         if servers:
             state["mcp"] = servers[0]
@@ -244,6 +255,9 @@ def handle(message):
         state["model"] = params.get("modelId")
         send({"id": request_id, "result": {}})
     elif method == "session/prompt":
+        for block in params.get("prompt", []):
+            if block.get("type") == "text":
+                note("prompt: " + block.get("text", ""))
         state["prompts"] += 1
         work = run_task if state["prompts"] == 1 else hit_limit
         threading.Thread(target=work, args=(params.get("sessionId"), request_id), daemon=True).start()

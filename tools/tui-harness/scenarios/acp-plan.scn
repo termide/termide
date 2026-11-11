@@ -1,0 +1,30 @@
+# Plan mode on Claude Code, played by the stand-in adapter in
+# tools/screenshots/mock-acp, which logs what it is sent. The plan
+# instructions reach it as a note ahead of the request, never in the system
+# prompt its session is fixed with; carrying the plan out from a clean
+# context opens a new session of its, sent the clean request.
+mock-acp claude_code
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+# configured → auto → all → ask → plan.
+key Shift+Tab Shift+Tab Shift+Tab Shift+Tab
+expect "plan"
+type "plan flagging critical low-stock items in the reorder report"
+key Enter
+mock-acp-got "prompt: <system-reminder> # Plan mode" 20
+mock-acp-count "plan-in-system-prompt" 0
+wait "Plan mode: carry the plan out?" 40
+expect "Yes, in configured mode, from a clean context"
+expect "Yes, in configured mode"
+snapshot card
+type "1"
+wait-gone "Plan mode: carry the plan out?" 10
+mock-acp-got "prompt: Carry out the plan above. The exploration behind it was cleared" 20
+mock-acp-count "session/new" 2
+mock-acp-count "plan-in-system-prompt" 0
+expect "Permissions: configured"
+snapshot carried
+quit --force

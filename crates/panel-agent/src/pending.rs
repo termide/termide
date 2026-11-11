@@ -823,9 +823,8 @@ impl AgentPanel {
     /// out in the mode it was planned from (`configured` for `ask`, which
     /// would ask about every step), from a clean context or with the
     /// exploration in it, or accepting edits, or to keep planning. An
-    /// external agent that follows the panel's modes is offered the same,
-    /// save the clean context: its history is its own, so there is nothing
-    /// of ours to clear.
+    /// external agent that follows the panel's modes is offered the same;
+    /// its clean context is a new session of its own.
     pub(crate) fn offer_plan(&mut self) {
         if (self.external && !self.runtime.follows_mode())
             || self.mode.get() != Mode::Plan
@@ -849,10 +848,7 @@ impl AgentPanel {
         }
         let t = termide_i18n::t();
         let back = self.plan_carry_mode();
-        let mut rows = Vec::new();
-        if !self.external {
-            rows.push((t.agent_plan_clean_mode_fmt(back.label()), (back, true)));
-        }
+        let mut rows = vec![(t.agent_plan_clean_mode_fmt(back.label()), (back, true))];
         rows.push((t.agent_plan_mode_fmt(back.label()), (back, false)));
         if back != Mode::Edit {
             rows.push((t.agent_plan_accept_edits().to_string(), (Mode::Edit, false)));
@@ -885,7 +881,14 @@ impl AgentPanel {
                     log::warn!("agent session write failed: {error}");
                 }
             }
-            if let Err(error) = self
+            if self.external {
+                // An external agent's history is its own: it starts a new
+                // session, told the recap of what the clearing kept, which the
+                // log no longer resumes past.
+                if !self.rebuild_keeping_prompt() {
+                    log::warn!("agent context not cleared: the agent could not restart");
+                }
+            } else if let Err(error) = self
                 .runtime
                 .update(Box::new(|agent| agent.prune_to_decisions()))
             {

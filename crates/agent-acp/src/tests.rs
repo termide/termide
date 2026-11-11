@@ -233,6 +233,7 @@ fn fake_agent(dir: PathBuf) -> (AcpRuntime, Receiver<PermissionEnvelope>) {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -368,6 +369,7 @@ fn recording_agent_with(
             mode,
             system_prompt: "termide's prompt".into(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -1016,8 +1018,14 @@ fn claude_code_is_told_of_a_plan_mode_switch_before_the_next_turn() {
         mode.clone(),
     );
     let plan = PlanPrompt::default();
-    // Started in plan mode, its system prompt already says so.
-    assert_eq!(prompt_blocks(&runtime, &seen, "one"), ["one"]);
+    // Started in plan mode: its system prompt says nothing of it, the first
+    // turn opens with the instructions.
+    let new = seen_where(&seen, |m| m["method"] == "session/new").remove(0);
+    assert_eq!(new["params"]["_meta"]["systemPrompt"], "termide's prompt");
+    let one = prompt_blocks(&runtime, &seen, "one");
+    assert!(one[0].contains(&plan.instructions), "{one:?}");
+    assert_eq!(one[1], "one");
+    assert_eq!(prompt_blocks(&runtime, &seen, "one more"), ["one more"]);
     mode.set(Mode::Edit);
     let two = prompt_blocks(&runtime, &seen, "two");
     assert_eq!(two.len(), 2, "{two:?}");
@@ -1038,6 +1046,83 @@ fn claude_code_is_told_of_a_plan_mode_switch_before_the_next_turn() {
     );
     mode.set(Mode::Edit);
     assert_eq!(prompt_blocks(&codex, &seen, "go"), ["go"]);
+}
+
+/// The agent compacting its context, as Claude Code reports it.
+fn compact(runtime: &AcpRuntime, id: &str) {
+    let shared = &runtime.shared;
+    shared.on_update(&json!({
+        "sessionUpdate": "compaction_update", "compactionId": id, "status": "in_progress",
+    }));
+    shared.on_update(&json!({
+        "sessionUpdate": "compaction_update", "compactionId": id, "status": "completed",
+        "summary": [{ "type": "text", "text": "## Kept" }],
+    }));
+    runtime.drain();
+}
+
+#[test]
+fn claude_code_is_told_the_plan_mode_again_after_it_compacts() {
+    let dir = tempfile::tempdir().unwrap();
+    let mode = ModeHandle::new(Mode::default());
+    let (runtime, seen) = recording_agent(
+        dir.path().to_path_buf(),
+        AcpFlavor::ClaudeCode,
+        None,
+        mode.clone(),
+    );
+    let plan = PlanPrompt::default();
+    // Never in plan mode: a compaction leaves nothing to tell.
+    assert_eq!(prompt_blocks(&runtime, &seen, "one"), ["one"]);
+    compact(&runtime, "c1");
+    assert_eq!(prompt_blocks(&runtime, &seen, "two"), ["two"]);
+
+    mode.set(Mode::Plan);
+    let three = prompt_blocks(&runtime, &seen, "three");
+    assert!(three[0].contains(&plan.instructions), "{three:?}");
+    // The instructions went with the history: told again.
+    compact(&runtime, "c2");
+    let four = prompt_blocks(&runtime, &seen, "four");
+    assert!(four[0].contains(&plan.instructions), "{four:?}");
+    assert_eq!(prompt_blocks(&runtime, &seen, "five"), ["five"]);
+
+    mode.set(Mode::Edit);
+    let six = prompt_blocks(&runtime, &seen, "six");
+    assert!(six[0].contains(&plan.leave), "{six:?}");
+    // The summary may still speak of plan mode: `leave` again.
+    compact(&runtime, "c3");
+    let seven = prompt_blocks(&runtime, &seen, "seven");
+    assert!(seven[0].contains(&plan.leave), "{seven:?}");
+    assert_eq!(prompt_blocks(&runtime, &seen, "eight"), ["eight"]);
+}
+
+#[test]
+fn a_resumed_claude_code_session_from_a_log_with_plan_mode_is_told_it_is_off() {
+    let plan = PlanPrompt::default();
+    let caps = json!({ "sessionCapabilities": { "resume": {} } });
+    for (plan_seen, forgotten, told) in [
+        (true, false, true),
+        // A log without plan mode, or a session gone and opened anew with a
+        // recap: nothing to take back.
+        (false, false, false),
+        (true, true, false),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (runtime, seen) = session_agent_as(
+            dir.path().to_path_buf(),
+            caps.clone(),
+            forgotten,
+            old_session("fake"),
+            earlier(),
+            AcpFlavor::ClaudeCode,
+            plan_seen,
+        );
+        let (_, prompt) = run_prompt(&runtime, &seen, "next");
+        let leaves = prompt
+            .iter()
+            .any(|block| block["text"].as_str().unwrap().contains(&plan.leave));
+        assert_eq!(leaves, told, "{plan_seen} {forgotten}: {prompt:?}");
+    }
 }
 
 #[test]
@@ -1647,6 +1732,7 @@ fn models_agent_with(dir: PathBuf, advertised: Value) -> AcpRuntime {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -1743,6 +1829,7 @@ fn options_are_listed_and_set_while_a_turn_runs() {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -1877,6 +1964,7 @@ fn steering_agent(dir: PathBuf, outcome: &'static str) -> (AcpRuntime, Arc<Mutex
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -2094,6 +2182,7 @@ fn side_agent(
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -2290,6 +2379,7 @@ fn asking_agent(
             mode: ModeHandle::new(mode),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer,
@@ -2558,6 +2648,7 @@ fn a_message_taken_by_the_next_turn_leaves_the_queue_at_once() {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -2654,6 +2745,7 @@ fn a_limited_turn_is_classified_and_retried_as_it_was() {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -2709,6 +2801,7 @@ fn a_failed_handshake_is_reported_on_the_first_prompt() {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -2790,6 +2883,27 @@ fn session_agent(
     resume: Option<ExternalSessionRef>,
     history: Vec<Message>,
 ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
+    session_agent_as(
+        dir,
+        capabilities,
+        forgotten,
+        resume,
+        history,
+        AcpFlavor::Generic,
+        false,
+    )
+}
+
+/// [`session_agent`] of `flavor`, its log recording plan mode or not.
+fn session_agent_as(
+    dir: PathBuf,
+    capabilities: Value,
+    forgotten: bool,
+    resume: Option<ExternalSessionRef>,
+    history: Vec<Message>,
+    flavor: AcpFlavor,
+    plan_seen: bool,
+) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
     let (to_agent_rx, to_agent_tx) = pipe().unwrap();
     let (from_agent_rx, from_agent_tx) = pipe().unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
@@ -2855,6 +2969,7 @@ fn session_agent(
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),
@@ -2863,7 +2978,7 @@ fn session_agent(
             history,
         },
         5,
-        AcpFlavor::Generic,
+        flavor,
     );
     (runtime, seen)
 }
@@ -3181,6 +3296,7 @@ fn self_starting_agent(dir: PathBuf, after: &'static str) -> AcpRuntime {
             mode: ModeHandle::new(Mode::default()),
             system_prompt: String::new(),
             plan: PlanPrompt::default(),
+            plan_seen: false,
             goal: GoalPrompt::default(),
             handoff: HandoffPrompt::default(),
             reviewer: ReviewerSetup::default(),

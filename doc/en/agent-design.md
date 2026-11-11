@@ -661,7 +661,19 @@ kept call paired with its result. The log records an `EntryKind::Pruned`
 with no payload and the replay applies the same function, so live and
 reopened history agree; a rewind past the entry restores the whole history,
 and `recall` counts what was cleared as out of context. Claude Code's
-plan-approval dialog has a similar "clear context" choice.
+plan-approval dialog has a similar "clear context" choice. An external agent
+keeps its own history, which termide cannot prune: there the row starts a new
+session of the agent, told the pruned history as its recap.
+
+Claude Code takes termide's system prompt once per session, so the plan
+instructions are never put in it: the prompt would keep saying "you are in
+plan mode" all through the carrying out, against a single note saying
+otherwise, and Claude Code's compaction drops that note while the prompt
+stays. The instructions and the `leave:` note go as `<system-reminder>`
+blocks ahead of a turn instead, and are sent again after a compaction and
+when a session is resumed from a log that was in plan mode. Restarting the
+session with a new prompt on each switch was set aside: it loses the prompt
+cache for the whole history.
 
 ## 4b. Auto mode
 
