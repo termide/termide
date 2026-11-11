@@ -625,6 +625,30 @@ impl HelpGenerator {
                 description: t.help_desc_open_file_editor().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.toggle_stage),
+                description: t.help_desc_toggle_stage().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.discard),
+                description: t.help_desc_discard_hunk().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.undo_discard),
+                description: t.help_desc_undo_discard().to_string(),
+            },
+            HelpEntry {
+                keys: format!("{} / Shift+↑↓", Self::format_keys(&kb.select_lines)),
+                description: t.help_desc_select_lines().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.prev_hunk),
+                description: t.help_desc_prev_hunk().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.next_hunk),
+                description: t.help_desc_next_hunk().to_string(),
+            },
+            HelpEntry {
                 keys: Self::format_keys(&kb.scroll_half_up),
                 description: t.help_desc_scroll_half_up().to_string(),
             },

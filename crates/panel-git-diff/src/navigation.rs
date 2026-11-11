@@ -8,12 +8,10 @@ impl GitDiffPanel {
     /// Toggle collapse state for selected file
     pub(crate) fn toggle_collapse(&mut self) {
         if self.selected_file < self.diffs.len() {
-            if self.collapsed.contains(&self.selected_file) {
-                self.collapsed.remove(&self.selected_file);
-            } else {
+            if !self.collapsed.remove(&self.selected_file) {
                 self.collapsed.insert(self.selected_file);
             }
-            self.calculate_total_lines();
+            self.after_fold();
         }
     }
 
@@ -21,7 +19,7 @@ impl GitDiffPanel {
     pub(crate) fn collapse_current(&mut self) {
         if self.selected_file < self.diffs.len() {
             self.collapsed.insert(self.selected_file);
-            self.calculate_total_lines();
+            self.after_fold();
         }
     }
 
@@ -29,24 +27,16 @@ impl GitDiffPanel {
     pub(crate) fn expand_current(&mut self) {
         if self.selected_file < self.diffs.len() {
             self.collapsed.remove(&self.selected_file);
-            self.calculate_total_lines();
+            self.after_fold();
         }
     }
 
-    /// Move selection up
-    pub(crate) fn move_up(&mut self) {
-        if self.selected_file > 0 {
-            self.selected_file -= 1;
-            self.ensure_file_visible();
-        }
-    }
-
-    /// Move selection down
-    pub(crate) fn move_down(&mut self) {
-        if self.selected_file + 1 < self.diffs.len() {
-            self.selected_file += 1;
-            self.ensure_file_visible();
-        }
+    /// Rows moved: the cursor goes to the folded or unfolded file's header,
+    /// and a selection, counted in rows, goes.
+    fn after_fold(&mut self) {
+        self.calculate_total_lines();
+        self.anchor = None;
+        self.set_cursor(self.file_row(self.selected_file));
     }
 
     /// Scroll up
@@ -62,48 +52,22 @@ impl GitDiffPanel {
 
     /// Page up
     pub(crate) fn page_up(&mut self) {
-        self.scroll_up(self.visible_height.saturating_sub(2));
+        self.move_cursor(-(self.visible_height.saturating_sub(2).max(1) as isize));
     }
 
     /// Page down
     pub(crate) fn page_down(&mut self) {
-        self.scroll_down(self.visible_height.saturating_sub(2));
+        self.move_cursor(self.visible_height.saturating_sub(2).max(1) as isize);
     }
 
     /// Go to start
     pub(crate) fn go_to_start(&mut self) {
-        self.scroll = 0;
-        self.selected_file = 0;
+        self.set_cursor(0);
     }
 
     /// Go to end
     pub(crate) fn go_to_end(&mut self) {
-        if !self.diffs.is_empty() {
-            self.selected_file = self.diffs.len() - 1;
-            let max_scroll = self.total_lines.saturating_sub(self.visible_height);
-            self.scroll = max_scroll;
-        }
-    }
-
-    /// Ensure selected file is visible
-    fn ensure_file_visible(&mut self) {
-        // Calculate line number where selected file starts
-        let mut line = 0;
-        for i in 0..self.selected_file {
-            line += 1; // File header
-            if !self.collapsed.contains(&i) {
-                for hunk in &self.diffs[i].hunks {
-                    line += 1 + hunk.lines.len();
-                }
-            }
-        }
-
-        // Adjust scroll to make file visible
-        if line < self.scroll {
-            self.scroll = line;
-        } else if line >= self.scroll + self.visible_height {
-            self.scroll = line.saturating_sub(self.visible_height) + 1;
-        }
+        self.set_cursor(self.total_lines.saturating_sub(1));
     }
 
     /// Open selected file in editor

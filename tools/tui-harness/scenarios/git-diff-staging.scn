@@ -1,0 +1,40 @@
+# Staging part of a file from the diff panel (doc/en/ui.md): a hunk with
+# Space; a discard asks first and the undo key brings it back; then lines
+# of the other hunk.
+project empty
+start
+run "git init -q && seq 1 30 > nums.txt && git add nums.txt && git commit -qm nums"
+run "seq 1 30 | sed 's/^2$/two/; s/^28$/twenty-eight/' > nums.txt"
+key Alt+G
+wait "nums.txt"
+# The status panel's [Diff] button: Shift+Tab to the buttons, past Stage
+# all, Revert all and Log.
+key Shift+Tab Right Right Right Enter
+wait "+two" 5
+key Alt+F11
+wait "+twenty-eight"
+
+# ] ] reaches the second hunk's header; Space stages that hunk alone.
+key ] ] Space
+wait "[staged]"
+run "git diff --cached | grep -qx +twenty-eight"
+run "! git diff --cached | grep -q two$"
+
+# d on the first hunk asks, and only then puts line 2 back.
+key Home ]
+key d
+wait "Discard the selected changes"
+run "grep -qx two nums.txt"
+key y
+wait-gone "Discard the selected changes"
+run "grep -qx 2 nums.txt"
+# u brings the discarded hunk back.
+key u
+wait "+two"
+run "grep -qx two nums.txt"
+
+# v selects from the removed line 2 to its replacement; Space stages them.
+key Home Down Down Down v Down Space
+run "git diff --cached | grep -qx +two"
+snapshot staged
+quit --force

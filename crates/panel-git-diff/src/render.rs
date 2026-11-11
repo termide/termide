@@ -46,6 +46,20 @@ impl GitDiffPanel {
 
         let line_num_width = 4; // Width for each line number column
 
+        // The cursor's row and the selected lines take the selection's
+        // background over their own colours.
+        let (cursor, selection) = (self.cursor, self.selection());
+        let marked = |row: usize| {
+            is_focused && (row == cursor || selection.is_some_and(|(a, b)| (a..=b).contains(&row)))
+        };
+        let mark = |style: Style, row: usize| {
+            if marked(row) {
+                style.bg(theme.selection_bg)
+            } else {
+                style
+            }
+        };
+
         let mut current_line = 0usize;
         let mut y = content_area.y;
         let max_y = content_area.y + content_area.height;
@@ -57,7 +71,7 @@ impl GitDiffPanel {
 
             // File header line
             if current_line >= self.scroll && y < max_y {
-                let is_selected = is_focused && file_idx == self.selected_file;
+                let is_selected = is_focused && current_line == cursor;
                 let is_collapsed = self.collapsed.contains(&file_idx);
 
                 // Use same style for entire line (text + lines) for uniformity
@@ -80,6 +94,7 @@ impl GitDiffPanel {
                     FileStatus::Deleted => "-",
                     FileStatus::Modified => "~",
                     FileStatus::Renamed => "R",
+                    FileStatus::Untracked => "?",
                 };
                 let stats = format!("(+{} -{})", diff.additions, diff.deletions);
                 let t = termide_i18n::t();
@@ -145,7 +160,14 @@ impl GitDiffPanel {
                     } else {
                         hunk.header.clone()
                     };
-                    buf.set_string(content_area.x, y, &header, hunk_header_style);
+                    let style = mark(hunk_header_style, current_line);
+                    for x in content_area.x..content_area.x + content_area.width {
+                        if let Some(cell) = buf.cell_mut((x, y)) {
+                            cell.set_char(' ');
+                            cell.set_style(style);
+                        }
+                    }
+                    buf.set_string(content_area.x, y, &header, style);
                     y += 1;
                 }
                 current_line += 1;
@@ -163,6 +185,8 @@ impl GitDiffPanel {
                             LineKind::Context => (context_style, " "),
                             LineKind::HunkHeader => (hunk_header_style, " "),
                         };
+                        let style = mark(style, current_line);
+                        let line_number_style = mark(line_number_style, current_line);
 
                         // Clear line with appropriate background
                         for x in content_area.x..content_area.x + content_area.width {

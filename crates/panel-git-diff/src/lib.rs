@@ -6,6 +6,7 @@ mod load;
 mod model;
 mod navigation;
 mod render;
+mod stage;
 mod unified;
 
 pub use model::{DiffHunk, DiffLine, FileDiff, FileStatus, LineKind};
@@ -13,7 +14,7 @@ pub use model::{DiffHunk, DiffLine, FileDiff, FileStatus, LineKind};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use crossterm::event::{KeyCode, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
 
 use termide_config::constants::spinner_frame;
@@ -46,8 +47,16 @@ pub struct GitDiffPanel {
     scroll: usize,
     /// Set of collapsed file indices
     collapsed: HashSet<usize>,
-    /// Selected file index
+    /// Selected file index: the file of the cursor's row.
     selected_file: usize,
+    /// The row the cursor is on, counting rows as they are drawn.
+    cursor: usize,
+    /// Where a selection of lines started; it ends at the cursor.
+    anchor: Option<usize>,
+    /// What a discard waiting for the user's confirmation takes.
+    pending_discard: Option<stage::Target>,
+    /// What the last discard took, for the undo key.
+    last_discard: Option<stage::Discarded>,
     /// Cached theme colors
     cached_theme: ThemeColors,
     /// Last render area
@@ -105,6 +114,12 @@ fn build_git_diff_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("refresh", &kb.refresh);
     t.insert("scroll_half_up", &kb.scroll_half_up);
     t.insert("scroll_half_down", &kb.scroll_half_down);
+    t.insert("toggle_stage", &kb.toggle_stage);
+    t.insert("discard", &kb.discard);
+    t.insert("undo_discard", &kb.undo_discard);
+    t.insert("select_lines", &kb.select_lines);
+    t.insert("prev_hunk", &kb.prev_hunk);
+    t.insert("next_hunk", &kb.next_hunk);
     t
 }
 
@@ -160,6 +175,10 @@ impl GitDiffPanel {
             scroll: 0,
             collapsed: HashSet::new(),
             selected_file: 0,
+            cursor: 0,
+            anchor: None,
+            pending_discard: None,
+            last_discard: None,
             cached_theme: ThemeColors::default(),
             last_area: Rect::default(),
             total_lines: 0,
@@ -242,6 +261,8 @@ impl GitDiffPanel {
             .and_then(|path| self.diffs.iter().position(|d| d.path == path))
             .unwrap_or_else(|| self.selected_file.min(self.diffs.len().saturating_sub(1)));
         self.calculate_total_lines();
+        self.anchor = None;
+        self.cursor = self.file_row(self.selected_file);
         self.scroll = self.scroll.min(self.total_lines.saturating_sub(1));
     }
 
@@ -347,6 +368,10 @@ impl Panel for GitDiffPanel {
                 }
                 CommandResult::Handled(true)
             }
+            PanelCommand::Confirmed { action } if action == stage::DISCARD_ACTION => {
+                self.confirmed_discard();
+                CommandResult::NeedsRedraw(true)
+            }
             PanelCommand::Cut => CommandResult::Handled(false),
             PanelCommand::Paste => CommandResult::Handled(false),
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
@@ -434,7 +459,39 @@ impl Panel for GitDiffPanel {
         let key = chord.raw;
         self.status_message = None;
 
+        if key.code == KeyCode::Esc && self.anchor.take().is_some() {
+            return vec![];
+        }
+
         // Configurable actions via HotkeyTable
+        if self.hotkeys.matches("toggle_stage", &key) {
+            if self.can_stage() {
+                return self.toggle_stage();
+            }
+            // A diff that cannot be staged keeps Space for folding.
+            self.toggle_collapse();
+            return vec![];
+        }
+        if self.can_stage() {
+            if self.hotkeys.matches("discard", &key) {
+                return self.ask_discard();
+            }
+            if self.hotkeys.matches("undo_discard", &key) {
+                return self.undo_discard();
+            }
+            if self.hotkeys.matches("select_lines", &key) {
+                self.toggle_selection();
+                return vec![];
+            }
+        }
+        if self.hotkeys.matches("prev_hunk", &key) {
+            self.jump_hunk(true);
+            return vec![];
+        }
+        if self.hotkeys.matches("next_hunk", &key) {
+            self.jump_hunk(false);
+            return vec![];
+        }
         if self.hotkeys.matches("toggle_collapse", &key) {
             self.toggle_collapse();
             return vec![];
@@ -446,22 +503,28 @@ impl Panel for GitDiffPanel {
             self.refresh();
             return vec![PanelEvent::NeedsRedraw];
         }
+        let half = (self.visible_height / 2).max(1) as isize;
         if self.hotkeys.matches("scroll_half_up", &key) {
-            self.scroll_up(self.visible_height / 2);
+            self.move_cursor(-half);
             return vec![];
         }
         if self.hotkeys.matches("scroll_half_down", &key) {
-            self.scroll_down(self.visible_height / 2);
+            self.move_cursor(half);
+            return vec![];
+        }
+
+        if key.modifiers == KeyModifiers::SHIFT && matches!(key.code, KeyCode::Up | KeyCode::Down) {
+            self.extend_selection(if key.code == KeyCode::Up { -1 } else { 1 });
             return vec![];
         }
 
         // Vim-aware navigation (j/k/g/G when vim_mode is enabled)
         if is_move_up(&key, self.vim_mode) {
-            self.move_up();
+            self.move_cursor(-1);
             return vec![];
         }
         if is_move_down(&key, self.vim_mode) {
-            self.move_down();
+            self.move_cursor(1);
             return vec![];
         }
         if is_go_home(&key, self.vim_mode) {
@@ -492,29 +555,12 @@ impl Panel for GitDiffPanel {
                 // Find which file was clicked
                 let content_y = self.last_area.y + 1;
                 if event.row >= content_y {
-                    let clicked_visual_line = (event.row - content_y) as usize + self.scroll;
-
-                    // Find which file this line belongs to
-                    let mut current_line = 0;
-                    for (file_idx, diff) in self.diffs.iter().enumerate() {
-                        let file_header_line = current_line;
-                        current_line += 1;
-
-                        if clicked_visual_line == file_header_line {
-                            self.selected_file = file_idx;
+                    let clicked = (event.row - content_y) as usize + self.scroll;
+                    if let Some(row) = self.row_at(clicked) {
+                        self.anchor = None;
+                        self.set_cursor(clicked);
+                        if matches!(row, stage::Row::File(_)) {
                             self.toggle_collapse();
-                            return vec![];
-                        }
-
-                        if !self.collapsed.contains(&file_idx) {
-                            for hunk in &diff.hunks {
-                                current_line += 1 + hunk.lines.len();
-                            }
-                        }
-
-                        if clicked_visual_line < current_line {
-                            self.selected_file = file_idx;
-                            return vec![];
                         }
                     }
                 }

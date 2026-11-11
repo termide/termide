@@ -1122,6 +1122,9 @@ impl Translation for RuntimeTranslation {
         git_revert_all_confirm,
         git_no_remote_url,
         git_diff_staged_marker,
+        git_diff_stale,
+        git_diff_nothing_chosen,
+        git_diff_nothing_to_undo,
         git_pushing,
         git_pulling,
         git_commit_author,
@@ -1171,6 +1174,12 @@ impl Translation for RuntimeTranslation {
         help_desc_revert,
         help_desc_copy_hash,
         help_desc_scroll_half_down,
+        help_desc_toggle_stage,
+        help_desc_discard_hunk,
+        help_desc_undo_discard,
+        help_desc_select_lines,
+        help_desc_prev_hunk,
+        help_desc_next_hunk,
         settings_tab_general,
         settings_tab_editor,
         settings_tab_file_manager,
@@ -2752,6 +2761,18 @@ impl Translation for RuntimeTranslation {
             "git_diff_title_fmt",
             &[("repo", repo), ("branch", branch), ("files", files)],
         )
+    }
+
+    fn git_diff_discard_confirm_fmt(&self, path: &str) -> String {
+        self.format("git_diff_discard_confirm_fmt", &[("path", path)])
+    }
+
+    fn git_diff_delete_untracked_fmt(&self, path: &str) -> String {
+        self.format("git_diff_delete_untracked_fmt", &[("path", path)])
+    }
+
+    fn git_diff_restored_fmt(&self, path: &str) -> String {
+        self.format("git_diff_restored_fmt", &[("path", path)])
     }
 
     fn git_commit_info_title(&self, hash: &str) -> String {

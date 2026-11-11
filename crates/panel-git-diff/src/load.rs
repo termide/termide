@@ -82,12 +82,8 @@ impl GitDiffPanel {
             self.diffs.retain(|d| &d.path == filter);
         }
 
-        // Reset selection if needed
-        if self.selected_file >= self.diffs.len() && !self.diffs.is_empty() {
-            self.selected_file = self.diffs.len() - 1;
-        }
-
         self.calculate_total_lines();
+        self.settle_cursor();
 
         self.is_loading = false;
         self.run_pending_refresh();
@@ -289,6 +285,7 @@ fn load_file_diff(repo: &Path, path: &Path, staged: bool, status_char: char) -> 
         'A' => FileStatus::Added,
         'D' => FileStatus::Deleted,
         'R' => FileStatus::Renamed,
+        '?' => FileStatus::Untracked,
         _ => FileStatus::Modified,
     };
 

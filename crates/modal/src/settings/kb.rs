@@ -162,6 +162,12 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "refresh",
             "scroll_half_up",
             "scroll_half_down",
+            "toggle_stage",
+            "discard",
+            "undo_discard",
+            "select_lines",
+            "prev_hunk",
+            "next_hunk",
         ],
         5 => &["info", "view_diff", "refresh"],
         6 => &[
@@ -323,7 +329,13 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             edit,
             refresh,
             scroll_half_up,
-            scroll_half_down
+            scroll_half_down,
+            toggle_stage,
+            discard,
+            undo_discard,
+            select_lines,
+            prev_hunk,
+            next_hunk
         ),
         5 => kb_get!(config.git_log.keybindings, name, info, view_diff, refresh),
         6 => kb_get!(
@@ -549,7 +561,13 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             edit,
             refresh,
             scroll_half_up,
-            scroll_half_down
+            scroll_half_down,
+            toggle_stage,
+            discard,
+            undo_discard,
+            select_lines,
+            prev_hunk,
+            next_hunk
         ),
         5 => kb_set!(
             config.git_log.keybindings,

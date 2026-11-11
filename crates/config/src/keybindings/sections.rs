@@ -241,6 +241,19 @@ pub struct GitDiffKeybindings {
     pub scroll_half_up: Option<KeyBinding>,
     /// Scroll half page down
     pub scroll_half_down: Option<KeyBinding>,
+    /// Stage the hunk or lines under the cursor, or unstage them on the
+    /// staged side
+    pub toggle_stage: Option<KeyBinding>,
+    /// Discard the hunk or lines under the cursor from the working tree
+    pub discard: Option<KeyBinding>,
+    /// Bring back what the last discard took
+    pub undo_discard: Option<KeyBinding>,
+    /// Start or drop a selection of lines
+    pub select_lines: Option<KeyBinding>,
+    /// Jump to the previous hunk
+    pub prev_hunk: Option<KeyBinding>,
+    /// Jump to the next hunk
+    pub next_hunk: Option<KeyBinding>,
 }
 
 impl GitDiffKeybindings {
@@ -254,9 +267,7 @@ impl GitDiffKeybindings {
             };
         }
 
-        if self.toggle_collapse.is_none() {
-            self.toggle_collapse = Some(KeyBinding::Multiple(vec!["Enter".into(), "Space".into()]));
-        }
+        set_default!(toggle_collapse, "Enter");
         if self.edit.is_none() {
             self.edit = Some(KeyBinding::Multiple(vec!["F4".into(), "E".into()]));
         }
@@ -265,6 +276,12 @@ impl GitDiffKeybindings {
         }
         set_default!(scroll_half_up, "Ctrl+U");
         set_default!(scroll_half_down, "Ctrl+D");
+        set_default!(toggle_stage, "Space");
+        set_default!(discard, "D");
+        set_default!(undo_discard, "U");
+        set_default!(select_lines, "V");
+        set_default!(prev_hunk, "[");
+        set_default!(next_hunk, "]");
     }
 }
 

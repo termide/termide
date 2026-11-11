@@ -314,6 +314,12 @@ pub trait Translation: Send + Sync {
     fn help_desc_revert(&self) -> &str;
     fn help_desc_copy_hash(&self) -> &str;
     fn help_desc_scroll_half_down(&self) -> &str;
+    fn help_desc_toggle_stage(&self) -> &str;
+    fn help_desc_discard_hunk(&self) -> &str;
+    fn help_desc_undo_discard(&self) -> &str;
+    fn help_desc_select_lines(&self) -> &str;
+    fn help_desc_prev_hunk(&self) -> &str;
+    fn help_desc_next_hunk(&self) -> &str;
     fn help_desc_tree_search(&self) -> &str;
     fn help_desc_expand_dir(&self) -> &str;
     fn help_desc_collapse_dir(&self) -> &str;
@@ -1847,6 +1853,9 @@ pub trait Translation: Send + Sync {
     fn git_revert_all_confirm(&self) -> &str;
     fn git_no_remote_url(&self) -> &str;
     fn git_diff_staged_marker(&self) -> &str;
+    fn git_diff_stale(&self) -> &str;
+    fn git_diff_nothing_chosen(&self) -> &str;
+    fn git_diff_nothing_to_undo(&self) -> &str;
     fn git_pushing(&self) -> &str;
     fn git_pulling(&self) -> &str;
     fn git_action_files_fmt(&self, action: &str, count: usize) -> String;
@@ -1866,6 +1875,9 @@ pub trait Translation: Send + Sync {
         files: &str,
     ) -> String;
     fn git_diff_title_fmt(&self, repo: &str, branch: &str, files: &str) -> String;
+    fn git_diff_discard_confirm_fmt(&self, path: &str) -> String;
+    fn git_diff_delete_untracked_fmt(&self, path: &str) -> String;
+    fn git_diff_restored_fmt(&self, path: &str) -> String;
 
     // Git commit info modal
     fn git_commit_info_title(&self, hash: &str) -> String;

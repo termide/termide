@@ -42,6 +42,8 @@ pub enum FileStatus {
     Modified,
     Deleted,
     Renamed,
+    /// Not in git yet: a working-tree file with no diff to show.
+    Untracked,
 }
 
 /// Diff information for a single file

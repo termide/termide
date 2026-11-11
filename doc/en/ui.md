@@ -230,6 +230,31 @@ reloads the log. All three but `Enter` are `info`, `view_diff` and `refresh`
 under `[git_log.keybindings]`. Checking a branch out is done from the git
 status panel.
 
+The **git diff** panel (`[Diff]` in git status) shows the working tree's
+changes, unstaged first, then staged ones marked `[staged]`, and stages or
+discards them a hunk or a line at a time. The cursor walks the rows as drawn:
+on a file's header it stands for the whole file, on a hunk's `@@` header for
+the hunk, on a line for that line. `[` and `]` jump between hunks; `V` starts
+a selection of lines and `Shift+↑↓` extends one, kept within a hunk, `Esc`
+drops it.
+
+- `Space` stages what the cursor stands for; on the staged side it unstages
+  it. A selected line of context changes nothing, and says so.
+- `D` discards it from the working tree, after asking; on the staged side it
+  unstages instead. `U` brings back what the last discard took, while the
+  panel stays open: the file is kept in git's object store first.
+- Untracked, renamed and binary files go whole. Discarding an untracked file
+  deletes it, so it always asks.
+
+The panel cuts each patch from a diff git writes at that moment, so carriage
+returns and a missing final newline survive; when the file changed since it
+was drawn, the action is refused and the panel reloads. `Enter` folds a
+file, `E`/`F4` opens it. A commit's or a stash's diff only shows changes, and
+`Space` folds there as `Enter` does. The keys are under
+`[git_diff.keybindings]`: `toggle_stage`, `discard`, `undo_discard`,
+`select_lines`, `prev_hunk`, `next_hunk`, `toggle_collapse`, `edit`,
+`refresh`, `scroll_half_up` and `scroll_half_down`.
+
 Opening a **binary file** (with `Enter` or `F3` in the file manager) shows a
 read-only **hex viewer** — `offset │ hex │ ASCII`, with the row width adapting to
 the panel in 16-byte sections — instead of handing it to the system viewer. A
