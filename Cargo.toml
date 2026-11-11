@@ -168,6 +168,13 @@ nix = { version = "0.29", features = ["signal", "process"] }
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_System_SystemInformation"] }
 
+# Dependencies keep line tables only: a backtrace still names their lines,
+# but their variables are not inspectable, and their artefacts come out
+# about a quarter smaller (tokio's rlib 19.6 MB → 14.9 MB). The workspace's own
+# crates keep full debug info, for stepping through them in a debugger.
+[profile.dev.package."*"]
+debug = "line-tables-only"
+
 [profile.release]
 lto = true
 codegen-units = 1
