@@ -1180,6 +1180,20 @@ something. How many delegated tasks think at once is the
 - **edit** replaces a unique piece of text in a file and reports a diff of
   what changed.
 - **write** creates a file or replaces its whole content.
+
+  After an `edit` or a `write`, the language server of the file's language
+  is told of the change, and the errors it reports in the file are added to
+  the result, so the agent sees a mistake in the step that made it. When
+  the file's errors before the change are known (an editor has the file
+  open, or the agent changed it earlier), only the new ones are listed.
+  Errors only, 20 at most; warnings and hints are left out. A file no
+  editor has open is opened in its server for the check and closed again,
+  the server started first if it is not running yet, as opening the file
+  in an editor would. The result waits for the server at most 5 seconds,
+  and says nothing when the server has not answered by then, when there is
+  no server for the language, or when an editor holds unsaved changes to
+  the file. Claude Code on termide's tools gets the same; without language
+  servers (`--no-lsp`, `lsp.enabled = false`) the results carry no errors.
 - **shell** runs a shell command in the project directory, streaming its output.
   Long output keeps its beginning and end, and the complete log is written to
   a file the agent can read. Only the two ends stay in memory, so a command

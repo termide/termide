@@ -46,6 +46,8 @@ mod debug_tool;
 pub(in crate::app) use debug_tool::Waiter as DebugWaiter;
 mod headless;
 pub(crate) mod live;
+mod lsp_check;
+pub(in crate::app) use lsp_check::LspChecks;
 mod peers;
 pub(crate) mod terminals;
 pub use headless::{run_agent_headless, run_recall, HeadlessOutput};

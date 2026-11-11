@@ -18,6 +18,7 @@ mod debug;
 mod edit;
 mod fork;
 mod jobs;
+mod lsp;
 mod peers;
 mod question;
 mod read;
@@ -40,6 +41,7 @@ pub use debug::{parse_action as parse_debug_action, DebugAction, DebugCheck, Deb
 pub use edit::EditTool;
 pub use fork::{ForkRequest, ForkSession, ForkTool};
 pub use jobs::{JobsTool, OwnTasks};
+pub use lsp::{set_lsp_check, FileError, LspCheck, LspReport};
 pub use peers::{AgentsTool, PeerInfo, PeerList, PeerSend, SendMessageTool};
 pub use question::QuestionTool;
 pub use read::ReadTool;

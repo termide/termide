@@ -1,0 +1,24 @@
+# The language server's errors in the result of the agent's edit. A Cargo
+# project with rust-analyzer running (`lsp` needs it on PATH): the mock
+# model makes a number a string in src/main.rs, which no editor has open,
+# and answers with what the edit's result said of the server's errors.
+project empty
+lsp
+mock-llm
+start
+run "mkdir src && printf '[package]\nname = \"count\"\nversion = \"0.1.0\"\nedition = \"2021\"\n' > Cargo.toml && printf 'fn main() {\n    let count: u32 = 3;\n    println!(\"{count}\");\n}\n' > src/main.rs"
+wait "Cargo.toml"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "break the count"
+key Enter
+# Outside a git repository the edit is asked about.
+wait "Agent wants to run edit" 20
+type "1"
+file-contains src/main.rs "\"three\"" 20
+wait "LSP: The language server reports 1 error" 30
+wait "2:22 mismatched" 10
+wait-gone "[■]" 15
+snapshot reported
+quit

@@ -1,0 +1,31 @@
+# Only the errors the agent's edit brought. src/main.rs is open in an
+# editor and already has an error rust-analyzer reported (`lsp` needs it on
+# PATH); the mock model's edit adds another, and its result lists that one
+# alone. The editor follows the file at once, without the watcher.
+project empty
+lsp
+mock-llm
+start
+run "mkdir src && printf '[package]\nname = \"count\"\nversion = \"0.1.0\"\nedition = \"2021\"\n' > Cargo.toml && printf 'fn main() {\n    let flag: bool = 1;\n    let count: u32 = 3;\n    println!(\"{count} {flag}\");\n}\n' > src/main.rs"
+wait "Cargo.toml"
+key Home Down Enter
+wait "main.rs"
+key Down F4
+wait "[E0308]" 30
+# Back to the project in the file manager, where the agent then works.
+key Alt+Left
+key Home Enter
+wait "Cargo.toml"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "break the count"
+key Enter
+wait "Agent wants to run edit" 20
+type "1"
+wait "LSP: The language server reports 1 new error" 30
+wait "3:22" 10
+wait-gone "[■]" 15
+expect "mismatched types (rustc E0308)"
+snapshot reported
+quit

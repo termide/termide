@@ -243,6 +243,7 @@ class Run:
         self.config = HERE / "config.toml"
         self.mock_llm = None
         self.mock_acp = None
+        self.lsp = False
         self.term = None
         self.helpers = []
         self.files = []
@@ -276,6 +277,11 @@ class Run:
     def v_mock_llm(self, flavor="default"):
         self.mock_llm = flavor
 
+    def v_lsp(self):
+        # Language servers run: no `--no-lsp`, and a rustup-installed server
+        # finds its toolchains though HOME is the throwaway one.
+        self.lsp = True
+
     def v_mock_acp(self, provider):
         if provider not in ("claude_code", "codex", "gemini_cli"):
             raise Failure("mock-acp takes claude_code, codex or gemini_cli")
@@ -305,6 +311,10 @@ class Run:
         if self.mock_acp:
             env["PATH"] = f"{SHOTS / 'mock-acp'}:{env['PATH']}"
             env["MOCK_ACP_LOG"] = str(self.out / "mock-acp.log")
+        if self.lsp:
+            real = Path.home()
+            env["RUSTUP_HOME"] = os.environ.get("RUSTUP_HOME", str(real / ".rustup"))
+            env["CARGO_HOME"] = os.environ.get("CARGO_HOME", str(real / ".cargo"))
         return env
 
     def prepare(self):
@@ -359,7 +369,7 @@ class Run:
 
     def v_start(self, *extra):
         env = self.prepare()
-        argv = [str(self.args.bin), "--no-lsp", *extra]
+        argv = [str(self.args.bin), *([] if self.lsp else ["--no-lsp"]), *extra]
         argv = [a.replace("{project}", str(self.project)) for a in argv]
         # Every byte termide wrote, for replaying a failure; closed in cleanup().
         self.log = open(self.out / "output.bin", "wb")  # noqa: SIM115

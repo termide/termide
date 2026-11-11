@@ -76,6 +76,7 @@ impl App {
             }
         }
         for (path, diagnostics) in published {
+            self.note_lsp_report(&path, &diagnostics);
             self.state.lsp_diagnostics.insert(path.clone(), diagnostics);
             self.publish_diagnostics(path);
         }

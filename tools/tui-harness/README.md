@@ -34,13 +34,16 @@ minute.
   (`tools/screenshots/fixtures/make-demo.sh`): a small Python service with
   a git history, a worktree, uncommitted changes and a SQLite database.
   `project empty` gives an empty directory instead.
-- **`--no-lsp`**, so no language server starts or downloads anything.
+- **`--no-lsp`**, so no language server starts or downloads anything,
+  unless the scenario says `lsp`.
 - **Mock agents** on request: `mock-llm` starts
   `tools/screenshots/mock-llm/server.py` on a free port and points the
   `local` connection at it; it plays a fixed task (read
   `inventory/report.py`, edit it, run the tests, answer), or, asked to
   "delegate the stock scan", hands a task to a subagent in the background
-  and quotes its report. It logs the model every call asks for. `mock-acp codex`
+  and quotes its report; asked to "break the count", it makes a number a
+  string in a Cargo project's `src/main.rs` and repeats what the edit's
+  result said of the language server's errors. It logs the model every call asks for. `mock-acp codex`
   (or `claude_code`, `gemini_cli`) makes that ACP agent the connection and
   puts the stand-in adapters of `tools/screenshots/mock-acp` first on
   `PATH`. Neither touches the network.
@@ -57,6 +60,7 @@ Timeouts are in seconds and default to 10.
 | `config FILE` | Use FILE (relative to the scenario) instead of `config.toml`; `{mock_llm_port}` in it is filled in |
 | `mock-llm [flavor]` | Start the mock model: `default`, `llamacpp`, `omlx` or `openrouter` |
 | `mock-acp PROVIDER` | Connect the `claude_code`, `codex` or `gemini_cli` stand-in |
+| `lsp` | Let language servers run (no `--no-lsp`); a rustup-installed one keeps the real `RUSTUP_HOME` and `CARGO_HOME` (before `start`) |
 | `start [ARGS...]` | Run termide in the project, waiting for its first frame; `{project}` in ARGS is the project's path |
 | `key K...` | Press keys: `Enter`, `Esc`, `Tab`, `Alt+T`, `Ctrl+S`, `Shift+Up`, `Alt+F11`, `PgDn`, `x` |
 | `type "TEXT"` | Type text, one character at a time |
@@ -80,7 +84,10 @@ A scenario that does not `quit` is killed at its end. The examples:
 `terminal` (a command in a terminal panel), `terminal-keys` (Alt, Esc and Ctrl+F reaching the shell and less, the title following them), `git-diff-staging` (a hunk and lines staged from the diff panel, a discard confirmed and undone), `editor-git-changes` (F7 to a change, staged, unstaged and reverted from the editor's menu), `agent` (the mock model's task
 with a permission card), `acp-codex` (the same task through Codex over
 ACP), `agent-review` (the Claude Code stand-in's edit reviewed with
-`/changes`, a hunk rejected and the agent told of it), `delegate` (a background subagent's row and report, on the model
+`/changes`, a hunk rejected and the agent told of it),
+`agent-lsp-errors` and `agent-lsp-new-errors` (rust-analyzer's errors in
+the mock model's edit result, for a file no editor has, and the new ones
+alone for one an editor has; both need rust-analyzer on `PATH`), `delegate` (a background subagent's row and report, on the model
 `[ai.subagents]` names), `goal` (`/goal` with its judge on the model
 `[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
 to the mode worked in, past the ones `Shift+Tab` passes through) and

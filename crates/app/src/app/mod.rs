@@ -103,6 +103,9 @@ pub struct App {
     debug_last_launch: Option<termide_debug::dap::LaunchSpec>,
     /// Agents' `debug` calls waiting for the session to get somewhere.
     debug_waiters: Vec<agent_panel::DebugWaiter>,
+    /// Agents' checks of the files they changed, waiting for the language
+    /// servers.
+    lsp_checks: agent_panel::LspChecks,
     /// Capability-aware key normalizer. Used to build a `KeyChord` from
     /// raw `KeyEvent`s on the dispatch boundary so that all matchers
     /// downstream see canonical keys while text-input and PTY paths
@@ -240,6 +243,7 @@ impl App {
             debug_breakpoints_version: 0,
             debug_revealed: None,
             debug_waiters: Vec::new(),
+            lsp_checks: Default::default(),
             debug_terminal_pid: None,
             debug_last_launch: None,
             normalizer: termide_keyboard::KeyNormalizer::default(),
@@ -349,6 +353,7 @@ impl App {
             debug_breakpoints_version: 0,
             debug_revealed: None,
             debug_waiters: Vec::new(),
+            lsp_checks: Default::default(),
             debug_terminal_pid: None,
             debug_last_launch: None,
             normalizer: termide_keyboard::KeyNormalizer::new(caps),
@@ -1131,6 +1136,7 @@ impl App {
         self.poll_debug_session();
         self.poll_plugins();
         self.serve_debug_tool();
+        self.serve_lsp_check();
         self.flush_settings_save();
         self.poll_settings_model_fetch();
         if let Some(termide_modal::ActiveModal::Input(modal)) = self.state.active_modal.as_mut() {

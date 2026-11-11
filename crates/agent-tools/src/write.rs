@@ -41,10 +41,15 @@ impl Tool for WriteTool {
         call: &ToolCall,
         ctx: &ToolContext,
         _on_update: &mut dyn FnMut(ToolUpdate),
-        _cancel: &CancelToken,
+        cancel: &CancelToken,
     ) -> ToolResultMessage {
         match write(call, ctx) {
-            Ok((text, details)) => ToolResultMessage::text(call, text).with_details(details),
+            Ok((mut text, details)) => {
+                if let Some(path) = details["path"].as_str() {
+                    text.extend(crate::lsp::errors_after_change(path.as_ref(), cancel));
+                }
+                ToolResultMessage::text(call, text).with_details(details)
+            }
             Err(message) => ToolResultMessage::error(call, message),
         }
     }

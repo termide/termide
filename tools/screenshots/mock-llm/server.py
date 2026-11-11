@@ -137,6 +137,41 @@ DELEGATE_SCRIPT = [
 ]
 
 
+# A third, played when the user asks to "break the count" in a Cargo project
+# (the TUI harness's agent-lsp-errors): the agent makes a number a string,
+# then repeats what the edit's result said of the language server's errors.
+BREAK = "break the count"
+LSP_NOTE = "The language server reports"
+BREAK_SCRIPT = [
+    {
+        "reasoning": "",
+        "text": "I'll make the count a string.",
+        "tool": (
+            "edit",
+            {
+                "path": "src/main.rs",
+                "old_string": "let count: u32 = 3;",
+                "new_string": 'let count: u32 = "three";',
+            },
+        ),
+    },
+]
+
+
+def lsp_echo(messages):
+    """The final step of BREAK: the first lines of the edit's LSP note."""
+    for message in messages:
+        if message.get("role") != "tool":
+            continue
+        text = message.get("content") or ""
+        if isinstance(text, list):
+            text = "".join(part.get("text", "") for part in text if isinstance(part, dict))
+        if LSP_NOTE in text:
+            note = text[text.index(LSP_NOTE) :].splitlines()
+            return {"reasoning": "", "text": "LSP: " + " | ".join(note[:2]), "tool": None}
+    return {"reasoning": "", "text": "LSP: nothing reported", "tool": None}
+
+
 def content_of(message):
     return json.dumps(message.get("content"))
 
@@ -205,7 +240,9 @@ class Handler(BaseHTTPRequestHandler):
             # Only the user's request says DELEGATE: the subagent's task does
             # not, though the report back may repeat the task.
             main = any(DELEGATE in u for u in users)
-            if not main and any("SUBTASK" in u for u in users):
+            if any(BREAK in u for u in users):
+                step = BREAK_SCRIPT[done] if done < len(BREAK_SCRIPT) else lsp_echo(messages)
+            elif not main and any("SUBTASK" in u for u in users):
                 time.sleep(SUBAGENT_DELAY)
                 step = {"reasoning": "", "text": SUBREPORT + model + ".", "tool": None}
             elif main:
