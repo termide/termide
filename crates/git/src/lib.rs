@@ -13,6 +13,7 @@ mod commits;
 mod discovery;
 mod files;
 pub mod graph;
+mod lines;
 mod log_stream;
 mod operations;
 mod patch;
@@ -42,6 +43,7 @@ pub use discovery::{
     get_repo_name, repo_paths_overlap, without_ancestor_repos,
 };
 pub use files::{get_staged_files, get_unstaged_files, StagedFile, UnstagedFile};
+pub use lines::{index_file_content, revert_lines, stage_lines, unstage_lines, LineRevert};
 pub use log_stream::{LogChunk, LogStream};
 pub use operations::{
     commit, init_repo, revert_all, revert_file, stage_all, stage_file, stage_files, unstage_all,

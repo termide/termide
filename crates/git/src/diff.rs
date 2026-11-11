@@ -1,6 +1,7 @@
 use anyhow::Result;
 use similar::TextDiff;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::ops::RangeInclusive;
 use std::path::PathBuf;
 use std::sync::mpsc;
 
@@ -11,6 +12,8 @@ pub struct GitDiffAsyncResult {
     pub file_path: PathBuf,
     /// Original content from HEAD (None if error or file not in HEAD)
     pub original_content: Option<String>,
+    /// The index's version of the file (None when the index has none)
+    pub index_content: Option<String>,
 }
 
 /// Load original content from HEAD in a background thread
@@ -20,9 +23,13 @@ pub fn load_original_async(file_path: PathBuf) -> mpsc::Receiver<GitDiffAsyncRes
 
     std::thread::spawn(move || {
         let original_content = load_original_from_head_sync(&file_path);
+        let index_content = original_content
+            .as_ref()
+            .and_then(|_| crate::lines::index_file_content(&file_path));
         let _ = tx.send(GitDiffAsyncResult {
             file_path,
             original_content,
+            index_content,
         });
     });
 
@@ -139,6 +146,14 @@ pub struct GitDiffCache {
     fallback_original: Option<String>,
     /// Whether `original_content` came from git.
     original_from_git: bool,
+    /// The index's version of the file, to tell staged changes from the
+    /// rest; `None` reads as an empty index version, so nothing is staged.
+    index_content: Option<String>,
+    /// Lines that differ from the index's version: a change against HEAD on
+    /// any other line is staged.
+    unstaged_lines: HashSet<usize>,
+    /// Lines with a removal after them against the index's version.
+    unstaged_deletions: HashSet<usize>,
 }
 
 impl GitDiffCache {
@@ -156,6 +171,9 @@ impl GitDiffCache {
             original_content: None,
             fallback_original: None,
             original_from_git: false,
+            index_content: None,
+            unstaged_lines: HashSet::new(),
+            unstaged_deletions: HashSet::new(),
         }
     }
 
@@ -230,6 +248,7 @@ impl GitDiffCache {
         self.deleted_after_lines = result.deleted_after;
         self.modified_line_mapping = result.modified_mapping;
         self.last_updated = std::time::Instant::now();
+        self.compare_with_index(current_content);
 
         Ok(())
     }
@@ -268,6 +287,7 @@ impl GitDiffCache {
         self.deleted_after_lines = result.deleted_after;
         self.modified_line_mapping = result.modified_mapping;
         self.last_updated = std::time::Instant::now();
+        self.compare_with_index(&current_content);
 
         Ok(())
     }
@@ -328,6 +348,7 @@ impl GitDiffCache {
     pub fn apply_async_result(&mut self, async_result: GitDiffAsyncResult) {
         // Store original content
         self.take_original(async_result.original_content);
+        self.index_content = async_result.index_content;
 
         // Recompute diff if we have original content
         let original = match self.original_content.as_deref() {
@@ -360,6 +381,70 @@ impl GitDiffCache {
         self.deleted_after_lines = result.deleted_after;
         self.modified_line_mapping = result.modified_mapping;
         self.last_updated = std::time::Instant::now();
+        self.compare_with_index(&current_content);
+    }
+
+    /// Seed the index's version directly instead of reading it from git;
+    /// recompute with [`Self::update_from_buffer`] afterwards.
+    pub fn set_index_content(&mut self, content: Option<String>) {
+        self.index_content = content;
+    }
+
+    /// Note which lines of `current` differ from the index's version.
+    fn compare_with_index(&mut self, current: &str) {
+        let index = self.index_content.as_deref().unwrap_or_default();
+        let diff = TextDiff::from_lines(index, current);
+        let result = compute_line_statuses_from_textdiff(&diff);
+        self.unstaged_lines = result.statuses.into_keys().collect();
+        self.unstaged_deletions = result.deleted_after.into_keys().collect();
+    }
+
+    /// Whether the change against HEAD on `line` is staged: the index's
+    /// version has the line as it stands.
+    pub fn is_staged(&self, line: usize) -> bool {
+        self.original_from_git
+            && self.get_line_status(line) != LineStatus::Unchanged
+            && !self.unstaged_lines.contains(&line)
+    }
+
+    /// Whether the removal marked after `line` is staged.
+    pub fn is_deletion_staged(&self, line: usize) -> bool {
+        self.original_from_git
+            && self.has_deletion_marker(line)
+            && !self.unstaged_deletions.contains(&line)
+    }
+
+    /// Whether `lines` show a change the index does not have yet.
+    pub fn has_unstaged(&self, lines: RangeInclusive<usize>) -> bool {
+        self.original_from_git
+            && lines.into_iter().any(|line| {
+                self.unstaged_lines.contains(&line) || self.unstaged_deletions.contains(&line)
+            })
+    }
+
+    /// Whether `lines` show a staged change.
+    pub fn has_staged(&self, lines: RangeInclusive<usize>) -> bool {
+        lines
+            .into_iter()
+            .any(|line| self.is_staged(line) || self.is_deletion_staged(line))
+    }
+
+    /// The lines changes against HEAD begin on, in order: a run of changed
+    /// lines begins once, a removal on the line it is marked after.
+    pub fn change_starts(&self) -> Vec<usize> {
+        let marked = |line: usize| {
+            self.line_statuses.contains_key(&line) || self.deleted_after_lines.contains_key(&line)
+        };
+        let mut starts: Vec<usize> = self
+            .line_statuses
+            .keys()
+            .chain(self.deleted_after_lines.keys())
+            .copied()
+            .filter(|&line| line == 0 || !marked(line - 1))
+            .collect();
+        starts.sort_unstable();
+        starts.dedup();
+        starts
     }
 }
 
@@ -673,6 +758,9 @@ mod tests {
             last_updated: std::time::Instant::now(),
             fallback_original: None,
             original_from_git: true,
+            index_content: None,
+            unstaged_lines: HashSet::new(),
+            unstaged_deletions: HashSet::new(),
         };
 
         let result = cache.update_from_buffer("line1\nline2\n");
@@ -710,6 +798,7 @@ mod tests {
         cache.apply_async_result(GitDiffAsyncResult {
             file_path: file.clone(),
             original_content: None,
+            index_content: None,
         });
         assert_eq!(cache.get_line_status(1), LineStatus::Modified);
 
@@ -717,6 +806,7 @@ mod tests {
         cache.apply_async_result(GitDiffAsyncResult {
             file_path: file,
             original_content: Some("one\nTWO\nthree\n".to_string()),
+            index_content: None,
         });
         assert_eq!(cache.get_line_status(1), LineStatus::Unchanged);
         assert!(!cache.diffs_against_fallback());
@@ -731,7 +821,43 @@ mod tests {
         outside.apply_async_result(GitDiffAsyncResult {
             file_path: dir.path().join("b.c"),
             original_content: None,
+            index_content: None,
         });
         assert_eq!(outside.get_line_status(0), LineStatus::Unchanged);
+    }
+
+    /// A change the index has is staged; one on top of it, or one the index
+    /// lacks, is not.
+    #[test]
+    fn staged_changes_are_told_from_the_rest() {
+        let mut cache = GitDiffCache::new(PathBuf::from("/nonexistent/a.txt"));
+        cache.set_original_content(Some("a\nb\nc\nd\ne\n".into()));
+        cache.set_index_content(Some("a\nB\nc\ne\n".into()));
+        cache.update_from_buffer("a\nB\nc\nX\nnew\n").unwrap();
+        assert!(cache.is_staged(1));
+        assert!(!cache.is_staged(3), "d → X is not in the index");
+        assert!(!cache.is_staged(0), "unchanged");
+        assert!(cache.has_staged(0..=1));
+        assert!(!cache.has_unstaged(0..=1));
+        assert!(cache.has_unstaged(3..=4));
+        assert_eq!(cache.change_starts(), vec![1, 3]);
+
+        // Nothing is staged where the original is not git's.
+        let mut fallback = GitDiffCache::new(PathBuf::from("/nonexistent/b.txt"));
+        fallback.set_fallback_original(Some("a\n".into()));
+        fallback.update_from_buffer("b\n").unwrap();
+        assert!(!fallback.is_staged(0));
+        assert!(!fallback.has_unstaged(0..=0));
+    }
+
+    #[test]
+    fn a_staged_removal_is_told_from_one_that_is_not() {
+        let mut cache = GitDiffCache::new(PathBuf::from("/nonexistent/a.txt"));
+        cache.set_original_content(Some("a\nb\nc\nd\ne\n".into()));
+        cache.set_index_content(Some("a\nc\nd\ne\n".into()));
+        cache.update_from_buffer("a\nc\nd\n").unwrap();
+        assert!(cache.is_deletion_staged(0));
+        assert!(!cache.is_deletion_staged(2));
+        assert_eq!(cache.change_starts(), vec![0, 2]);
     }
 }
