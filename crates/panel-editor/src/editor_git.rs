@@ -65,7 +65,18 @@ impl Editor {
     ///
     /// Returns true if result was applied and needs_redraw should be set.
     pub fn check_git_diff_receiver(&mut self) -> bool {
-        git::check_git_diff_receiver(&mut self.git.diff_receiver, &mut self.git.diff_cache)
+        let applied =
+            git::check_git_diff_receiver(&mut self.git.diff_receiver, &mut self.git.diff_cache);
+        // The result is diffed against the file on disk; unsaved text, such
+        // as a change just staged from it, is what the gutter has to show.
+        if applied && self.buffer.is_modified() {
+            if let Some(cache) = self.git.diff_cache.as_mut() {
+                if let Err(e) = cache.update_from_buffer(&self.buffer.to_string()) {
+                    log::warn!("git diff against the buffer failed: {e}");
+                }
+            }
+        }
+        applied
     }
 
     /// Schedule git diff update with debounce (300ms delay)

@@ -77,7 +77,7 @@ Timeouts are in seconds and default to 10.
 
 A scenario that does not `quit` is killed at its end. The examples:
 `smoke` (start and quit), `editor` (file manager → editor → save),
-`terminal` (a command in a terminal panel), `terminal-keys` (Alt, Esc and Ctrl+F reaching the shell and less, the title following them), `git-diff-staging` (a hunk and lines staged from the diff panel, a discard confirmed and undone), `agent` (the mock model's task
+`terminal` (a command in a terminal panel), `terminal-keys` (Alt, Esc and Ctrl+F reaching the shell and less, the title following them), `git-diff-staging` (a hunk and lines staged from the diff panel, a discard confirmed and undone), `editor-git-changes` (F7 to a change, staged, unstaged and reverted from the editor's menu), `agent` (the mock model's task
 with a permission card), `acp-codex` (the same task through Codex over
 ACP), `agent-review` (the Claude Code stand-in's edit reviewed with
 `/changes`, a hunk rejected and the agent told of it), `delegate` (a background subagent's row and report, on the model

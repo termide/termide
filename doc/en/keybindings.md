@@ -235,6 +235,8 @@ turned on:
 | Rename symbol | `F4` | `editor` |
 | Toggle breakpoint | `Ctrl+F8` | `editor` |
 | Start debugging | `F5` | `editor` |
+| Next change | `F7` | `editor` |
+| Previous change | `Shift+F7` | `editor` |
 | View file | `F3` | `git_status` |
 | Edit file | `F4` | `git_status` |
 

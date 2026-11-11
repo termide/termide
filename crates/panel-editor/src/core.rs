@@ -73,6 +73,9 @@ mod editor_file_io;
 #[path = "editor_breakpoints.rs"]
 mod editor_breakpoints;
 
+#[path = "editor_changes.rs"]
+mod editor_changes;
+
 #[cfg(test)]
 #[path = "core_tests.rs"]
 mod core_tests;

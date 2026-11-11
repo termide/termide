@@ -139,6 +139,14 @@ pub struct EditorKeybindings {
     // Debugging
     pub toggle_breakpoint: Option<KeyBinding>,
     pub start_debug: Option<KeyBinding>,
+
+    // Git changes in the gutter. Staging, unstaging and reverting have no
+    // default key: the panel menu offers them on a changed line.
+    pub next_change: Option<KeyBinding>,
+    pub prev_change: Option<KeyBinding>,
+    pub stage_change: Option<KeyBinding>,
+    pub unstage_change: Option<KeyBinding>,
+    pub revert_change: Option<KeyBinding>,
 }
 
 /// File manager keybindings (file_manager.keybindings section).
@@ -696,6 +704,10 @@ impl EditorKeybindings {
         // take JetBrains' `Ctrl+F8`; `F5` starts debugging as in VS Code.
         set_default!(toggle_breakpoint, "Ctrl+F8");
         set_default!(start_debug, "F5");
+
+        // JetBrains' diff viewer steps through differences with F7.
+        set_default!(next_change, "F7");
+        set_default!(prev_change, "Shift+F7");
     }
 }
 

@@ -45,6 +45,13 @@ pub(crate) fn build_editor_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("toggle_breakpoint", &kb.toggle_breakpoint);
     t.insert("start_debug", &kb.start_debug);
 
+    // Git changes
+    t.insert("next_change", &kb.next_change);
+    t.insert("prev_change", &kb.prev_change);
+    t.insert("stage_change", &kb.stage_change);
+    t.insert("unstage_change", &kb.unstage_change);
+    t.insert("revert_change", &kb.revert_change);
+
     // Viewer: swap this text file to the hex viewer (shared viewer binding).
     t.insert("viewer_toggle_hex", &config.viewer.keybindings.toggle_hex);
     // Viewer: toggle this editor between view (read-only) and edit.

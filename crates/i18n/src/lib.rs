@@ -231,6 +231,16 @@ pub trait Translation: Send + Sync {
     fn help_desc_start_debug(&self) -> &str;
     fn help_desc_clear_breakpoints(&self) -> &str;
     fn help_desc_configure_debug(&self) -> &str;
+    // Git changes in the editor's gutter
+    fn help_desc_next_change(&self) -> &str;
+    fn help_desc_prev_change(&self) -> &str;
+    fn help_desc_stage_change(&self) -> &str;
+    fn help_desc_unstage_change(&self) -> &str;
+    fn help_desc_revert_change(&self) -> &str;
+    fn editor_no_change_here(&self) -> &str;
+    fn editor_no_changes(&self) -> &str;
+    fn editor_stage_failed_fmt(&self, error: &str) -> String;
+    fn editor_unstage_failed_fmt(&self, error: &str) -> String;
     fn debug_select_title(&self) -> &str;
     fn debug_no_native_debugger(&self) -> &str;
     fn debug_no_delve(&self) -> &str;

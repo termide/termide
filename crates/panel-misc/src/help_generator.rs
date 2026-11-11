@@ -537,6 +537,26 @@ impl HelpGenerator {
                 description: t.help_desc_start_debug().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.next_change),
+                description: t.help_desc_next_change().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.prev_change),
+                description: t.help_desc_prev_change().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.stage_change),
+                description: t.help_desc_stage_change().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.unstage_change),
+                description: t.help_desc_unstage_change().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.revert_change),
+                description: t.help_desc_revert_change().to_string(),
+            },
+            HelpEntry {
                 keys: "Ctrl+←/→".to_string(),
                 description: t.help_desc_word_nav().to_string(),
             },

@@ -200,6 +200,11 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         &e.toggle_breakpoint,
     );
     push(&mut out, "editor", "start_debug", &e.start_debug);
+    push(&mut out, "editor", "next_change", &e.next_change);
+    push(&mut out, "editor", "prev_change", &e.prev_change);
+    push(&mut out, "editor", "stage_change", &e.stage_change);
+    push(&mut out, "editor", "unstage_change", &e.unstage_change);
+    push(&mut out, "editor", "revert_change", &e.revert_change);
 
     let f = &config.file_manager.keybindings;
     push(&mut out, "file_manager", "rename", &f.rename);

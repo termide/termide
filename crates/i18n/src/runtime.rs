@@ -375,6 +375,13 @@ impl Translation for RuntimeTranslation {
         help_desc_start_debug,
         help_desc_clear_breakpoints,
         help_desc_configure_debug,
+        help_desc_next_change,
+        help_desc_prev_change,
+        help_desc_stage_change,
+        help_desc_unstage_change,
+        help_desc_revert_change,
+        editor_no_change_here,
+        editor_no_changes,
         debug_select_title,
         debug_no_native_debugger,
         debug_no_delve,
@@ -2790,6 +2797,14 @@ impl Translation for RuntimeTranslation {
 
     fn git_diff_reject_both_confirm_fmt(&self, path: &str) -> String {
         self.format("git_diff_reject_both_confirm_fmt", &[("path", path)])
+    }
+
+    fn editor_stage_failed_fmt(&self, error: &str) -> String {
+        self.format("editor_stage_failed_fmt", &[("error", error)])
+    }
+
+    fn editor_unstage_failed_fmt(&self, error: &str) -> String {
+        self.format("editor_unstage_failed_fmt", &[("error", error)])
     }
 
     fn git_diff_reject_all_skipped_fmt(&self, count: usize) -> String {

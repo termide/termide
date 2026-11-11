@@ -336,6 +336,7 @@ Line numbers use background highlighting to show the status compared to HEAD. Th
 
 - **Green background** - Line was added (not in HEAD)
 - **Yellow background** - Line was modified (changed from HEAD)
+- **Green or yellow digits, no background** - The line's change is staged: the index has it as it stands
 - **Red marker (▶)** - Marks a deletion point (lines were deleted after this line)
 - **Default color** - Line unchanged from HEAD
 
@@ -362,6 +363,27 @@ When lines are deleted, a virtual line is inserted to visualize the deletion:
 - **Real-time comparison**: Compares current buffer content with HEAD version
 - **Undo/Redo support**: Markers appear/disappear as you undo/redo deletions
 - **Works with editing**: All normal editing operations work seamlessly with diff visualization
+
+### Staging and Reverting Changes
+
+`F7` and `Shift+F7` go to the next and the previous change, round the end
+of the file. On a changed line, or on selected lines, the panel's `[≡]`
+menu (`Alt+K`) offers what fits the change there:
+
+- **Stage change** puts it in the index as the editor holds it, saved or
+  not; the file on disk is left alone. Its line number turns hollow.
+- **Unstage change** takes a staged change back out of the index.
+- **Revert change** puts the lines back as the index has them. It is an
+  edit like any other: `Ctrl+Z` takes it back, so it does not ask. A
+  file new to git has nothing in the index, so its lines go.
+
+Selected lines take only the changes on them; a selection ending at the
+start of a line leaves that line out. A change that only removed lines
+belongs to the line its `▶` marker sits under. The actions are
+`stage_change`, `unstage_change` and `revert_change` under
+`[editor.keybindings]`, with no key by default; `next_change` and
+`prev_change` are the two `F7` keys. A file with a merge conflict is
+refused.
 
 ### Configuration
 
@@ -556,6 +578,7 @@ Termide tells `docker-language-server` to send no telemetry when it starts; the 
 |------------|---------------------------------------------------------------|
 | `Ctrl+F8`  | Set or remove a breakpoint on the cursor line (`toggle_breakpoint`) |
 | `F5`       | Start debugging (`start_debug`); continue while a session is stopped |
+| `F7` / `Shift+F7` | Next / previous git change (`next_change`, `prev_change`); see [Staging and Reverting Changes](#staging-and-reverting-changes) |
 
 A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text.
 

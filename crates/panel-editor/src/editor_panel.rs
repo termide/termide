@@ -23,7 +23,7 @@ use termide_theme::Theme;
 use crate::keyboard;
 use crate::{
     CLEAR_BREAKPOINTS_ACTION, CONFIGURE_DEBUG_ACTION, RESTART_LANGUAGE_SERVER_ACTION,
-    START_DEBUG_ACTION,
+    REVERT_CHANGE_ACTION, STAGE_CHANGE_ACTION, START_DEBUG_ACTION, UNSTAGE_CHANGE_ACTION,
 };
 
 use super::{build_editor_hotkey_table, Editor};
@@ -371,7 +371,29 @@ impl Panel for Editor {
 
     fn context_menu_items(&self) -> Vec<(String, String)> {
         let t = t();
-        let mut items = vec![
+        let mut items = Vec::new();
+        // The changes on the lines under the cursor come first: the menu is
+        // where they are reached without a key of their own.
+        let (unstaged, staged) = self.change_actions();
+        if unstaged {
+            items.push((
+                t.help_desc_stage_change().to_string(),
+                STAGE_CHANGE_ACTION.into(),
+            ));
+        }
+        if staged {
+            items.push((
+                t.help_desc_unstage_change().to_string(),
+                UNSTAGE_CHANGE_ACTION.into(),
+            ));
+        }
+        if unstaged && !self.config.read_only {
+            items.push((
+                t.help_desc_revert_change().to_string(),
+                REVERT_CHANGE_ACTION.into(),
+            ));
+        }
+        items.extend([
             (
                 t.menu_view_as_diagram().to_string(),
                 "view_as_diagram".into(),
@@ -388,7 +410,7 @@ impl Panel for Editor {
                 t.help_desc_clear_breakpoints().to_string(),
                 CLEAR_BREAKPOINTS_ACTION.into(),
             ),
-        ];
+        ]);
         if (self.lsp.enabled || self.lsp.server_start_failed) && self.file_path().is_some() {
             items.push((
                 t.lsp_restart_server().to_string(),
@@ -456,6 +478,9 @@ impl Panel for Editor {
                 vec![PanelEvent::ConfigureDebug { file }]
             }
             CLEAR_BREAKPOINTS_ACTION => vec![PanelEvent::ClearBreakpoints],
+            STAGE_CHANGE_ACTION => self.stage_change(),
+            UNSTAGE_CHANGE_ACTION => self.unstage_change(),
+            REVERT_CHANGE_ACTION => self.revert_change(),
             RESTART_LANGUAGE_SERVER_ACTION => match self.file_path() {
                 Some(file) => vec![PanelEvent::RestartLanguageServer {
                     file: file.to_path_buf(),
@@ -888,6 +913,23 @@ impl Editor {
         if self.hotkeys.matches("start_debug", &key) {
             let file = self.file_path().map(|p| p.to_path_buf());
             return vec![PanelEvent::StartDebug { file }];
+        }
+        // So do stepping through the git changes and moving them in and out
+        // of the index; a revert edits the text, so view mode refuses it.
+        if self.hotkeys.matches("next_change", &key) {
+            return self.goto_change(true);
+        }
+        if self.hotkeys.matches("prev_change", &key) {
+            return self.goto_change(false);
+        }
+        if self.hotkeys.matches("stage_change", &key) {
+            return self.stage_change();
+        }
+        if self.hotkeys.matches("unstage_change", &key) {
+            return self.unstage_change();
+        }
+        if self.hotkeys.matches("revert_change", &key) {
+            return self.revert_change();
         }
 
         // Collect events from internal state

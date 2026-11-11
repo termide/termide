@@ -206,6 +206,8 @@ F 键行发送的是媒体键,任何 `F<n>` 绑定都无法到达。对大多数
 | 重命名符号 | `F4` | `editor` |
 | 切换断点 | `Ctrl+F8` | `editor` |
 | 开始调试 | `F5` | `editor` |
+| 下一处更改 | `F7` | `editor` |
+| 上一处更改 | `Shift+F7` | `editor` |
 | 查看文件 | `F3` | `git_status` |
 | 编辑文件 | `F4` | `git_status` |
 

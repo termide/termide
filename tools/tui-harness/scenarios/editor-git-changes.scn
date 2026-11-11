@@ -1,0 +1,47 @@
+# Git changes from the editor's gutter (doc/en/editor.md): F7 goes to the
+# next change, the panel menu stages the one under the cursor from the
+# unsaved text, unstages it again and reverts the other one.
+project empty
+start
+run "git init -q && seq 1 30 > nums.txt && git add nums.txt && git commit -qm nums"
+run "seq 1 30 | sed 's/^5$/five/; s/^25$/twenty-five/' > nums.txt"
+wait "nums.txt"
+key End F4
+wait "five"
+key Alt+F11
+wait "twenty-five"
+key Ctrl+Home
+
+# F7 reaches line 5, the first change; the menu stages it.
+key F7
+wait "Pos: 5:1"
+key Alt+K
+wait "Stage change"
+expect "Revert change"
+snapshot menu
+key Enter
+wait-gone "Stage change"
+run "git diff --cached | grep -qx +five"
+run "! git diff --cached | grep -q twenty-five"
+
+# Staged now, the line offers to unstage it.
+key Alt+K
+wait "Unstage change"
+expect-not "Stage change"
+key Enter
+run "! git diff --cached | grep -q five"
+snapshot unstaged
+
+# The second change goes back as the index has it, unsaved until Ctrl+S.
+key F7
+wait "Pos: 25:1"
+key Alt+K
+wait "Revert change"
+snapshot menu2
+key Down Enter
+wait-gone "twenty-five"
+key Ctrl+S
+file-contains nums.txt "24"
+run "grep -qx 25 nums.txt"
+snapshot reverted
+quit

@@ -186,6 +186,7 @@ fn pick_contrasting_fg(bg: Color, a: Color, b: Color) -> Color {
 /// Returns (fg_color, bg_color) for the line number.
 /// - Green bg for added lines
 /// - Yellow bg for modified lines
+/// - Green or yellow digits with no bg for a staged change
 /// - No bg for unchanged lines
 ///
 /// fg is chosen from theme.fg / theme.bg for best contrast against git bg.
@@ -203,6 +204,15 @@ pub fn get_line_number_git_style(
         .as_ref()
         .map(|cache| {
             let status = cache.get_line_status(line_idx);
+            // A staged change is drawn hollow: its colour on the digits, no
+            // background, as Zed marks one.
+            if cache.is_staged(line_idx) {
+                let color = match status {
+                    LineStatus::Added => theme.success,
+                    _ => theme.warning,
+                };
+                return (color, None);
+            }
             match status {
                 LineStatus::Added => {
                     let fg = pick_contrasting_fg(theme.success, theme.fg, theme.bg);
