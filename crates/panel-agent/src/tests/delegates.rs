@@ -489,7 +489,7 @@ fn a_parked_delegate_holds_a_row_and_asks_what_to_do() {
     let rows = render_text(&mut panel, width, height);
     let row = strip_row(&panel, crate::strip::StripTarget::Parked(0));
     let line = &rows[row as usize];
-    assert!(line.starts_with("\u{23f8} "), "{line}");
+    assert!(line.starts_with("\u{21bb} "), "{line}");
     assert!(line.contains("methodical"), "{line}");
     assert!(line.contains("cut the release"), "{line}");
     assert!(line.trim_end().ends_with('\u{2715}'), "{line}");
@@ -1609,4 +1609,43 @@ fn held_answers_survive_a_reopen_and_go_with_the_next_request() {
         panel.session.as_ref().unwrap().held_reports().is_empty(),
         "the log no longer holds them"
     );
+}
+
+/// Every delegate row is drawn from where its task stands: the same label
+/// and agent for all, a paused or unfinished one saying so, a parked one
+/// under the retry wait's glyph — not `⏸`, which marks unfinished sessions
+/// in the lists — with when it goes again.
+#[test]
+fn a_delegate_row_says_where_its_task_stands() {
+    use crate::strip::{delegate_row, DelegateState, StripTarget};
+    let t = termide_i18n::t();
+    let row = |state| {
+        delegate_row(
+            "finder".into(),
+            "\n  find it\nthen more",
+            state,
+            StripTarget::Delegate(0),
+        )
+    };
+
+    let running = row(DelegateState::Running {
+        status: "· read a.rs".into(),
+    });
+    assert_eq!(running.glyph, "&");
+    assert_eq!(running.body, "find it");
+    assert_eq!(running.notes, vec!["finder".to_string()]);
+    assert_eq!(running.status, "· read a.rs");
+
+    let paused = row(DelegateState::Paused);
+    assert_eq!(paused.glyph, "&");
+    assert_eq!(paused.notes[1], t.agent_strip_paused());
+    assert!(paused.status.is_empty());
+
+    let unfinished = row(DelegateState::Unfinished);
+    assert_eq!(unfinished.notes[1], t.agent_strip_left_unfinished());
+
+    let parked = row(DelegateState::Parked { wakes_at: 0 });
+    assert_eq!(parked.glyph, crate::failure::WAIT_GLYPH);
+    assert_eq!(parked.label, t.agent_parked_strip());
+    assert_eq!(parked.notes.len(), 2);
 }

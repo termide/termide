@@ -100,6 +100,57 @@ impl StripRow {
     }
 }
 
+/// Where a delegated task stands, as its row says it. Every kind of
+/// delegate row — waited for, handed over in the background, parked, left
+/// unfinished — is drawn from one of these by [`delegate_row`], so they read
+/// alike and only what differs shows.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DelegateState {
+    /// Working; what it did last, before the time.
+    Running { status: String },
+    /// Held at the delegating panel's pause, until the pause lifts.
+    Paused,
+    /// Stopped by a limit that passes on its own; goes again at `wakes_at`
+    /// (unix seconds). Drawn with the retry wait's glyph: it waits as the
+    /// panel's own run does at a limit.
+    Parked { wakes_at: u64 },
+    /// Left unfinished when termide closed; its own session carries it on.
+    Unfinished,
+}
+
+/// The row of a task delegated to `agent`, its first line as the body.
+/// The time and `✕` are the caller's: they differ by where the task runs.
+pub(crate) fn delegate_row(
+    agent: String,
+    task: &str,
+    state: DelegateState,
+    target: StripTarget,
+) -> StripRow {
+    let t = termide_i18n::t();
+    let (glyph, label) = match state {
+        DelegateState::Parked { .. } => (crate::failure::WAIT_GLYPH, t.agent_parked_strip()),
+        _ => ("&", t.agent_tool_task()),
+    };
+    let mut row = StripRow::new(glyph, label.to_string(), first_line(task), target);
+    row.notes.push(agent);
+    match state {
+        DelegateState::Running { status } => row.status = status,
+        DelegateState::Paused => row.notes.push(t.agent_strip_paused().to_string()),
+        DelegateState::Parked { wakes_at } => row.notes.push(crate::failure::clock(wakes_at)),
+        DelegateState::Unfinished => row.notes.push(t.agent_strip_left_unfinished().to_string()),
+    }
+    row
+}
+
+/// The first line of `text` that holds anything, trimmed.
+fn first_line(text: &str) -> String {
+    text.lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
 /// How many rows the subagents, the background commands and the terminals
 /// show each, newest first, before the rest fold into a count: what was just
 /// launched stays in sight, and the older ones give way.
@@ -359,20 +410,16 @@ impl AgentPanel {
     /// is answered; a task carried on leaves its row, and the strip's live
     /// rows take it.
     fn restored_rows(&self) -> Vec<StripRow> {
-        let t = termide_i18n::t();
         self.restored_delegates
             .iter()
             .enumerate()
             .map(|(index, delegate)| {
-                let mut row = StripRow::new(
-                    "&",
-                    t.agent_tool_task().to_string(),
-                    single_line(&delegate.task),
+                delegate_row(
+                    delegate.agent.clone(),
+                    &delegate.task,
+                    DelegateState::Unfinished,
                     StripTarget::DelegateSession(index),
-                );
-                row.notes.push(delegate.agent.clone());
-                row.notes.push(t.agent_strip_left_unfinished().to_string());
-                row
+                )
             })
             .collect()
     }
@@ -381,30 +428,25 @@ impl AgentPanel {
     /// last step before the time. The clock of each starts when it is first
     /// seen, and is dropped once the call has returned.
     fn running_tasks(&mut self) -> Vec<(Duration, StripRow)> {
-        let t = termide_i18n::t();
         let now = Instant::now();
         let mut seen = Vec::new();
         let mut rows = Vec::new();
         for (index, call, live) in self.transcript.running_tasks() {
             let start = *self.task_clocks.entry(call.id.clone()).or_insert(now);
             seen.push(call.id.clone());
-            let arg = |key: &str| call.arguments[key].as_str().unwrap_or("").to_string();
-            let last_line = |text: &str, rev: bool| {
-                let mut lines: Box<dyn Iterator<Item = &str>> = if rev {
-                    Box::new(text.lines().rev())
-                } else {
-                    Box::new(text.lines())
-                };
-                lines
-                    .find(|l| !l.trim().is_empty())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string()
-            };
-            let mut row = StripRow::new(
-                "&",
-                t.agent_tool_task().to_string(),
-                last_line(&arg("prompt"), false),
+            let arg = |key: &str| call.arguments[key].as_str().unwrap_or("");
+            let status = live
+                .unwrap_or("")
+                .lines()
+                .rev()
+                .find(|l| !l.trim().is_empty())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            let mut row = delegate_row(
+                arg("agent").to_string(),
+                arg("prompt"),
+                DelegateState::Running { status },
                 StripTarget::Task(index),
             )
             .since(start);
@@ -412,8 +454,6 @@ impl AgentPanel {
             if crate::live::is_running(self.panel_id, &call.id) {
                 row = row.stoppable();
             }
-            row.notes.push(arg("agent"));
-            row.status = last_line(live.unwrap_or(""), true);
             rows.push((now.saturating_duration_since(start), row));
         }
         self.task_clocks.retain(|id, _| seen.contains(id));
@@ -424,7 +464,6 @@ impl AgentPanel {
     /// still run: worded as a running subagent's, with a `✕` that stops it.
     /// Their calls have returned, so no running block stands for them.
     fn background_tasks(&mut self) -> Vec<(Duration, StripRow)> {
-        let t = termide_i18n::t();
         let now = Instant::now();
         let tasks = crate::live::background_of(self.panel_id);
         self.strip_delegates = tasks.iter().map(|task| task.call.clone()).collect();
@@ -432,30 +471,18 @@ impl AgentPanel {
             .into_iter()
             .enumerate()
             .map(|(index, task)| {
-                let first = task
-                    .task
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                let mut row = StripRow::new(
-                    "&",
-                    t.agent_tool_task().to_string(),
-                    first,
-                    StripTarget::Delegate(index),
-                )
-                .since(task.started)
-                .stoppable();
-                row.notes.push(task.agent);
                 // Held at the panel's pause, its last step no longer stands:
                 // what it does is wait.
-                if task.paused {
-                    row.notes.push(t.agent_strip_paused().to_string());
-                    row.status = String::new();
+                let state = if task.paused {
+                    DelegateState::Paused
                 } else {
-                    row.status = task.status;
-                }
+                    DelegateState::Running {
+                        status: task.status,
+                    }
+                };
+                let row = delegate_row(task.agent, &task.task, state, StripTarget::Delegate(index))
+                    .since(task.started)
+                    .stoppable();
                 (now.saturating_duration_since(task.started), row)
             })
             .collect()
@@ -466,7 +493,6 @@ impl AgentPanel {
     /// it at once — and answers where a running one would. `✕` gives the task
     /// up; elsewhere on the row its session opens, where it stands paused.
     fn parked_tasks(&mut self) -> Vec<(Duration, StripRow)> {
-        let t = termide_i18n::t();
         let now = crate::failure::unix_now();
         let parked = crate::live::parked_of(self.panel_id);
         self.strip_parked = parked.iter().map(|p| p.call.clone()).collect();
@@ -474,25 +500,19 @@ impl AgentPanel {
             .into_iter()
             .enumerate()
             .map(|(index, p)| {
-                let first = p
-                    .task
-                    .lines()
-                    .find(|line| !line.trim().is_empty())
-                    .unwrap_or("")
-                    .trim()
-                    .to_string();
-                let mut row = StripRow::new(
-                    "⏸",
-                    t.agent_parked_strip().to_string(),
-                    first,
+                // When it goes again: the reset it named, else the backoff.
+                let wakes_at = p
+                    .failure
+                    .resets_at
+                    .filter(|at| *at > now)
+                    .unwrap_or(p.wake_at);
+                let row = delegate_row(
+                    p.agent,
+                    &p.task,
+                    DelegateState::Parked { wakes_at },
                     StripTarget::Parked(index),
                 )
                 .stoppable();
-                row.notes.push(p.agent);
-                // When it goes again: the reset it named, else the backoff.
-                let at = p.failure.resets_at.filter(|at| *at > now);
-                row.notes
-                    .push(crate::failure::clock(at.unwrap_or(p.wake_at)));
                 (Duration::from_secs(now.saturating_sub(p.since)), row)
             })
             .collect()

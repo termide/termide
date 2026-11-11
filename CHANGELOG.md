@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A terminal `send` waiting for text reports the text.** When the awaited text and the shell's return to its prompt arrived together, the call could answer that the command finished rather than that the text appeared; the text is now checked once more before the finish is reported.
 - **Saving to a named pipe or a device writes to it.** The editor's save renamed a temporary file over the target, which replaced a FIFO or a device node with a plain file; anything but a regular file is now written in place, as the agent's tools already did. The editor, the agent, the project store and the settings now share one atomic write.
 - **`auto_reviewer = "name"` reads as the connection it names.** The string form, from before the reviewer could name a model, was set aside with a warning; it now reads as that connection.
+- **A parked task's row no longer looks like a paused session.** Its row above the input carried `⏸`, the mark the session lists give a session left with work to carry on; it now carries `↻`, as the panel's own wait for a limit does. The agent guide gains a table of everything that runs beside the conversation — who sets it going, its row, what stops it, what comes back and what bounds it.
 - **The battery indicator follows the battery.** A new reading was drawn only when something else on the screen changed; the menu bar is now redrawn whenever any of its indicators would read differently.
 
 ### Security

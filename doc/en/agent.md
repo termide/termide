@@ -2094,7 +2094,7 @@ model calls (the delegate's `max_turns` changes that), and one that fails report
 A limit is not among those failures: a delegate stopped by one that passes on
 its own — a usage limit, a rate limit, an outage — answers nothing and is
 **parked**. Its own session stays where it stopped, marked `⏸`, and the panel
-that delegated it holds a row for it (`⏸ Parked at a limit · methodical 21:50 …✕`),
+that delegated it holds a row for it (`↻ Parked at a limit · methodical 21:50 …✕`),
 naming when it goes again. It goes again by itself at the reset the limit
 named, or after a wait that doubles with each try when none was stated — and
 **at once when the panel moves to another connection**, which is how a spent
@@ -2221,6 +2221,25 @@ only the agent's own work; a `/goal` or `/loop` is yours and is not listed. Term
 and closes them.
 The tool comes with `task`: an agent whose `tools` list leaves `task` out
 gets `jobs` only by naming it. Subagents have neither.
+
+#### What runs beside the conversation
+
+| Work | Set going by | Its row above the input | Stopped by | What comes back | Bounded by |
+|---|---|---|---|---|---|
+| A subagent waited for | the agent's `task` | `& Delegating to · agent` | `✕`, `Esc` | its answer, as the call's result | 50 model calls (`max_turns`) |
+| A task in the background | `task` with `background`, or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message | the ten messages agents pass without you |
+| A parked task | a limit that passes on its own | `↻ Parked at a limit · agent 21:50` | `✕`, `jobs` (both give it up) | its answer once it goes again and ends | six tries |
+| A task left unfinished | termide closing while it ran | `& Delegating to · agent · left unfinished` | its session's carry-on card | its answer once carried on | — |
+| A call moved to the background | an external agent, to take a message typed while it ran | `$ Running  cargo test` | `✕`, `jobs`, `Esc` | its result, to the agent, which goes on by itself | — |
+| A terminal | `shell` with `session` or `background` | `$ Terminal · name` | `✕`, `terminals close` | what it printed, when the agent reads it | 2 MiB in memory, 256 MiB of log |
+| A `/goal` | you | `◎ Heading for the goal` | `✕`, `/goal stop`, `Esc` | the judge's verdict | the judge; it pauses when the agent only talks |
+| A `/loop` | you | `↺ Repeating every 5m · 3/100` | `✕`, `/loop stop`, `Esc` | each run, in the transcript | 100 runs |
+| A fork | the agent's `fork` | none: a panel of its own | closing its panel | nothing | the ten messages agents pass without you |
+| A message to another panel | the agent's `send_message` | none | — | an answer, as a message, when one is asked | the ten messages agents pass without you |
+
+`⏸` in the session lists means only a session left with work to carry on —
+the parked task's own session among them; in the strip, `‖` is the panel's
+pause and `↻` a wait for a limit, the panel's own or a parked task's.
 
 ### Talking to other panels
 
