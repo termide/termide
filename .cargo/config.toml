@@ -5,12 +5,14 @@
 # grammars link and pass their tests with all three. A faster linker of your
 # own goes in ~/.cargo/config.toml (doc/en/developer-guide.md, Platform notes).
 
-# The C code of the grammars is built without strict aliasing. The Haskell
-# grammar's scanner (tree-sitter-haskell 0.23 and 0.24) grows its lookahead
-# buffer through tree-sitter's `Array` macros while declaring the buffer as a
-# struct of its own; optimised with strict aliasing, GCC keeps the pointer from
-# before the realloc and writes into freed memory, which glibc aborts on
-# (`cargo test --release -p termide-highlight` on Linux). A CFLAGS set in the
+# The C code of the grammars is built without strict aliasing. The `array.h`
+# that grammars generated before tree-sitter 0.26.4 vendor grows an array
+# through an `(Array *)` cast and then reads `contents` through the scanner's
+# own type (tree-sitter/tree-sitter#4960); optimised with strict aliasing, GCC
+# keeps the pointer from before the realloc and writes into freed memory. The
+# Haskell scanner did (tree-sitter-haskell#144; glibc aborted
+# `cargo test --release -p termide-highlight` on Linux), and the bash, html,
+# python, ruby and yaml scanners use the same macros. A CFLAGS set in the
 # environment replaces this one: add -fno-strict-aliasing to it (the AUR
 # PKGBUILD does).
 [env]
