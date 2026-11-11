@@ -129,6 +129,11 @@ pub struct Terminal {
     /// Cached shell working directory, for the same reason as
     /// `cached_fg_command`: `title()` runs per frame and takes `&self`.
     cached_cwd: std::sync::Mutex<Option<(std::path::PathBuf, std::time::Instant)>>,
+    /// The title as `has_pending_output` last saw it. The title follows the
+    /// foreground program and the shell's directory, which change with no
+    /// output of their own after the frame their output drew (`less` quits,
+    /// its last screen is drawn while the cached name still says `less`).
+    seen_title: std::sync::Mutex<String>,
     /// Last working directory reported to the app, so a `cd` inside the shell
     /// is announced once instead of on every tick.
     last_reported_cwd: Option<std::path::PathBuf>,
@@ -339,6 +344,7 @@ impl Terminal {
                 std::time::Instant::now(),
             )),
             cached_cwd: std::sync::Mutex::new(None),
+            seen_title: std::sync::Mutex::new(String::new()),
             last_reported_cwd: None,
             sync_timeout_redrawn: None,
             shell_kind: shell_utils::ShellKind::default(),
@@ -812,9 +818,23 @@ impl Terminal {
         (screen.sync_output && !screen.sync_output_held()).then_some(since)
     }
 
-    /// Check if PTY has new data that needs rendering
+    /// Whether the panel needs drawing: the PTY wrote, or the title reads
+    /// differently than when last asked.
     pub fn has_pending_output(&self) -> bool {
-        self.has_new_data.swap(false, Ordering::AcqRel)
+        let output = self.has_new_data.swap(false, Ordering::AcqRel);
+        self.title_changed() || output
+    }
+
+    /// Whether the title changed since the last call. Cheap per tick: the
+    /// foreground name and the directory under it are cached.
+    fn title_changed(&self) -> bool {
+        let title = Panel::title(self);
+        let mut seen = self.seen_title.lock().unwrap_or_else(|e| e.into_inner());
+        if *seen == title {
+            return false;
+        }
+        *seen = title;
+        true
     }
 
     /// Get the name of the currently running foreground command (cached, 500ms TTL).
@@ -2064,6 +2084,30 @@ mod title_tests {
         };
         assert!(term.is_alive());
         assert!(term.captures_escape());
+    }
+
+    /// A program that quits writes nothing more once its last screen is
+    /// drawn, so the title naming it is only caught up with if a change of
+    /// title asks for a frame of its own.
+    #[test]
+    fn a_title_change_asks_for_a_frame() {
+        let Ok(term) = Terminal::new_with_cwd(24, 80, None) else {
+            return; // No PTY available.
+        };
+        let set_foreground = |name: &str, at: std::time::Instant| {
+            *term.cached_fg_command.lock().unwrap() = (name.to_string(), at);
+        };
+        set_foreground("less", std::time::Instant::now());
+        assert!(term.title_changed(), "the first look sees a new title");
+        assert!(term.title().contains("(less)"));
+        assert!(!term.title_changed(), "an unchanged title asks nothing");
+        // `less` has quit: the cached name runs out and the live one differs.
+        set_foreground(
+            "less",
+            std::time::Instant::now() - std::time::Duration::from_secs(1),
+        );
+        assert!(term.title_changed());
+        assert!(!term.title().contains("(less)"));
     }
 
     /// A full-screen program gets Ctrl+F (page-down in less and vim); the
