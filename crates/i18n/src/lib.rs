@@ -805,6 +805,17 @@ pub trait Translation: Send + Sync {
     /// Nowhere to return a carried-on delegate's answer: no panel holds the
     /// session that delegated it.
     fn agent_notice_no_parent_panel(&self) -> &str;
+    /// The question put to the user once the agents have passed
+    /// `ai.max_agent_messages` messages to one another without them: its
+    /// header, its choices and what they mean.
+    fn agent_hop_limit_header(&self) -> &str;
+    fn agent_hop_limit_allow_description(&self) -> &str;
+    fn agent_hop_limit_stop(&self) -> &str;
+    fn agent_hop_limit_stop_description(&self) -> &str;
+    /// The question itself (`{count}`: the messages passed)
+    fn agent_hop_limit_question_fmt(&self, count: usize) -> String;
+    /// The choice that allows `{count}` more
+    fn agent_hop_limit_allow_fmt(&self, count: usize) -> String;
     /// Agent panel notice: a session opened with messages from other agents
     /// waiting in its log for the next request.
     fn agent_notice_held_messages_fmt(&self, count: usize) -> String;
@@ -1453,6 +1464,9 @@ pub trait Translation: Send + Sync {
     fn settings_agent_on_limit_ask_else_wait(&self) -> &str;
     fn settings_agent_on_limit_wait(&self) -> &str;
     fn settings_agent_on_limit_stop(&self) -> &str;
+    /// AI settings: how many messages agents pass one another without the
+    /// user, `ai.max_agent_messages`.
+    fn settings_agent_max_agent_messages(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.

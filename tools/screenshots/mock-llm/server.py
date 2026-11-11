@@ -135,6 +135,16 @@ DELEGATE_SCRIPT = [
     },
     {"reasoning": "", "text": "The scan runs in the background.", "tool": None},
 ]
+# Asked to delegate it "and again", the agent hands the scan over once more
+# when the first report comes back: that second hand-over is one more
+# message passed without the user, which the TUI harness's agent-message-limit
+# needs to meet the limit.
+AGAIN = "and again"
+AGAIN_STEP = {
+    "reasoning": "",
+    "text": "Once more, in the background.",
+    "tool": ("task", {"agent": "default", "prompt": SUBTASK, "background": True}),
+}
 
 
 # A third, played when the user asks to "break the count" in a Cargo project
@@ -246,7 +256,16 @@ class Handler(BaseHTTPRequestHandler):
                 time.sleep(SUBAGENT_DELAY)
                 step = {"reasoning": "", "text": SUBREPORT + model + ".", "tool": None}
             elif main:
-                if any("SUBREPORT" in u for u in users):
+                handed = sum(1 for m in messages if "SUBTASK" in json.dumps(m.get("tool_calls")))
+                if any(AGAIN in u for u in users) and handed == 1 and any(
+                    "SUBREPORT" in u for u in users
+                ):
+                    step = AGAIN_STEP
+                elif any(AGAIN in u for u in users) and handed == 2 and (
+                    sum(1 for u in users if "SUBREPORT" in u) < 2
+                ):
+                    step = {"reasoning": "", "text": "Waiting for the second scan.", "tool": None}
+                elif any("SUBREPORT" in u for u in users):
                     report = next(u for u in users if "SUBREPORT" in u)
                     found = report[report.index("checked on ") :].split(".")[0]
                     step = {

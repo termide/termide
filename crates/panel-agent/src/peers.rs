@@ -69,6 +69,12 @@ impl AgentPanel {
         self.agent_hops
     }
 
+    /// Start the count of messages passed without the user again, as a
+    /// message of the user's does: the user allowed the agents more.
+    pub fn renew_agent_hops(&mut self) {
+        self.agent_hops = 0;
+    }
+
     /// What the panel is doing.
     #[must_use]
     pub fn peer_state(&self) -> PeerState {

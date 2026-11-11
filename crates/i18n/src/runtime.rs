@@ -703,6 +703,10 @@ impl Translation for RuntimeTranslation {
         agent_strip_idle,
         agent_strip_ended,
         agent_notice_no_parent_panel,
+        agent_hop_limit_header,
+        agent_hop_limit_allow_description,
+        agent_hop_limit_stop,
+        agent_hop_limit_stop_description,
         agent_unfinished_delegates_title,
         agent_strip_left_unfinished,
         agent_strip_checking,
@@ -895,6 +899,7 @@ impl Translation for RuntimeTranslation {
         settings_agent_on_limit_ask_else_wait,
         settings_agent_on_limit_wait,
         settings_agent_on_limit_stop,
+        settings_agent_max_agent_messages,
         settings_ai_add_connection,
         settings_ai_delete_connection,
         settings_ai_connection_back,
@@ -1334,6 +1339,20 @@ impl Translation for RuntimeTranslation {
 
     fn agent_undo_confirm_fmt(&self, changed: &str) -> String {
         self.format("agent_undo_confirm_fmt", &[("changed", changed)])
+    }
+
+    fn agent_hop_limit_question_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_hop_limit_question_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
+    fn agent_hop_limit_allow_fmt(&self, count: usize) -> String {
+        self.format(
+            "agent_hop_limit_allow_fmt",
+            &[("count", &count.to_string())],
+        )
     }
 
     fn agent_undo_changed_files_fmt(&self, count: usize, files: &str) -> String {
