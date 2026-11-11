@@ -2187,7 +2187,9 @@ the id too), what it is and how long it has run (`& Listing background
 work`), and with `stop` set to an id stops that one (`& Stopping <id>`): a
 task stops, a parked one is given up, a call is cancelled, and no answer
 comes from it afterwards. It asks you nothing in any mode, since it touches
-only the agent's own work; a `/goal` or `/loop` is yours and is not listed.
+only the agent's own work; a `/goal` or `/loop` is yours and is not listed. Terminal sessions — a
+`shell` call with `background` among them — are not jobs: `terminals` lists
+and closes them.
 The tool comes with `task`: an agent whose `tools` list leaves `task` out
 gets `jobs` only by naming it. Subagents have neither.
 
