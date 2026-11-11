@@ -52,8 +52,12 @@ pub fn shell_cwd(pid: u32) -> Option<PathBuf> {
 /// Mirrors the Linux path, which reads the first entry of the kernel's
 /// `children` list and falls back to the shell's own `comm`.
 pub fn foreground_command(pid: u32) -> Option<String> {
-    let target = children(pid, 1).first().copied().unwrap_or(pid);
-    let info = bsdinfo(target)?;
+    // A child that has exited but is not reaped yet is a zombie, which
+    // libproc reports nothing about: the shell is what runs then.
+    let info = children(pid, 1)
+        .first()
+        .and_then(|&child| bsdinfo(child))
+        .or_else(|| bsdinfo(pid))?;
 
     // `pbi_name` holds up to 32 characters against `pbi_comm`'s 16, so a
     // longer command stays readable in the panel title. The kernel leaves it
