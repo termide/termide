@@ -75,7 +75,7 @@ Timeouts are in seconds and default to 10.
 
 A scenario that does not `quit` is killed at its end. The examples:
 `smoke` (start and quit), `editor` (file manager → editor → save),
-`terminal` (a command in a terminal panel), `agent` (the mock model's task
+`terminal` (a command in a terminal panel), `terminal-keys` (Alt, Esc and Ctrl+F reaching the shell and less, the title following them), `agent` (the mock model's task
 with a permission card), `acp-codex` (the same task through Codex over
 ACP), `delegate` (a background subagent's row and report, on the model
 `[ai.subagents]` names) and `goal` (`/goal` with its judge on the model

@@ -1,0 +1,41 @@
+# Keys a live terminal gives its program (doc/en/terminal.md): Alt+D kills
+# a word in the shell, Ctrl+F pages a full-screen program, Esc reaches the
+# shell instead of asking to close the panel; Ctrl+F at the prompt still
+# opens the find bar.
+start
+wait "README.md"
+key Alt+T
+wait "demo$"
+
+# Alt+D at the start of the line deletes the first word, so only `echo` runs.
+type "XXXX echo kept-by-alt-d"
+key Ctrl+A Alt+D Enter
+wait-re "│kept-by-alt-d +│"
+expect-not "XXXX"
+
+# Ctrl+F pages less down instead of opening the find bar.
+type "seq 1 200 | less"
+key Enter
+wait-re "│1 +│"
+expect-not "│16 "
+key Ctrl+F
+wait-re "│16 +│"
+expect-not "│1 "
+key q
+# The title catches up with less quitting though nothing more is written.
+wait "(bash)" 3
+
+# Esc at the prompt goes to the shell: no close question takes the keys
+# after it, so the next command still runs there. (Ctrl+C drops the Meta
+# prefix bash read the Esc as.)
+key Esc
+sleep 1
+key Ctrl+C
+type "echo after-$((40 + 2))"
+key Enter
+wait "after-42"
+
+# At the prompt Ctrl+F still opens the find bar.
+key Ctrl+F
+wait "─ Find ─"
+quit --force
