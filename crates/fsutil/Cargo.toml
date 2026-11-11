@@ -1,0 +1,11 @@
+[package]
+name = "termide-fsutil"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "File-system helpers shared across termide crates"
+
+[dev-dependencies]
+tempfile.workspace = true

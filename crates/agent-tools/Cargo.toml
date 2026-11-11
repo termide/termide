@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Built-in tools of the termide coding agent: read, edit, write, bash"
 
 [dependencies]
+termide-fsutil = { path = "../fsutil" }
 log.workspace = true
 serde_json.workspace = true
 similar.workspace = true

@@ -62,7 +62,7 @@ fn write(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> 
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
     }
-    termide_agent_core::write_atomic(&path, content.as_bytes())
+    termide_fsutil::write_atomic(&path, content.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     let verb = if existed { "Overwrote" } else { "Created" };
     Ok((

@@ -11,10 +11,10 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::atomic_write::write_atomic;
 use crate::hooks::HOOKS_FILE;
 use crate::layers::AGENT_FILE;
 use crate::tool::{LEGACY_SHELL_TOOL, SHELL_TOOL};
+use termide_fsutil::write_atomic;
 
 /// Rename the tool in the global hooks and agent profiles under `global`.
 pub(crate) fn rewrite_global(global: &Path) {

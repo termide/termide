@@ -5141,6 +5141,7 @@ dependencies = [
  "tempfile",
  "termide-agent-core",
  "termide-agent-mcp",
+ "termide-fsutil",
 ]
 
 [[package]]
@@ -5155,6 +5156,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "tempfile",
+ "termide-fsutil",
  "toml",
  "toml_edit",
  "unicode-segmentation",
@@ -5223,6 +5225,7 @@ dependencies = [
  "tempfile",
  "termide-agent-core",
  "termide-clipboard",
+ "termide-fsutil",
 ]
 
 [[package]]
@@ -5336,6 +5339,7 @@ dependencies = [
  "anyhow",
  "ropey",
  "tempfile",
+ "termide-fsutil",
  "unicode-segmentation",
  "unicode-width",
 ]
@@ -5366,6 +5370,7 @@ dependencies = [
  "serde",
  "tempfile",
  "termide-agent-core",
+ "termide-fsutil",
  "termide-keyboard",
  "termide-project",
  "toml",
@@ -5452,6 +5457,13 @@ dependencies = [
  "termide-vfs",
  "thiserror 2.0.18",
  "zip",
+]
+
+[[package]]
+name = "termide-fsutil"
+version = "0.49.0"
+dependencies = [
+ "tempfile",
 ]
 
 [[package]]
@@ -6032,6 +6044,7 @@ dependencies = [
  "log",
  "serde",
  "tempfile",
+ "termide-fsutil",
  "toml",
 ]
 

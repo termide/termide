@@ -582,7 +582,7 @@ impl Config {
         // settings and the global ones, two termide windows) must not share a
         // temporary file: a synced, uniquely named sibling is renamed over the
         // target — through a symlink, as a dotfiles checkout keeps it.
-        termide_agent_core::write_atomic(path, content.as_bytes())?;
+        termide_fsutil::write_atomic(path, content.as_bytes())?;
         Ok(())
     }
 

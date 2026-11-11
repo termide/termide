@@ -143,7 +143,7 @@ fn save_to(path: &Path, projects: &SavedOpenProjects) -> Result<()> {
         current: projects.current.clone(),
     };
     let contents = toml::to_string_pretty(&file).context("Failed to serialize open projects")?;
-    crate::atomic::write_atomic(path, contents.as_bytes())
+    termide_fsutil::write_atomic(path, contents.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))
 }
 

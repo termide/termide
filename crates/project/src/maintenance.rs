@@ -78,7 +78,7 @@ pub fn save_unsaved_buffer(project_dir: &Path, filename: &str, content: &str) ->
         )
     })?;
     let buffer_path = project_dir.join(filename);
-    crate::atomic::write_atomic(&buffer_path, content.as_bytes()).with_context(|| {
+    termide_fsutil::write_atomic(&buffer_path, content.as_bytes()).with_context(|| {
         format!(
             "Failed to write unsaved buffer file: {}",
             buffer_path.display()

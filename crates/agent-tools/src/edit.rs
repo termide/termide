@@ -134,7 +134,7 @@ fn edit(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
     } else {
         updated
     });
-    termide_agent_core::write_atomic(&path, output.as_bytes())
+    termide_fsutil::write_atomic(&path, output.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 
     let strategy = matches[0].strategy.label();

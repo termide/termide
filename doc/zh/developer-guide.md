@@ -125,6 +125,7 @@ termide/
 │   ├── detach/               # 可分离（守护进程化）实例托管
 │   ├── fetch/                # 供查看器面板使用的最小化、受安全约束的 HTTP(S) GET
 │   ├── file-ops/             # 文件操作队列（复制、移动、删除、上传、下载）
+│   ├── fsutil/               # 编辑器、代理与项目存储共用的崩溃安全原子写入
 │   ├── git/                  # Git 集成（状态、diff、日志）
 │   ├── highlight/            # 语法高亮（tree-sitter）
 │   ├── html/                 # HTML 到终端伪图形的渲染器

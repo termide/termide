@@ -8,6 +8,7 @@ repository.workspace = true
 description = "ACP client for the termide coding agent: an external agent over stdio behind the same panel"
 
 [dependencies]
+termide-fsutil = { path = "../fsutil" }
 log.workspace = true
 serde_json.workspace = true
 

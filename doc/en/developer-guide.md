@@ -141,6 +141,7 @@ termide/
 │   ├── detach/               # Detached (daemonised) instance hosting
 │   ├── fetch/                # Minimal, security-bounded HTTP(S) GET for viewer panels
 │   ├── file-ops/             # File operations queue (copy, move, delete, upload, download)
+│   ├── fsutil/               # Crash-safe atomic file writes, shared by the editor, agent and project store
 │   ├── git/                  # Git integration (status, diff, log)
 │   ├── highlight/            # Syntax highlighting (tree-sitter)
 │   ├── html/                 # HTML to terminal pseudographics renderer

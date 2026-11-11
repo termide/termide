@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Configuration management for termide"
 
 [dependencies]
+termide-fsutil = { path = "../fsutil" }
 serde.workspace = true
 anyhow.workspace = true
 toml.workspace = true

@@ -23,7 +23,7 @@ pub(crate) fn rename_in_file(path: &Path) {
     let Some(renamed) = rename(&text) else {
         return;
     };
-    match termide_agent_core::write_atomic(path, renamed.as_bytes()) {
+    match termide_fsutil::write_atomic(path, renamed.as_bytes()) {
         Ok(()) => log::info!(
             "Renamed [ai.permissions.{LEGACY_SHELL_TOOL}] to [ai.permissions.{SHELL_TOOL}] in {}",
             path.display()

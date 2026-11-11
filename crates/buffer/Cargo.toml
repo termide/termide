@@ -8,6 +8,7 @@ repository.workspace = true
 description = "Text buffer with rope data structure for termide"
 
 [dependencies]
+termide-fsutil = { path = "../fsutil" }
 ropey.workspace = true
 anyhow.workspace = true
 unicode-segmentation.workspace = true

@@ -228,9 +228,8 @@ impl CheckpointStore {
         let mut files = Vec::new();
         for saved in &run.files {
             let outcome = match (&saved.copy, saved.existed) {
-                (Some(copy), true) => {
-                    std::fs::read(copy).and_then(|bytes| crate::write_atomic(&saved.path, &bytes))
-                }
+                (Some(copy), true) => std::fs::read(copy)
+                    .and_then(|bytes| termide_fsutil::write_atomic(&saved.path, &bytes)),
                 _ => match std::fs::remove_file(&saved.path) {
                     Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error),
                     _ => Ok(()),

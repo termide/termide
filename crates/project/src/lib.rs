@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-mod atomic;
 mod maintenance;
 pub use maintenance::*;
 mod open_list;
@@ -432,7 +431,7 @@ impl ProjectLayout {
         let path = project_dir.join("session.toml");
         let contents = toml::to_string_pretty(self).context("Failed to serialize layout")?;
 
-        atomic::write_atomic(&path, contents.as_bytes())
+        termide_fsutil::write_atomic(&path, contents.as_bytes())
             .with_context(|| format!("Failed to write layout file: {}", path.display()))?;
 
         Ok(())

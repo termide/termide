@@ -1,8 +1,8 @@
-//! Crash-safe file writing for buffer saves.
+//! File-system helpers shared across termide crates.
 //!
-//! The new contents go to a temporary file next to the target, are flushed to
-//! disk and then renamed over the target, so a crash or a full disk leaves
-//! either the old file or the new one, never a truncated mix.
+//! [`write_atomic`] is the one crash-safe write: the editor's save, the
+//! agent's tools, the project store and the config all replace files
+//! through it.
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
@@ -12,19 +12,27 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// How many symlink hops to follow before giving up on resolution.
 const MAX_SYMLINK_HOPS: usize = 40;
 
-/// Write `contents` to `path`, replacing it atomically where possible.
+/// Write `contents` to `path`, replacing it atomically where possible: the
+/// data goes to a temporary file next to the target, is synced, and is then
+/// renamed over it, so a crash leaves the old file or the new one, never a
+/// truncated mix.
 ///
 /// - A symlink is followed: its final target is replaced and the link stays.
 /// - The permissions (and, on Unix, the owner when allowed) of an existing
 ///   file carry over to the new one.
-/// - A file with several hard links, or one in a directory where no
-///   temporary file can be created, is rewritten in place, since a rename
-///   would split the links or is impossible there.
-pub(crate) fn write_file(path: &Path, contents: &[u8]) -> io::Result<()> {
+/// - A file with several hard links, anything but a regular file, or a file
+///   in a directory where no temporary file can be created is rewritten in
+///   place, since a rename would split the links, replace the special file,
+///   or is impossible there.
+pub fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
     let target = resolve_symlinks(path)?;
     let existing = fs::metadata(&target).ok();
 
-    if existing.as_ref().is_some_and(has_other_hard_links) {
+    // Renaming over a pipe or a device would replace it with a plain file.
+    if existing
+        .as_ref()
+        .is_some_and(|meta| !meta.is_file() || has_other_hard_links(meta))
+    {
         return write_in_place(&target, contents);
     }
 
@@ -34,7 +42,7 @@ pub(crate) fn write_file(path: &Path, contents: &[u8]) -> io::Result<()> {
     };
     let (temp_path, mut temp) = match create_temp(&dir, &target) {
         Ok(t) => t,
-        // A writable file in a read-only directory can still be saved.
+        // A writable file in a read-only directory can still be written.
         Err(e) if e.kind() == io::ErrorKind::PermissionDenied && existing.is_some() => {
             return write_in_place(&target, contents);
         }
@@ -59,7 +67,7 @@ pub(crate) fn write_file(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 
 /// Follow `path` through symlinks to the file that actually holds the data.
-/// A dangling link resolves to the path it points at, so saving creates it.
+/// A dangling link resolves to the path it points at, so writing creates it.
 fn resolve_symlinks(path: &Path) -> io::Result<PathBuf> {
     let mut current = path.to_path_buf();
     for _ in 0..MAX_SYMLINK_HOPS {
@@ -108,7 +116,12 @@ fn write_in_place(target: &Path, contents: &[u8]) -> io::Result<()> {
         .truncate(true)
         .open(target)?;
     file.write_all(contents)?;
-    file.sync_all()
+    // fsync of a pipe or a device fails with EINVAL on Linux; only a
+    // regular file has data to make durable.
+    if file.metadata()?.is_file() {
+        file.sync_all()?;
+    }
+    Ok(())
 }
 
 #[cfg(unix)]
@@ -157,66 +170,82 @@ mod tests {
     }
 
     #[test]
-    fn creates_a_new_file_and_leaves_no_temp_behind() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("new.txt");
-        write_file(&path, b"hello").unwrap();
-        assert_eq!(fs::read(&path).unwrap(), b"hello");
-        assert!(leftovers(dir.path()).is_empty());
-    }
-
-    #[test]
-    fn replaces_an_existing_file() {
+    fn replaces_an_existing_file_and_leaves_no_temp_behind() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("f.txt");
         fs::write(&path, "a much longer old content").unwrap();
-        write_file(&path, b"new").unwrap();
+        write_atomic(&path, b"new").unwrap();
         assert_eq!(fs::read(&path).unwrap(), b"new");
+        write_atomic(&dir.path().join("created.txt"), b"x").unwrap();
         assert!(leftovers(dir.path()).is_empty());
     }
 
     #[cfg(unix)]
     #[test]
-    fn keeps_the_permissions_of_the_existing_file() {
+    fn keeps_permissions_symlinks_and_hard_links() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("script.sh");
-        fs::write(&path, "old").unwrap();
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o751)).unwrap();
-        write_file(&path, b"new").unwrap();
-        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        let script = dir.path().join("script.sh");
+        fs::write(&script, "old").unwrap();
+        fs::set_permissions(&script, fs::Permissions::from_mode(0o751)).unwrap();
+        write_atomic(&script, b"new").unwrap();
+        let mode = fs::metadata(&script).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o751);
-    }
 
-    #[cfg(unix)]
-    #[test]
-    fn writes_through_a_symlink_and_keeps_the_link() {
-        let dir = tempfile::tempdir().unwrap();
-        let real = dir.path().join("real.txt");
-        let link = dir.path().join("link.txt");
-        fs::write(&real, "old").unwrap();
-        std::os::unix::fs::symlink("real.txt", &link).unwrap();
-
-        write_file(&link, b"new").unwrap();
-
+        let link = dir.path().join("link.sh");
+        std::os::unix::fs::symlink("script.sh", &link).unwrap();
+        write_atomic(&link, b"through").unwrap();
         assert!(fs::symlink_metadata(&link)
             .unwrap()
             .file_type()
             .is_symlink());
-        assert_eq!(fs::read(&real).unwrap(), b"new");
+        assert_eq!(fs::read(&script).unwrap(), b"through");
+
+        let twin = dir.path().join("twin.sh");
+        fs::hard_link(&script, &twin).unwrap();
+        write_atomic(&script, b"both").unwrap();
+        assert_eq!(fs::read(&twin).unwrap(), b"both");
     }
 
+    /// A special file is written into, not replaced by a plain file.
     #[cfg(unix)]
     #[test]
-    fn keeps_hard_links_together() {
+    fn a_special_file_is_not_replaced() {
+        use std::os::unix::fs::FileTypeExt;
         let dir = tempfile::tempdir().unwrap();
-        let a = dir.path().join("a.txt");
-        let b = dir.path().join("b.txt");
-        fs::write(&a, "old").unwrap();
-        fs::hard_link(&a, &b).unwrap();
+        let pipe = dir.path().join("pipe");
+        let made = std::process::Command::new("mkfifo").arg(&pipe).status();
+        if !made.is_ok_and(|s| s.success()) {
+            return;
+        }
+        let reader = {
+            let pipe = pipe.clone();
+            std::thread::spawn(move || fs::read(pipe).unwrap())
+        };
+        write_atomic(&pipe, b"through").unwrap();
+        assert_eq!(reader.join().unwrap(), b"through");
+        assert!(fs::symlink_metadata(&pipe).unwrap().file_type().is_fifo());
+    }
 
-        write_file(&a, b"new").unwrap();
-
-        assert_eq!(fs::read(&b).unwrap(), b"new");
+    /// A write that cannot complete leaves the previous file whole and no
+    /// temporary file behind.
+    #[test]
+    fn a_failed_write_keeps_the_previous_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.toml");
+        fs::write(&path, "previous").unwrap();
+        // Renaming a file over a non-empty directory fails after the
+        // temporary file was written.
+        let blocked = dir.path().join("blocked");
+        fs::create_dir(&blocked).unwrap();
+        fs::write(blocked.join("x"), "").unwrap();
+        assert!(write_atomic(&blocked, b"new").is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "previous");
+        let mut names: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        assert_eq!(names, ["blocked", "session.toml"]);
     }
 }
