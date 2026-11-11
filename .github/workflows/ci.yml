@@ -112,6 +112,10 @@ jobs:
       - name: Release version in every copy
         run: tools/release/version.sh --check
 
+      # doc/ru follows doc/en heading for heading; doc/zh only warns.
+      - name: Translated docs keep the English structure
+        run: tools/docs/headings.sh
+
   deny:
     name: Supply-chain audit
     runs-on: ubuntu-latest

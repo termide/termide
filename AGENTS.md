@@ -100,5 +100,5 @@ Several agent sessions often work in this repository at once, in the main checko
 ## Documentation policy
 
 - Update docs only when behavior, workflow, or invariants actually changed.
-- Treat `doc/en/` as the primary user documentation source and keep `doc/ru/` aligned at minimum for user-visible changes.
+- Treat `doc/en/` as the primary user documentation source and keep `doc/ru/` aligned at minimum for user-visible changes. `tools/docs/headings.sh` (run in CI) fails when a `doc/ru/` page's headings no longer follow its `doc/en/` page, and warns for `doc/zh/`.
 - Do not pad docs with obvious implementation trivia.
