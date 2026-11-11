@@ -74,6 +74,24 @@ pub(crate) fn pty_key(chord: termide_core::KeyChord) -> KeyEvent {
     raw
 }
 
+/// A character or Backspace as the legacy encoding sends it: Ctrl masks a
+/// character to its control byte, and Alt puts Escape before the result, as
+/// terminals with xterm's metaSendsEscape do. Readline, Emacs and Vim read
+/// Alt this way; without the Escape, Alt+D in the shell typed a plain `d`.
+pub(crate) fn legacy_key_bytes(code: KeyCode, mods: KeyModifiers) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(5);
+    if mods.contains(KeyModifiers::ALT) {
+        bytes.push(0x1b);
+    }
+    match code {
+        KeyCode::Char(c) if mods.contains(KeyModifiers::CONTROL) => bytes.push((c as u8) & 0x1f),
+        KeyCode::Char(c) => bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+        KeyCode::Backspace => bytes.push(0x7f),
+        _ => {}
+    }
+    bytes
+}
+
 pub(crate) fn modern_key_bytes(key: &KeyEvent, mode: KeyboardProtocolMode) -> Option<Vec<u8>> {
     match key.code {
         KeyCode::Char(c) => match mode {
@@ -351,6 +369,30 @@ mod tests {
             pty_key(chord('+', KeyModifiers::CONTROL)).code,
             KeyCode::Char('+')
         );
+    }
+
+    /// Alt sends Escape before the key, as xterm's metaSendsEscape and every
+    /// common terminal do: readline's `M-d`, `M-.` and `M-DEL` read it so.
+    #[test]
+    fn legacy_bytes_prefix_escape_for_alt() {
+        let key = |code: KeyCode, mods: KeyModifiers| legacy_key_bytes(code, mods);
+        assert_eq!(key(KeyCode::Char('d'), KeyModifiers::NONE), b"d");
+        assert_eq!(key(KeyCode::Char('d'), KeyModifiers::ALT), b"\x1bd");
+        assert_eq!(key(KeyCode::Char('.'), KeyModifiers::ALT), b"\x1b.");
+        assert_eq!(
+            key(KeyCode::Char('ф'), KeyModifiers::ALT),
+            "\x1bф".as_bytes()
+        );
+        assert_eq!(key(KeyCode::Char('x'), KeyModifiers::CONTROL), [0x18]);
+        assert_eq!(
+            key(
+                KeyCode::Char('x'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT
+            ),
+            [0x1b, 0x18]
+        );
+        assert_eq!(key(KeyCode::Backspace, KeyModifiers::NONE), [0x7f]);
+        assert_eq!(key(KeyCode::Backspace, KeyModifiers::ALT), [0x1b, 0x7f]);
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- **Alt with a letter reaches the program in a terminal panel.** Without the kitty keyboard protocol, the terminal panel sent `Alt+D` as a plain `d`, so readline's `kill-word`, `Alt+.` (last argument), `Alt+Backspace` and Emacs's Meta keys typed a character instead. Alt now sends Escape before the key, as other terminals do.

@@ -25,7 +25,7 @@ pub use terminal_info::TerminalInfo;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
-use input_encoding::{arrow_modifier_param, modern_key_bytes, pty_key};
+use input_encoding::{arrow_modifier_param, legacy_key_bytes, modern_key_bytes, pty_key};
 use link_detection::HighlightSegment;
 #[cfg(unix)]
 use nix::sys::signal::{self, Signal};
@@ -1259,41 +1259,25 @@ impl Panel for Terminal {
         // Handle special keys
         match key.code {
             KeyCode::Char(c) => {
-                if key.modifiers.contains(KeyModifiers::CONTROL) {
-                    // Ctrl+C, Ctrl+D, etc.
-                    if c.eq_ignore_ascii_case(&'c') {
-                        // Ctrl+C: copy if there's a selection, otherwise send SIGINT
-                        let has_selection = {
-                            let screen = self.read_screen();
-                            screen.selection_start.is_some() && screen.selection_end.is_some()
-                        };
-                        if has_selection {
-                            let copy_result = self.copy_selection_to_clipboard();
-                            // Clear selection after copying
-                            self.write_screen().clear_selection();
-                            if let Err(e) = copy_result {
-                                return vec![PanelEvent::SetStatusMessage {
-                                    message: format!("Clipboard error: {}", e),
-                                    is_error: true,
-                                }];
-                            }
-                        } else {
-                            let _ = self.send_input(&[3]); // Ctrl+C (SIGINT)
-                        }
-                    } else if c.eq_ignore_ascii_case(&'d') {
-                        let _ = self.send_input(&[4]); // Ctrl+D
-                    } else if c.eq_ignore_ascii_case(&'z') {
-                        let _ = self.send_input(&[26]); // Ctrl+Z
-                    } else {
-                        // Other Ctrl combinations
-                        let ctrl_char = (c as u8) & 0x1f;
-                        let _ = self.send_input(&[ctrl_char]);
+                // Ctrl+C copies a selection; without one it is SIGINT.
+                let has_selection = || {
+                    let screen = self.read_screen();
+                    screen.selection_start.is_some() && screen.selection_end.is_some()
+                };
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && c.eq_ignore_ascii_case(&'c')
+                    && has_selection()
+                {
+                    let copy_result = self.copy_selection_to_clipboard();
+                    self.write_screen().clear_selection();
+                    if let Err(e) = copy_result {
+                        return vec![PanelEvent::SetStatusMessage {
+                            message: format!("Clipboard error: {}", e),
+                            is_error: true,
+                        }];
                     }
                 } else {
-                    // Regular character
-                    let mut buf = [0u8; 4];
-                    let s = c.encode_utf8(&mut buf);
-                    let _ = self.send_input(s.as_bytes());
+                    let _ = self.send_input(&legacy_key_bytes(key.code, key.modifiers));
                 }
             }
             KeyCode::Enter => {
@@ -1310,7 +1294,7 @@ impl Panel for Terminal {
                 }
             }
             KeyCode::Backspace => {
-                let _ = self.send_input(&[127]); // DEL
+                let _ = self.send_input(&legacy_key_bytes(key.code, key.modifiers));
             }
             KeyCode::Delete => {
                 let _ = self.send_input(b"\x1b[3~");
