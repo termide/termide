@@ -20,7 +20,6 @@ zeroize = "1"
 termide-theme = { path = "../theme" }
 termide-config = { path = "../config" }
 termide-project = { path = "../project" }
-termide-file-ops = { path = "../file-ops" }
 termide-keyboard = { path = "../keyboard" }
 
 [target.'cfg(unix)'.dependencies]

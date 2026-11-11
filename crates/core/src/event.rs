@@ -859,15 +859,15 @@ pub enum PanelEvent {
 
     // === Operations panel ===
     /// Toggle pause/resume for a file operation
-    ToggleOperationPause(termide_file_ops::OperationId),
+    ToggleOperationPause(crate::OperationId),
 
     /// Cancel a file operation
-    CancelOperation(termide_file_ops::OperationId),
+    CancelOperation(crate::OperationId),
 
     /// Open the per-operation popup menu (Pause/Resume/Cancel) anchored
     /// at the operation type icon on its card.
     OpenOperationActionMenu {
-        op_id: termide_file_ops::OperationId,
+        op_id: crate::OperationId,
         anchor_x: u16,
         anchor_y: u16,
     },
@@ -1028,7 +1028,7 @@ pub enum ConfirmAction {
     QuitApplication,
 
     /// Cancel a running background operation
-    CancelOperation(termide_file_ops::OperationId),
+    CancelOperation(crate::OperationId),
 
     /// Replace every content-search match in the file manager with this text.
     ReplaceInContent(String),

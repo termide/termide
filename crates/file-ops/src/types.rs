@@ -7,22 +7,7 @@ use std::sync::Arc;
 use termide_vfs::archive::pack::CompressionLevel;
 use termide_vfs::VfsPath;
 
-/// Unique identifier for an operation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct OperationId(pub u64);
-
-impl OperationId {
-    /// Create a new operation ID.
-    pub fn new(id: u64) -> Self {
-        Self(id)
-    }
-}
-
-impl std::fmt::Display for OperationId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "op-{}", self.0)
-    }
-}
+pub use termide_core::OperationId;
 
 /// Phase of an operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

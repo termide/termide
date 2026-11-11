@@ -26,6 +26,7 @@ pub mod graphics_cells;
 pub mod hotkey_table;
 pub mod key_chord;
 pub mod links;
+pub mod operation_id;
 pub mod panel;
 pub mod scrollbar;
 pub mod terminal_caps;
@@ -46,6 +47,7 @@ pub use graphics_cells::GraphicsCells;
 pub use hotkey_table::HotkeyTable;
 pub use key_chord::KeyChord;
 pub use links::LinkTarget;
+pub use operation_id::OperationId;
 pub use panel::{
     AgentSetupState, CommandContext, HeightMode, Panel, PanelConfig, PanelState, RenderContext,
     Searchable, SegmentKind, StatusSegment, ThemeColors, TitleCut, WidthPreference,
