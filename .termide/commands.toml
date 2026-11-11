@@ -15,3 +15,42 @@ cwd = "project"
 [[tui-harness.params]]
 name = "scenarios"
 label = "Scenarios (empty: all)"
+
+# The pre-commit gate on what is staged now, without committing: the same
+# fmt / machete / clippy / nextest the hook runs at `git commit`.
+[gate-staged]
+command = ".githooks/pre-commit"
+name = "Gate the staged changes"
+mode = "report"
+cwd = "project"
+
+# The narrow check of one crate while working on it (AGENTS.md, Validation).
+[check-crate]
+command = "cargo clippy -p termide-{crate} --all-targets -- -D warnings && cargo nextest run -p termide-{crate}"
+name = "Clippy and tests of one crate"
+mode = "report"
+cwd = "project"
+
+[[check-crate.params]]
+name = "crate"
+label = "Crate (without termide-)"
+default = "panel-agent"
+
+# How big target/ has grown; past tens of GiB, `cargo clean` speeds builds up.
+[target-size]
+command = "du -sh target target/* 2>/dev/null | sort -h | tail -8"
+name = "Size of target/"
+mode = "report"
+cwd = "project"
+
+# README and website screenshots (tools/screenshots/README.md); tapes
+# separated by spaces, or every one when left empty. Needs Docker.
+[screenshots]
+command = "tools/screenshots/run.sh $TERMIDE_PARAM_TAPES"
+name = "Render screenshots"
+mode = "terminal"
+cwd = "project"
+
+[[screenshots.params]]
+name = "tapes"
+label = "Tapes (empty: all)"
