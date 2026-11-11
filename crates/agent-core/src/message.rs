@@ -144,9 +144,7 @@ pub const IMAGE_ESTIMATE_CHARS: usize = 6000;
 pub struct ToolCall {
     /// Provider-assigned id echoed back in the matching [`ToolResultMessage`].
     pub id: String,
-    /// The tool's name; a log written before a tool was renamed reads with
-    /// the current one.
-    #[serde(deserialize_with = "crate::tool::de_tool_name")]
+    /// The tool's name.
     pub name: String,
     /// Parsed JSON arguments; an object for well-formed calls.
     pub arguments: Value,
@@ -568,7 +566,6 @@ impl AssistantMessage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ToolResultMessage {
     pub tool_call_id: String,
-    #[serde(deserialize_with = "crate::tool::de_tool_name")]
     pub tool_name: String,
     pub content: Vec<ToolResultContent>,
     #[serde(default)]
@@ -920,17 +917,5 @@ mod tests {
         assert_eq!(result.tool_call_id, "id-7");
         assert_eq!(result.tool_name, "shell");
         assert_eq!(result.plain_text(), "boom");
-    }
-
-    #[test]
-    fn a_log_from_before_the_shell_tools_rename_reads_with_its_new_name() {
-        let call: ToolCall =
-            serde_json::from_value(json!({ "id": "c", "name": "bash", "arguments": {} })).unwrap();
-        assert_eq!(call.name, "shell");
-        let result: ToolResultMessage = serde_json::from_value(
-            json!({ "tool_call_id": "c", "tool_name": "bash", "content": [], "timestamp": 1 }),
-        )
-        .unwrap();
-        assert_eq!(result.tool_name, "shell");
     }
 }

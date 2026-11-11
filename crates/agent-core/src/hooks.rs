@@ -35,7 +35,7 @@ pub struct HookConfig {
     #[serde(default)]
     pub args: Vec<String>,
     /// Tool names the hook applies to (`*` wildcards); every tool when empty.
-    #[serde(default, deserialize_with = "crate::tool::de_tool_names")]
+    #[serde(default)]
     pub tools: Vec<String>,
     /// Seconds before the program is killed and ignored.
     #[serde(default = "default_timeout")]
@@ -99,14 +99,13 @@ mod tests {
     #[test]
     fn a_hook_table_parses_with_defaults() {
         let hooks: BTreeMap<String, HookConfig> = toml::from_str(
-            "[guard]\nevent = \"before_tool_call\"\ntools = [\"bash\"]\ncommand = \"guard.sh\"\n\n[log]\nevent = \"after_tool_call\"\ncommand = \"log.sh\"\nenabled = false\n",
+            "[guard]\nevent = \"before_tool_call\"\ntools = [\"shell\"]\ncommand = \"guard.sh\"\n\n[log]\nevent = \"after_tool_call\"\ncommand = \"log.sh\"\nenabled = false\n",
         )
         .unwrap();
         assert_eq!(hooks["guard"].event, HookEvent::BeforeToolCall);
         assert_eq!(hooks["guard"].timeout_secs, 30);
         assert!(hooks["guard"].args.is_empty());
         assert!(!hooks["log"].enabled);
-        // The shell tool's name before its rename still matches it.
         assert_eq!(hooks["guard"].tools, ["shell"]);
     }
 }

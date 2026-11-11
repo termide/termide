@@ -48,7 +48,6 @@ pub mod prune;
 pub mod recall;
 pub mod recap;
 pub mod refusals;
-mod retired_tools;
 pub mod runtime;
 pub mod session;
 pub mod shell;
@@ -142,8 +141,7 @@ pub use terminals::{
     TerminalState,
 };
 pub use tool::{
-    canonical_tool_name, de_tool_name, de_tool_names, CallsBeside, LateTools, RunningCall,
-    RunningCalls, ShellSyntax, Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate,
-    LEGACY_SHELL_TOOL, PLUGIN_TOOL_SOURCE, SHELL_TOOL,
+    CallsBeside, LateTools, RunningCall, RunningCalls, ShellSyntax, Tool, ToolContext,
+    ToolRegistry, ToolTraits, ToolUpdate, PLUGIN_TOOL_SOURCE, SHELL_TOOL,
 };
 pub use tool_text::{apply_tool_texts, is_known_tool_name, ToolText, SEED_TOOLS, TOOLS_DIR};

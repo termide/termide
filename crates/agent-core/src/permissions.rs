@@ -37,7 +37,7 @@ use crate::cancel::CancelToken;
 use crate::classifier::{Classifier, Verdict};
 use crate::message::ToolCall;
 use crate::refusals::Refusals;
-use crate::tool::{canonical_tool_name, ShellSyntax, ToolContext, SHELL_TOOL};
+use crate::tool::{ShellSyntax, ToolContext, SHELL_TOOL};
 
 /// Which rules count and what happens to calls none covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -456,7 +456,7 @@ fn broad_allow(tool: &str, pattern: &str) -> bool {
         return true;
     }
     // What the pattern fixes, followed by an argument its wildcard would take.
-    canonical_tool_name(tool) == SHELL_TOOL && delegating_command(&format!("{fixed} x"))
+    tool == SHELL_TOOL && delegating_command(&format!("{fixed} x"))
 }
 
 fn add_rule(tables: &mut RuleTables, tool: &str, pattern: &str, decision: Decision) {
@@ -466,17 +466,12 @@ fn add_rule(tables: &mut RuleTables, tool: &str, pattern: &str, decision: Decisi
         .insert(pattern.to_string(), decision);
 }
 
-/// The tables of `tool`: its own and any kept under a name it had before,
-/// which the user's config and granted rules may still use.
+/// The rule table of `tool`, when it has one.
 fn tool_tables<'a>(
     tables: &'a RuleTables,
     tool: &'a str,
 ) -> impl Iterator<Item = &'a BTreeMap<String, Decision>> {
-    let tool = canonical_tool_name(tool);
-    tables
-        .iter()
-        .filter(move |(name, _)| canonical_tool_name(name) == tool)
-        .map(|(_, table)| table)
+    tables.get(tool).into_iter()
 }
 
 fn evaluate_rules(tables: &RuleTables, tool: &str, subject: &str) -> Option<Decision> {
@@ -3636,25 +3631,5 @@ mod granted_tests {
         );
         let text = toml::to_string(&rules).unwrap();
         assert!(!text.contains("cargo"), "{text}");
-    }
-
-    #[test]
-    fn rules_kept_under_the_shell_tools_old_name_still_apply() {
-        let mut rules: PermissionRules =
-            toml::from_str("[bash]\n\"git push*\" = \"deny\"\n\"cargo *\" = \"allow\"\n").unwrap();
-        add_rule(&mut rules.granted, "bash", "make *", Decision::Allow);
-        assert_eq!(rules.evaluate("shell", "git push"), Some(Decision::Deny));
-        assert_eq!(rules.evaluate("shell", "make all"), Some(Decision::Allow));
-        assert_eq!(
-            rules.evaluate_narrow("shell", "cargo test"),
-            Some(Decision::Allow)
-        );
-        // A rule the user adds now goes under the new name, beside the old.
-        rules.add("shell", "rm *", Decision::Deny);
-        assert_eq!(rules.evaluate("shell", "rm x"), Some(Decision::Deny));
-        assert_eq!(
-            rules.evaluate("shell", "cargo build"),
-            Some(Decision::Allow)
-        );
     }
 }

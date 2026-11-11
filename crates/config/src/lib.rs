@@ -13,7 +13,6 @@ mod layer_rules;
 mod overrides;
 mod placeholders;
 mod plugins;
-mod retired_tools;
 mod settings;
 mod words;
 mod xdg;
@@ -236,7 +235,6 @@ fn granted_rules_from(
     path: &Path,
     warnings: &mut Vec<String>,
 ) -> termide_agent_core::permissions::RuleTables {
-    retired_tools::rename_in_file(path);
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Default::default(),
@@ -285,9 +283,6 @@ pub struct LayeredConfig {
 fn overlay_file(value: &mut toml::Value, path: &Path, layer: Layer, warnings: &mut Vec<String>) {
     if !path.exists() {
         return;
-    }
-    if layer == Layer::Global {
-        retired_tools::rename_in_file(path);
     }
     let parsed = std::fs::read_to_string(path)
         .map_err(|e| e.to_string())
@@ -446,7 +441,6 @@ impl Config {
         let config_path = Self::config_file_path()?;
 
         if config_path.exists() {
-            retired_tools::rename_in_file(&config_path);
             let original_content = std::fs::read_to_string(&config_path)?;
 
             // Try parsing as new structured format first

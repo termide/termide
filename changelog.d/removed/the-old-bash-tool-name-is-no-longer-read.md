@@ -1,0 +1,1 @@
+- **The shell tool's old name, `bash`, is no longer read.** 0.49.0 renamed the tool to `shell` and rewrote the old name out of the files termide keeps; a `bash` left in a project's own `[ai.permissions]`, hooks or an agent's `tools:` applied through that release only. It now matches no tool and is reported as an unknown tool name — rename it to `shell`.

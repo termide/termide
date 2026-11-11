@@ -26,7 +26,6 @@ use crate::permissions::Mode;
 use crate::plan::{PlanPrompt, SEED_PLAN};
 use crate::recall::{RecallPrompt, SEED_RECALL};
 use crate::refusals::{Refusals, SEED_PERMISSIONS};
-use crate::tool::{canonical_tool_name, LEGACY_SHELL_TOOL, SHELL_TOOL};
 use crate::tool_text::{is_known_tool_name, ToolText, SEED_TOOLS, TOOLS_DIR};
 
 /// The `ai` directory inside the configuration directory.
@@ -417,9 +416,6 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
         }),
     };
     let mut manifest_changed = move_legacy_default_template(global, &mut manifest)?;
-    manifest_changed |= move_legacy_tool_text(global, &mut manifest)?;
-    crate::retired_tools::rewrite_global(global);
-    rewrite_session_logs_once(global);
 
     for (relative, seed) in shipped_assets() {
         let path = global.join(&relative);
@@ -492,59 +488,6 @@ fn move_legacy_default_template(
     }
     if let Some(hash) = manifest.remove(LEGACY_DEFAULT_TEMPLATE) {
         manifest.insert(DEFAULT_AGENT_FILE.to_string(), hash);
-    }
-    Ok(true)
-}
-
-/// Rewrite the shell tool's old name out of the session logs under `global`,
-/// on a thread of its own, once per process. Transitional, as
-/// [`move_legacy_tool_text`] is.
-fn rewrite_session_logs_once(global: &Path) {
-    static STARTED: std::sync::Once = std::sync::Once::new();
-    let sessions = global.join(SESSIONS_DIR);
-    STARTED.call_once(|| {
-        let spawned = std::thread::Builder::new()
-            .name("rename-shell-tool".into())
-            .spawn(move || crate::retired_tools::rewrite_session_logs(&sessions));
-        if let Err(error) = spawned {
-            log::warn!("cannot start the session log rewrite: {error}");
-        }
-    });
-}
-
-/// Carry the shell tool's texts over from `tools/bash.md`, its name before the
-/// rename, to `tools/shell.md`. An untouched copy is dropped, so the new seed
-/// is written in its place; an edited one is moved with its seed record, so it
-/// stays in effect and the new default lands beside it as `.new`. Whether
-/// anything changed. Transitional: it ships for one release after the rename.
-fn move_legacy_tool_text(
-    global: &Path,
-    manifest: &mut BTreeMap<String, String>,
-) -> std::io::Result<bool> {
-    let tools = global.join(TOOLS_DIR);
-    let legacy_key = format!("{TOOLS_DIR}/{LEGACY_SHELL_TOOL}.md");
-    let current_key = format!("{TOOLS_DIR}/{SHELL_TOOL}.md");
-    let legacy = tools.join(format!("{LEGACY_SHELL_TOOL}.md"));
-    let current = tools.join(format!("{SHELL_TOOL}.md"));
-    let stale_new = dot_new(&legacy);
-    if stale_new.is_file() {
-        std::fs::remove_file(&stale_new)?;
-    }
-    let recorded = manifest.remove(&legacy_key);
-    if !legacy.is_file() || current.exists() {
-        return Ok(recorded.is_some());
-    }
-    let text = std::fs::read_to_string(&legacy).ok();
-    let untouched = text
-        .as_deref()
-        .is_some_and(|text| recorded.as_deref() == Some(seed_hash(text).as_str()));
-    if untouched {
-        std::fs::remove_file(&legacy)?;
-    } else {
-        std::fs::rename(&legacy, &current)?;
-        if let Some(hash) = recorded {
-            manifest.insert(current_key, hash);
-        }
     }
     Ok(true)
 }
@@ -656,12 +599,7 @@ impl AgentSpec {
             >::new(value));
             parsed.map_err(|error| warn("mode", &error)).ok()
         });
-        let tools = text("tools").map(|value| {
-            tool_list(value)
-                .iter()
-                .map(|tool| canonical_tool_name(tool).to_string())
-                .collect()
-        });
+        let tools = text("tools").map(tool_list);
         let max_turns = text("max_turns").and_then(|value| match value.parse::<usize>() {
             Ok(0) => {
                 warn("max_turns", &"it must be at least 1");
@@ -1668,7 +1606,7 @@ mod tests {
              mode: accept-edits\ntools: read, shell\nmax_turns: 120\n---\n\
              You review.\n\n{{tools}}\n",
         );
-        write("bracketed", "---\ntools: [\"read\", 'bash']\n---\n");
+        write("bracketed", "---\ntools: [\"read\", 'shell']\n---\n");
         write("toolless", "---\ntools: []\n---\n");
         // A field that does not parse is dropped; the others still count.
         write(
@@ -1710,7 +1648,6 @@ mod tests {
             dirs.soul("review").as_deref(),
             Some("You review.\n\n{{tools}}\n")
         );
-        // `bracketed` names the shell tool as it was called before the rename.
         assert_eq!(dirs.spec("bracketed").tools, read_shell);
         assert_eq!(dirs.spec("toolless").tools, Some(Vec::new()));
         let broken = dirs.spec("broken");
@@ -1955,43 +1892,6 @@ mod tests {
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some(""));
         assert_eq!(dirs.soul("other").as_deref(), Some(""));
-    }
-
-    #[test]
-    fn the_shell_tools_texts_move_over_from_its_old_name() {
-        let old_seed = "---\nsnippet: run\n---\nRun a bash command.\n";
-        let layout = |legacy: &str| {
-            let tmp = tempfile::tempdir().unwrap();
-            let global = tmp.path().join("ai");
-            let tools = global.join(TOOLS_DIR);
-            std::fs::create_dir_all(&tools).unwrap();
-            std::fs::write(tools.join("bash.md"), legacy).unwrap();
-            std::fs::write(tools.join("bash.md.new"), old_seed).unwrap();
-            std::fs::write(
-                global.join(SEEDS_MANIFEST),
-                format!("\"tools/bash.md\" = \"{}\"\n", seed_hash(old_seed)),
-            )
-            .unwrap();
-            ensure_global_layout(&global).unwrap();
-            let manifest = std::fs::read_to_string(global.join(SEEDS_MANIFEST)).unwrap();
-            assert!(!manifest.contains("tools/bash.md"), "{manifest}");
-            assert!(!tools.join("bash.md").exists());
-            assert!(!tools.join("bash.md.new").exists());
-            (tmp, tools)
-        };
-
-        // Untouched: the new seed takes its place.
-        let (_tmp, tools) = layout(old_seed);
-        let shipped = ToolText::seed(SHELL_TOOL);
-        let text = std::fs::read_to_string(tools.join("shell.md")).unwrap();
-        assert_eq!(&ToolText::from_file(&text), shipped);
-        assert!(!tools.join("shell.md.new").exists());
-
-        // Edited: the user's text moves and stays; the new seed lands beside it.
-        let (_tmp, tools) = layout("---\n---\nMine.\n");
-        let text = std::fs::read_to_string(tools.join("shell.md")).unwrap();
-        assert_eq!(text, "---\n---\nMine.\n");
-        assert!(tools.join("shell.md.new").exists());
     }
 
     /// A seed file that exists but cannot be read as text is the user's; it

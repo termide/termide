@@ -5158,7 +5158,6 @@ dependencies = [
  "tempfile",
  "termide-fsutil",
  "toml",
- "toml_edit",
  "unicode-segmentation",
 ]
 

@@ -1156,7 +1156,7 @@ fn a_broken_config_is_left_for_a_hand_fix() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     // Two tables of the same name: invalid TOML.
-    let broken = "[ai.permissions.bash]\n\"cat *\" = \"allow\"\n[ai.permissions.bash]\n\"ls *\" = \"allow\"\n";
+    let broken = "[ai.permissions.shell]\n\"cat *\" = \"allow\"\n[ai.permissions.shell]\n\"ls *\" = \"allow\"\n";
     std::fs::write(&path, broken).unwrap();
     assert!(merge_permission_rule(&path, "shell", "python3 *", Decision::Allow).is_err());
     // The file is untouched, not appended to.
@@ -2078,7 +2078,7 @@ fn the_catalog_turns_definitions_into_profiles() {
     .unwrap();
     std::fs::write(
         review.join(AGENT_FILE),
-        "---\ndescription: Reviews diffs\nmodel: big\nmode: auto\ntools: read, bash, nope\n---\n\
+        "---\ndescription: Reviews diffs\nmodel: big\nmode: auto\ntools: read, shell, nope\n---\n\
              You review.\n\n{{tools}}\n",
     )
     .unwrap();
