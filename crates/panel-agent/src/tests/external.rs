@@ -155,8 +155,11 @@ fn an_external_agent_on_termides_tools_lists_gets_and_refuses_them() {
     let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
     assert_eq!(keys, ["read", "shell", "db__query"]);
 
-    // Its session took the tools when it started: switched off, even before
-    // the first request, a tool is refused rather than taken out.
+    // After the first request a tool switched off is refused rather than
+    // taken out, as with the built-in loop.
+    type_text(&mut panel, "go");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
     panel.apply_toolset(&["read".to_string(), "db__query".to_string()]);
     assert!(panel.toolset_off.contains("shell"));
     assert!(panel.context_off.is_empty());
@@ -226,10 +229,99 @@ fn an_external_agent_on_its_own_tools_gets_and_lists_the_mcp_servers_alone() {
     let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
     assert_eq!(keys, ["db__query", "db__drop"]);
 
-    // Switched off, one is refused.
+    // Switched off after the first request, one is refused.
+    type_text(&mut panel, "go");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
     panel.apply_toolset(&["db__query".to_string()]);
     assert!(panel.blocked.read().unwrap().contains("db__drop"));
     assert_eq!(chip(&panel, TOOLSET_ACTION), "1/2");
+}
+
+/// The names `served` holds, sorted.
+fn served_names(served: &Arc<Mutex<Vec<String>>>) -> Vec<String> {
+    let mut names = served.lock().unwrap().clone();
+    names.sort();
+    names
+}
+
+/// Before the first request an external agent's toolset works as the
+/// built-in loop's: what is switched off leaves its context and what is
+/// switched on comes back, the agent started again on the new set.
+#[test]
+fn switching_off_before_the_first_request_starts_an_external_agent_again_without_it() {
+    let served = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = external_with_server(External::on_termides_tools, &served, None);
+    assert!(panel.external && panel.is_fresh());
+    assert_eq!(
+        served_names(&served),
+        ["db__drop", "db__query", "read", "shell"]
+    );
+
+    panel.apply_toolset(&["read".to_string(), "db__query".to_string()]);
+    panel.tick();
+    assert!(panel.external);
+    assert_eq!(served_names(&served), ["db__query", "read"]);
+    let off: BTreeSet<String> = ["db__drop".to_string(), "shell".to_string()].into();
+    assert_eq!(panel.toolset_off, off);
+    assert_eq!(panel.context_off, off);
+    assert!(panel.blocked.read().unwrap().is_empty());
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "2/4");
+    assert!(panel.toolset_items().iter().all(|item| item.enabled));
+
+    // Ticked on again, they come back.
+    let all: Vec<String> = ["read", "shell", "db__query", "db__drop"]
+        .map(String::from)
+        .into();
+    panel.apply_toolset(&all);
+    panel.tick();
+    assert_eq!(
+        served_names(&served),
+        ["db__drop", "db__query", "read", "shell"]
+    );
+    assert!(panel.toolset_off.is_empty() && panel.context_off.is_empty());
+    assert_eq!(chip(&panel, TOOLSET_ACTION), "4/4");
+}
+
+/// A new session keeps what the last one switched off, out of the agent's
+/// context, and before its first request it can be switched on again: the
+/// agent opens a session of its own anew rather than resuming the empty one.
+#[test]
+fn an_external_agent_s_new_session_can_switch_on_what_the_last_switched_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let served = Arc::new(Mutex::new(Vec::new()));
+    let mut panel = external_with_server(
+        External::taking_mcp_tools,
+        &served,
+        Some(dir.path().to_path_buf()),
+    );
+    assert_eq!(served_names(&served), ["db__drop", "db__query"]);
+    type_text(&mut panel, "go");
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    settle(&mut panel);
+    panel.apply_toolset(&["db__query".to_string()]);
+    assert!(panel.blocked.read().unwrap().contains("db__drop"));
+
+    assert!(panel.switch_session(None));
+    panel.tick();
+    assert_eq!(served_names(&served), ["db__query"]);
+    assert!(panel.context_off.contains("db__drop"));
+    let items = panel.toolset_items();
+    let drop = items.iter().find(|i| i.key == "db__drop").unwrap();
+    assert!(drop.enabled && !drop.checked, "{drop:?}");
+
+    panel.apply_toolset(&["db__query".to_string(), "db__drop".to_string()]);
+    panel.tick();
+    assert!(panel.external);
+    assert_eq!(served_names(&served), ["db__drop", "db__query"]);
+    assert!(panel.toolset_off.is_empty() && panel.context_off.is_empty());
+    assert!(panel.blocked.read().unwrap().is_empty());
+    assert_eq!(
+        EXTERNAL_START
+            .with(|start| start.borrow_mut().take())
+            .and_then(|(resume, _)| resume),
+        None
+    );
 }
 
 #[test]

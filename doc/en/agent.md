@@ -447,9 +447,9 @@ context at the next moment the cache is lost anyway — a compaction, an agent
 or model switch — and cannot be switched back on in that session. The set is
 kept in the session log, so a reopened session comes back with it, and a new
 session started in the panel begins with it, out of the context. Claude Code
-has the checklist too: it is served termide's tools when its session starts,
-so an unchecked item is refused from the first request on rather than kept out
-of its context. Codex and Gemini CLI have it once an MCP server of termide's
+has the checklist too, and it works the same: the agent takes termide's tools
+and prompt when its session opens, so a change before the first request starts
+it again on the new set, which takes a few seconds. Codex and Gemini CLI have it once an MCP server of termide's
 has connected, with those servers' tools alone. Other ACP agents bring their
 own tools, so they have no checklist.
 

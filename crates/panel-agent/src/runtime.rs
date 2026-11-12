@@ -320,8 +320,11 @@ pub(crate) fn spawn_runtime(
                 session_id: session.map(|s| s.id().to_string()),
             }),
             // The conversation goes on in the agent's own session when it
-            // still holds it, else the agent is told a recap of it.
-            resume: session.and_then(Session::external_session),
+            // still holds it, else the agent is told a recap of it. One with
+            // nothing said yet opens anew, on the tools and prompt of now.
+            resume: session
+                .filter(|_| !messages.is_empty())
+                .and_then(Session::external_session),
             history: messages.clone(),
         }) {
             Ok(runtime) => {

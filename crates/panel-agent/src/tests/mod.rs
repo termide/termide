@@ -1247,6 +1247,64 @@ impl AgentCatalog for Statuses {
     }
 }
 
+/// A catalog whose agents come with termide's tools `read` and `shell` and
+/// the MCP server `db` (`db__query`, `db__drop`), which connects at once
+/// each time an agent is resolved, as the app's subscribes it anew.
+struct WithServer;
+
+impl AgentCatalog for WithServer {
+    fn list(&self) -> Vec<AgentEntry> {
+        Agents.list()
+    }
+    fn resolve(&self, name: &str) -> Option<AgentProfile> {
+        let mut profile = Agents.resolve(name)?;
+        profile.tools.insert(Arc::new(Late("read")));
+        profile.tools.insert(Arc::new(Late("shell")));
+        profile.late_tools = Some(db_server());
+        Some(profile)
+    }
+}
+
+/// The MCP server `db` of [`WithServer`], connected.
+fn db_server() -> mpsc::Receiver<LateTools> {
+    let (tx, rx) = mpsc::channel();
+    tx.send(LateTools::Ready {
+        source: "db".into(),
+        tools: vec![
+            Arc::new(Late("db__query")) as Arc<dyn termide_agent_core::Tool>,
+            Arc::new(Late("db__drop")) as Arc<dyn termide_agent_core::Tool>,
+        ],
+    })
+    .unwrap();
+    rx
+}
+
+/// A panel on an external agent the connection brings, as Claude Code,
+/// Codex and Gemini CLI come, with [`WithServer`]'s tools and server; what
+/// it was last served goes to `served`.
+fn external_with_server(
+    make: fn(BackendSetup, Arc<Mutex<Vec<String>>>) -> External,
+    served: &Arc<Mutex<Vec<String>>>,
+    session_dir: Option<PathBuf>,
+) -> AgentPanel {
+    let served = Arc::clone(served);
+    let backend: crate::BackendFactory = Arc::new(move |setup: BackendSetup| {
+        Ok(Box::new(make(setup, Arc::clone(&served))) as Box<dyn Backend>)
+    });
+    let profile = WithServer.resolve("default").unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        catalog: Arc::new(WithServer),
+        tools: profile.tools,
+        late_tools: profile.late_tools,
+        backend: Some(Arc::clone(&backend)),
+        provider_backend: Some(backend),
+        session_dir,
+        ..setup(vec![])
+    });
+    panel.tick();
+    panel
+}
+
 /// An external agent that advertises two models and records the one picked.
 struct ModelBackend {
     picked: Arc<Mutex<Option<String>>>,

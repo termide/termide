@@ -76,11 +76,11 @@ impl AgentPanel {
         self.runtime.runs_host_tools()
     }
 
-    /// Whether switching something off still takes it out of the context. An
-    /// external agent got its tools when its session started, so for it
-    /// switching off only ever refuses.
+    /// Whether switching something off still takes it out of the context:
+    /// before the first request, for an external agent too, which is started
+    /// again on the new set (see [`Self::apply_toolset`]).
     fn toolset_fresh(&self) -> bool {
-        !self.external && self.is_fresh()
+        self.is_fresh()
     }
 
     /// The system prompt as the agent receives it, written next to the
@@ -312,7 +312,12 @@ impl AgentPanel {
                 log::warn!("agent session write failed: {error}");
             }
         }
-        if fresh {
+        if fresh && self.external {
+            // An external agent took its tools and its prompt when its
+            // session opened, before any request: with nothing asked yet,
+            // starting it again on the new set costs only the start.
+            self.rebuild_keeping_prompt();
+        } else if fresh {
             self.refresh_context();
         } else {
             self.sync_blocked();
