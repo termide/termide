@@ -268,7 +268,8 @@ the cursor, `zM` folds everything and `zR` unfolds everything.
 The blocks come from the file's language server when it offers folding ranges
 and answers within half a second, and from the indentation otherwise: a line
 heads the lines below it that are indented deeper, up to the line that closes
-the block.
+the block. A server still busy starting up may answer later: its ranges then
+serve the next fold.
 
 The cursor, the arrows and `PageUp`/`PageDown` step over a folded block. When
 the cursor lands inside one — a search, a jump, a go-to-line — the fold opens.

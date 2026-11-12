@@ -175,3 +175,35 @@ fn an_edit_inside_a_fold_drops_it_and_one_on_the_header_keeps_it() {
     e.buffer.insert(&start, "z").unwrap();
     assert!(folds(&e).is_empty());
 }
+
+#[test]
+fn a_server_answer_too_late_for_one_fold_serves_the_next() {
+    use std::time::{Duration, Instant};
+
+    use crate::folding::FoldAction;
+
+    let (_f, mut e) = editor(EditorConfig::default());
+    e.cursor.line = 1;
+    let (tx, rx) = std::sync::mpsc::channel();
+    e.folding.pending = Some(FoldAction::Fold);
+    let asked = Instant::now() - Duration::from_millis(600);
+    e.folding.rx = Some((rx, e.buffer.edit_version(), asked));
+
+    assert!(e.poll_folding_ranges(), "the fold no longer waits");
+    assert_eq!(folds(&e), [(0, 4)], "it goes by the indentation");
+
+    // The server's block takes the closing brace too.
+    let range = lsp_types::FoldingRange {
+        start_line: 0,
+        end_line: 5,
+        ..Default::default()
+    };
+    tx.send(Some(vec![range])).unwrap();
+    assert!(!e.poll_folding_ranges(), "nothing waits on it any more");
+    assert!(e.folding.rx.is_none());
+
+    e.handle_key(alt('.'));
+    e.handle_key(alt(','));
+    assert!(!e.folding.request_wanted, "the ranges are known");
+    assert_eq!(folds(&e), [(0, 5)]);
+}

@@ -1,0 +1,31 @@
+# Folding by the language server's ranges (doc/en/editor.md): rust-analyzer
+# folds the run of `use` lines, which the indentation would not, and the
+# body of a function from its first line. `lsp` needs rust-analyzer on PATH.
+project empty
+lsp
+start
+run "mkdir src && printf '[package]\nname = \"fold\"\nversion = \"0.1.0\"\nedition = \"2021\"\n' > Cargo.toml && printf 'use std::fmt;\nuse std::io;\nuse std::mem;\n\nfn main() {\n    let a = 1;\n    let b = 2;\n    println!(\"{a}{b}\");\n}\n' > src/main.rs"
+wait "Cargo.toml"
+run "true"
+key Down Enter
+wait "main.rs"
+key End F4
+wait "use std::mem;"
+# The server is warm once it reports the unused imports and has indexed.
+wait "[unused_imports]" 120
+wait-gone "(indexing)" 60
+
+# On the first `use`: the server folds the imports.
+key Ctrl+Home Alt+,
+wait "use std::fmt; ⋯ 2 lines" 10
+expect-not "use std::io;"
+snapshot imports
+key Alt+.
+wait "use std::io;"
+
+# On the function's first line: its body down to the closing brace.
+key Down Down Down Down Alt+,
+wait "fn main() { ⋯ " 10
+expect-not "let a = 1;"
+snapshot body
+quit --force

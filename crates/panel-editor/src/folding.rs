@@ -11,6 +11,9 @@ use termide_buffer::TextBuffer;
 /// indentation.
 pub(crate) const SERVER_WAIT: Duration = Duration::from_millis(500);
 
+/// How long a late answer is still taken in, for the folds that follow.
+pub(crate) const LATE_ANSWER_WAIT: Duration = Duration::from_secs(30);
+
 /// A foldable range: `start` is the header line that stays on screen, `end`
 /// the last line the fold hides. Both 0-based, `end > start`.
 pub(crate) type FoldRange = (usize, usize);

@@ -95,6 +95,12 @@ impl Editor {
             Ok(Some(ranges)) => Some(folding::server_ranges(&ranges)),
             Ok(None) | Err(TryRecvError::Disconnected) => None,
             Err(TryRecvError::Empty) if asked.elapsed() < folding::SERVER_WAIT => return false,
+            // The fold does not wait any longer, but a server still busy
+            // indexing may answer later: keep its ranges for the next one.
+            Err(TryRecvError::Empty) if asked.elapsed() < folding::LATE_ANSWER_WAIT => {
+                let action = self.folding.pending.take();
+                return self.finish_pending_fold(action, None);
+            }
             Err(TryRecvError::Empty) => None,
         };
         let version = *version;
