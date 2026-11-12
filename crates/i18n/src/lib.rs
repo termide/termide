@@ -1714,6 +1714,16 @@ pub trait Translation: Send + Sync {
     fn projects_close_warning(&self) -> &str;
     fn projects_already_open(&self) -> &str;
     fn projects_already_current(&self) -> &str;
+    fn projects_move(&self) -> &str;
+    fn projects_copy(&self) -> &str;
+    fn projects_move_title(&self) -> &str;
+    fn projects_transfer_busy(&self) -> &str;
+    fn projects_transfer_exists_fmt(&self, path: &str) -> String;
+    fn projects_move_nested_open_fmt(&self, path: &str) -> String;
+    fn project_moved_to_fmt(&self, path: &str) -> String;
+    fn project_copied_to_fmt(&self, path: &str) -> String;
+    fn projects_move_failed_fmt(&self, path: &str, error: &str) -> String;
+    fn projects_copy_failed_fmt(&self, path: &str, error: &str) -> String;
     fn projects_reopen_fmt(&self, count: usize) -> String;
 
     // Detached sessions

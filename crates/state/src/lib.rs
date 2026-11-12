@@ -20,6 +20,6 @@ pub use layout::{LayoutInfo, LayoutMode};
 pub use operations::{ActiveOperation, OperationProgress, OperationType, SpeedTracker};
 pub use pending_action::{PendingAction, ProjectsOrigin, UnpackPlan};
 pub use ui::{
-    DragState, PanelActionMenuState, PanelDragSource, PanelDragState, SubmenuState, TerminalState,
-    UiState,
+    DragState, PanelActionMenuState, PanelDragSource, PanelDragState, ProjectActionMenuState,
+    SubmenuState, TerminalState, UiState,
 };

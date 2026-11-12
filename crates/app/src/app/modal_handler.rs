@@ -156,7 +156,9 @@ impl App {
                                 return Ok(());
                             }
                             PendingAction::DeleteProject { from, .. }
-                            | PendingAction::CloseProject { from, .. } => {
+                            | PendingAction::CloseProject { from, .. }
+                            | PendingAction::TransferProject { from, .. }
+                            | PendingAction::ConfirmProjectMove { from, .. } => {
                                 self.state.close_modal();
                                 self.return_to_projects(from)?;
                                 return Ok(());
@@ -669,6 +671,21 @@ impl App {
                 PendingAction::CloseProject { root, from } => {
                     if value.get::<bool>().copied().unwrap_or(false) {
                         self.close_project(&root, from)?;
+                    } else {
+                        self.return_to_projects(from)?;
+                    }
+                }
+                PendingAction::TransferProject { root, copy, from } => {
+                    match value.get::<String>().cloned() {
+                        Some(input) => {
+                            self.handle_transfer_project_input(root, copy, &input, from)?
+                        }
+                        None => self.return_to_projects(from)?,
+                    }
+                }
+                PendingAction::ConfirmProjectMove { root, target, from } => {
+                    if value.get::<bool>().copied().unwrap_or(false) {
+                        self.start_project_transfer(root, target, false)?;
                     } else {
                         self.return_to_projects(from)?;
                     }

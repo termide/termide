@@ -1065,6 +1065,37 @@ pub fn panel_action_dropdown_position(
 }
 
 // ────────────────────────────────────────────────────────────────────
+// Project action menu (the `≡` after the current project's button)
+// ────────────────────────────────────────────────────────────────────
+
+pub const PROJECT_ACTION_MOVE: &str = "__project_action_move__";
+pub const PROJECT_ACTION_COPY: &str = "__project_action_copy__";
+pub const PROJECT_ACTION_CHANGE_ROOT: &str = "__project_action_change_root__";
+pub const PROJECT_ACTION_CLOSE: &str = "__project_action_close__";
+
+/// The items of the current project's menu, with the keys that do the same
+/// on a project in the Projects menu or on its button. Closing is offered
+/// only while another project is open: the current one closes by switching
+/// to it.
+pub fn get_project_action_menu_items(can_close: bool) -> Vec<DropdownItem> {
+    let t = termide_i18n::t();
+    let mut items = vec![
+        DropdownItem::new(t.projects_move(), PROJECT_ACTION_MOVE)
+            .with_shortcut(Some("F6".to_string())),
+        DropdownItem::new(t.projects_copy(), PROJECT_ACTION_COPY)
+            .with_shortcut(Some("F5".to_string())),
+        DropdownItem::new(t.projects_change_root(), PROJECT_ACTION_CHANGE_ROOT),
+    ];
+    if can_close {
+        items.push(
+            DropdownItem::new(t.panel_action_close(), PROJECT_ACTION_CLOSE)
+                .with_shortcut(Some("F8".to_string())),
+        );
+    }
+    items
+}
+
+// ────────────────────────────────────────────────────────────────────
 // Operation action menu (Pause/Resume/Cancel on an ops-panel card)
 // ────────────────────────────────────────────────────────────────────
 

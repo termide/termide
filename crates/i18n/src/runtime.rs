@@ -1022,6 +1022,10 @@ impl Translation for RuntimeTranslation {
         projects_close_warning,
         projects_already_open,
         projects_already_current,
+        projects_move,
+        projects_copy,
+        projects_move_title,
+        projects_transfer_busy,
         detach_instance,
         detach_not_detached_instance,
         detach_failed,
@@ -2955,6 +2959,36 @@ impl Translation for RuntimeTranslation {
 
     fn projects_delete_fmt(&self, path: &str) -> String {
         self.format("projects_delete_fmt", &[("path", path)])
+    }
+
+    fn projects_transfer_exists_fmt(&self, path: &str) -> String {
+        self.format("projects_transfer_exists_fmt", &[("path", path)])
+    }
+
+    fn projects_move_nested_open_fmt(&self, path: &str) -> String {
+        self.format("projects_move_nested_open_fmt", &[("path", path)])
+    }
+
+    fn project_moved_to_fmt(&self, path: &str) -> String {
+        self.format("project_moved_to_fmt", &[("path", path)])
+    }
+
+    fn project_copied_to_fmt(&self, path: &str) -> String {
+        self.format("project_copied_to_fmt", &[("path", path)])
+    }
+
+    fn projects_move_failed_fmt(&self, path: &str, error: &str) -> String {
+        self.format(
+            "projects_move_failed_fmt",
+            &[("path", path), ("error", error)],
+        )
+    }
+
+    fn projects_copy_failed_fmt(&self, path: &str, error: &str) -> String {
+        self.format(
+            "projects_copy_failed_fmt",
+            &[("path", path), ("error", error)],
+        )
     }
 
     fn projects_open_elsewhere_fmt(&self, path: &str, pid: &str) -> String {

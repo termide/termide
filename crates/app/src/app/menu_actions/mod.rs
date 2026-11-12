@@ -13,6 +13,7 @@ mod direnv;
 mod operation_action;
 mod outline;
 mod panel_action;
+mod project_action;
 mod projects;
 mod settings;
 mod stash;
@@ -138,6 +139,13 @@ impl App {
                 self.move_project_button(button, step);
                 return Ok(());
             }
+            if let KeyCode::F(n @ (5 | 6)) = key.code {
+                if let Some(root) = self.listed_open_roots().get(button).cloned() {
+                    self.state.close_menu();
+                    self.prompt_project_transfer(root, n == 5, ProjectsOrigin::Button(button));
+                }
+                return Ok(());
+            }
             if matches!(key.code, KeyCode::Delete | KeyCode::F(8)) {
                 if let Some(root) = self.listed_open_roots().get(button).cloned() {
                     self.state.close_menu();
@@ -235,11 +243,10 @@ impl App {
     }
 
     /// Open the menu bar at project button `index`, or the last one when
-    /// fewer are left, after a project was closed from it. With one project
-    /// left there are no buttons, and the menu stays closed.
+    /// fewer are left, after a project was closed from it.
     pub(in crate::app) fn reopen_menu_bar_at_button(&mut self, index: usize) {
         let count = self.open_projects.count();
-        if count < 2 {
+        if count == 0 {
             return;
         }
         let index = index.min(count - 1);

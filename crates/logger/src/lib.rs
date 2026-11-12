@@ -239,6 +239,19 @@ pub fn init(file_path: PathBuf, max_entries: usize, min_level: LogLevel) {
     log::set_max_level(log_level_to_filter(min_level));
 }
 
+/// Follow the log file when the directory `from` holding it moves to `to`:
+/// it is opened by path for every line, which would otherwise bring the old
+/// directory back.
+pub fn relocate_file(from: &std::path::Path, to: &std::path::Path) {
+    if let Some(logger) = LOGGER.get() {
+        if let Ok(mut logger) = logger.lock() {
+            if let Ok(rel) = logger.file_path.strip_prefix(from) {
+                logger.file_path = to.join(rel);
+            }
+        }
+    }
+}
+
 /// Get the total number of log entries
 ///
 /// Returns the count without cloning any entries.

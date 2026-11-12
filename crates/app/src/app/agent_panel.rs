@@ -3425,7 +3425,7 @@ fn agent_setup(
 /// Where the session logs of a panel working in `cwd` live: filed by that
 /// directory, under the same `ai/` directory as the agents,
 /// `<config>/ai/sessions/<path>/`.
-fn session_dir_of(cwd: &Path) -> Option<PathBuf> {
+pub(super) fn session_dir_of(cwd: &Path) -> Option<PathBuf> {
     termide_config::get_config_dir().ok().map(|dir| {
         dir.join(GLOBAL_AGENT_DIR)
             .join(SESSIONS_DIR)

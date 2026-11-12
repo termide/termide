@@ -202,6 +202,15 @@ impl App {
             Some(ProjectRow::Project(project)) => Some(project.clone()),
             _ => None,
         };
+        if let crossterm::event::KeyCode::F(n @ (5 | 6)) = key.code {
+            if let Some(project) = removable {
+                let selection = menu.selected;
+                drop(menu);
+                self.state.close_menu();
+                self.prompt_project_transfer(project.root, n == 5, ProjectsOrigin::Menu(selection));
+            }
+            return Ok(());
+        }
         let mut cursor = termide_state::SubmenuState {
             open: true,
             selected: menu.selected,

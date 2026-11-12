@@ -27,6 +27,7 @@ impl App {
             || ui.bookmarks_submenu.open
             || ui.panel_action_menu.open
             || ui.operation_action_menu.open
+            || ui.project_action_menu.open
             || ui.options_submenu.open
     }
 
@@ -92,6 +93,11 @@ impl App {
         // If Bookmarks submenu is open, handle its navigation
         if self.state.ui.bookmarks_submenu.open {
             return self.handle_bookmarks_submenu_key(key);
+        }
+
+        // The current project's ≡ menu
+        if self.state.ui.project_action_menu.open {
+            return self.handle_project_action_menu_key(key);
         }
 
         // If Panel action context menu is open, handle its navigation

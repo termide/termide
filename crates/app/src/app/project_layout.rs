@@ -17,7 +17,7 @@ impl App {
         // In $EDITOR mode (launched with file arguments) the layout is not
         // persisted, so editing a commit message or crontab never clobbers the
         // project's real layout.
-        if !self.persist_layout {
+        if !self.persist_layout || self.vacated_root.as_ref() == Some(&self.project_root) {
             return Ok(());
         }
         save_layout_of(&self.project_root, &mut self.layout_manager)
@@ -143,7 +143,7 @@ impl App {
     /// ones, for the next start, together with the layouts: for an end
     /// nobody was asked about (a signal, an error).
     pub(super) fn keep_unsaved_changes(&mut self) {
-        let persist = self.persist_layout;
+        let persist = self.persist_layout && self.vacated_root.as_ref() != Some(&self.project_root);
         keep_unsaved_changes_of(&self.project_root, &mut self.layout_manager, persist);
         self.keep_parked_unsaved_changes();
     }

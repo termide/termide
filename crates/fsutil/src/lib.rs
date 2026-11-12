@@ -9,6 +9,9 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
+mod tree;
+pub use tree::{prune_empty_dirs, rebase, transfer_tree};
+
 /// How many symlink hops to follow before giving up on resolution.
 const MAX_SYMLINK_HOPS: usize = 40;
 

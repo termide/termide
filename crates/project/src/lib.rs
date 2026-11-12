@@ -12,7 +12,9 @@ pub use maintenance::*;
 mod open_list;
 pub use open_list::{load_open_projects, save_open_projects, SavedOpenProjects};
 mod ownership;
+mod relocate;
 pub use ownership::{claim_project, project_owner, Owner, ProjectClaim};
+pub use relocate::relocate_project_state;
 
 /// The saved layout of a project: its panels, restored on the next start
 #[derive(Debug, Clone, Serialize, Deserialize)]
