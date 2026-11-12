@@ -51,6 +51,7 @@ fn main() {
 
     let cwd = std::env::current_dir().expect("cwd");
     let model = ModelSpec {
+        reasoning_budget: None,
         provider: "local".into(),
         id: model_id,
         context_window,

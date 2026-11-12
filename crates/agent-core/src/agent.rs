@@ -548,6 +548,14 @@ pub enum AgentEvent {
     EmptyCutOff {
         retrying: bool,
     },
+    /// A model call reasoned past the model's reasoning budget
+    /// ([`ModelSpec::reasoning_budget`]) and was cut. With `retrying` the
+    /// loop calls it once more without reasoning; without, an earlier call of
+    /// the turn already failed so and the run stops for the user to decide.
+    ReasoningBudget {
+        budget: u64,
+        retrying: bool,
+    },
     /// The loop stopped early on a pause request with work still pending, so
     /// the run can be resumed. Not emitted on a natural finish.
     Paused,
@@ -1081,14 +1089,37 @@ impl Agent {
             prompt_tokens: Some(context_tokens(&self.messages)),
         });
         let mut retried_after_overflow = false;
-        // After a call that went round in circles, the next one is made
-        // without reasoning; after one that ran to the output limit with
-        // nothing to show, the model is told so. A second such call, of
-        // either kind, stops the run.
+        // After a call that went round in circles or reasoned past its
+        // budget, the next one is made without reasoning; after one that ran
+        // to the output limit with nothing to show, the model is told so, and
+        // when its reasoning is what used the limit up, the next call is made
+        // without it too. A second such call, of any kind, stops the run.
         let mut thinking = self.model.thinking;
         let mut retried = false;
         let assistant = loop {
-            let (reply, looped) = self.call_model(thinking, cancel, emit);
+            let (reply, cut) = self.call_model(thinking, cancel, emit);
+            if let Some(CallCut::Budget(budget)) = cut {
+                self.push(Message::Assistant(cut_reasoning(reply, usize::MAX)), emit);
+                emit(AgentEvent::ReasoningBudget {
+                    budget,
+                    retrying: !retried,
+                });
+                if retried {
+                    emit(AgentEvent::TurnEnd);
+                    return TurnOutcome::Halt;
+                }
+                retried = true;
+                thinking = ThinkingLevel::Off;
+                self.push(Message::User(UserMessage::text(BUDGET_NUDGE)), emit);
+                emit(AgentEvent::MessageStart {
+                    prompt_tokens: Some(context_tokens(&self.messages)),
+                });
+                continue;
+            }
+            let looped = match cut {
+                Some(CallCut::Loop(report)) => Some(report),
+                _ => None,
+            };
             if let Some(report) = looped {
                 self.push(
                     Message::Assistant(cut_reasoning(reply, report.loop_start)),
@@ -1112,6 +1143,7 @@ impl Agent {
                 continue;
             }
             if is_empty_cut_off(&reply) && !cancel.is_cancelled() {
+                let reasoned_away = reasoning_used_the_limit(&reply);
                 self.push(Message::Assistant(cut_reasoning(reply, usize::MAX)), emit);
                 emit(AgentEvent::EmptyCutOff { retrying: !retried });
                 if retried {
@@ -1119,7 +1151,13 @@ impl Agent {
                     return TurnOutcome::Halt;
                 }
                 retried = true;
-                self.push(Message::User(UserMessage::text(EMPTY_CUT_OFF_NUDGE)), emit);
+                let nudge = if reasoned_away {
+                    thinking = ThinkingLevel::Off;
+                    REASONED_CUT_OFF_NUDGE
+                } else {
+                    EMPTY_CUT_OFF_NUDGE
+                };
+                self.push(Message::User(UserMessage::text(nudge)), emit);
                 emit(AgentEvent::MessageStart {
                     prompt_tokens: Some(context_tokens(&self.messages)),
                 });
@@ -1367,7 +1405,7 @@ impl Agent {
         thinking: ThinkingLevel,
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
-    ) -> (AssistantMessage, Option<LoopReport>) {
+    ) -> (AssistantMessage, Option<CallCut>) {
         let noted = self
             .context_note
             .as_ref()
@@ -1383,24 +1421,36 @@ impl Agent {
         let call_cancel = cancel.child();
         let mut reasoning = LoopGuard::new();
         let mut answer = LoopGuard::new();
+        // Without reasoning asked for, whatever a server streams as such is
+        // not the model running on.
+        let budget = self
+            .model
+            .reasoning_budget
+            .filter(|_| thinking != ThinkingLevel::Off);
+        let mut reasoned_chars = 0u64;
         let mut cut = false;
+        let mut over_budget = false;
         let reply = self.provider.stream(
             &request,
             &mut |event| {
                 let looped = match &event {
-                    StreamEvent::ThinkingDelta(delta) => reasoning.feed(delta),
+                    StreamEvent::ThinkingDelta(delta) => {
+                        reasoned_chars += delta.chars().count() as u64;
+                        over_budget |= budget.is_some_and(|budget| reasoned_chars / 4 >= budget);
+                        reasoning.feed(delta)
+                    }
                     StreamEvent::TextDelta(delta) => answer.feed(delta),
                     _ => false,
                 };
                 emit(AgentEvent::MessageUpdate(event));
-                if looped && !call_cancel.is_cancelled() {
+                if (looped || over_budget) && !call_cancel.is_cancelled() {
                     cut = true;
                     call_cancel.cancel();
                 }
             },
             &call_cancel,
         );
-        // Only the guard stops the call alone: any other stop of it is a
+        // Only the guards stop the call alone: any other stop of it is a
         // stop of the run.
         if call_cancel.is_cancelled() && !cut {
             cancel.cancel();
@@ -1415,7 +1465,13 @@ impl Agent {
                 ..report
             })
         });
-        (reply, report)
+        // A loop is the more telling verdict: it names what the model kept
+        // going back to.
+        match (report, budget) {
+            (Some(report), _) => (reply, Some(CallCut::Loop(report))),
+            (None, Some(budget)) => (reply, Some(CallCut::Budget(budget))),
+            (None, None) => (reply, None),
+        }
     }
 
     /// Replace the older part of the transcript with a model-written summary,
@@ -1762,9 +1818,45 @@ enum TurnOutcome {
     Halt,
 }
 
+/// Why the loop cut a model call short.
+enum CallCut {
+    /// The reasoning or the answer went round in circles.
+    Loop(LoopReport),
+    /// The reasoning ran past this many tokens, the model's budget.
+    Budget(u64),
+}
+
+/// What the model is told after a call cut for reasoning past its budget;
+/// the next call is made without reasoning.
+const BUDGET_NUDGE: &str = "Your reasoning ran past its budget for one reply and was cut off before any answer or tool call. Reasoning is off for this reply: act on what you know now — one tool call with short arguments, or your answer.";
+
 /// What the model is told after a call that ran to the output limit with
 /// nothing to show.
 const EMPTY_CUT_OFF_NUDGE: &str = "Your last reply ran to the output limit and nothing usable came of it: no answer and no complete tool call. Do not write it again. Take a smaller step now: one tool call with short arguments (a long file goes in parts), or give your answer.";
+
+/// What the model is told after a call whose reasoning ran to the output
+/// limit; the next call is made without reasoning.
+const REASONED_CUT_OFF_NUDGE: &str = "Your last reply spent the whole output limit reasoning and came to no answer and no tool call. Reasoning is off for this reply: act on what you know now — one tool call with short arguments, or your answer.";
+
+/// Whether the reasoning of a reply cut off empty is what used the output
+/// limit up, rather than a tool call the server held back. Reasoning runs
+/// to three or four bytes a token, so one byte of it for each token the
+/// reply spent means most of them went into it; without a count of the
+/// tokens, a long reasoning stands in for one.
+fn reasoning_used_the_limit(reply: &AssistantMessage) -> bool {
+    let reasoned: usize = reply
+        .content
+        .iter()
+        .map(|block| match block {
+            AssistantContent::Thinking { text, .. } => text.len(),
+            _ => 0,
+        })
+        .sum();
+    match reply.usage.output {
+        0 => reasoned >= 8 * 1024,
+        output => reasoned as u64 >= output,
+    }
+}
 
 /// A reply cut off by the output limit with no answer and no tool call:
 /// whatever the model wrote went nowhere.
@@ -1953,6 +2045,7 @@ pub(crate) mod test_support {
 
     pub fn model() -> ModelSpec {
         ModelSpec {
+            reasoning_budget: None,
             provider: "scripted".into(),
             id: "test".into(),
             context_window: 8192,

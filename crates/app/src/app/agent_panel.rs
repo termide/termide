@@ -987,6 +987,8 @@ struct Active {
     provider: Arc<dyn Provider>,
     model: String,
     context_window: u64,
+    /// The connection's reasoning budget, see `Connection::reasoning_budget`.
+    reasoning_budget: Option<u64>,
 }
 
 type ActiveSlot = Arc<std::sync::RwLock<Active>>;
@@ -1079,6 +1081,7 @@ impl ConnectionCatalog for AiConnections {
             provider: Arc::clone(&choice.provider),
             model: choice.model.clone(),
             context_window: choice.context_window,
+            reasoning_budget: choice.settings.reasoning_budget(),
         };
     }
 }
@@ -1228,6 +1231,7 @@ fn side_model(
                 context_window: connection.effective_context_window(),
                 max_tokens: None,
                 thinking: ThinkingLevel::Off,
+                reasoning_budget: None,
             };
             let mut provider = connection_provider(name, connection);
             if id.trim().is_empty() {
@@ -1251,6 +1255,7 @@ fn side_model(
                     context_window: 0,
                     max_tokens: None,
                     thinking: ThinkingLevel::Off,
+                    reasoning_budget: None,
                 };
                 let cwd = std::env::current_dir().unwrap_or_default();
                 let provider = AcpProvider::new(name, config, cwd);
@@ -1323,6 +1328,7 @@ fn cheap_reviewer(
         context_window: 0,
         max_tokens: None,
         thinking: ThinkingLevel::Off,
+        reasoning_budget: None,
     };
     Some(ModelChoice::own(
         Arc::new(AcpProvider::new(session, config, cwd).cheapest()),
@@ -2521,66 +2527,70 @@ impl Subagents {
             return self.run_cli(run, message, log, &budget, cancel, caller, task, on_update);
         }
 
-        let (provider, requested, context_window, connection_name, kind) = match target {
-            SubagentTarget::Cli(connection_name, connection) => {
-                let config = cli_acp_config(&connection)
-                    .ok_or_else(|| format!("{} is not a CLI agent", connection.provider))?;
-                let log = match resumed {
-                    Some(session) => DelegateLog::resume(session),
-                    None => DelegateLog::start(
-                        self.session_dir.as_deref(),
-                        &self.cwd,
-                        lineage,
-                        &DelegateRun {
-                            connection: &connection_name,
-                            provider: &connection.provider,
-                            model: connection.model.trim(),
-                            context_window: None,
-                            agent: name,
-                        },
-                    ),
-                };
-                let run = CliSubagent {
-                    name: format!("{connection_name}:{name}"),
-                    connection: connection_name.clone(),
-                    max_turns,
-                    reviewer,
-                    config,
-                    model: connection.model.trim().to_string(),
-                    system_prompt,
-                    tools,
-                    skills,
-                    hooks,
-                    rules,
-                    asker,
-                    prompter,
-                    panel: ctx.panel,
-                };
-                return self.run_cli(run, message, log, &budget, cancel, caller, task, on_update);
-            }
-            // On a connection of its own the subagent runs that connection's
-            // model: the id its `AGENT.md` names is one of the session's
-            // endpoint.
-            SubagentTarget::Model(connection_name, connection) => (
-                connection_provider(&connection_name, &connection),
-                connection.model.clone(),
-                connection.effective_context_window(),
-                connection_name,
-                connection.provider,
-            ),
-            SubagentTarget::Session(model) => (
-                Arc::clone(&active.provider),
-                definition
-                    .spec
-                    .model
-                    .clone()
-                    .or(model)
-                    .unwrap_or_else(|| active.model.clone()),
-                active.context_window,
-                active.connection.clone(),
-                active.kind.clone(),
-            ),
-        };
+        let (provider, requested, context_window, connection_name, kind, reasoning_budget) =
+            match target {
+                SubagentTarget::Cli(connection_name, connection) => {
+                    let config = cli_acp_config(&connection)
+                        .ok_or_else(|| format!("{} is not a CLI agent", connection.provider))?;
+                    let log = match resumed {
+                        Some(session) => DelegateLog::resume(session),
+                        None => DelegateLog::start(
+                            self.session_dir.as_deref(),
+                            &self.cwd,
+                            lineage,
+                            &DelegateRun {
+                                connection: &connection_name,
+                                provider: &connection.provider,
+                                model: connection.model.trim(),
+                                context_window: None,
+                                agent: name,
+                            },
+                        ),
+                    };
+                    let run = CliSubagent {
+                        name: format!("{connection_name}:{name}"),
+                        connection: connection_name.clone(),
+                        max_turns,
+                        reviewer,
+                        config,
+                        model: connection.model.trim().to_string(),
+                        system_prompt,
+                        tools,
+                        skills,
+                        hooks,
+                        rules,
+                        asker,
+                        prompter,
+                        panel: ctx.panel,
+                    };
+                    return self
+                        .run_cli(run, message, log, &budget, cancel, caller, task, on_update);
+                }
+                // On a connection of its own the subagent runs that connection's
+                // model: the id its `AGENT.md` names is one of the session's
+                // endpoint.
+                SubagentTarget::Model(connection_name, connection) => (
+                    connection_provider(&connection_name, &connection),
+                    connection.model.clone(),
+                    connection.effective_context_window(),
+                    connection_name,
+                    connection.provider.clone(),
+                    connection.reasoning_budget(),
+                ),
+                SubagentTarget::Session(model) => (
+                    Arc::clone(&active.provider),
+                    definition
+                        .spec
+                        .model
+                        .clone()
+                        .or(model)
+                        .unwrap_or_else(|| active.model.clone()),
+                    active.context_window,
+                    active.connection.clone(),
+                    active.kind.clone(),
+                    active.reasoning_budget,
+                ),
+            };
         let Some(id) = resolve_model(provider.as_ref(), &requested) else {
             return Err("the provider lists no model to run the subagent on".into());
         };
@@ -2590,6 +2600,7 @@ impl Subagents {
             context_window,
             max_tokens: self.max_tokens,
             thinking: self.reasoning,
+            reasoning_budget,
         };
         let cwd = resumed
             .as_ref()
@@ -3282,6 +3293,7 @@ fn agent_setup(
         provider: Arc::clone(&provider),
         model: connection.model.clone(),
         context_window: connection.effective_context_window(),
+        reasoning_budget: connection.reasoning_budget(),
     }));
     let reviewer = reviewer_setup(settings, &catalog.dirs, &connection_name);
     catalog.subagents = Some(Arc::new(Subagents {
@@ -3338,6 +3350,7 @@ fn agent_setup(
         context_window: connection.effective_context_window(),
         max_tokens: settings.output_limit(),
         thinking: settings.reasoning,
+        reasoning_budget: connection.reasoning_budget(),
     };
     let mut rules = settings.permissions.clone();
     if let Some(mode) = profile.mode {

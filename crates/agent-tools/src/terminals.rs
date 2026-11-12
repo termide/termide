@@ -522,6 +522,7 @@ mod tests {
             intent: IntentLog::new(),
             provider: Arc::new(NoProvider),
             model: ModelSpec {
+                reasoning_budget: None,
                 provider: "none".into(),
                 id: "m".into(),
                 context_window: 8192,

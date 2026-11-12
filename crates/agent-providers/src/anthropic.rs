@@ -875,6 +875,7 @@ mod tests {
 
     fn model(id: &str) -> ModelSpec {
         ModelSpec {
+            reasoning_budget: None,
             provider: "anthropic".into(),
             id: id.into(),
             context_window: 200_000,

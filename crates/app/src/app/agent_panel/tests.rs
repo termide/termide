@@ -296,6 +296,7 @@ fn active_on(settings: &AiSettings, name: &str) -> Active {
         provider: build_provider(connection, None),
         model: connection.model.clone(),
         context_window: connection.effective_context_window(),
+        reasoning_budget: connection.reasoning_budget(),
     }
 }
 
@@ -1305,6 +1306,7 @@ fn a_side_call_with_no_model_named_asks_the_first_listed_once() {
             context_window: 0,
             max_tokens: None,
             thinking: ThinkingLevel::Off,
+            reasoning_budget: None,
         };
         let request = termide_agent_core::Request {
             model: &model,

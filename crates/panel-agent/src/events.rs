@@ -704,6 +704,18 @@ impl AgentPanel {
                     self.notice(t.agent_notice_empty_cut_off_stopped(), NoticeKind::Warn);
                 }
             }
+            AgentEvent::ReasoningBudget { retrying, .. } => {
+                let t = termide_i18n::t();
+                if retrying {
+                    self.notice(t.agent_notice_reasoning_budget_retry(), NoticeKind::Warn);
+                } else {
+                    if self.goal_task.take().is_some() {
+                        self.end_judging();
+                        self.notice(t.agent_notice_goal_stopped(), NoticeKind::Info);
+                    }
+                    self.notice(t.agent_notice_reasoning_budget_stopped(), NoticeKind::Warn);
+                }
+            }
         }
     }
 

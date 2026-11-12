@@ -34,6 +34,7 @@ model = "Qwen3.8-Flash-Next-oQ4e-mtp"  # left out: the provider's first model
 # api_key_env = "OPENAI_API_KEY"   # name of the variable, never the key itself
 # context_window_fallback = 32000  # used only when the server does not report a window
 # max_concurrent_requests = 1      # requests served at once across termide; default 0: no limit
+# reasoning_budget = 12000         # tokens one call may reason before it is cut; default 0: no limit
 # reviewer = "small"               # the connection whose model reviews in `auto`, or { connection, model }; default: [ai.auto_reviewer]
 # app_attribution = false          # not to identify termide to the endpoint; default on, and only where it is tracked
 
@@ -49,8 +50,8 @@ provider = "codex"                 # a CLI agent needs nothing else
 
 A connection carries `provider`, `base_url`, `model`, `api_key_env`,
 `context_window_fallback`, `subagents` (see [Subagents](#subagents)),
-`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests` and
-`app_attribution`; what it leaves out takes that field's default.
+`reviewer` (see [Auto mode](#auto-mode)), `max_concurrent_requests`,
+`reasoning_budget` and `app_attribution`; what it leaves out takes that field's default.
 
 Side work runs on the session's model unless a key names another, each in
 the same shape — a connection and a model of it, either left empty for the
@@ -89,6 +90,16 @@ what the server runs. The default, 0, sets no limit. It counts per connection
 name, so two connections to one server keep separate counts, and two termide
 processes do not share it. A CLI agent sends its requests itself, so it has
 none.
+`reasoning_budget` bounds how many tokens one model call may spend reasoning,
+counted from the streamed reasoning at four characters a token. A model that
+reasons past it is cut there and asked again at once without reasoning, to act
+on what it knows, as after a [loop](#service-prompts); a second cut in the same
+step stops the run. Some local models now and then reason until the output
+limit stops them, which at a local server's speed is minutes with nothing to
+show; a budget of about a third of the output limit caps that waste and leaves
+ordinary reasoning alone. The default, 0, sets no limit. It applies to
+termide's own loop only — a CLI agent reasons in its own — and an open
+session takes a change from its next call.
 Every server but the hosted APIs is asked for its prompt-processing progress
 (`return_progress`), which llama.cpp and omlx (0.7.1 and later) report and
 others ignore; one that
@@ -152,7 +163,7 @@ provider and model, the one new sessions start on marked `●`. `Enter` or a
 click opens a connection on a page of its own — name, provider, base URL, API
 key, API key variable, **Identify as Termide** (only for an endpoint that keeps
 a breakdown of usage by app, see `app_attribution` above), model, context window (for a CLI agent, **Context window
-limit**, see below), **Requests at once** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
+limit**, see below), **Requests at once** and **Reasoning budget, tokens** (not for a CLI agent), **Subagents**, **Auto mode reviewer** and **Use by default** (new sessions start
 on it) — and **[ Back to list ]**, `Esc` or `Backspace` returns to the list;
 **+ Add connection** adds an OpenAI-compatible one, and
 **[ Delete connection ]** on the page, or `Del` on its row, removes one.
@@ -2668,7 +2679,10 @@ Some servers hold a tool call back until it is complete, so a model stuck
 inside one shows nothing until the output limit ends the call. A reply that
 ends at the limit with no answer and no tool call is treated the same way:
 the panel warns, the model is told that nothing came of it and asked for a
-smaller step, and a second such reply (or a loop) stops the run.
+smaller step, and a second such reply (or a loop) stops the run. When the
+reasoning is what used the limit up (about as many bytes of it as the reply
+spent tokens), the model is told to act on what it knows and the next call is
+made without reasoning, as after a loop.
 
 [Recall](#recall)'s solver uses `recall.md`: the system prompt of the call that
 answers from the search results, with the question line in its front matter

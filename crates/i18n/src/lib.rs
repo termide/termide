@@ -1162,6 +1162,8 @@ pub trait Translation: Send + Sync {
     /// the model asked again / the run stopped after a second one.
     fn agent_notice_empty_cut_off_retry(&self) -> &str;
     fn agent_notice_empty_cut_off_stopped(&self) -> &str;
+    fn agent_notice_reasoning_budget_retry(&self) -> &str;
+    fn agent_notice_reasoning_budget_stopped(&self) -> &str;
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;
     fn agent_notice_mcp_error_fmt(&self, source: &str, error: &str) -> String;
     fn agent_notice_mcp_connected_fmt(&self, source: &str, count: usize) -> String;
@@ -1479,6 +1481,7 @@ pub trait Translation: Send + Sync {
     fn settings_ai_connection_context_limit(&self) -> &str;
     /// Settings modal: how many requests a connection serves at once.
     fn settings_ai_connection_max_requests(&self) -> &str;
+    fn settings_ai_connection_reasoning_budget(&self) -> &str;
     /// Settings modal: the switch that identifies termide to an endpoint that
     /// files usage by the app that sent it.
     fn settings_ai_connection_attribution(&self) -> &str;

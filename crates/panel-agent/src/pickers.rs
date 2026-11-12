@@ -564,6 +564,7 @@ impl AgentPanel {
         let model = ModelSpec {
             id: choice.model.clone(),
             context_window: choice.context_window,
+            reasoning_budget: choice.settings.reasoning_budget(),
             ..self.model.clone()
         };
         self.configured_model = model.clone();
@@ -663,6 +664,10 @@ impl AgentPanel {
             self.model = model;
             self.model_choices.clear();
         }
+        // The reasoning budget is the connection's, whatever model it runs.
+        let budget = choice.settings.reasoning_budget();
+        self.model.reasoning_budget = budget;
+        self.configured_model.reasoning_budget = budget;
         self.backend = self.provider_backend.clone().or_else(|| {
             self.catalog
                 .resolve(&self.agent)

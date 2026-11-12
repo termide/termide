@@ -776,6 +776,7 @@ mod tests {
 
     fn spec(id: &str) -> ModelSpec {
         ModelSpec {
+            reasoning_budget: None,
             provider: "canned".into(),
             id: id.into(),
             context_window: 8192,

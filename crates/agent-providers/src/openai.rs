@@ -814,6 +814,7 @@ pub(crate) mod tests {
 
     fn model() -> ModelSpec {
         ModelSpec {
+            reasoning_budget: None,
             provider: "test".into(),
             id: "qwen".into(),
             context_window: 32_000,

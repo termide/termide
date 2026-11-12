@@ -733,6 +733,7 @@ mod tests {
 
     fn ask_text(provider: &AcpProvider, model: &str, text: &str) -> AssistantMessage {
         let spec = ModelSpec {
+            reasoning_budget: None,
             provider: "agent".into(),
             id: model.into(),
             context_window: 0,

@@ -182,6 +182,7 @@ pub fn run_agent_headless(
         context_window: connection.effective_context_window(),
         max_tokens: settings.output_limit(),
         thinking: settings.reasoning,
+        reasoning_budget: connection.reasoning_budget(),
     };
     let mut rules = settings.permissions.clone();
     if let Some(mode) = definition.spec.mode {
@@ -277,6 +278,16 @@ pub fn run_agent_headless(
             }
             AgentEvent::EmptyCutOff { retrying } if stream => {
                 line(serde_json::json!({ "type": "cut_off", "retrying": retrying }));
+            }
+            AgentEvent::ReasoningBudget { budget, retrying } if stream => {
+                if let Some(text) = thinking.finish() {
+                    line(serde_json::json!({ "type": "thinking", "text": text }));
+                }
+                line(serde_json::json!({
+                    "type": "reasoning_budget",
+                    "budget": budget,
+                    "retrying": retrying,
+                }));
             }
             AgentEvent::MessageEnd(Message::Assistant(message)) if stream => {
                 if let Some(text) = thinking.finish() {
@@ -427,6 +438,7 @@ pub fn run_recall(settings: &AiSettings, project_root: &Path, query: &str, json:
                     context_window: connection.effective_context_window(),
                     max_tokens: None,
                     thinking: termide_agent_core::ThinkingLevel::Off,
+                    reasoning_budget: None,
                 },
             })
         });

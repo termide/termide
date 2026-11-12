@@ -2408,6 +2408,7 @@ fn in_auto_mode_the_reviewer_answers_an_external_agents_request() {
                     shown: Arc::clone(&shown),
                 }),
                 ModelSpec {
+                    reasoning_budget: None,
                     provider: "reviewer".into(),
                     id: "small".into(),
                     context_window: 0,

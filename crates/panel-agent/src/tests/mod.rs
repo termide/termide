@@ -257,6 +257,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
             context_window: 1000,
             max_tokens: Some(100),
             thinking: ThinkingLevel::Off,
+            reasoning_budget: None,
         },
         tools: ToolRegistry::new(),
         // `configured`, not the default `auto`: a reviewer would spend the

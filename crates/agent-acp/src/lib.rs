@@ -1950,6 +1950,7 @@ impl Shared {
             intent: self.intent.clone(),
             provider,
             model: ModelSpec {
+                reasoning_budget: None,
                 provider: ACP_PROVIDER.into(),
                 id: String::new(),
                 context_window: 0,

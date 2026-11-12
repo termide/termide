@@ -259,6 +259,13 @@ pub struct Connection {
     /// one at a time (or llama.cpp's `--parallel` many).
     #[serde(default, skip_serializing_if = "is_zero")]
     pub max_concurrent_requests: u32,
+    /// How many tokens one model call may spend reasoning before the loop
+    /// cuts it and asks again without reasoning; 0 sets no bound. For a
+    /// model that sometimes reasons until the output limit stops it, which
+    /// at a local server's speed is minutes with nothing to show. termide's
+    /// own loop only; a session takes a change from its next call.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub reasoning_budget: u64,
     /// The model that reviews the calls of this one's sessions in `auto`
     /// mode, over `[ai.auto_reviewer]`: a connection and a model of it, or a
     /// connection's bare name. Unset leaves it to `[ai.auto_reviewer]`.
@@ -281,6 +288,10 @@ pub struct Connection {
 }
 
 fn is_zero(n: &u32) -> bool {
+    *n == 0
+}
+
+fn is_zero_u64(n: &u64) -> bool {
     *n == 0
 }
 
@@ -314,6 +325,7 @@ impl Default for Connection {
             context_window_limit: None,
             subagents: SideModel::default(),
             max_concurrent_requests: 0,
+            reasoning_budget: 0,
             reviewer: SideModel::default(),
             app_attribution: agent_defaults::app_attribution(),
         }
@@ -369,6 +381,12 @@ impl Connection {
     pub fn effective_context_window(&self) -> u64 {
         self.context_window_fallback
             .unwrap_or(DEFAULT_CONTEXT_WINDOW_FALLBACK)
+    }
+
+    /// The reasoning budget a model spec takes: `None` for no bound.
+    #[must_use]
+    pub fn reasoning_budget(&self) -> Option<u64> {
+        (self.reasoning_budget > 0).then_some(self.reasoning_budget)
     }
 
     /// Whether it drives a CLI agent over ACP rather than an endpoint.
@@ -1831,6 +1849,17 @@ mod ai_settings_tests {
         let parsed: AiSettings = toml::from_str("reasoning = \"xhigh\"\n").unwrap();
         assert_eq!(parsed.reasoning, termide_agent_core::ThinkingLevel::XHigh);
         assert!(toml::from_str::<AiSettings>("reasoning = \"extreme\"\n").is_err());
+    }
+
+    #[test]
+    fn a_connection_reads_its_reasoning_budget_and_saves_none_by_default() {
+        let parsed: AiSettings =
+            toml::from_str("[connections.local]\nreasoning_budget = 12000\n").unwrap();
+        assert_eq!(parsed.connections["local"].reasoning_budget(), Some(12_000));
+        let parsed: AiSettings = toml::from_str("[connections.local]\n").unwrap();
+        assert_eq!(parsed.connections["local"].reasoning_budget(), None);
+        let saved = toml::to_string(&parsed.connections["local"]).unwrap();
+        assert!(!saved.contains("reasoning_budget"), "{saved}");
     }
 
     /// The settings that chose the reasoning field and the echo by hand are

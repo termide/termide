@@ -909,7 +909,8 @@ fn an_empty_reply_cut_off_by_the_limit_is_told_and_tried_again() {
         panic!("expected the nudge");
     };
     assert!(nudge.plain_text().contains("output limit"));
-    // The reasoning level stays: the reasoning was not what ran away.
+    // The reasoning level stays: a few words of reasoning are not what used
+    // the limit up, a tool call the server held back is.
     assert_eq!(
         *provider.thinking_seen.lock().unwrap(),
         vec![ThinkingLevel::High, ThinkingLevel::High]
@@ -917,6 +918,142 @@ fn an_empty_reply_cut_off_by_the_limit_is_told_and_tried_again() {
     assert!(events
         .iter()
         .any(|e| matches!(e, AgentEvent::EmptyCutOff { retrying: true })));
+}
+
+#[test]
+fn a_reply_that_reasoned_to_the_limit_is_tried_again_without_reasoning() {
+    let runaway = AssistantMessage {
+        content: vec![AssistantContent::Thinking {
+            // Distinct sentences, so the loop guard does not take it for one.
+            text: (0..2000)
+                .map(|n| format!("Case {n} of the regex needs its own check. "))
+                .collect(),
+            signature: None,
+            redacted: false,
+        }],
+        stop_reason: StopReason::Length,
+        usage: Usage {
+            output: 32_768,
+            ..Usage::default()
+        },
+        ..text_reply("")
+    };
+    let provider = Arc::new(ScriptedProvider::new(vec![runaway, text_reply("Done.")]));
+    let mut agent = Agent::new(
+        provider.clone(),
+        ToolRegistry::new(),
+        ModelSpec {
+            thinking: ThinkingLevel::High,
+            ..model()
+        },
+        PathBuf::from("."),
+    );
+    collect(&mut agent, "go", &mut NoHooks);
+
+    let Message::User(nudge) = &agent.messages()[2] else {
+        panic!("expected the nudge");
+    };
+    assert!(nudge.plain_text().contains("Reasoning is off"));
+    assert_eq!(
+        *provider.thinking_seen.lock().unwrap(),
+        vec![ThinkingLevel::High, ThinkingLevel::Off]
+    );
+}
+
+/// A reply that reasons at length without going round in circles, then
+/// answers.
+fn long_reasoning_reply() -> AssistantMessage {
+    AssistantMessage {
+        content: vec![
+            AssistantContent::Thinking {
+                text: (0..500)
+                    .map(|n| format!("Case {n} of the regex needs its own check. "))
+                    .collect(),
+                signature: Some("sealed".into()),
+                redacted: false,
+            },
+            AssistantContent::Text {
+                text: "the answer".into(),
+            },
+        ],
+        ..text_reply("")
+    }
+}
+
+#[test]
+fn reasoning_past_the_budget_is_cut_and_tried_again_without_it() {
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        long_reasoning_reply(),
+        text_reply("Done."),
+    ]));
+    let mut agent = Agent::new(
+        provider.clone(),
+        ToolRegistry::new(),
+        ModelSpec {
+            thinking: ThinkingLevel::High,
+            reasoning_budget: Some(1000),
+            ..model()
+        },
+        PathBuf::from("."),
+    );
+    let events = collect(&mut agent, "go", &mut NoHooks);
+
+    assert_eq!(
+        roles(agent.messages()),
+        vec!["user", "assistant", "user", "assistant"]
+    );
+    // The cut reply keeps its reasoning, unsealed, and none of the answer.
+    let Message::Assistant(cut) = &agent.messages()[1] else {
+        panic!("expected the cut reply");
+    };
+    assert_eq!(cut.plain_text(), "");
+    let Message::User(nudge) = &agent.messages()[2] else {
+        panic!("expected the nudge");
+    };
+    assert!(nudge.plain_text().contains("past its budget"));
+    assert_eq!(
+        *provider.thinking_seen.lock().unwrap(),
+        vec![ThinkingLevel::High, ThinkingLevel::Off]
+    );
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::ReasoningBudget {
+            budget: 1000,
+            retrying: true
+        }
+    )));
+}
+
+#[test]
+fn reasoning_within_the_budget_or_without_one_runs_on() {
+    for (thinking, budget) in [
+        (ThinkingLevel::High, None),
+        (ThinkingLevel::High, Some(100_000)),
+        // Asked for none, a server's reasoning stream is not cut.
+        (ThinkingLevel::Off, Some(1000)),
+    ] {
+        let provider = Arc::new(ScriptedProvider::new(vec![long_reasoning_reply()]));
+        let mut agent = Agent::new(
+            provider.clone(),
+            ToolRegistry::new(),
+            ModelSpec {
+                thinking,
+                reasoning_budget: budget,
+                ..model()
+            },
+            PathBuf::from("."),
+        );
+        let events = collect(&mut agent, "go", &mut NoHooks);
+
+        assert_eq!(roles(agent.messages()), vec!["user", "assistant"]);
+        let Message::Assistant(answer) = &agent.messages()[1] else {
+            panic!("expected the answer");
+        };
+        assert_eq!(answer.plain_text(), "the answer");
+        assert!(!events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::ReasoningBudget { .. })));
+    }
 }
 
 #[test]

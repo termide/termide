@@ -1201,6 +1201,7 @@ mod tests {
             }
         }
         let model = ModelSpec {
+            reasoning_budget: None,
             provider: "canned".into(),
             id: "m".into(),
             context_window: 8_000,

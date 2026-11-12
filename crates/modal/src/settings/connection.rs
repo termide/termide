@@ -33,6 +33,8 @@ pub(super) const API_KEY: usize = 11;
 /// Whether to identify termide to the endpoint. On the page only for an
 /// endpoint that files usage by app, where the switch means something.
 pub(super) const APP_ATTRIBUTION: usize = 12;
+/// How many tokens one call may spend reasoning; 0 for no bound.
+pub(super) const REASONING_BUDGET: usize = 13;
 
 /// The API key dropdown's entries besides the current state, stored as an
 /// empty value.
@@ -136,6 +138,10 @@ pub(super) fn connection_fields() -> Vec<FieldDescriptor> {
         FieldDescriptor {
             label: t.settings_ai_connection_attribution(),
             field_type: FieldType::Bool,
+        },
+        FieldDescriptor {
+            label: t.settings_ai_connection_reasoning_budget(),
+            field_type: FieldType::Number,
         },
     ]
 }
@@ -274,6 +280,8 @@ impl SettingsModal {
         // A CLI agent's requests go through its own process, not termide's.
         if !cli {
             rows.push(Field(MAX_REQUESTS));
+            // termide's own loop cuts the reasoning; a CLI agent runs its own.
+            rows.push(Field(REASONING_BUDGET));
         }
         rows.extend([
             Field(SUBAGENTS),
@@ -477,6 +485,10 @@ impl SettingsModal {
                 i18n::t().settings_value_no_limit().to_string()
             }
             MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
+            REASONING_BUDGET if connection.reasoning_budget == 0 => {
+                i18n::t().settings_value_no_limit().to_string()
+            }
+            REASONING_BUDGET => connection.reasoning_budget.to_string(),
             REVIEWER => self.reviewer_label(&connection.reviewer),
             APP_ATTRIBUTION => bool_str(connection.app_attribution),
             _ => String::new(),
@@ -524,6 +536,7 @@ impl SettingsModal {
                 .map(|n| n.to_string())
                 .unwrap_or_default(),
             MAX_REQUESTS => connection.max_concurrent_requests.to_string(),
+            REASONING_BUDGET => connection.reasoning_budget.to_string(),
             _ => String::new(),
         }
     }
@@ -697,13 +710,17 @@ impl SettingsModal {
     }
 
     /// Store a number typed on the page: how many requests the connection
-    /// serves at once, 0 for any number.
+    /// serves at once, or how many tokens a call may reason; 0 for no bound.
     pub(super) fn apply_connection_number(&mut self, index: usize, value: u64) {
-        if index != MAX_REQUESTS {
+        let Some(connection) = self.edited_mut() else {
             return;
-        }
-        if let Some(connection) = self.edited_mut() {
-            connection.max_concurrent_requests = u32::try_from(value).unwrap_or(u32::MAX);
+        };
+        match index {
+            MAX_REQUESTS => {
+                connection.max_concurrent_requests = u32::try_from(value).unwrap_or(u32::MAX);
+            }
+            REASONING_BUDGET => connection.reasoning_budget = value,
+            _ => {}
         }
     }
 
@@ -836,6 +853,7 @@ impl SettingsModal {
             connection.api_key_env = defaults.api_key_env;
             connection.context_window_fallback = defaults.context_window_fallback;
             connection.max_concurrent_requests = defaults.max_concurrent_requests;
+            connection.reasoning_budget = defaults.reasoning_budget;
         }
         // Only an agent with a setting for it keeps a limit, one it takes.
         let limit_taken = connection.takes_context_limit()
@@ -1807,6 +1825,29 @@ mod tests {
         assert!(!modal
             .content_rows()
             .contains(&ContentRow::Field(MAX_REQUESTS)));
+    }
+
+    #[test]
+    fn the_reasoning_budget_is_typed_for_an_endpoint_only() {
+        let mut modal = ai_modal(with_local());
+        modal.open_connection("local".into());
+        assert_eq!(
+            modal.connection_value(REASONING_BUDGET),
+            i18n::t().settings_value_no_limit()
+        );
+        edit(&mut modal, REASONING_BUDGET, "12000");
+        assert_eq!(
+            modal.config.ai.connections["local"].reasoning_budget,
+            12_000
+        );
+        assert_eq!(modal.connection_value(REASONING_BUDGET), "12000");
+        // A CLI agent reasons in its own loop: the field and the value go.
+        modal.apply_connection_enum(PROVIDER, "claude_code");
+        let name = modal.open_connection_name().unwrap().to_string();
+        assert_eq!(modal.config.ai.connections[&name].reasoning_budget, 0);
+        assert!(!modal
+            .content_rows()
+            .contains(&ContentRow::Field(REASONING_BUDGET)));
     }
 
     #[test]

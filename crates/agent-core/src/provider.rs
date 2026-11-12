@@ -98,6 +98,12 @@ pub struct ModelSpec {
     /// one the model accepts.
     #[serde(default)]
     pub thinking: ThinkingLevel,
+    /// How many tokens one call may spend reasoning (estimated from the
+    /// streamed reasoning, four characters a token) before the loop cuts it
+    /// and asks again without reasoning; `None` sets no bound. A model that
+    /// reasons until the output limit stops it gets nothing for that time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_budget: Option<u64>,
 }
 
 /// One entry of a provider's model list.
@@ -291,6 +297,7 @@ mod tests {
     fn one_shot_returns_the_text_or_the_reason_it_failed() {
         use crate::agent::test_support::{text_reply, ScriptedProvider};
         let model = super::ModelSpec {
+            reasoning_budget: None,
             provider: "scripted".into(),
             id: "m".into(),
             context_window: 8_000,
