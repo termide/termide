@@ -446,7 +446,10 @@ impl App {
                     self.handle_create_directory(directory, value)?;
                 }
                 PendingAction::DeletePath { paths } => {
-                    self.handle_delete_path(paths, value)?;
+                    self.handle_delete_path(paths, value, false)?;
+                }
+                PendingAction::TrashPath { paths } => {
+                    self.handle_delete_path(paths, value, true)?;
                 }
                 PendingAction::DeleteRemotePath { paths, vfs_manager } => {
                     self.handle_delete_remote_path(paths, vfs_manager, value)?;

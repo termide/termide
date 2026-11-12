@@ -58,7 +58,8 @@ In tree view, selecting a directory with `Insert` cascades the selection to all 
 |-------------------|--------------------------------------------|
 | `F` / `Ctrl+N` / `Shift+F4` | Create new file                            |
 | `D` / `F7`        | Create new directory                       |
-| `Delete` / `F8`   | Delete selected files/directories          |
+| `Delete` / `F8`   | Move selected files/directories to the trash |
+| `Shift+Delete` / `Shift+F8` | Delete selected files/directories permanently |
 | `C` / `F5`        | Copy selected files/directories            |
 | `M` / `F6`        | Move/rename files/directories              |
 | `P` / `Alt+F5`    | Pack selected files/directories into an [archive](vfs.md#packing) |
@@ -76,6 +77,15 @@ the nearest other file manager (another panel's directory when there is none);
 the source directory is offered only when no panel sits anywhere else. The
 path stays editable, and `Tab` opens a [directory tree](#destination-path)
 under it that starts with the other panels' directories.
+
+`Delete` moves the selection to the system trash — the Trash on macOS, the
+freedesktop.org trash on Linux, the Recycle Bin on Windows — after a prompt
+that starts on **Yes**; take items back with the system's own tools.
+`Shift+Delete` deletes them for good, and its prompt starts on **No**. Remote
+locations (SFTP, FTP, SMB) have no trash: there `Delete` deletes for good too,
+and the prompt says so. A file system the system cannot trash on, such as
+some network mounts, reports an error; `Shift+Delete` deletes there. The keys
+are `delete` and `delete_permanently` under `[file_manager.keybindings]`.
 
 Copying or pasting an item into the directory it already lives in makes a
 copy next to it named `name (1).ext` (the next free number) instead of

@@ -26,6 +26,7 @@ pub(crate) fn build_fm_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("create_dir", &kb.create_dir);
     t.insert("create_file", &kb.create_file);
     t.insert("delete", &kb.delete);
+    t.insert("delete_permanently", &kb.delete_permanently);
     t.insert("info", &kb.info);
     t.insert("pack", &kb.pack);
     t.insert("unpack", &kb.unpack);
@@ -190,12 +191,14 @@ impl FileManager {
                 };
                 self.modal_request = Some((action, ActiveModal::Input(Box::new(modal))));
             }
-            FmCommand::DeleteFiles => {
+            FmCommand::DeleteFiles | FmCommand::DeletePermanently => {
+                // Only local files have a trash: a remote one is deleted for
+                // good, which its prompt says and starts on "No" for.
+                let to_trash = command == FmCommand::DeleteFiles;
+                let t = termide_i18n::t();
                 if self.is_remote() {
-                    // Remote delete - use VfsPath
                     let vfs_paths = self.get_selected_vfs_paths();
                     if !vfs_paths.is_empty() {
-                        let t = termide_i18n::t();
                         let title = if vfs_paths.len() == 1 {
                             let file_name = vfs_paths[0]
                                 .file_name()
@@ -205,7 +208,7 @@ impl FileManager {
                         } else {
                             t.modal_delete_multiple_title(vfs_paths.len())
                         };
-                        let modal = ConfirmModal::new(&title, "");
+                        let modal = ConfirmModal::new(&title, "").defaulting_to_no();
                         let action = PendingAction::DeleteRemotePath {
                             paths: vfs_paths,
                             vfs_manager: self.vfs_manager_arc(),
@@ -213,18 +216,26 @@ impl FileManager {
                         self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
                     }
                 } else {
-                    // Local delete - use PathBuf
                     let paths = self.get_selected_paths();
                     if !paths.is_empty() {
-                        let t = termide_i18n::t();
-                        let title = if paths.len() == 1 {
-                            let file_name = path_utils::get_file_name_str(&paths[0]);
-                            t.modal_delete_single_title(file_name)
-                        } else {
-                            t.modal_delete_multiple_title(paths.len())
+                        let file_name = path_utils::get_file_name_str(&paths[0]);
+                        let title = match (to_trash, paths.len()) {
+                            (true, 1) => t.modal_trash_single_title(file_name),
+                            (true, n) => t.modal_trash_multiple_title(n),
+                            (false, 1) => t.modal_delete_single_title(file_name),
+                            (false, n) => t.modal_delete_multiple_title(n),
                         };
                         let modal = ConfirmModal::new(&title, "");
-                        let action = PendingAction::DeletePath { paths };
+                        // The trash gives back what it takes: its prompt
+                        // starts on "Yes".
+                        let (modal, action) = if to_trash {
+                            (modal, PendingAction::TrashPath { paths })
+                        } else {
+                            (
+                                modal.defaulting_to_no(),
+                                PendingAction::DeletePath { paths },
+                            )
+                        };
                         self.modal_request = Some((action, ActiveModal::Confirm(Box::new(modal))));
                     }
                 }

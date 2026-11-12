@@ -45,6 +45,8 @@ pub enum PendingAction {
     CreateDirectory { directory: PathBuf },
     /// Delete files/directories (one or multiple)
     DeletePath { paths: Vec<PathBuf> },
+    /// Move local files/directories to the system trash
+    TrashPath { paths: Vec<PathBuf> },
     /// Delete remote files/directories (one or multiple)
     DeleteRemotePath {
         paths: Vec<VfsPath>,

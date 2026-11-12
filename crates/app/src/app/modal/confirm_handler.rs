@@ -11,11 +11,13 @@ use termide_ui::path_utils;
 use termide_vfs::{VfsManager, VfsPath};
 
 impl App {
-    /// Handle deletion of files/directories
+    /// Handle deletion of local files/directories, or their move to the
+    /// system trash.
     pub(in crate::app) fn handle_delete_path(
         &mut self,
         paths: Vec<PathBuf>,
         value: termide_modal::ModalOutput,
+        to_trash: bool,
     ) -> Result<()> {
         if let Some(confirmed) = value.get::<bool>() {
             if *confirmed && !paths.is_empty() {
@@ -27,7 +29,17 @@ impl App {
                 let sources: Vec<OperationPath> =
                     paths.into_iter().map(OperationPath::Local).collect();
                 let vfs_manager = Arc::new(VfsManager::new());
-                self.start_delete_operation(sources, vfs_manager, source_display);
+                if to_trash {
+                    let request = OperationRequest::trash(sources);
+                    self.start_delete_request(
+                        request,
+                        OperationType::Trash,
+                        vfs_manager,
+                        source_display,
+                    );
+                } else {
+                    self.start_delete_operation(sources, vfs_manager, source_display);
+                }
             }
         }
         Ok(())
@@ -65,14 +77,25 @@ impl App {
         vfs_manager: Arc<VfsManager>,
         source_display: String,
     ) {
-        log::info!("Starting async delete of {}", source_display);
-        let paths_count = sources.len();
         let request = OperationRequest::delete(sources);
+        self.start_delete_request(request, OperationType::Delete, vfs_manager, source_display);
+    }
+
+    /// Start a tracked delete or trash request.
+    fn start_delete_request(
+        &mut self,
+        request: OperationRequest,
+        op_type: OperationType,
+        vfs_manager: Arc<VfsManager>,
+        source_display: String,
+    ) {
+        log::info!("Starting async {:?} of {}", op_type, source_display);
+        let paths_count = request.sources.len();
 
         match self.start_tracked_operation(
             request,
             vfs_manager,
-            OperationType::Delete,
+            op_type,
             source_display,
             String::new(),
             paths_count,

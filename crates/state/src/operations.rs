@@ -23,6 +23,8 @@ pub enum OperationType {
     MoveDownload,
     /// Delete file(s)
     Delete,
+    /// Move local file(s) to the system trash
+    Trash,
     /// Pack files into a new archive
     Pack,
     /// Unpack archives into a directory
@@ -43,7 +45,11 @@ impl OperationType {
     pub fn has_data_progress(&self) -> bool {
         !matches!(
             self,
-            Self::Delete | Self::Rename | Self::CommandBackground | Self::CommandReport
+            Self::Delete
+                | Self::Trash
+                | Self::Rename
+                | Self::CommandBackground
+                | Self::CommandReport
         )
     }
 }
@@ -199,6 +205,7 @@ mod tests {
         assert!(OperationType::CopyUpload.has_data_progress());
         assert!(OperationType::CopyDownload.has_data_progress());
         assert!(!OperationType::Delete.has_data_progress());
+        assert!(!OperationType::Trash.has_data_progress());
         assert!(!OperationType::Rename.has_data_progress());
         assert!(!OperationType::CommandBackground.has_data_progress());
         assert!(!OperationType::CommandReport.has_data_progress());

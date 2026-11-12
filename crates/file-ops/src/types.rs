@@ -35,6 +35,8 @@ pub enum OperationType {
     Move,
     /// Delete file(s).
     Delete,
+    /// Move local file(s) to the system trash.
+    Trash,
     /// Download from remote to local (single or multiple files).
     Download,
     /// Upload from local to remote (single or multiple files).
@@ -563,6 +565,14 @@ impl OperationRequest {
             conflict_mode: ConflictMode::Ask,
             archive_passwords: ArchivePasswords::default(),
             compression: CompressionLevel::Normal,
+        }
+    }
+
+    /// Create a request moving local files to the system trash.
+    pub fn trash(sources: Vec<OperationPath>) -> Self {
+        Self {
+            op_type: OperationType::Trash,
+            ..Self::delete(sources)
         }
     }
 

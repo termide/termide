@@ -16,6 +16,7 @@ termide-vfs = { path = "../vfs" }
 termide-i18n = { path = "../i18n" }
 termide-core = { path = "../core" }
 tempfile.workspace = true
+trash = "5.3"
 
 [dev-dependencies]
 zip = { version = "9.1", default-features = false, features = ["deflate-flate2", "aes-crypto"] }

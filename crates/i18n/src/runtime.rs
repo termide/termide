@@ -444,6 +444,8 @@ impl Translation for RuntimeTranslation {
         lsp_restart_server,
         lsp_restart_no_server,
         help_desc_delete_generic,
+        help_desc_trash,
+        help_desc_delete_permanently,
         help_desc_open_bookmark_add,
         help_desc_command_palette,
         help_desc_open_path,
@@ -1109,6 +1111,7 @@ impl Translation for RuntimeTranslation {
         fm_pack_local_only,
         help_desc_unpack,
         op_type_unpack,
+        op_type_trash,
         modal_unpack_title,
         fm_unpack_local_only,
         fm_unpack_no_archive,
@@ -2305,6 +2308,18 @@ impl Translation for RuntimeTranslation {
         let element = self.pluralize(count, "element");
         self.format(
             "modal_delete_multiple_title",
+            &[("count", &count.to_string()), ("element", element)],
+        )
+    }
+
+    fn modal_trash_single_title(&self, name: &str) -> String {
+        self.format("modal_trash_single_title", &[("name", name)])
+    }
+
+    fn modal_trash_multiple_title(&self, count: usize) -> String {
+        let element = self.pluralize(count, "element");
+        self.format(
+            "modal_trash_multiple_title",
             &[("count", &count.to_string()), ("element", element)],
         )
     }

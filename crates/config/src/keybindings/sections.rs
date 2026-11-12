@@ -172,6 +172,7 @@ pub struct FileManagerKeybindings {
     pub create_dir: Option<KeyBinding>,
     pub create_file: Option<KeyBinding>,
     pub delete: Option<KeyBinding>,
+    pub delete_permanently: Option<KeyBinding>,
     pub info: Option<KeyBinding>,
     pub pack: Option<KeyBinding>,
     pub unpack: Option<KeyBinding>,
@@ -777,6 +778,14 @@ impl FileManagerKeybindings {
         }
         if self.delete.is_none() {
             self.delete = Some(KeyBinding::Multiple(vec!["Delete".into(), "F8".into()]));
+        }
+        // `delete` moves to the trash where there is one; this one deletes
+        // for good.
+        if self.delete_permanently.is_none() {
+            self.delete_permanently = Some(KeyBinding::Multiple(vec![
+                "Shift+Delete".into(),
+                "Shift+F8".into(),
+            ]));
         }
         if self.info.is_none() {
             self.info = Some(KeyBinding::Multiple(vec!["F12".into(), "Space".into()]));

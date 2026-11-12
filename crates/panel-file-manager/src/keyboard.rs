@@ -48,7 +48,11 @@ pub enum FmCommand {
     // File operations
     NewFile,
     NewDirectory,
+    /// Move the selection to the trash; delete it for good where there is
+    /// no trash.
     DeleteFiles,
+    /// Delete the selection for good.
+    DeletePermanently,
     CopyFiles,
     MoveFiles,
     RenameFile,
@@ -93,6 +97,7 @@ impl FmCommand {
             Self::NewFile
                 | Self::NewDirectory
                 | Self::DeleteFiles
+                | Self::DeletePermanently
                 | Self::MoveFiles
                 | Self::RenameFile
                 | Self::SearchReplace
@@ -137,6 +142,9 @@ impl FmCommand {
         }
         if hotkeys.matches("delete", &key) {
             return Self::DeleteFiles;
+        }
+        if hotkeys.matches("delete_permanently", &key) {
+            return Self::DeletePermanently;
         }
         if hotkeys.matches("info", &key) {
             return Self::ShowFileInfo;
@@ -477,6 +485,14 @@ mod tests {
         assert_eq!(
             FmCommand::from_key_event(key(KeyCode::Delete, KeyModifiers::NONE), &hk, false),
             FmCommand::DeleteFiles
+        );
+        assert_eq!(
+            FmCommand::from_key_event(key(KeyCode::Delete, KeyModifiers::SHIFT), &hk, false),
+            FmCommand::DeletePermanently
+        );
+        assert_eq!(
+            FmCommand::from_key_event(key(KeyCode::F(8), KeyModifiers::SHIFT), &hk, false),
+            FmCommand::DeletePermanently
         );
 
         // F-keys

@@ -198,6 +198,7 @@ impl App {
                 }
             }
             FO::Delete => crate::state::OperationType::Delete,
+            FO::Trash => crate::state::OperationType::Trash,
             _ => {
                 if request.is_move {
                     crate::state::OperationType::Move

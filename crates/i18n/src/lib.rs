@@ -299,6 +299,8 @@ pub trait Translation: Send + Sync {
     fn help_desc_toggle_hidden(&self) -> &str;
     fn help_desc_open_external(&self) -> &str;
     fn help_desc_delete_generic(&self) -> &str;
+    fn help_desc_trash(&self) -> &str;
+    fn help_desc_delete_permanently(&self) -> &str;
     fn help_desc_open_bookmark_add(&self) -> &str;
     fn help_desc_command_palette(&self) -> &str;
     fn help_desc_open_path(&self) -> &str;
@@ -462,6 +464,8 @@ pub trait Translation: Send + Sync {
     fn modal_create_dir_title(&self) -> &str;
     fn modal_delete_single_title(&self, name: &str) -> String;
     fn modal_delete_multiple_title(&self, count: usize) -> String;
+    fn modal_trash_single_title(&self, name: &str) -> String;
+    fn modal_trash_multiple_title(&self, count: usize) -> String;
     fn modal_save_as_title(&self) -> &str;
     fn modal_copy_single_prompt(&self, name: &str) -> String;
     fn modal_copy_multiple_prompt(&self, count: usize) -> String;
@@ -1852,6 +1856,7 @@ pub trait Translation: Send + Sync {
     fn fm_pack_local_only(&self) -> &str;
     fn help_desc_unpack(&self) -> &str;
     fn op_type_unpack(&self) -> &str;
+    fn op_type_trash(&self) -> &str;
     fn modal_unpack_title(&self) -> &str;
     /// Shown when unpacking is asked for in a remote or archive panel.
     fn fm_unpack_local_only(&self) -> &str;

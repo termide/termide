@@ -1,0 +1,30 @@
+# Deleting in the file manager (doc/en/file-manager.md): Delete moves a file
+# to the system trash after a prompt that starts on Yes; Shift+Delete deletes
+# for good after one that starts on No. On macOS the trashed file lands in
+# the user's own Trash, under its name below.
+project empty
+start
+run "echo x > tui-harness-trash-me.txt && echo y > gone-for-good.txt"
+wait "tui-harness-trash-me.txt"
+
+# The last entry goes to the trash; Enter takes the prompt's "Yes".
+key End Delete
+wait "Move 'tui-harness-trash-me.txt' to trash"
+snapshot trash-prompt
+key Enter
+wait-gone "tui-harness-trash-me.txt"
+run "test ! -e tui-harness-trash-me.txt"
+
+# Deleting for good: Enter takes the prompt's "No" and keeps the file.
+key End Shift+Delete
+wait "Delete 'gone-for-good.txt' permanently"
+snapshot delete-prompt
+key Enter
+wait-gone "permanently"
+run "test -e gone-for-good.txt"
+key Shift+F8
+wait "permanently"
+key y
+wait-gone "gone-for-good.txt"
+run "test ! -e gone-for-good.txt"
+quit

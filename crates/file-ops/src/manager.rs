@@ -18,7 +18,7 @@ use crate::types::{
 };
 use crate::worker::{
     ConflictContext, CrossProtocolWorker, DownloadWorker, LocalCopyWorker, LocalDeleteWorker,
-    OperationWorker, PackWorker, RemoteDeleteWorker, UnpackWorker, UploadWorker,
+    OperationWorker, PackWorker, RemoteDeleteWorker, TrashWorker, UnpackWorker, UploadWorker,
 };
 
 /// Configuration for the operation manager.
@@ -264,6 +264,21 @@ impl OperationManager {
 
                     Ok(Box::new(worker))
                 }
+            }
+
+            OperationType::Trash => {
+                // Only the local file system has a trash.
+                let paths = request
+                    .sources
+                    .iter()
+                    .map(|p| match p {
+                        OperationPath::Local(path) => Ok(path.clone()),
+                        OperationPath::Remote(_) => Err(OperationError::Invalid(
+                            "Only local files go to the trash".to_string(),
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Box::new(TrashWorker::new(paths)))
             }
 
             OperationType::Delete => {
@@ -589,6 +604,7 @@ impl OperationManager {
                     OperationType::Copy => Some("Copying".to_string()),
                     OperationType::Move => Some("Moving".to_string()),
                     OperationType::Delete => Some("Deleting".to_string()),
+                    OperationType::Trash => Some("Moving to trash".to_string()),
                     OperationType::Download => Some("Downloading".to_string()),
                     OperationType::Upload => Some("Uploading".to_string()),
                     OperationType::Pack => Some("Packing".to_string()),

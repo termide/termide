@@ -348,7 +348,11 @@ impl HelpGenerator {
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.delete),
-                description: t.help_desc_delete_generic().to_string(),
+                description: t.help_desc_trash().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.delete_permanently),
+                description: t.help_desc_delete_permanently().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.info),

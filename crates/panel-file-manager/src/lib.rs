@@ -1637,6 +1637,49 @@ mod tests {
         );
     }
 
+    /// `delete` asks to move the selection to the trash and starts on "Yes";
+    /// `delete_permanently` asks to delete it for good and starts on "No".
+    #[test]
+    fn delete_goes_to_the_trash_and_delete_permanently_does_not() {
+        use termide_modal::{Modal, ModalResult};
+        let enter = || {
+            termide_core::KeyChord::identity(crossterm::event::KeyEvent::new(
+                crossterm::event::KeyCode::Enter,
+                crossterm::event::KeyModifiers::NONE,
+            ))
+        };
+        let temp_dir = TempDir::new().unwrap();
+        std::fs::write(temp_dir.path().join("a.txt"), "x").unwrap();
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("a.txt").unwrap();
+
+        fm.execute_command(keyboard::FmCommand::DeleteFiles);
+        let Some((PendingAction::TrashPath { paths }, ActiveModal::Confirm(mut modal))) =
+            fm.modal_request.take()
+        else {
+            panic!("a trash confirmation");
+        };
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].ends_with("a.txt"));
+        assert!(matches!(
+            modal.handle_key(enter()).unwrap(),
+            Some(ModalResult::Confirmed(true))
+        ));
+
+        fm.execute_command(keyboard::FmCommand::DeletePermanently);
+        let Some((PendingAction::DeletePath { .. }, ActiveModal::Confirm(mut modal))) =
+            fm.modal_request.take()
+        else {
+            panic!("a delete confirmation");
+        };
+        assert!(matches!(
+            modal.handle_key(enter()).unwrap(),
+            Some(ModalResult::Confirmed(false))
+        ));
+    }
+
     /// An archive inside an archive opens with Enter too, and `..` walks
     /// back out one level at a time, the cursor landing on what was left.
     #[test]
