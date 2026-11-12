@@ -42,6 +42,17 @@ fn load_original_from_head_sync(file_path: &std::path::Path) -> Option<String> {
     crate::command::head_file_content(file_path)
 }
 
+/// `content` with its CRLF line breaks made LF, as the editor's buffer holds
+/// them: a file committed with CRLF, or checked out with them, would
+/// otherwise differ on every line.
+fn lf_line_breaks(content: String) -> String {
+    if content.contains("\r\n") {
+        content.replace("\r\n", "\n")
+    } else {
+        content
+    }
+}
+
 /// Git diff status for a line in a file
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LineStatus {
@@ -180,13 +191,16 @@ impl GitDiffCache {
     /// Take what git gave as the original, the fallback where git gave none.
     fn take_original(&mut self, from_git: Option<String>) {
         self.original_from_git = from_git.is_some();
-        self.original_content = from_git.or_else(|| self.fallback_original.clone());
+        self.original_content = from_git
+            .map(lf_line_breaks)
+            .or_else(|| self.fallback_original.clone());
     }
 
     /// Diff against `content` while git has no original for the file;
     /// `None` takes the fallback back. Recompute with
     /// [`Self::update_from_buffer`] afterwards.
     pub fn set_fallback_original(&mut self, content: Option<String>) {
+        let content = content.map(lf_line_breaks);
         if !self.original_from_git {
             self.original_content = content.clone();
         }
@@ -207,7 +221,8 @@ impl GitDiffCache {
         // it every line would count as a change the index lacks.
         self.index_content = from_git
             .as_ref()
-            .and_then(|_| crate::lines::index_file_content(&self.file_path));
+            .and_then(|_| crate::lines::index_file_content(&self.file_path))
+            .map(lf_line_breaks);
         self.take_original(from_git);
         Ok(())
     }
@@ -217,7 +232,7 @@ impl GitDiffCache {
     /// without invoking git (also used to set up deterministic tests).
     pub fn set_original_content(&mut self, content: Option<String>) {
         self.original_from_git = content.is_some();
-        self.original_content = content;
+        self.original_content = content.map(lf_line_breaks);
     }
 
     /// Update git diff by comparing buffer content with original from HEAD
@@ -275,7 +290,7 @@ impl GitDiffCache {
 
         // Read current file content from disk
         let current_content = match std::fs::read_to_string(&self.file_path) {
-            Ok(content) => content,
+            Ok(content) => lf_line_breaks(content),
             Err(_) => {
                 // File might not exist or can't be read
                 self.line_statuses.clear();
@@ -353,7 +368,7 @@ impl GitDiffCache {
     pub fn apply_async_result(&mut self, async_result: GitDiffAsyncResult) {
         // Store original content
         self.take_original(async_result.original_content);
-        self.index_content = async_result.index_content;
+        self.index_content = async_result.index_content.map(lf_line_breaks);
 
         // Recompute diff if we have original content
         let original = match self.original_content.as_deref() {
@@ -369,7 +384,7 @@ impl GitDiffCache {
 
         // Read current file content from disk
         let current_content = match std::fs::read_to_string(&self.file_path) {
-            Ok(content) => content,
+            Ok(content) => lf_line_breaks(content),
             Err(_) => {
                 self.line_statuses.clear();
                 self.deleted_after_lines.clear();
@@ -392,7 +407,7 @@ impl GitDiffCache {
     /// Seed the index's version directly instead of reading it from git;
     /// recompute with [`Self::update_from_buffer`] afterwards.
     pub fn set_index_content(&mut self, content: Option<String>) {
-        self.index_content = content;
+        self.index_content = content.map(lf_line_breaks);
     }
 
     /// Note which lines of `current` differ from the index's version.
@@ -545,6 +560,36 @@ fn compute_line_statuses_from_textdiff<'a>(diff: &TextDiff<'a, 'a, 'a, str>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn crlf_line_breaks_alone_are_no_change() {
+        // Committed with CRLF; the editor's buffer holds LF.
+        let mut cache = GitDiffCache::new(PathBuf::from("/nonexistent/a.txt"));
+        cache.set_original_content(Some("one\r\ntwo\r\nthree\r\n".into()));
+        cache.set_index_content(Some("one\r\ntwo\r\nthree\r\n".into()));
+        cache.update_from_buffer("one\nTWO\nthree\n").unwrap();
+        assert_eq!(cache.get_line_status(0), LineStatus::Unchanged);
+        assert_eq!(cache.get_line_status(1), LineStatus::Modified);
+        assert_eq!(cache.get_line_status(2), LineStatus::Unchanged);
+        assert!(!cache.has_unstaged(0..=0) && cache.has_unstaged(1..=1));
+    }
+
+    #[test]
+    fn a_file_checked_out_with_crlf_matches_its_lf_blob() {
+        // core.autocrlf: the blob has LF, the working file CRLF.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, "one\r\ntwo\r\n").unwrap();
+        let mut cache = GitDiffCache::new(path.clone());
+        cache.apply_async_result(GitDiffAsyncResult {
+            file_path: path,
+            original_content: Some("one\ntwo\n".into()),
+            index_content: Some("one\ntwo\n".into()),
+        });
+        assert_eq!(cache.get_line_status(0), LineStatus::Unchanged);
+        assert_eq!(cache.get_line_status(1), LineStatus::Unchanged);
+        assert!(!cache.has_unstaged(0..=1));
+    }
 
     #[test]
     fn test_compute_line_statuses_from_textdiff_added() {

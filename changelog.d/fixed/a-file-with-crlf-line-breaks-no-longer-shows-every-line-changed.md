@@ -1,0 +1,1 @@
+- **A file with CRLF line breaks no longer shows every line as changed in the editor's gutter.** A file committed with CRLF marked every line once it was edited, and one checked out with CRLF from an LF commit (`core.autocrlf`) marked every line from the start; line breaks alone are no change now.

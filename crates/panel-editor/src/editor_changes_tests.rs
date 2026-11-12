@@ -160,6 +160,27 @@ fn an_unchanged_line_offers_nothing() {
 }
 
 #[test]
+fn a_file_committed_with_crlf_marks_only_the_edited_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    git(repo, &["config", "core.autocrlf", "false"]);
+    std::fs::write(repo.join("f"), "a\r\nb\r\nc\r\nd\r\n").unwrap();
+    git(repo, &["add", "f"]);
+    git(repo, &["commit", "-q", "-m", "one"]);
+    let mut e = Editor::open_file_with_config(repo.join("f"), EditorConfig::default()).unwrap();
+    settle(&mut e);
+    e.cursor.line = 0;
+    assert!(actions(&e).is_empty(), "nothing changed yet");
+
+    type_over(&mut e, 2, "C");
+    settle(&mut e);
+    assert!(actions(&e).is_empty(), "line 1 is as committed");
+    e.cursor.line = 2;
+    assert_eq!(actions(&e), [STAGE_CHANGE_ACTION, REVERT_CHANGE_ACTION]);
+}
+
+#[test]
 fn a_freshly_opened_file_offers_nothing_on_an_unchanged_line() {
     // Before the background load: the git markers the editor opens with.
     let dir = tempfile::tempdir().unwrap();

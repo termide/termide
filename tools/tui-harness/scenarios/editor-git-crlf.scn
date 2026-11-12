@@ -1,0 +1,33 @@
+# A file committed with CRLF line breaks (doc/en/editor.md, Git Diff
+# Visualization): after an edit the gutter marks the edited line alone, not
+# every line, whose breaks the editor holds as LF.
+project empty
+start
+run "git init -q && git config core.autocrlf false && printf 'one\r\ntwo\r\nthree\r\nfour\r\nfive\r\nsix\r\n' > crlf.txt && git add crlf.txt && git commit -qm crlf"
+wait "crlf.txt"
+key End F4
+wait "EOL: CRLF"
+
+# Edit line 4; the gutter recomputes against the buffer after a pause.
+key Down Down Down End
+type "!"
+wait "four!"
+run "sleep 1"
+
+# Line 1 is unchanged: its menu offers nothing to stage.
+key Ctrl+Home
+wait "Pos: 1:1"
+key Alt+K
+wait "Fold all"
+expect-not "Stage change"
+key Esc
+wait-gone "Fold all"
+
+# F7 goes to the one change.
+key F7
+wait "Pos: 4:1"
+key Alt+K
+wait "Stage change"
+snapshot menu
+key Esc
+quit --force
