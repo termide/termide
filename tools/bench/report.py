@@ -205,6 +205,8 @@ def agent_label(job: Path, rows: list[dict]) -> str:
     m = meta(job)
     if m.get("describe"):
         reasoning = f" · {m['reasoning']}" if m.get("reasoning") else ""
+        if m.get("reasoning_budget"):
+            reasoning += f" ≤{m['reasoning_budget']}"
         return f"termide {m['describe']}{reasoning}"
     return next((r["agent"] for r in rows if r["agent"]), m.get("agent", "?"))
 
@@ -321,6 +323,9 @@ def trace(job: Path, task: str) -> None:
         elif kind == "cut_off":
             what = "retrying" if e.get("retrying") else "run stopped"
             print(f"{stamp}  ✂ reply hit the output limit with nothing in it: {what}")
+        elif kind == "reasoning_budget":
+            what = "retrying without reasoning" if e.get("retrying") else "run stopped"
+            print(f"{stamp}  ✂ reasoning ran past its budget of {e.get('budget')} tokens: {what}")
         elif kind == "tool_use":
             subject = e.get("subject", "").replace("\n", " ⏎ ")
             print(f"{stamp}  {e.get('name', ''):<6} {subject[:160]}")

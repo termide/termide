@@ -75,6 +75,7 @@ class TermideAgent(BaseInstalledAgent):
         model = self._get_env("TERMIDE_MODEL") or (self.model_name or "").split("/")[-1]
         context = self._get_env("TERMIDE_CONTEXT_WINDOW") or "262144"
         reasoning = self._get_env("TERMIDE_REASONING") or "high"
+        budget = self._get_env("TERMIDE_REASONING_BUDGET") or "0"
         config = "\n".join(
             [
                 "[ai]",
@@ -88,6 +89,7 @@ class TermideAgent(BaseInstalledAgent):
                 f"model = {_toml_str(model)}",
                 'api_key_env = "TERMIDE_API_KEY"',
                 f"context_window_fallback = {int(context)}",
+                f"reasoning_budget = {int(budget)}",
                 "",
             ]
         )

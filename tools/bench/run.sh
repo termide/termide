@@ -15,9 +15,13 @@
 #   BASE_URL  endpoint as the container sees it (OMLX on the host)
 #   API_KEY   key for it; for OMLX it is read from ~/.omlx/settings.json
 #   DATASET   Harbor dataset (terminal-bench/terminal-bench-2-1)
-#   CONCURRENT  trials at once (2)
+#   CONCURRENT  trials at once (1): a local model server splits its
+#               generation between them, so each runs slower against its
+#               wall-clock limit for little more throughput
 #   REASONING termide's reasoning level (high, its default): off, minimal,
 #             low, medium, high, xhigh, max
+#   REASONING_BUDGET  tokens one call of termide's may reason before it is
+#             cut and asked again without reasoning (0, the default: no limit)
 #   MIRROR_PORT the port of mirror.sh serve (10001); while it answers, the
 #               verifiers take uv, Python and pytest from it
 set -eu
@@ -43,8 +47,9 @@ AGENT=${AGENT:-termide}
 MODEL=${MODEL:-Qwen3.6-35B-A3B-8bit}
 BASE_URL=${BASE_URL:-http://host.docker.internal:10000/v1}
 DATASET=${DATASET:-terminal-bench/terminal-bench-2-1}
-CONCURRENT=${CONCURRENT:-2}
+CONCURRENT=${CONCURRENT:-1}
 REASONING=${REASONING:-high}
+REASONING_BUDGET=${REASONING_BUDGET:-0}
 omlx=false
 case "$BASE_URL" in *:10000/*) omlx=true ;; esac
 if [ -z "${API_KEY:-}" ] && $omlx; then
@@ -57,6 +62,7 @@ if [ "$AGENT" = termide ]; then
     --ae "TERMIDE_BASE_URL=$BASE_URL" \
     --ae "TERMIDE_API_KEY=$API_KEY" \
     --ae "TERMIDE_REASONING=$REASONING" \
+    --ae "TERMIDE_REASONING_BUDGET=$REASONING_BUDGET" \
     "$@"
 else
   # Harbor's own agents read the key from this variable and take the
@@ -81,9 +87,9 @@ if curl -sf -o /dev/null "http://127.0.0.1:$port/simple/pytest/"; then
 fi
 
 mkdir -p "$bench/jobs/$job"
-python3 -I - "$bench/jobs/$job/bench-meta.json" "$root" "$AGENT" "$MODEL" "$BASE_URL" "$DATASET" "$CONCURRENT" "$mirror" "$REASONING" <<'EOF'
+python3 -I - "$bench/jobs/$job/bench-meta.json" "$root" "$AGENT" "$MODEL" "$BASE_URL" "$DATASET" "$CONCURRENT" "$mirror" "$REASONING" "$REASONING_BUDGET" <<'EOF'
 import json, subprocess, sys
-out, root, agent, model, base_url, dataset, concurrent, mirror, reasoning = sys.argv[1:]
+out, root, agent, model, base_url, dataset, concurrent, mirror, reasoning, budget = sys.argv[1:]
 git = lambda *a: subprocess.run(["git", "-C", root, *a], capture_output=True, text=True).stdout.strip()
 meta = {"agent": agent}
 if agent == "termide":
@@ -92,6 +98,7 @@ if agent == "termide":
         "dirty": bool(git("status", "--porcelain", "--untracked-files=no")),
         "describe": git("describe", "--tags", "--always", "--dirty"),
         "reasoning": reasoning,
+        "reasoning_budget": int(budget),
     }
 meta |= {"model": model, "base_url": base_url, "dataset": dataset, "concurrent": int(concurrent),
          "verifier_mirror": mirror == "true"}

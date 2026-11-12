@@ -19,7 +19,7 @@ container (the SWE-bench family included; its registry name is not checked yet).
 | `sets/*.txt` | named task subsets, one task name per line |
 | `report.py` | one job as a table of outcomes, or two jobs compared |
 | `watchdog.sh` | stops a run when OMLX loads another model (see below) |
-| `mirror.sh` | local mirror of what the verifiers download (see Setup) |
+| `mirror.sh`, `mirror_server.py` | local mirror of what the verifiers download (see Setup) |
 | `bin/`, `jobs/`, `mirror/` | build output, results, mirrored files; not committed |
 
 ## Setup
@@ -44,14 +44,21 @@ time and the trial gets no verdict. While `mirror.sh serve` answers on port
 `UV_PYTHON_INSTALL_MIRROR`, `UV_INDEX_URL`, `PIP_INDEX_URL`), and
 `bench-meta.json` records `verifier_mirror`. The files are the same ones (uv
 checks their hashes), the tests unchanged; only `apt-get install curl` and the
-uv install script still come from the network.
+uv install script still come from the network. About a quarter of the tasks
+also install other packages for their tests (numpy, torch, pandas…) or pin
+other versions: `mirror_server.py` serves PyPI's index pages with the
+mirrored wheels pointed at the local copies, so those come from PyPI, and a
+Python the mirror lacks (3.11) is redirected to its GitHub release. torch and
+torchvision come from PyTorch's CPU-only index: the default wheels pull about
+3 GB of CUDA libraries the verifiers cannot use, more than a slow line fetches
+within a verifier's 15 minutes.
 
 ## Running
 
 ```sh
 tools/bench/run.sh debug8-qwen debug8            # the 8-task smoke set
 tools/bench/run.sh tb21-qwen all                 # the whole dataset
-MODEL=other-model CONCURRENT=1 tools/bench/run.sh name debug8 --agent-timeout-multiplier 3
+MODEL=other-model tools/bench/run.sh name debug8 --agent-timeout-multiplier 3
 AGENT=opencode tools/bench/run.sh debug8-opencode debug8   # another harness, same model
 ```
 
@@ -115,7 +122,10 @@ it as a timeline.
 - **Wall-clock timeouts.** Terminal-Bench times the agent in seconds, not
   tokens, so a slower machine scores lower with the same harness. On a Mac
   with two agents at once and 40–70k-token contexts generation runs at
-  15–30 tokens/s, against ~100 for a short single request. For harness
+  15–30 tokens/s, against ~100 for a short single request: the two share
+  the server's generation for little more throughput in all, and one's
+  prompt processing stalls the other. `run.sh` therefore runs one trial at
+  a time unless `CONCURRENT` says otherwise. For harness
   comparisons run with `--agent-timeout-multiplier` and also report the 1×
   score; say which one a number is.
 - **Slow mirrors.** Without `mirror.sh serve`, verifiers time out or fail
@@ -142,6 +152,9 @@ it as a timeline.
   of tokens in one turn (12 minutes with no output, or up to OMLX's
   32768-token cap, `stop` = `length`). One such turn uses up a task's whole
   time; `trace` shows it as a long gap after the last tool result.
+  termide asks again without reasoning when a reply reasoned to the limit;
+  `REASONING_BUDGET=12000` cuts such a call earlier, and `trace` marks it
+  `✂ reasoning ran past its budget`.
 - **Old builds log less.** Builds before `usage_total` report only the last
   turn's tokens and no tool outputs or times, so their token column and
   `trace` stay blank.

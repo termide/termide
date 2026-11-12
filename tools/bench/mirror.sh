@@ -68,6 +68,8 @@ case "${1:-}" in
   fetch) fetch ;;
   # OrbStack forwards host.docker.internal to the host's loopback, so the
   # mirror need not be seen from the network. (Elsewhere: MIRROR_BIND.)
-  serve) exec python3 -m http.server "$port" --bind "${MIRROR_BIND:-127.0.0.1}" --directory "$mirror" ;;
+  # Tasks also pin packages and versions the mirror lacks: mirror_server.py
+  # takes those from PyPI and GitHub.
+  serve) exec python3 -I "$bench/mirror_server.py" "$mirror" "$port" "${MIRROR_BIND:-127.0.0.1}" ;;
   *) sed -n '2,12p' "$0" >&2; exit 2 ;;
 esac
