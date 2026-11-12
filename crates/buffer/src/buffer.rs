@@ -7,6 +7,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use super::{Action, Cursor, History};
 use crate::edit_log::{EditLog, EditRevision, SyntaxEdit};
+use crate::folds::{Fold, Folds};
 use crate::line_marks::{shift_marks, LineEdit};
 use crate::LineEnding;
 
@@ -59,6 +60,10 @@ pub struct TextBuffer {
     line_marks: BTreeSet<usize>,
     /// Incremented whenever `line_marks` changes.
     line_marks_version: u64,
+    /// Folded line ranges; they move with edits like the line marks.
+    folds: Folds,
+    /// Incremented whenever `folds` changes.
+    folds_version: u64,
     /// Recent edits in byte/point terms, for incremental syntax parsing.
     edit_log: EditLog,
 }
@@ -78,6 +83,8 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            folds: Folds::default(),
+            folds_version: 0,
             edit_log: EditLog::new(),
         }
     }
@@ -96,6 +103,8 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            folds: Folds::default(),
+            folds_version: 0,
             edit_log: EditLog::new(),
         }
     }
@@ -115,6 +124,8 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            folds: Folds::default(),
+            folds_version: 0,
             edit_log: EditLog::new(),
         }
     }
@@ -150,6 +161,8 @@ impl TextBuffer {
             lsp_needs_full_sync: false,
             line_marks: BTreeSet::new(),
             line_marks_version: 0,
+            folds: Folds::default(),
+            folds_version: 0,
             edit_log: EditLog::new(),
         })
     }
@@ -315,7 +328,7 @@ impl TextBuffer {
     /// the pre-edit document, which is what a `didChange` content change
     /// means.
     fn record_change(&mut self, chars: std::ops::Range<usize>, text: &str) {
-        if !self.line_marks.is_empty() {
+        if !self.line_marks.is_empty() || !self.folds.is_empty() {
             self.shift_line_marks(chars.clone(), text);
         }
         self.edit_log.record(&self.rope, chars.clone(), text);
@@ -338,8 +351,11 @@ impl TextBuffer {
             // Count breaks the way the rope does (CR, LS, PS... too).
             inserted_breaks: ropey::str_utils::byte_to_line_idx(text, text.len()),
         };
-        if shift_marks(&mut self.line_marks, edit) {
+        if !self.line_marks.is_empty() && shift_marks(&mut self.line_marks, edit) {
             self.line_marks_version += 1;
+        }
+        if self.folds.shift(edit) {
+            self.folds_version += 1;
         }
     }
 
@@ -424,6 +440,93 @@ impl TextBuffer {
     /// moved them.
     pub fn line_marks_version(&self) -> u64 {
         self.line_marks_version
+    }
+
+    /// The folds, sorted by header line; nested folds included.
+    pub fn folds(&self) -> &[Fold] {
+        self.folds.all()
+    }
+
+    /// The fold headed by `line`.
+    pub fn fold_at(&self, line: usize) -> Option<Fold> {
+        self.folds.at(line)
+    }
+
+    /// Fold `start..=end`: `start` stays on screen, the lines after it hide.
+    /// Returns whether anything changed; an empty range or one past the end
+    /// of the text folds nothing.
+    pub fn add_fold(&mut self, start: usize, end: usize) -> bool {
+        let end = end.min(self.line_count().saturating_sub(1));
+        let changed = self.folds.add(Fold { start, end });
+        if changed {
+            self.folds_version += 1;
+        }
+        changed
+    }
+
+    /// Unfold the fold headed by `start`.
+    pub fn remove_fold(&mut self, start: usize) -> bool {
+        let changed = self.folds.remove(start);
+        if changed {
+            self.folds_version += 1;
+        }
+        changed
+    }
+
+    /// Unfold every fold that hides `line`, so it shows.
+    pub fn reveal_line(&mut self, line: usize) -> bool {
+        let changed = self.folds.reveal(line);
+        if changed {
+            self.folds_version += 1;
+        }
+        changed
+    }
+
+    /// Unfold everything.
+    pub fn clear_folds(&mut self) -> bool {
+        let changed = self.folds.clear();
+        if changed {
+            self.folds_version += 1;
+        }
+        changed
+    }
+
+    /// Whether a fold hides `line`.
+    pub fn is_line_hidden(&self, line: usize) -> bool {
+        self.folds.is_hidden(line)
+    }
+
+    /// `line` when it shows, else the first line after the folded run
+    /// hiding it (which may be past the end of the text).
+    pub fn visible_at_or_after(&self, line: usize) -> usize {
+        self.folds.visible_at_or_after(line)
+    }
+
+    /// `line` when it shows, else the header of the fold hiding it.
+    pub fn visible_at_or_before(&self, line: usize) -> usize {
+        self.folds.visible_at_or_before(line)
+    }
+
+    /// Hidden lines before `line`.
+    pub fn hidden_before(&self, line: usize) -> usize {
+        self.folds.hidden_before(line)
+    }
+
+    /// The `index`-th line that shows, 0-based.
+    pub fn line_at_visible_index(&self, index: usize) -> usize {
+        self.folds.line_at_visible_index(index)
+    }
+
+    /// Lines that show: the line count less the hidden lines.
+    pub fn visible_line_count(&self) -> usize {
+        let count = self.line_count();
+        count - self.folds.hidden_before(count)
+    }
+
+    /// Incremented whenever the folds change, by a fold, an unfold or an
+    /// edit that moved or dropped them.
+    pub fn folds_version(&self) -> u64 {
+        self.folds_version
     }
 
     /// Get all text

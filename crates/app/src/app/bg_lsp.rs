@@ -185,6 +185,16 @@ impl App {
                     }
                 }
 
+                // A fold from the menu asks here; the answer, or the wait
+                // running out, folds.
+                if editor.take_folding_request() {
+                    editor.request_folding_ranges(self.state.lsp_manager.as_ref());
+                    self.state.needs_redraw = true;
+                }
+                if editor.poll_folding_ranges() {
+                    self.state.needs_redraw = true;
+                }
+
                 // Poll for references response (Shift+F12)
                 if let Some(locations) = editor.poll_references() {
                     let ref_locations: Vec<termide_core::ReferenceLocation> = locations

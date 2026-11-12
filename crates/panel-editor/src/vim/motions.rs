@@ -77,10 +77,11 @@ pub fn execute_motion(
             }
         }
         VimMotion::Down => {
-            let max_line = buffer.line_count().saturating_sub(1);
+            // A fold counts as one line, as in Vim.
             for _ in 0..count {
-                if new_cursor.line < max_line {
-                    new_cursor.line += 1;
+                let next = buffer.visible_at_or_after(new_cursor.line + 1);
+                if next < buffer.line_count() {
+                    new_cursor.line = next;
                 }
             }
             clamp_column(&mut new_cursor, buffer);
@@ -88,7 +89,7 @@ pub fn execute_motion(
         VimMotion::Up => {
             for _ in 0..count {
                 if new_cursor.line > 0 {
-                    new_cursor.line -= 1;
+                    new_cursor.line = buffer.visible_at_or_before(new_cursor.line - 1);
                 }
             }
             clamp_column(&mut new_cursor, buffer);

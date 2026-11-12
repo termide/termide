@@ -1,0 +1,47 @@
+# Folding in the editor (doc/en/editor.md): Alt+, folds the block around the
+# cursor by its indentation (no language server runs here), the arrows step
+# over it, a search landing inside opens it, and the panel menu folds and
+# unfolds everything.
+project empty
+start
+run "printf 'fn outer() {\n    let a = 1;\n    if a {\n        needle();\n    }\n}\nfn tail() {\n    done();\n}\n' > code.rs"
+wait "code.rs"
+key End F4
+wait "needle"
+key Ctrl+Home
+
+# The block under the first line folds to it.
+key Alt+,
+wait "⋯ 4 lines"
+expect "▸"
+expect-not "needle"
+snapshot folded
+key Down
+wait "Pos: 6:1"
+key Up
+wait "Pos: 1:1"
+
+# A search for a hidden line opens the fold.
+key Ctrl+F
+type "needle"
+wait "Pos: 4:"
+expect "needle();"
+expect-not "⋯ 4 lines"
+key Esc Ctrl+Home
+wait "Pos: 1:1"
+
+# The menu folds every block, then unfolds them.
+key Alt+K
+wait "Fold all"
+expect-not "Unfold all"
+key Enter
+wait "⋯ 4 lines"
+expect "⋯ 1 line "
+expect-not "needle"
+snapshot all-folded
+key Alt+K
+wait "Unfold all"
+key Down Enter
+wait "needle"
+expect-not "⋯"
+quit --force

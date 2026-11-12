@@ -18,6 +18,7 @@ use termide_theme::Theme;
 pub mod context;
 pub mod cursor_renderer;
 pub mod deletion_markers;
+mod fold_marks;
 pub mod highlight_renderer;
 pub mod inline_diff;
 pub mod line_rendering;

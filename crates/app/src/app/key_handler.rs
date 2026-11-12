@@ -229,6 +229,12 @@ impl App {
                     }
                 }
 
+                // A fold waits on the server's folding ranges.
+                if editor.take_folding_request() {
+                    editor.request_folding_ranges(self.state.lsp_manager.as_ref());
+                }
+                editor.poll_folding_ranges();
+
                 // Handle code-action request (Alt+Enter)
                 if editor.take_code_action_request() {
                     if let Some(ref lsp_manager) = self.state.lsp_manager {

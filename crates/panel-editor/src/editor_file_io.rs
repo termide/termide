@@ -122,6 +122,8 @@ impl Editor {
             self.sync_breakpoints();
             self.buffer = TextBuffer::from_file(&path)?;
             self.reload_breakpoints();
+            // The new buffer has no folds; ranges asked of the old one are stale.
+            self.folding = Default::default();
             // The server still holds the pre-reload text and the fresh buffer
             // has no ranges to describe the difference, so ask for a whole
             // document on the next sync and make sure one happens.

@@ -284,6 +284,14 @@ impl Editor {
         };
 
         if gutter_click {
+            // The gutter's last cell of a fold's header holds its `▸`: a click
+            // there unfolds it.
+            if !is_virtual_line
+                && mouse.column + 1 == content_x
+                && self.buffer.remove_fold(buffer_line)
+            {
+                return vec![PanelEvent::NeedsRedraw];
+            }
             if !is_virtual_line && buffer_line < self.buffer.line_count() {
                 self.toggle_breakpoint_at(buffer_line);
                 return vec![PanelEvent::NeedsRedraw];

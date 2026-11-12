@@ -7,24 +7,50 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::word_boundary;
 
-/// Move cursor up by one line. The column is the caller's to settle (see
-/// `Editor::begin_vertical_move`).
-pub(crate) fn move_up(cursor: &mut Cursor) {
-    cursor.move_up(1);
+/// Move cursor up by one line that shows, over a fold. The column is the
+/// caller's to settle (see `Editor::begin_vertical_move`).
+pub(crate) fn move_up(cursor: &mut Cursor, buffer: &TextBuffer) {
+    if cursor.line > 0 {
+        cursor.line = buffer.visible_at_or_before(cursor.line - 1);
+    }
 }
 
-/// Move cursor down by one line. The column is the caller's to settle (see
-/// `Editor::begin_vertical_move`).
+/// Move cursor down by one line that shows, over a fold. The column is the
+/// caller's to settle (see `Editor::begin_vertical_move`).
 pub(crate) fn move_down(cursor: &mut Cursor, buffer: &TextBuffer) {
-    let max_line = buffer.line_count().saturating_sub(1);
-    cursor.move_down(1, max_line);
+    let next = buffer.visible_at_or_after(cursor.line + 1);
+    if next < buffer.line_count() {
+        cursor.line = next;
+    }
+}
+
+/// After a move that may have crossed into the next or previous line: a
+/// cursor that went into a fold goes past it, to the start of the line after
+/// it or the end of its header; with no line after it, back to `from`.
+fn step_over_fold(cursor: &mut Cursor, from: Cursor, buffer: &TextBuffer) {
+    if !buffer.is_line_hidden(cursor.line) {
+        return;
+    }
+    if cursor.line > from.line {
+        let next = buffer.visible_at_or_after(cursor.line);
+        if next < buffer.line_count() {
+            *cursor = Cursor::at(next, 0);
+        } else {
+            *cursor = from;
+        }
+    } else {
+        let header = buffer.visible_at_or_before(cursor.line);
+        *cursor = Cursor::at(header, buffer.line_len_graphemes(header));
+    }
 }
 
 /// Move cursor left by one character.
 ///
 /// Returns true to reset preferred column (horizontal movement).
 pub fn move_left(cursor: &mut Cursor, buffer: &TextBuffer) -> bool {
+    let from = *cursor;
     cursor.move_left(1);
+    step_over_fold(cursor, from, buffer);
 
     // Clamp cursor to line length
     if cursor.line < buffer.line_count() {
@@ -41,7 +67,9 @@ pub fn move_left(cursor: &mut Cursor, buffer: &TextBuffer) -> bool {
 pub fn move_right(cursor: &mut Cursor, buffer: &TextBuffer) -> bool {
     let line_len = buffer.line_len_graphemes(cursor.line);
     let max_line = buffer.line_count().saturating_sub(1);
+    let from = *cursor;
     cursor.move_right(1, line_len, max_line);
+    step_over_fold(cursor, from, buffer);
     false // Reset preferred column
 }
 
@@ -94,10 +122,10 @@ pub fn move_word_forward(cursor: &mut Cursor, buffer: &TextBuffer) -> bool {
         }
     }
 
-    // No next word on current line — move to start of next line
-    let max_line = buffer.line_count().saturating_sub(1);
-    if cursor.line < max_line {
-        cursor.line += 1;
+    // No next word on current line — move to start of next line that shows
+    let next = buffer.visible_at_or_after(cursor.line + 1);
+    if next < buffer.line_count() {
+        cursor.line = next;
         cursor.column = 0;
     } else {
         // At last line — move to end
@@ -126,7 +154,7 @@ pub fn move_word_backward(cursor: &mut Cursor, buffer: &TextBuffer) -> bool {
 
     // No previous word on current line — move to end of previous line
     if cursor.line > 0 {
-        cursor.line -= 1;
+        cursor.line = buffer.visible_at_or_before(cursor.line - 1);
         cursor.column = buffer.line_len_graphemes(cursor.line);
     } else {
         cursor.column = 0;

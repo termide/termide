@@ -76,6 +76,9 @@ mod editor_breakpoints;
 #[path = "editor_changes.rs"]
 mod editor_changes;
 
+#[path = "editor_folding.rs"]
+mod editor_folding;
+
 #[cfg(test)]
 #[path = "core_tests.rs"]
 mod core_tests;
@@ -161,6 +164,11 @@ pub struct Editor {
     /// `line_marks_version` of the buffer last written to the breakpoint
     /// store, so only a change is written.
     breakpoints_synced: u64,
+
+    // === Folding ===
+    /// Ranges asked of the language server and a fold waiting on them; the
+    /// folds themselves live in the buffer.
+    pub(crate) folding: crate::folding::FoldingState,
 
     // === Stale-on-collapse optimization ===
     /// Whether panel is stale (collapsed, skipping background work)

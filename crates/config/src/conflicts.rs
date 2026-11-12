@@ -206,6 +206,10 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "editor", "unstage_change", &e.unstage_change);
     push(&mut out, "editor", "revert_change", &e.revert_change);
     push(&mut out, "editor", "send_to_agent", &e.send_to_agent);
+    push(&mut out, "editor", "fold", &e.fold);
+    push(&mut out, "editor", "unfold", &e.unfold);
+    push(&mut out, "editor", "fold_all", &e.fold_all);
+    push(&mut out, "editor", "unfold_all", &e.unfold_all);
 
     let f = &config.file_manager.keybindings;
     push(&mut out, "file_manager", "rename", &f.rename);

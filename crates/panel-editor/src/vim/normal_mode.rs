@@ -2,7 +2,7 @@
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
-use super::key_handler::{translate_cyrillic_key, InsertPosition, VimKeyResult};
+use super::key_handler::{translate_cyrillic_key, InsertPosition, VimFold, VimKeyResult};
 use super::motions::VimMotion;
 use super::operators::VimOperator;
 use super::state::VimState;
@@ -66,6 +66,20 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             }
             _ => VimKeyResult::Consumed,
         };
+    }
+
+    // Check for 'z' prefix (folds)
+    if !state.partial_keys.is_empty() && state.partial_keys[0] == 'z' {
+        state.clear_pending();
+        let fold = match key.code {
+            KeyCode::Char('a') => VimFold::Toggle,
+            KeyCode::Char('c') => VimFold::Close,
+            KeyCode::Char('o') => VimFold::Open,
+            KeyCode::Char('R') => VimFold::OpenAll,
+            KeyCode::Char('M') => VimFold::CloseAll,
+            _ => return VimKeyResult::Consumed,
+        };
+        return VimKeyResult::Fold(fold);
     }
 
     // Handle Ctrl+W (start panel navigation sequence)
@@ -321,6 +335,10 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
         // Document motions
         KeyCode::Char('g') => {
             state.push_partial_key('g');
+            VimKeyResult::Consumed
+        }
+        KeyCode::Char('z') => {
+            state.push_partial_key('z');
             VimKeyResult::Consumed
         }
         KeyCode::Char('G') => {

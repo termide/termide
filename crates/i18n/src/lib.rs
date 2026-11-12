@@ -243,8 +243,13 @@ pub trait Translation: Send + Sync {
     fn help_desc_prev_prompt(&self) -> &str;
     fn help_desc_next_prompt(&self) -> &str;
     fn help_desc_copy_command_output(&self) -> &str;
+    fn help_desc_fold(&self) -> &str;
+    fn help_desc_unfold(&self) -> &str;
+    fn help_desc_fold_all(&self) -> &str;
+    fn help_desc_unfold_all(&self) -> &str;
     fn terminal_no_command_output(&self) -> &str;
     fn terminal_command_output_copied(&self, lines: usize) -> String;
+    fn editor_folded_lines(&self, lines: usize) -> String;
     fn agent_mention_selection(&self) -> &str;
     fn agent_mention_term(&self) -> &str;
     fn agent_snippet_no_selection(&self) -> &str;

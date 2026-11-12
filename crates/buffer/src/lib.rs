@@ -6,6 +6,7 @@
 mod buffer;
 mod cursor;
 mod edit_log;
+mod folds;
 mod history;
 mod line_marks;
 mod search;
@@ -15,6 +16,7 @@ mod wrap;
 pub use buffer::{LspContentChange, TextBuffer};
 pub use cursor::{Cursor, Selection};
 pub use edit_log::{EditPoint, EditRevision, SyntaxEdit};
+pub use folds::Fold;
 pub use history::{Action, History};
 pub use search::SearchState;
 pub use viewport::Viewport;

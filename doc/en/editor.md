@@ -254,6 +254,28 @@ out. `send_to_agent` under `[editor.keybindings]` has no key by default. From
 the agent's side, `@selection` takes the same text; see the
 [agent](agent.md) page.
 
+## Folding
+
+`Alt+,` folds the innermost block around the cursor: its first line stays,
+with `▸` in the gutter and `⋯ N lines` after the text, and the lines under it
+are hidden. Pressed again, it folds the block around that one. `Alt+.` on a
+folded line opens it, as does a click on the `▸`. **Fold all** in the panel's
+`[≡]` menu (`Alt+K`) folds every block, and **Unfold all** opens them again;
+`fold_all` and `unfold_all` under `[editor.keybindings]` have no key by
+default. In Vim mode `zc`, `zo` and `za` fold, unfold and toggle the block at
+the cursor, `zM` folds everything and `zR` unfolds everything.
+
+The blocks come from the file's language server when it offers folding ranges
+and answers within half a second, and from the indentation otherwise: a line
+heads the lines below it that are indented deeper, up to the line that closes
+the block.
+
+The cursor, the arrows and `PageUp`/`PageDown` step over a folded block. When
+the cursor lands inside one — a search, a jump, a go-to-line — the fold opens.
+An edit inside a folded block opens it; an edit on its first line keeps it.
+A selection that spans a fold copies the hidden lines too. Folds are not
+saved: a file opens unfolded.
+
 ## Mouse Support
 
 - **Single click**: Set cursor to click position

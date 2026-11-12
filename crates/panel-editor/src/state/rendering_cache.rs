@@ -51,6 +51,9 @@ pub(crate) struct RenderingCache {
     cumulative_visual_rows: Vec<usize>,
     /// Whether cumulative cache is valid.
     cumulative_valid: bool,
+    /// The buffer's `folds_version` the cumulative cache counted folded
+    /// lines for: they take no rows.
+    folds_version: u64,
     /// Cached diagnostic rows per buffer line: line -> total diagnostic visual rows.
     diagnostic_rows_cache: HashMap<usize, usize>,
     /// Content width used to compute diagnostic rows cache.
@@ -85,6 +88,7 @@ impl RenderingCache {
             wrap_cache: HashMap::new(),
             cumulative_visual_rows: Vec::new(),
             cumulative_valid: false,
+            folds_version: 0,
             diagnostic_rows_cache: HashMap::new(),
             diagnostic_cache_width: 0,
             diagnostic_cache_valid: false,
@@ -210,12 +214,18 @@ impl RenderingCache {
         self.cumulative_visual_rows.reserve(line_count);
 
         let mut cumulative = 0usize;
+        self.folds_version = buffer.folds_version();
 
         let content_width = self.content_width;
         let use_smart_wrap = self.use_smart_wrap;
         let tab_size = self.tab_size;
 
         for line_idx in 0..line_count {
+            // A folded line takes no rows.
+            if buffer.is_line_hidden(line_idx) {
+                self.cumulative_visual_rows.push(cumulative);
+                continue;
+            }
             // Get visual rows from wrap cache, or compute and cache if missing
             // Validate cached data matches current width settings
             let visual_rows = if let Some(cached) = self.wrap_cache.get(&line_idx).filter(|c| {
@@ -293,6 +303,14 @@ impl RenderingCache {
             Some(self.cumulative_visual_rows[line - 1])
         } else {
             None
+        }
+    }
+
+    /// Drop the cumulative counts when the folds changed since they were made.
+    pub fn sync_folds(&mut self, folds_version: u64) {
+        if self.folds_version != folds_version {
+            self.folds_version = folds_version;
+            self.cumulative_valid = false;
         }
     }
 

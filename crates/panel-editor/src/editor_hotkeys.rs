@@ -53,6 +53,12 @@ pub(crate) fn build_editor_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("revert_change", &kb.revert_change);
     t.insert("send_to_agent", &kb.send_to_agent);
 
+    // Folding
+    t.insert("fold", &kb.fold);
+    t.insert("unfold", &kb.unfold);
+    t.insert("fold_all", &kb.fold_all);
+    t.insert("unfold_all", &kb.unfold_all);
+
     // Viewer: swap this text file to the hex viewer (shared viewer binding).
     t.insert("viewer_toggle_hex", &config.viewer.keybindings.toggle_hex);
     // Viewer: toggle this editor between view (read-only) and edit.

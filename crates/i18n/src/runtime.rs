@@ -402,6 +402,10 @@ impl Translation for RuntimeTranslation {
         help_desc_prev_prompt,
         help_desc_next_prompt,
         help_desc_copy_command_output,
+        help_desc_fold,
+        help_desc_unfold,
+        help_desc_fold_all,
+        help_desc_unfold_all,
         terminal_no_command_output,
         agent_mention_selection,
         agent_mention_term,
@@ -2239,6 +2243,14 @@ impl Translation for RuntimeTranslation {
         self.format(
             "terminal_command_output_copied",
             &[("lines", &lines.to_string())],
+        )
+    }
+
+    fn editor_folded_lines(&self, lines: usize) -> String {
+        let plural = self.pluralize(lines, "line");
+        self.format(
+            "editor_folded_lines",
+            &[("lines", &lines.to_string()), ("plural", plural)],
         )
     }
 

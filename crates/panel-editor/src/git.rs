@@ -310,8 +310,10 @@ pub fn build_virtual_lines_for_viewport(
     let mut virtual_lines = Vec::with_capacity(max_lines);
     let buffer_line_count = buffer.line_count();
 
-    // Start from viewport_top_line instead of 0
-    for line_idx in viewport_top_line..buffer_line_count {
+    // Start from viewport_top_line instead of 0; folded lines are passed
+    // over with whatever follows them.
+    let mut line_idx = buffer.visible_at_or_after(viewport_top_line);
+    while line_idx < buffer_line_count {
         if virtual_lines.len() >= max_lines {
             break;
         }
@@ -356,6 +358,7 @@ pub fn build_virtual_lines_for_viewport(
                 }
             }
         }
+        line_idx = buffer.visible_at_or_after(line_idx + 1);
     }
 
     virtual_lines

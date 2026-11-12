@@ -561,6 +561,22 @@ impl HelpGenerator {
                 description: t.help_desc_send_to_agent().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.fold),
+                description: t.help_desc_fold().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.unfold),
+                description: t.help_desc_unfold().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.fold_all),
+                description: t.help_desc_fold_all().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.unfold_all),
+                description: t.help_desc_unfold_all().to_string(),
+            },
+            HelpEntry {
                 keys: "Ctrl+←/→".to_string(),
                 description: t.help_desc_word_nav().to_string(),
             },

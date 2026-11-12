@@ -58,10 +58,27 @@ pub enum VimKeyResult {
     Redo,
     /// Panel navigation (Ctrl+w h/j/k/l).
     PanelNavigation(PanelDirection),
+    /// Fold command (za, zc, zo, zR, zM).
+    Fold(VimFold),
     /// Pass through to standard editor (for insert mode).
     PassThrough,
     /// Key not recognized.
     Unhandled,
+}
+
+/// A fold command of the `z` family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VimFold {
+    /// Toggle the fold at the cursor (za).
+    Toggle,
+    /// Fold the block at the cursor (zc).
+    Close,
+    /// Open the fold at the cursor (zo).
+    Open,
+    /// Open every fold (zR).
+    OpenAll,
+    /// Fold every block (zM).
+    CloseAll,
 }
 
 /// Position for entering insert mode.

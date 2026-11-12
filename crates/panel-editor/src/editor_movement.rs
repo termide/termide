@@ -38,7 +38,7 @@ impl Editor {
     pub(crate) fn move_cursor_up(&mut self) {
         self.begin_vertical_move();
         let display_col = self.input.preferred_column.unwrap_or(0);
-        cursor::physical::move_up(&mut self.cursor);
+        cursor::physical::move_up(&mut self.cursor, &self.buffer);
         self.land_in_display_column(display_col);
         self.clamp_cursor();
         self.end_vertical_move();
@@ -177,8 +177,8 @@ impl Editor {
         self.cursor = new_cursor;
         if should_scroll {
             // Use cached virtual line count for viewport scroll
-            self.viewport
-                .scroll_to_bottom(self.render_cache.virtual_line_count);
+            let total = self.render_cache.virtual_line_count;
+            self.in_visible_lines(|viewport| viewport.scroll_to_bottom(total));
         }
     }
 
@@ -294,10 +294,11 @@ impl Editor {
         let page_size = self.viewport.height;
         // A full page keeps the screen column; the jump to the document
         // start sets its own.
-        let keeps_column = self.cursor.line >= page_size;
+        let keeps_column = self.visible_index(self.cursor.line) >= page_size;
         self.begin_vertical_move();
         let display_col = self.input.preferred_column.unwrap_or(0);
-        let (should_scroll, scroll_amount) = cursor::jump::page_up(&mut self.cursor, page_size);
+        let (should_scroll, scroll_amount) =
+            cursor::jump::page_up(&mut self.cursor, &self.buffer, page_size);
         if keeps_column {
             self.land_in_display_column(display_col);
         } else {
@@ -306,7 +307,7 @@ impl Editor {
         self.clamp_cursor();
         self.end_vertical_move();
         if should_scroll {
-            self.viewport.scroll_up(scroll_amount);
+            self.in_visible_lines(|viewport| viewport.scroll_up(scroll_amount));
         }
     }
 
@@ -315,8 +316,13 @@ impl Editor {
         let page_size = self.viewport.height;
         // A full page keeps the screen column; the jump to the document end
         // sets its own.
-        let max_line = self.buffer.line_count().saturating_sub(1);
-        let keeps_column = max_line.saturating_sub(self.cursor.line) >= page_size;
+        let max_line = self
+            .buffer
+            .visible_at_or_before(self.buffer.line_count().saturating_sub(1));
+        let keeps_column = self
+            .visible_index(max_line)
+            .saturating_sub(self.visible_index(self.cursor.line))
+            >= page_size;
         self.begin_vertical_move();
         let display_col = self.input.preferred_column.unwrap_or(0);
         let (should_scroll, scroll_amount) =
@@ -330,8 +336,8 @@ impl Editor {
         self.end_vertical_move();
         if should_scroll {
             // Use cached virtual line count for viewport scroll (accounts for deletion markers)
-            self.viewport
-                .scroll_down(scroll_amount, self.render_cache.virtual_line_count);
+            let total = self.render_cache.virtual_line_count;
+            self.in_visible_lines(|viewport| viewport.scroll_down(scroll_amount, total));
         }
     }
 

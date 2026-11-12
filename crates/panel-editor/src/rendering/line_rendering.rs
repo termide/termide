@@ -803,6 +803,20 @@ pub fn render_content_no_wrap<H: LineHighlighter>(
                         current_match_style,
                         selection_style,
                     );
+                    if let Some(fold) = buffer.fold_at(*line_idx) {
+                        let width =
+                            termide_buffer::display_width(line_text, render_context.tab_size);
+                        super::fold_marks::render_fold_marks(
+                            buf,
+                            area,
+                            row,
+                            line_number_width,
+                            content_width,
+                            width.saturating_sub(viewport.left_column),
+                            fold.hidden_lines(),
+                            theme,
+                        );
+                    }
                 }
             }
             git::VirtualLine::DeletionMarker(_after_line_idx, deletion_count) => {

@@ -258,6 +258,11 @@ impl LspServer {
                         ..Default::default()
                     }),
                     definition: Some(lsp_types::GotoCapability::default()),
+                    // Folds cover whole lines here; ask for no column ranges.
+                    folding_range: Some(lsp_types::FoldingRangeClientCapabilities {
+                        line_folding_only: Some(true),
+                        ..Default::default()
+                    }),
                     synchronization: Some(lsp_types::TextDocumentSyncClientCapabilities {
                         dynamic_registration: Some(false),
                         will_save: Some(false),
@@ -423,6 +428,36 @@ impl LspServer {
             work_done_progress_params: Default::default(),
         };
         let _ = self.send_request::<Value>("workspace/executeCommand", params);
+    }
+
+    /// Whether the server answers `textDocument/foldingRange`.
+    pub fn supports_folding_range(&self) -> bool {
+        match self
+            .capabilities
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .and_then(|caps| caps.folding_range_provider.as_ref())
+        {
+            Some(lsp_types::FoldingRangeProviderCapability::Simple(enabled)) => *enabled,
+            Some(_) => true,
+            None => false,
+        }
+    }
+
+    /// Request the foldable ranges of a document.
+    pub fn folding_range(&self, uri: Uri) -> mpsc::Receiver<Option<Vec<lsp_types::FoldingRange>>> {
+        let params = lsp_types::FoldingRangeParams {
+            text_document: TextDocumentIdentifier { uri },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+
+        self.send_request("textDocument/foldingRange", params)
+            .unwrap_or_else(|_| {
+                let (_, rx) = mpsc::channel();
+                rx
+            })
     }
 
     /// Request hover at position

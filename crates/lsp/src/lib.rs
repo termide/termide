@@ -655,6 +655,21 @@ impl LspManager {
         self.apply_edit_rx.try_recv().ok()
     }
 
+    /// Request the foldable ranges of a file; `None` when no server for it
+    /// answers `textDocument/foldingRange`.
+    pub fn folding_range(
+        &self,
+        lang: &str,
+        file_path: &Path,
+    ) -> Option<mpsc::Receiver<Option<Vec<lsp_types::FoldingRange>>>> {
+        let server = self.get_server(lang, file_path)?;
+        if !server.supports_folding_range() {
+            return None;
+        }
+        let uri = path_to_uri(file_path)?;
+        Some(server.folding_range(uri))
+    }
+
     /// Request hover info at position
     pub fn hover(
         &self,

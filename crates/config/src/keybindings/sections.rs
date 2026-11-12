@@ -151,6 +151,13 @@ pub struct EditorKeybindings {
     // The selection into the agent's prompt; no default key, the panel menu
     // offers it while text is selected.
     pub send_to_agent: Option<KeyBinding>,
+
+    // Folding. Folding and unfolding everything have no default key: the
+    // panel menu offers them.
+    pub fold: Option<KeyBinding>,
+    pub unfold: Option<KeyBinding>,
+    pub fold_all: Option<KeyBinding>,
+    pub unfold_all: Option<KeyBinding>,
 }
 
 /// File manager keybindings (file_manager.keybindings section).
@@ -722,6 +729,12 @@ impl EditorKeybindings {
         // JetBrains' diff viewer steps through differences with F7.
         set_default!(next_change, "F7");
         set_default!(prev_change, "Shift+F7");
+
+        // VS Code's `Ctrl+Shift+[`/`]` reach an application only through
+        // the kitty keyboard protocol, and `Alt+[` arrives as `ESC [`, the
+        // start of an escape sequence: take the keys beside them.
+        set_default!(fold, "Alt+,");
+        set_default!(unfold, "Alt+.");
     }
 }
 

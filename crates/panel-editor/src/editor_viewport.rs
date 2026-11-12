@@ -71,6 +71,9 @@ impl Editor {
         );
 
         for line in start..end {
+            if self.buffer.is_line_hidden(line) {
+                continue;
+            }
             // Deletion markers (rendered between text and diagnostics).
             if show_git_diff {
                 if let Some(ref git_diff) = self.git.diff_cache {
@@ -256,6 +259,9 @@ impl Editor {
             // Fallback to O(n) loop if cumulative cache is not valid
             let mut rows = 0;
             for line in (self.viewport.top_line + 1)..self.cursor.line {
+                if self.buffer.is_line_hidden(line) {
+                    continue;
+                }
                 let line_visual_rows = word_wrap::get_visual_rows_cached(
                     &mut self.render_cache,
                     &self.buffer,
@@ -361,14 +367,15 @@ impl Editor {
                 remaining -= virtual_after_line;
             }
 
-            // Move to next line
-            self.viewport.top_line += 1;
+            // Move to the next line that shows
+            self.viewport.top_line = self.buffer.visible_at_or_after(self.viewport.top_line + 1);
             self.viewport.top_visual_row_offset = 0;
         }
 
         // Clamp to valid range
         if self.viewport.top_line >= self.buffer.line_count() {
-            self.viewport.top_line = self.buffer.line_count().saturating_sub(1);
+            let last = self.buffer.line_count().saturating_sub(1);
+            self.viewport.top_line = self.buffer.visible_at_or_before(last);
             self.viewport.top_visual_row_offset = 0;
         }
     }
@@ -386,7 +393,7 @@ impl Editor {
 
         if !self.config.word_wrap || content_width == 0 {
             // Fallback to buffer line scrolling
-            self.viewport.scroll_up(count);
+            self.in_visible_lines(|viewport| viewport.scroll_up(count));
             return;
         }
 
@@ -404,8 +411,9 @@ impl Editor {
                 // Scroll within current line
                 self.viewport.top_visual_row_offset -= 1;
             } else if self.viewport.top_line > 0 {
-                // Move to previous line's last visual row
-                self.viewport.top_line -= 1;
+                // Move to the last visual row of the previous line that shows
+                self.viewport.top_line =
+                    self.buffer.visible_at_or_before(self.viewport.top_line - 1);
                 let visual_rows = word_wrap::get_visual_rows_cached(
                     &mut self.render_cache,
                     &self.buffer,
@@ -437,8 +445,8 @@ impl Editor {
 
         if !self.config.word_wrap || content_width == 0 {
             // Fallback to buffer line scrolling
-            self.viewport
-                .scroll_down(count, self.render_cache.virtual_line_count);
+            let total = self.render_cache.virtual_line_count;
+            self.in_visible_lines(|viewport| viewport.scroll_down(count, total));
             return;
         }
 
@@ -467,9 +475,10 @@ impl Editor {
             if self.viewport.top_visual_row_offset + 1 < visual_rows {
                 // Scroll within current line
                 self.viewport.top_visual_row_offset += 1;
-            } else if self.viewport.top_line + 1 < line_count {
-                // Move to next line
-                self.viewport.top_line += 1;
+            } else if self.buffer.visible_at_or_after(self.viewport.top_line + 1) < line_count {
+                // Move to the next line that shows
+                self.viewport.top_line =
+                    self.buffer.visible_at_or_after(self.viewport.top_line + 1);
                 self.viewport.top_visual_row_offset = 0;
             } else {
                 // Already at bottom
@@ -553,7 +562,9 @@ impl Editor {
                 self.calculate_last_visible_buffer_line(content_height)
             } else {
                 // Without word wrap, it's straightforward
-                (self.viewport.top_line + content_height - 1)
+                let index = self.visible_index(self.viewport.top_line) + content_height - 1;
+                self.buffer
+                    .line_at_visible_index(index)
                     .min(self.buffer.line_count().saturating_sub(1))
             };
 
@@ -600,7 +611,7 @@ impl Editor {
         }
 
         visual_rows_remaining -= rows_in_first_line;
-        current_line += 1;
+        current_line = self.buffer.visible_at_or_after(current_line + 1);
 
         // Continue through subsequent lines
         while current_line < line_count && visual_rows_remaining > 0 {
@@ -620,16 +631,18 @@ impl Editor {
             }
 
             visual_rows_remaining -= line_visual_rows;
-            current_line += 1;
+            current_line = self.buffer.visible_at_or_after(current_line + 1);
         }
 
         // Return last line if we've gone past the end
-        line_count.saturating_sub(1)
+        self.buffer
+            .visible_at_or_before(line_count.saturating_sub(1))
     }
 
     /// Get the total count of virtual lines (real buffer lines + deletion marker lines + diagnostics + word wrap)
     /// This is used for viewport calculations to account for deletion markers, diagnostics, and word wrapping
     pub(crate) fn virtual_line_count(&mut self, config: &Config) -> usize {
+        self.render_cache.sync_folds(self.buffer.folds_version());
         // Count diagnostic virtual lines
         let diagnostic_line_count = self.lsp.diagnostics.len();
 
@@ -660,8 +673,8 @@ impl Editor {
             return total_visual_rows + deletion_markers;
         }
 
-        // No word wrap - use buffer lines + deletion markers + diagnostics
-        let buffer_line_count = self.buffer.line_count();
+        // No word wrap - use the lines that show + deletion markers + diagnostics
+        let buffer_line_count = self.buffer.visible_line_count();
         let deletion_marker_count = if config.editor.show_git_diff {
             self.git
                 .diff_cache

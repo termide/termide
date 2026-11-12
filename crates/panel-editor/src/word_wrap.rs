@@ -194,7 +194,7 @@ pub fn visual_row_to_buffer_position_with_diagnostics(
                 current_visual_row += 1;
             }
 
-            line_idx += 1;
+            line_idx = buffer.visible_at_or_after(line_idx + 1);
         }
 
         let last_line = buffer.line_count().saturating_sub(1);
@@ -275,7 +275,7 @@ pub fn visual_row_to_buffer_position_with_diagnostics(
             current_visual_row += 1;
         }
 
-        line_idx += 1;
+        line_idx = buffer.visible_at_or_after(line_idx + 1);
     }
 
     // If we've exhausted all lines, return the last line
@@ -546,9 +546,9 @@ pub(crate) fn step_up(
     if line == 0 {
         return None;
     }
-    // The last visual row of the previous line, where the cursor may sit at
-    // the end of the line.
-    let prev = line - 1;
+    // The last visual row of the previous line that shows, where the cursor
+    // may sit at the end of the line.
+    let prev = buffer.visible_at_or_before(line - 1);
     let (prev_wraps, prev_len) = rows(prev);
     let (start, end) = get_visual_row_bounds(prev_wraps.len(), &prev_wraps, prev_len);
     let col = column_at_row_offset(
@@ -602,10 +602,10 @@ pub(crate) fn step_down(
         );
         return Some((line, col));
     }
-    if line + 1 >= buffer.line_count() {
+    let next = buffer.visible_at_or_after(line + 1);
+    if next >= buffer.line_count() {
         return None;
     }
-    let next = line + 1;
     let (next_wraps, next_len) = rows(next);
     let (start, end) = get_visual_row_bounds(0, &next_wraps, next_len);
     let col = column_at_row_offset(
@@ -829,7 +829,7 @@ pub(crate) fn visual_row_to_buffer_position_cached(
         }
         current_visual_row += diag_row_count;
 
-        line_idx += 1;
+        line_idx = buffer.visible_at_or_after(line_idx + 1);
     }
 
     // If we've exhausted all lines, return the last line

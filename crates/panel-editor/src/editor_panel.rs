@@ -22,9 +22,9 @@ use termide_theme::Theme;
 
 use crate::keyboard;
 use crate::{
-    CLEAR_BREAKPOINTS_ACTION, CONFIGURE_DEBUG_ACTION, RESTART_LANGUAGE_SERVER_ACTION,
-    REVERT_CHANGE_ACTION, SEND_TO_AGENT_ACTION, STAGE_CHANGE_ACTION, START_DEBUG_ACTION,
-    UNSTAGE_CHANGE_ACTION,
+    CLEAR_BREAKPOINTS_ACTION, CONFIGURE_DEBUG_ACTION, FOLD_ALL_ACTION,
+    RESTART_LANGUAGE_SERVER_ACTION, REVERT_CHANGE_ACTION, SEND_TO_AGENT_ACTION,
+    STAGE_CHANGE_ACTION, START_DEBUG_ACTION, UNFOLD_ALL_ACTION, UNSTAGE_CHANGE_ACTION,
 };
 
 use super::{build_editor_hotkey_table, Editor};
@@ -400,6 +400,13 @@ impl Panel for Editor {
                 SEND_TO_AGENT_ACTION.into(),
             ));
         }
+        items.push((t.help_desc_fold_all().to_string(), FOLD_ALL_ACTION.into()));
+        if self.has_folds() {
+            items.push((
+                t.help_desc_unfold_all().to_string(),
+                UNFOLD_ALL_ACTION.into(),
+            ));
+        }
         items.extend([
             (
                 t.menu_view_as_diagram().to_string(),
@@ -489,6 +496,14 @@ impl Panel for Editor {
             UNSTAGE_CHANGE_ACTION => self.unstage_change(),
             REVERT_CHANGE_ACTION => self.revert_change(),
             SEND_TO_AGENT_ACTION => self.send_to_agent(),
+            FOLD_ALL_ACTION => {
+                self.fold_all();
+                vec![PanelEvent::NeedsRedraw]
+            }
+            UNFOLD_ALL_ACTION => {
+                self.unfold_all();
+                vec![PanelEvent::NeedsRedraw]
+            }
             RESTART_LANGUAGE_SERVER_ACTION => match self.file_path() {
                 Some(file) => vec![PanelEvent::RestartLanguageServer {
                     file: file.to_path_buf(),
@@ -941,6 +956,24 @@ impl Editor {
         }
         if self.hotkeys.matches("send_to_agent", &key) {
             return self.send_to_agent();
+        }
+        // Folding hides text without changing it: view mode and every Vim
+        // mode have it too.
+        if self.hotkeys.matches("fold", &key) {
+            self.fold();
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        if self.hotkeys.matches("unfold", &key) {
+            self.unfold();
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        if self.hotkeys.matches("fold_all", &key) {
+            self.fold_all();
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        if self.hotkeys.matches("unfold_all", &key) {
+            self.unfold_all();
+            return vec![PanelEvent::NeedsRedraw];
         }
 
         // Collect events from internal state

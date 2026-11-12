@@ -130,6 +130,10 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "unstage_change",
             "revert_change",
             "send_to_agent",
+            "fold",
+            "unfold",
+            "fold_all",
+            "unfold_all",
         ],
         2 => &[
             "rename",
@@ -297,7 +301,11 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             stage_change,
             unstage_change,
             revert_change,
-            send_to_agent
+            send_to_agent,
+            fold,
+            unfold,
+            fold_all,
+            unfold_all
         ),
         2 => kb_get!(
             config.file_manager.keybindings,
@@ -538,7 +546,11 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             stage_change,
             unstage_change,
             revert_change,
-            send_to_agent
+            send_to_agent,
+            fold,
+            unfold,
+            fold_all,
+            unfold_all
         ),
         2 => kb_set!(
             config.file_manager.keybindings,

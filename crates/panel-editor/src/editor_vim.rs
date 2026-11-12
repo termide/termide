@@ -12,8 +12,8 @@ impl Editor {
         result: crate::vim::VimKeyResult,
     ) -> Option<Vec<PanelEvent>> {
         use crate::vim::{
-            motions::execute_motion, operators, InsertPosition, PanelDirection, VimKeyResult,
-            VimMode,
+            motions::execute_motion, operators, InsertPosition, PanelDirection, VimFold,
+            VimKeyResult, VimMode,
         };
         use termide_core::VimPanelDirection;
 
@@ -312,6 +312,17 @@ impl Editor {
                     direction: vim_direction,
                 });
             }
+            VimKeyResult::Fold(fold) => match fold {
+                VimFold::Toggle => self.toggle_fold(),
+                VimFold::Close => self.fold(),
+                VimFold::Open => {
+                    self.unfold();
+                }
+                VimFold::OpenAll => {
+                    self.unfold_all();
+                }
+                VimFold::CloseAll => self.fold_all(),
+            },
             VimKeyResult::Consumed | VimKeyResult::PassThrough | VimKeyResult::Unhandled => {
                 // These are handled in handle_key
             }

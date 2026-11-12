@@ -55,6 +55,7 @@ impl Editor {
 
         self.viewport.resize(content_width, content_height);
 
+        self.settle_folds();
         let virtual_lines_total = self.virtual_line_count(config);
         self.render_cache.virtual_line_count = virtual_lines_total;
 
@@ -63,9 +64,7 @@ impl Editor {
             if self.config.word_wrap && content_width > 0 {
                 self.ensure_cursor_visible_word_wrap(content_height);
             } else {
-                let cursor = self.cursor_in_display_columns();
-                self.viewport
-                    .ensure_cursor_visible(&cursor, virtual_lines_total);
+                self.ensure_cursor_visible_no_wrap(virtual_lines_total);
             }
         }
 
@@ -226,7 +225,8 @@ impl Editor {
             // Deletion markers and diagnostic rows above the cursor push its
             // text down on screen; offset by them so the annotation lands on
             // the cursor's row, not the bare logical-line distance.
-            let row = (self.cursor.line - self.viewport.top_line)
+            let row = (self.visible_index(self.cursor.line)
+                - self.visible_index(self.viewport.top_line))
                 + self.count_virtual_rows_between(
                     self.viewport.top_line,
                     self.cursor.line,
@@ -269,6 +269,16 @@ impl Editor {
         buf.set_string(ann_x, line_y, &truncated, style);
     }
 
+    /// Scroll so the cursor shows, without word wrap: counted in lines that
+    /// show, so a fold above the cursor takes one row, not its length.
+    fn ensure_cursor_visible_no_wrap(&mut self, virtual_lines_total: usize) {
+        let cursor = self.cursor_in_display_columns();
+        let cursor = termide_buffer::Cursor::at(self.visible_index(cursor.line), cursor.column);
+        self.in_visible_lines(|viewport| {
+            viewport.ensure_cursor_visible(&cursor, virtual_lines_total)
+        });
+    }
+
     /// Render editor content
     pub(crate) fn render_content(
         &mut self,
@@ -308,6 +318,8 @@ impl Editor {
 
         self.viewport.resize(content_width, content_height);
 
+        // A fold gives way to the cursor that went into it.
+        self.settle_folds();
         // Compute and cache virtual line count for viewport calculations
         let virtual_lines_total = self.virtual_line_count(config);
         self.render_cache.virtual_line_count = virtual_lines_total;
@@ -319,9 +331,7 @@ impl Editor {
                 self.ensure_cursor_visible_word_wrap(content_height);
             } else {
                 // Standard mode: use physical line scrolling
-                let cursor = self.cursor_in_display_columns();
-                self.viewport
-                    .ensure_cursor_visible(&cursor, virtual_lines_total);
+                self.ensure_cursor_visible_no_wrap(virtual_lines_total);
             }
         }
 
@@ -368,7 +378,7 @@ impl Editor {
                 border_x,
                 area.y,
                 area.height,
-                self.viewport.top_line,
+                self.visible_index(self.viewport.top_line),
                 content_height,
                 virtual_lines_total,
                 &theme_colors,

@@ -12,7 +12,8 @@ use termide_highlight::LineHighlighter;
 use termide_theme::Theme;
 
 use super::{
-    context::RenderContext, cursor_renderer, deletion_markers, highlight_renderer, line_rendering,
+    context::RenderContext, cursor_renderer, deletion_markers, fold_marks, highlight_renderer,
+    line_rendering,
 };
 use crate::git;
 use crate::word_wrap::{get_line_wrap_points, WrapLayout};
@@ -86,6 +87,7 @@ pub fn render_content_word_wrap<H: LineHighlighter>(
             let mut grapheme_offset = 0;
             let mut wrap_idx = 0;
             let mut is_first_visual_row = skip_visual_rows == 0;
+            let first_row = visual_row;
 
             // Special handling for empty lines
             if line_len == 0 {
@@ -157,6 +159,24 @@ pub fn render_content_word_wrap<H: LineHighlighter>(
                     visual_row += 1;
                 }
             }
+
+            // A fold's marks go on its header's last row, once that is drawn.
+            if let Some(fold) = buffer.fold_at(line_idx) {
+                if visual_row > first_row && grapheme_offset >= line_len {
+                    let last_row_start = wrap_points.last().copied().unwrap_or(0);
+                    let last_row: String = line_text.graphemes(true).skip(last_row_start).collect();
+                    fold_marks::render_fold_marks(
+                        buf,
+                        area,
+                        visual_row - 1,
+                        line_number_width,
+                        content_width,
+                        termide_buffer::display_width(&last_row, tab_size),
+                        fold.hidden_lines(),
+                        theme,
+                    );
+                }
+            }
         }
 
         // Check for deletion markers after this line
@@ -216,7 +236,7 @@ pub fn render_content_word_wrap<H: LineHighlighter>(
             }
         }
 
-        line_idx += 1;
+        line_idx = buffer.visible_at_or_after(line_idx + 1);
     }
 
     // Render cursor — only when the panel is focused, so inactive editors
