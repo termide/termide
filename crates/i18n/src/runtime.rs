@@ -182,6 +182,24 @@ impl Translation for RuntimeTranslation {
         agent_model_unknown,
         agent_info_context_parts,
         agent_info_by_tool,
+        menu_ai_usage,
+        usage_title,
+        usage_scope_session,
+        usage_scope_project,
+        usage_scope_all,
+        usage_period_today,
+        usage_period_week,
+        usage_period_month,
+        usage_period_all,
+        usage_hint,
+        usage_sessions,
+        usage_by_day,
+        usage_by_month,
+        usage_by_agent,
+        usage_by_project,
+        usage_top_sessions,
+        usage_nothing,
+        usage_agent_unnamed,
         agent_context_system,
         agent_context_tools,
         agent_context_skills,
@@ -2577,6 +2595,13 @@ impl Translation for RuntimeTranslation {
 
     fn settings_kb_conflict_fmt(&self, key: &str, held: &str) -> String {
         self.format("settings_kb_conflict_fmt", &[("key", key), ("held", held)])
+    }
+
+    fn usage_counting_fmt(&self, done: usize, total: usize) -> String {
+        self.format(
+            "usage_counting_fmt",
+            &[("done", &done.to_string()), ("total", &total.to_string())],
+        )
     }
 
     fn time_minutes_ago(&self, count: usize) -> String {

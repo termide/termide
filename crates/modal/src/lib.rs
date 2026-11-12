@@ -49,6 +49,7 @@ pub mod rename_pattern;
 pub mod save_as;
 pub mod select;
 pub mod settings;
+pub mod usage;
 
 pub use bookmark_add::{BookmarkAddModal, BookmarkAddResult};
 pub use calendar::CalendarModal;
@@ -82,6 +83,7 @@ pub use rename_pattern::RenamePatternModal;
 pub use save_as::{SaveAsModal, SaveAsResult};
 pub use select::SelectModal;
 pub use settings::{ApiKeyChange, SettingsModal, SettingsResult, SettingsSave};
+pub use usage::{UsageLine, UsageModal, UsageScopeTab, UsageView};
 
 /// Active modal window enum.
 ///
@@ -134,6 +136,8 @@ pub enum ActiveModal {
     /// Database single-column filter modal
     DbFilter(Box<DbFilterModal>),
     DbRowEdit(Box<DbRowEditModal>),
+    /// The agents' usage window
+    Usage(Box<UsageModal>),
 }
 
 /// A modal's typed result as the [`ModalOutput`] every modal shares.
@@ -172,6 +176,7 @@ macro_rules! dispatch_modal {
             ActiveModal::Settings(m) => m.$method($($arg),*),
             ActiveModal::DbFilter(m) => m.$method($($arg),*),
             ActiveModal::DbRowEdit(m) => m.$method($($arg),*),
+            ActiveModal::Usage(m) => m.$method($($arg),*),
         }
     };
 }
@@ -204,6 +209,7 @@ macro_rules! dispatch_modal_erased {
             ActiveModal::Settings(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::DbFilter(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::DbRowEdit(m) => m.$method($($arg),*)?.map(erase_modal_result),
+            ActiveModal::Usage(m) => m.$method($($arg),*)?.map(erase_modal_result),
         }
     };
 }

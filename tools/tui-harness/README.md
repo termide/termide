@@ -94,7 +94,9 @@ alone for one an editor has; both need rust-analyzer on `PATH`), `delegate` (a b
 `[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
 to the mode worked in, past the ones `Shift+Tab` passes through) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in
-its system prompt, and a clean-context carry-out in a new session).
+its system prompt, and a clean-context carry-out in a new session) and
+`usage` (the usage window from `F3` and the AI menu: its scopes, a period,
+a session opened from its list).
 
 ## Writing one
 

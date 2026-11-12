@@ -59,7 +59,7 @@ impl Spender {
 
 /// A session's tokens by who spent them and by model. A model left empty is
 /// one the log does not tell (a subagent's, say).
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Spending {
     pub by: BTreeMap<Spender, Usage>,
     pub models: BTreeMap<String, Usage>,
@@ -73,6 +73,16 @@ impl Spending {
         }
         self.by.entry(by).or_default().add(usage);
         self.models.entry(model.to_string()).or_default().add(usage);
+    }
+
+    /// Count everything `other` spent too.
+    pub fn merge(&mut self, other: &Self) {
+        for (by, usage) in &other.by {
+            self.by.entry(*by).or_default().add(usage);
+        }
+        for (model, usage) in &other.models {
+            self.models.entry(model.clone()).or_default().add(usage);
+        }
     }
 
     /// Everything spent.
@@ -128,94 +138,199 @@ impl Spending {
     fn read(
         entries: &[Entry],
         start: usize,
-        mut delegates: Option<(&mut HashSet<PathBuf>, usize)>,
+        delegates: Option<(&mut HashSet<PathBuf>, usize)>,
     ) -> Self {
         let mut spending = Self::default();
-        // What the tasks said each delegate's log spent, a log carried on
-        // by several tasks counted once.
-        let mut delegated: BTreeMap<PathBuf, Usage> = BTreeMap::new();
-        // A summary runs on the model the session ran on at the time.
-        let mut model = String::new();
-        for (index, entry) in entries.iter().enumerate() {
-            // A model change before `start` still sets the model a later
-            // summary runs on.
-            if let EntryKind::ModelChange { model: changed, .. } = &entry.kind {
-                model.clone_from(changed);
-            }
-            if index < start {
-                continue;
-            }
-            match &entry.kind {
-                EntryKind::Message { message, .. } => match message {
-                    Message::Assistant(reply) => {
-                        let on = if reply.model.is_empty() {
-                            &model
-                        } else {
-                            &reply.model
-                        };
-                        spending.add(Spender::Main, on, &reply.usage);
-                    }
-                    Message::ToolResult(result) => {
-                        let log = delegates.as_ref().and_then(|_| delegate_log(result));
-                        match (result.spent(), log) {
-                            (spent, Some(log)) => delegated
-                                .entry(log)
-                                .or_default()
-                                .add(&spent.unwrap_or_default()),
-                            (Some(spent), None) => {
-                                spending.add(Spender::of_tool(&result.tool_name), "", &spent);
-                            }
-                            (None, None) => {}
-                        }
-                    }
-                    Message::User(_) => {}
-                },
-                EntryKind::Compaction {
-                    call: Some(call), ..
-                }
-                | EntryKind::CompactionFailed { call, .. } => {
-                    spending.add(Spender::Compaction, &model, &call.usage);
-                }
-                EntryKind::Spent {
-                    by,
-                    model: on,
-                    usage,
-                } => spending.add(*by, on, usage),
-                _ => {}
-            }
+        walk(entries, start, delegates, &mut |_, by, model, usage| {
+            spending.add(by, model, usage);
+        });
+        spending
+    }
+}
+
+/// What a log spent, hour by hour: the hours since the epoch, in UTC, each
+/// with what was spent in it, so a period is cut in local time when it is
+/// shown and a change of time zone does not spoil what was counted.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Timeline {
+    pub hours: BTreeMap<u64, Spending>,
+}
+
+impl Timeline {
+    /// [`Spending::with_subagents`] hour by hour: a subagent's turns in the
+    /// hours its own log dates them, what its task said beyond its log in
+    /// the hour of the task's result.
+    #[must_use]
+    pub fn with_subagents(entries: &[Entry], start: usize) -> Self {
+        Self::with_delegates(entries, start).0
+    }
+
+    /// [`Self::with_subagents`] and the delegates' logs it took in, at
+    /// every level, those gone too.
+    #[must_use]
+    pub fn with_delegates(entries: &[Entry], start: usize) -> (Self, HashSet<PathBuf>) {
+        let mut timeline = Self::default();
+        let mut seen = HashSet::new();
+        walk(
+            entries,
+            start,
+            Some((&mut seen, SUBAGENT_DEPTH)),
+            &mut |at, by, model, usage| timeline.add(at, by, model, usage),
+        );
+        (timeline, seen)
+    }
+
+    /// Count `usage` spent at `at` (millis) as `by`'s, on `model`.
+    pub fn add(&mut self, at: u64, by: Spender, model: &str, usage: &Usage) {
+        if usage.total() == 0 {
+            return;
         }
-        if let Some((seen, depth)) = delegates.as_mut() {
-            for (log, said) in delegated {
-                spending.add_delegate(&log, said, seen, *depth);
-            }
+        self.hours
+            .entry(at / MILLIS_PER_HOUR)
+            .or_default()
+            .add(by, model, usage);
+    }
+
+    /// Everything spent, whenever.
+    #[must_use]
+    pub fn spending(&self) -> Spending {
+        self.between(0, u64::MAX)
+    }
+
+    /// What was spent from `from` up to `until` (millis, `until` left out),
+    /// counted by the whole hour each spending fell in.
+    #[must_use]
+    pub fn between(&self, from: u64, until: u64) -> Spending {
+        let mut spending = Spending::default();
+        for (_, hour) in self
+            .hours
+            .range(from / MILLIS_PER_HOUR..until.div_ceil(MILLIS_PER_HOUR))
+        {
+            spending.merge(hour);
         }
         spending
     }
 
-    /// Count delegate log `log`, whose tasks said they spent `said`.
-    fn add_delegate(&mut self, log: &Path, said: Usage, seen: &mut HashSet<PathBuf>, depth: usize) {
-        let read = (depth > 0 && seen.insert(log.to_path_buf()))
-            .then(|| read_file(log).ok())
-            .flatten();
-        let Some((header, entries)) = read else {
-            self.add(Spender::Subagent, "", &said);
-            return;
-        };
-        let start = own_start(&header, &entries);
-        let theirs = Self::read(&entries, start, Some((seen, depth - 1)));
-        for (by, usage) in &theirs.by {
+    /// Whether nothing was spent.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.hours.is_empty()
+    }
+}
+
+/// Milliseconds in an hour, the step of a [`Timeline`].
+pub const MILLIS_PER_HOUR: u64 = 3_600_000;
+
+/// Who spent what at which time (millis), on which model.
+type Emit<'a> = dyn FnMut(u64, Spender, &str, &Usage) + 'a;
+
+/// Walk `entries` from index `start` on and tell `emit` each spending, as
+/// [`Spending::of_entries`] counts it; with `delegates`, the logs already
+/// read and the levels left, the subagents' logs are walked too.
+fn walk(
+    entries: &[Entry],
+    start: usize,
+    mut delegates: Option<(&mut HashSet<PathBuf>, usize)>,
+    emit: &mut Emit<'_>,
+) {
+    // What the tasks said each delegate's log spent, a log carried on by
+    // several tasks counted once, and when the last of them returned.
+    let mut delegated: BTreeMap<PathBuf, (Usage, u64)> = BTreeMap::new();
+    // A summary runs on the model the session ran on at the time.
+    let mut model = String::new();
+    for (index, entry) in entries.iter().enumerate() {
+        // A model change before `start` still sets the model a later
+        // summary runs on.
+        if let EntryKind::ModelChange { model: changed, .. } = &entry.kind {
+            model.clone_from(changed);
+        }
+        if index < start {
+            continue;
+        }
+        let at = entry.timestamp;
+        match &entry.kind {
+            EntryKind::Message { message, .. } => match message {
+                Message::Assistant(reply) => {
+                    let on = if reply.model.is_empty() {
+                        &model
+                    } else {
+                        &reply.model
+                    };
+                    emit(at, Spender::Main, on, &reply.usage);
+                }
+                Message::ToolResult(result) => {
+                    let log = delegates.as_ref().and_then(|_| delegate_log(result));
+                    match (result.spent(), log) {
+                        (spent, Some(log)) => {
+                            let (said, last) = delegated.entry(log).or_default();
+                            said.add(&spent.unwrap_or_default());
+                            *last = at;
+                        }
+                        (Some(spent), None) => {
+                            emit(at, Spender::of_tool(&result.tool_name), "", &spent);
+                        }
+                        (None, None) => {}
+                    }
+                }
+                Message::User(_) => {}
+            },
+            EntryKind::Compaction {
+                call: Some(call), ..
+            }
+            | EntryKind::CompactionFailed { call, .. } => {
+                emit(at, Spender::Compaction, &model, &call.usage);
+            }
+            EntryKind::Spent {
+                by,
+                model: on,
+                usage,
+            } => emit(at, *by, on, usage),
+            _ => {}
+        }
+    }
+    if let Some((seen, depth)) = delegates.as_mut() {
+        for (log, (said, at)) in delegated {
+            walk_delegate(&log, said, at, seen, *depth, emit);
+        }
+    }
+}
+
+/// Walk delegate log `log`, whose tasks said they spent `said`, the last of
+/// them returning at `at`: its turns count as the subagent's, and what the
+/// tasks said beyond the log as the subagent's on no known model.
+fn walk_delegate(
+    log: &Path,
+    said: Usage,
+    at: u64,
+    seen: &mut HashSet<PathBuf>,
+    depth: usize,
+    emit: &mut Emit<'_>,
+) {
+    let read = (depth > 0 && seen.insert(log.to_path_buf()))
+        .then(|| read_file(log).ok())
+        .flatten();
+    let Some((header, entries)) = read else {
+        emit(at, Spender::Subagent, "", &said);
+        return;
+    };
+    let start = own_start(&header, &entries);
+    let mut theirs = Usage::default();
+    walk(
+        &entries,
+        start,
+        Some((seen, depth - 1)),
+        &mut |when, by, model, usage| {
             let by = match by {
                 Spender::Main => Spender::Subagent,
-                other => *other,
+                other => other,
             };
-            self.by.entry(by).or_default().add(usage);
-        }
-        for (model, usage) in &theirs.models {
-            self.models.entry(model.clone()).or_default().add(usage);
-        }
-        let rest = said.less(&theirs.total());
-        self.add(Spender::Subagent, "", &rest);
-    }
+            if usage.total() > 0 {
+                theirs.add(usage);
+            }
+            emit(when, by, model, usage);
+        },
+    );
+    emit(at, Spender::Subagent, "", &said.less(&theirs));
 }
 
 /// The log of the delegate a task's `result` ran in, when it notes one.
@@ -372,6 +487,25 @@ mod tests {
         }
     }
 
+    /// A timeline keeps each spending in its hour, and a period takes the
+    /// hours it touches.
+    #[test]
+    fn a_timeline_cuts_periods_by_the_hour() {
+        let mut timeline = Timeline::default();
+        let hour = MILLIS_PER_HOUR;
+        timeline.add(10 * hour + 5, Spender::Main, "big", &spent(1, 0));
+        timeline.add(10 * hour + 9, Spender::Reviewer, "small", &spent(2, 0));
+        timeline.add(12 * hour, Spender::Main, "big", &spent(4, 0));
+        timeline.add(13 * hour, Spender::Main, "big", &Usage::default());
+        assert_eq!(timeline.hours.keys().collect::<Vec<_>>(), [&10, &12]);
+        assert_eq!(timeline.spending().total().input, 7);
+        assert_eq!(timeline.between(10 * hour, 11 * hour).total().input, 3);
+        assert_eq!(timeline.between(11 * hour, 13 * hour).total().input, 4);
+        assert_eq!(timeline.between(13 * hour, u64::MAX).total().input, 0);
+        let json = serde_json::to_string(&timeline).unwrap();
+        assert_eq!(serde_json::from_str::<Timeline>(&json).unwrap(), timeline);
+    }
+
     fn task_result(log: &Path, usage: Usage) -> Message {
         let Message::ToolResult(result) = result("task", usage) else {
             unreachable!()
@@ -425,6 +559,9 @@ mod tests {
         // The totals agree with what the results said.
         assert_eq!(deep.total(), spent(85, 8));
         assert_eq!(ours.spending().total(), spent(85, 8));
+        // Hour by hour it adds up the same.
+        let timeline = Timeline::with_subagents(ours.entries(), 0);
+        assert_eq!(timeline.spending(), deep);
 
         // A result that says nothing of what its subagent spent counts its
         // log, as the totals with the subagents do.

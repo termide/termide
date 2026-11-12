@@ -31,6 +31,8 @@ fn arrow_keys_recall_earlier_requests_and_bring_the_draft_back() {
     assert_eq!(format_tokens(262_144), "262k");
     assert_eq!(format_tokens(1_000_000), "1M");
     assert_eq!(format_tokens(1_250_000), "1.2M");
+    assert_eq!(format_tokens(2_770_209_854), "2.8B");
+    assert_eq!(format_tokens(3_000_000_000), "3B");
     assert_eq!(format_tokens(512), "512");
 }
 

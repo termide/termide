@@ -879,6 +879,24 @@ pub trait Translation: Send + Sync {
     fn agent_model_unknown(&self) -> &str;
     fn agent_info_context_parts(&self) -> &str;
     fn agent_info_by_tool(&self) -> &str;
+    fn menu_ai_usage(&self) -> &str;
+    fn usage_title(&self) -> &str;
+    fn usage_scope_session(&self) -> &str;
+    fn usage_scope_project(&self) -> &str;
+    fn usage_scope_all(&self) -> &str;
+    fn usage_period_today(&self) -> &str;
+    fn usage_period_week(&self) -> &str;
+    fn usage_period_month(&self) -> &str;
+    fn usage_period_all(&self) -> &str;
+    fn usage_hint(&self) -> &str;
+    fn usage_sessions(&self) -> &str;
+    fn usage_by_day(&self) -> &str;
+    fn usage_by_month(&self) -> &str;
+    fn usage_by_agent(&self) -> &str;
+    fn usage_by_project(&self) -> &str;
+    fn usage_top_sessions(&self) -> &str;
+    fn usage_nothing(&self) -> &str;
+    fn usage_agent_unnamed(&self) -> &str;
     fn agent_context_system(&self) -> &str;
     fn agent_context_tools(&self) -> &str;
     fn agent_context_skills(&self) -> &str;
@@ -1636,6 +1654,7 @@ pub trait Translation: Send + Sync {
     fn settings_kb_hint_capturing_replace(&self) -> &str;
     fn settings_kb_key_taken_fmt(&self, key: &str) -> String;
     fn settings_kb_conflict_fmt(&self, key: &str, held: &str) -> String;
+    fn usage_counting_fmt(&self, done: usize, total: usize) -> String;
 
     // Sessions
     fn projects_title(&self) -> &str;

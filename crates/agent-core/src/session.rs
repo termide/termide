@@ -27,7 +27,7 @@ use crate::message::{now_millis, Message, StopReason, Usage, UserMessage};
 use crate::permissions::Mode;
 use crate::provider::ThinkingLevel;
 use crate::prune::{prune_by, prune_to_decisions};
-use crate::spend::{Spender, Spending};
+use crate::spend::{Spender, Spending, Timeline};
 
 /// Bumped when a line shape changes incompatibly.
 pub const SESSION_FORMAT_VERSION: u32 = 1;
@@ -1762,6 +1762,13 @@ impl Session {
     #[must_use]
     pub fn spending_with_subagents(&self) -> Spending {
         Spending::with_subagents(&self.entries, self.own_start())
+    }
+
+    /// [`Self::spending_with_subagents`] hour by hour, and the delegates'
+    /// logs read for it; see [`Timeline::with_delegates`].
+    #[must_use]
+    pub fn timeline_with_delegates(&self) -> (Timeline, HashSet<PathBuf>) {
+        Timeline::with_delegates(&self.entries, self.own_start())
     }
 
     /// The entries this log wrote itself, after those a fork copied from its

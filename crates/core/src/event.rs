@@ -761,6 +761,10 @@ pub enum PanelEvent {
         rows: Vec<(String, String)>,
     },
 
+    /// Open the usage window on the panel's session: its summary as
+    /// key/value rows, beside what the project and every project spent.
+    ShowSessionUsage { rows: Vec<(String, String)> },
+
     /// Show error message
     ShowError(String),
 

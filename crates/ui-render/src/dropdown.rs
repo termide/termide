@@ -509,9 +509,10 @@ pub const PROJECTS_SUBMENU_CHANGE_ROOT: usize = 1;
 /// keys (`agents`/`sessions`/`skills`/`prompts`) are the contract the app's AI
 /// menu handler decodes; the `AI_SUBMENU_*` indices below address the rows.
 ///
-/// `browser` is whether the agents' web browser is shown in a window, `None`
-/// when there is no browser to show; with a value, a separator and a row
-/// keyed `browser` that switches it follow the sections.
+/// A separator and the row keyed `usage`, which opens the agents' usage
+/// window, follow the sections. `browser` is whether the agents' web
+/// browser is shown in a window, `None` when there is no browser to show;
+/// with a value, a row keyed `browser` that switches it comes last.
 pub fn get_ai_items(browser: Option<bool>) -> Vec<DropdownItem> {
     let t = i18n::t();
     let mut items = vec![
@@ -519,6 +520,8 @@ pub fn get_ai_items(browser: Option<bool>) -> Vec<DropdownItem> {
         DropdownItem::new(t.menu_ai_sessions(), "sessions").with_submenu(),
         DropdownItem::new(t.menu_ai_skills(), "skills").with_submenu(),
         DropdownItem::new(t.menu_ai_prompts(), "prompts").with_submenu(),
+        DropdownItem::separator(),
+        DropdownItem::new(t.menu_ai_usage(), AI_USAGE_KEY),
     ];
     if let Some(shown) = browser {
         let label = if shown {
@@ -526,7 +529,6 @@ pub fn get_ai_items(browser: Option<bool>) -> Vec<DropdownItem> {
         } else {
             t.menu_ai_show_browser()
         };
-        items.push(DropdownItem::separator());
         items.push(DropdownItem::new(label, AI_BROWSER_KEY));
     }
     items
@@ -534,6 +536,9 @@ pub fn get_ai_items(browser: Option<bool>) -> Vec<DropdownItem> {
 
 /// Key of the AI submenu row that shows or hides the agents' browser.
 pub const AI_BROWSER_KEY: &str = "browser";
+
+/// Key of the AI submenu row that opens the agents' usage window.
+pub const AI_USAGE_KEY: &str = "usage";
 
 /// Number of items in the AI submenu.
 pub const AI_SUBMENU_ITEM_COUNT: usize = 4;
@@ -1338,15 +1343,16 @@ mod menu_shortcut_tests {
     #[test]
     fn the_browser_row_follows_the_ai_sections_only_when_there_is_a_browser() {
         let plain = get_ai_items(None);
-        assert_eq!(plain.len(), AI_SUBMENU_ITEM_COUNT);
+        assert_eq!(plain.len(), AI_SUBMENU_ITEM_COUNT + 2);
+        assert!(plain[AI_SUBMENU_ITEM_COUNT].is_separator);
+        assert_eq!(plain[AI_SUBMENU_ITEM_COUNT + 1].key, AI_USAGE_KEY);
         let with_browser = get_ai_items(Some(false));
-        assert_eq!(with_browser.len(), AI_SUBMENU_ITEM_COUNT + 2);
-        assert!(with_browser[AI_SUBMENU_ITEM_COUNT].is_separator);
-        let row = &with_browser[AI_SUBMENU_ITEM_COUNT + 1];
+        assert_eq!(with_browser.len(), AI_SUBMENU_ITEM_COUNT + 3);
+        let row = &with_browser[AI_SUBMENU_ITEM_COUNT + 2];
         assert_eq!(row.key, AI_BROWSER_KEY);
         assert_ne!(
             row.label,
-            get_ai_items(Some(true))[AI_SUBMENU_ITEM_COUNT + 1].label
+            get_ai_items(Some(true))[AI_SUBMENU_ITEM_COUNT + 2].label
         );
         // The sections keep their indices.
         assert_eq!(with_browser[AI_SUBMENU_PROMPTS].key, "prompts");

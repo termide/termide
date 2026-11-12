@@ -1185,6 +1185,25 @@ plugins_none = "ไม่มีปลั๊กอินที่ติดตั�
 command_report_no_output = "(ไม่มีเอาต์พุต)"
 agent_unfinished_delegates_title = "แผงปิดลงท้งงานที่มอบหมายยังไม่เสร็จ ต่อพวกมันไหม"
 agent_strip_left_unfinished = "ยังไม่เสร็จ"
+menu_ai_usage = "การใช้งาน…"
+usage_title = "การใช้งานเอเจนต์"
+usage_scope_session = "เซสชันนี้"
+usage_scope_project = "โปรเจกต์"
+usage_scope_all = "ทุกโปรเจกต์"
+usage_period_today = "วันนี้"
+usage_period_week = "7 วัน"
+usage_period_month = "30 วัน"
+usage_period_all = "ทั้งหมด"
+usage_hint = "Tab ขอบเขต · ←→ ช่วงเวลา · ↑↓ เซสชัน · Enter เปิด · Esc ปิด"
+usage_sessions = "เซสชัน"
+usage_by_day = "รายวัน"
+usage_by_month = "รายเดือน"
+usage_by_agent = "ตามเอเจนต์"
+usage_by_project = "ตามโปรเจกต์"
+usage_top_sessions = "เซสชันที่ใช้มากที่สุด"
+usage_nothing = "ไม่มีการใช้ในช่วงนี้"
+usage_agent_unnamed = "(ไม่มีชื่อ)"
+
 [formats]
 projects_delete_fmt = "เลย์เอาต์ของ {path}"
 projects_open_elsewhere_fmt = "{path} เปิดอยู่ใน termide อื่น (pid {pid})"
@@ -1470,6 +1489,7 @@ debug_status_failed_fmt = "ล้มเหลว: {error}"
 command_name_taken_fmt = "มีคำสั่งชื่อ \"{name}\" อยู่แล้ว"
 settings_kb_key_taken_fmt = "{key} ผูกกับการนี้อยู่แล้ว"
 settings_kb_conflict_fmt = "{key} ผูกกับ {held} ด้วย"
+usage_counting_fmt = "กำลังนับบันทึกเซสชัน: {done} จาก {total}"
 
 [plurals]
 char = { one = "", other = "" }

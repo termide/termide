@@ -56,6 +56,7 @@ pub mod suggest;
 pub mod terminals;
 pub mod tool;
 pub mod tool_text;
+pub mod usage;
 
 pub use acp::{companion_tools, AcpConfig, AcpFlavor, ACP_PROVIDER, COMPANION_TOOLS, MODEL_OPTION};
 pub use agent::{
@@ -130,7 +131,7 @@ pub use session::{
     Timing,
 };
 pub use shell::{ShellOutput, ShellRunner};
-pub use spend::{Spender, Spending};
+pub use spend::{Spender, Spending, Timeline, MILLIS_PER_HOUR};
 pub use suggest::{
     format_interval, parse_interval, suggestion_channel, CommandSuggester, Suggestion,
     SuggestionEnvelope, SuggestionKind, SuggestionReply,

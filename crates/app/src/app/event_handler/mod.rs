@@ -181,6 +181,10 @@ impl App {
                 self.state.needs_redraw = true;
             }
 
+            PanelEvent::ShowSessionUsage { rows } => {
+                self.open_usage(Some(rows));
+            }
+
             PanelEvent::ShowError(message) => {
                 self.show_error_modal(message);
             }

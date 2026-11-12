@@ -1,6 +1,10 @@
 //! The session-info rows that break a session's tokens down: by who spent
-//! them, by model, what the cache served and what went on reasoning.
+//! them, by model, what the cache served and what went on reasoning; and the
+//! usage window's, for a project's sessions or every project's.
 
+use std::path::{Path, PathBuf};
+
+use termide_agent_core::usage::{UsagePeriod, UsageReport};
 use termide_agent_core::{ContextLoad, Spender, Spending, ToolLoad, Usage};
 
 use crate::{format_tokens, token_label};
@@ -38,6 +42,9 @@ pub(crate) struct Share {
     name: String,
     share: f64,
     figures: String,
+    /// How full its bar is, 0 to 1, when not its share: a day's against
+    /// the busiest day's, so a month of days does not draw empty bars.
+    bar: Option<f64>,
 }
 
 /// A breakdown: its parts, in the order shown.
@@ -65,6 +72,7 @@ fn shares(parts: Vec<(String, f64, String)>, of: f64) -> Shares {
             name,
             share: if of > 0.0 { weight / of } else { 0.0 },
             figures,
+            bar: None,
         })
         .collect()
 }
@@ -104,7 +112,8 @@ pub(crate) fn render(rows: Vec<(String, Shares)>) -> Vec<(String, String)> {
                 .iter()
                 .map(|part| {
                     #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-                    let filled = ((part.share * BAR as f64).round() as usize).min(BAR);
+                    let filled =
+                        ((part.bar.unwrap_or(part.share) * BAR as f64).round() as usize).min(BAR);
                     format!(
                         "{:<name_width$}  {}{}  {:>percent_width$}  {}",
                         part.name,
@@ -324,6 +333,142 @@ pub(crate) fn context_rows(
     rows
 }
 
+/// A line of the usage window: its key, its value, and for a session that
+/// can be opened here, its log.
+pub type UsageReportLine = (String, String, Option<PathBuf>);
+
+/// How long a session's label may be in the usage window.
+const SESSION_LABEL: usize = 48;
+
+/// The usage window's lines for `report`, over `period`: its totals, its
+/// breakdowns and the sessions that spent the most, those of the project
+/// keyed `here` with their logs to open them. With `all`, every project's,
+/// with a breakdown by project, each shown by its path, `home` as `~`.
+#[must_use]
+pub fn usage_report_lines(
+    report: &UsageReport,
+    period: UsagePeriod,
+    all: bool,
+    here: &Path,
+    home: Option<&Path>,
+) -> Vec<UsageReportLine> {
+    let t = termide_i18n::t();
+    let total = report.spending.total();
+    if report.sessions == 0 || total.total() == 0 {
+        return vec![(String::new(), t.usage_nothing().to_string(), None)];
+    }
+    let mut lines: Vec<UsageReportLine> = vec![
+        (
+            t.agent_info_tokens().into(),
+            token_label(total.uncached(), total.cache_read, total.output),
+            None,
+        ),
+        (t.usage_sessions().into(), report.sessions.to_string(), None),
+    ];
+    lines.extend(
+        spending_figures(&report.spending)
+            .into_iter()
+            .map(|(key, value)| (key, value, None)),
+    );
+    let of = weight(&total);
+    let mut rows = spending_rows(&report.spending, str::to_string);
+    let agents: Vec<(String, Usage)> = report
+        .agents
+        .iter()
+        .map(|(agent, usage)| {
+            let name = if agent.is_empty() {
+                t.usage_agent_unnamed().to_string()
+            } else {
+                agent.clone()
+            };
+            (name, *usage)
+        })
+        .collect();
+    rows.push((t.usage_by_agent().into(), usage_shares(agents, of)));
+    if all {
+        let projects: Vec<(String, Usage)> = report
+            .projects
+            .iter()
+            .map(|(key, usage)| (project_path(key, home), *usage))
+            .collect();
+        rows.push((t.usage_by_project().into(), usage_shares(projects, of)));
+    }
+    if !report.buckets.is_empty() {
+        let busiest = report
+            .buckets
+            .iter()
+            .map(|(_, usage)| weight(usage))
+            .fold(0.0, f64::max);
+        let parts = report
+            .buckets
+            .iter()
+            .map(|(label, usage)| {
+                let figures = if usage.total() == 0 {
+                    String::new()
+                } else {
+                    token_label(usage.uncached(), usage.cache_read, usage.output)
+                };
+                (label.clone(), weight(usage), figures)
+            })
+            .collect();
+        let mut parts = shares(parts, of);
+        for part in &mut parts {
+            part.bar = Some(if busiest > 0.0 {
+                part.share * of / busiest
+            } else {
+                0.0
+            });
+        }
+        let label = if period == UsagePeriod::All {
+            t.usage_by_month()
+        } else {
+            t.usage_by_day()
+        };
+        rows.push((label.into(), parts));
+    }
+    // The days come last, after the sessions: a month of them would push
+    // the sessions out of sight.
+    let mut rendered = render(rows);
+    let days = (!report.buckets.is_empty())
+        .then(|| rendered.pop())
+        .flatten();
+    lines.extend(rendered.into_iter().map(|(key, value)| (key, value, None)));
+    for (index, session) in report.top.iter().enumerate() {
+        let key = if index == 0 {
+            t.usage_top_sessions().to_string()
+        } else {
+            String::new()
+        };
+        let mut label = session.label.clone();
+        if label.chars().count() > SESSION_LABEL {
+            label = label.chars().take(SESSION_LABEL - 1).collect::<String>() + "…";
+        }
+        let usage = &session.usage;
+        let mut value = format!(
+            "{label:<SESSION_LABEL$}  {}",
+            token_label(usage.uncached(), usage.cache_read, usage.output)
+        );
+        if all {
+            value.push_str("  ");
+            value.push_str(&project_path(&session.project, home));
+        }
+        let link = (session.project == here).then(|| session.path.clone());
+        lines.push((key, value, link));
+    }
+    lines.extend(days.map(|(key, value)| (key, value, None)));
+    lines
+}
+
+/// A project's path from its key, the home directory as `~`.
+fn project_path(key: &Path, home: Option<&Path>) -> String {
+    let path = Path::new("/").join(key);
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_string(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,5 +581,107 @@ mod tests {
         spending.add(Spender::Main, "m", &spent);
         let rows = spending_figures(&spending);
         assert_eq!(rows.last().map(|r| r.1.as_str()), Some("↓50 (25%)"));
+    }
+}
+
+#[cfg(test)]
+mod usage_tests {
+    use std::path::{Path, PathBuf};
+
+    use termide_agent_core::usage::{SessionUsage, UsagePeriod, UsageReport};
+    use termide_agent_core::{Spender, Usage};
+
+    use super::usage_report_lines;
+
+    fn spent(input: u64) -> Usage {
+        Usage {
+            input,
+            ..Default::default()
+        }
+    }
+
+    fn report() -> UsageReport {
+        let mut report = UsageReport::default();
+        report.spending.add(Spender::Main, "big", &spent(900));
+        report.spending.add(Spender::Reviewer, "small", &spent(100));
+        report.sessions = 2;
+        report.agents.insert("default".into(), spent(1_000));
+        report
+            .projects
+            .insert(PathBuf::from("home/me/a"), spent(600));
+        report.projects.insert(PathBuf::from("srv/b"), spent(400));
+        report.buckets = vec![
+            ("2026-11-10".into(), spent(0)),
+            ("2026-11-11".into(), spent(1_000)),
+        ];
+        for (name, project, input) in [("mine", "home/me/a", 600), ("theirs", "srv/b", 400)] {
+            report.top.push(SessionUsage {
+                path: PathBuf::from(format!("/s/{name}.jsonl")),
+                project: PathBuf::from(project),
+                label: name.into(),
+                agent: None,
+                modified: 0,
+                usage: spent(input),
+            });
+        }
+        report
+    }
+
+    /// The window lists the totals, the breakdowns with the busiest day's
+    /// bar full, and the costliest sessions, only this project's to open.
+    #[test]
+    fn the_usage_lines_break_the_report_down() {
+        let lines = usage_report_lines(
+            &report(),
+            UsagePeriod::Week,
+            true,
+            Path::new("home/me/a"),
+            Some(Path::new("/home/me")),
+        );
+        let value = |key: &str| {
+            lines
+                .iter()
+                .find(|(k, _, _)| k == key)
+                .map(|(_, v, _)| v.clone())
+                .unwrap_or_else(|| panic!("no {key} in {lines:?}"))
+        };
+        assert_eq!(value("Tokens"), "↑1k ↓0");
+        assert_eq!(value("Sessions"), "2");
+        let projects = value("By project");
+        assert!(
+            projects.contains("~/a") && projects.contains("/srv/b"),
+            "{projects}"
+        );
+        let days = value("By day");
+        let day = |date: &str| {
+            days.lines()
+                .find(|l| l.starts_with(date))
+                .unwrap()
+                .to_string()
+        };
+        assert!(day("2026-11-11").contains("██████████  100%"), "{days}");
+        assert!(day("2026-11-10").contains("░░░░░░░░░░    0%"), "{days}");
+        let sessions: Vec<&(String, String, Option<PathBuf>)> = lines
+            .iter()
+            .skip_while(|(k, _, _)| k != "Top sessions")
+            .take_while(|(k, _, _)| k != "By day")
+            .collect();
+        assert_eq!(lines.last().map(|(k, _, _)| k.as_str()), Some("By day"));
+        assert_eq!(sessions.len(), 2);
+        assert_eq!(sessions[0].2, Some(PathBuf::from("/s/mine.jsonl")));
+        assert!(sessions[0].1.ends_with("~/a"), "{:?}", sessions[0]);
+        assert_eq!(sessions[1].2, None);
+        // One project's report has no breakdown by project.
+        let here = usage_report_lines(&report(), UsagePeriod::Week, false, Path::new("x"), None);
+        assert!(here.iter().all(|(k, _, _)| k != "By project"));
+        // Nothing spent says so.
+        let none = usage_report_lines(
+            &UsageReport::default(),
+            UsagePeriod::Today,
+            false,
+            Path::new("x"),
+            None,
+        );
+        assert_eq!(none.len(), 1);
     }
 }
