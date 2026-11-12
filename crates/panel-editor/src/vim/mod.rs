@@ -8,6 +8,7 @@
 //!
 //! Vim mode is disabled by default and can be enabled via config.
 
+mod hint;
 pub mod key_handler;
 mod mode;
 pub mod motions;
@@ -16,6 +17,7 @@ pub mod operators;
 mod state;
 mod visual_mode;
 
+pub use hint::VimHint;
 pub use key_handler::{handle_vim_key, InsertPosition, VimFold, VimKeyResult};
 pub use mode::VimMode;
 pub use motions::VimMotion;

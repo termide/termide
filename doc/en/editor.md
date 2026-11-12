@@ -654,6 +654,11 @@ vim_mode = true
 | `v` | Enter Visual mode |
 | `V` | Enter Visual Line mode |
 
+A command typed in part — `g`, `z`, `Ctrl+W`, or an operator such as `d`
+with or without a count — shows the keys that may complete it in a box at
+the bottom right of the editor. The next key takes the box away; `Escape`
+drops the half-typed command and leaves the panel open.
+
 ### Motion Keys (Normal/Visual)
 
 | Key | Action |

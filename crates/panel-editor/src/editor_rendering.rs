@@ -428,6 +428,11 @@ impl Editor {
         if let Some(ref preview) = self.lsp.color_preview {
             preview.render(buf, area);
         }
+
+        // What may follow a pending Vim prefix, while it waits.
+        if let Some(hint) = self.vim.as_ref().and_then(crate::vim::VimHint::for_state) {
+            hint.render(buf, area, theme);
+        }
     }
 }
 

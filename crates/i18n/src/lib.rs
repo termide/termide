@@ -247,6 +247,15 @@ pub trait Translation: Send + Sync {
     fn help_desc_unfold(&self) -> &str;
     fn help_desc_fold_all(&self) -> &str;
     fn help_desc_unfold_all(&self) -> &str;
+    fn vim_hint_first_line(&self) -> &str;
+    fn vim_hint_screen_lines(&self) -> &str;
+    fn vim_hint_toggle_fold(&self) -> &str;
+    fn vim_hint_panels(&self) -> &str;
+    fn vim_hint_whole_line(&self) -> &str;
+    fn vim_hint_words(&self) -> &str;
+    fn vim_hint_line_ends(&self) -> &str;
+    fn vim_hint_chars(&self) -> &str;
+    fn vim_hint_lines(&self) -> &str;
     fn terminal_no_command_output(&self) -> &str;
     fn terminal_command_output_copied(&self, lines: usize) -> String;
     fn editor_folded_lines(&self, lines: usize) -> String;

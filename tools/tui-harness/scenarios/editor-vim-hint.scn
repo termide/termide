@@ -1,0 +1,38 @@
+# The which-key hint in Vim mode (doc/en/editor.md): a pending prefix shows
+# the keys that may follow it in a box at the bottom right of the editor,
+# and the next key takes it away.
+config editor-vim-hint.toml
+project empty
+start
+run "printf 'fn outer() {\n    one();\n    two();\n}\nlast\n' > code.rs"
+wait "code.rs"
+key End F4
+wait "two();"
+
+# z lists the fold commands; c folds and the box goes.
+key z
+wait "Toggle fold"
+expect "Fold all"
+snapshot z
+key c
+wait-gone "Toggle fold"
+wait "⋯ 2 lines"
+
+# An operator with a count lists the motions; Esc drops it and leaves the
+# panel open.
+key 2 d
+wait "Whole line"
+expect " 2d "
+snapshot operator
+key Esc
+wait-gone "Whole line"
+expect "code.rs ─"
+expect-not "Close active panel"
+
+# g lists its continuations; gg goes to the first line.
+key G g
+wait "First line"
+key g
+wait-gone "First line"
+wait "Pos: 1:1"
+quit --force

@@ -1,0 +1,1 @@
+- **Vim mode shows the keys that may follow a prefix.** After `g`, `z`, `Ctrl+W` or an operator such as `d` (with or without a count), a box at the bottom right of the editor lists the keys that complete the command and what they do; the next key takes it away. See [Editor](doc/en/editor.md).

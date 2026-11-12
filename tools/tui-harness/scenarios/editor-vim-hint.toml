@@ -1,0 +1,10 @@
+# The configuration of editor-vim-hint: the shared config.toml with Vim mode.
+[general]
+language = "en"
+icon_mode = "unicode"
+# The status bar's resource figures change on their own; keep them still.
+resource_monitor_interval = 60000
+vim_mode = true
+
+[editor]
+show_blame = false
