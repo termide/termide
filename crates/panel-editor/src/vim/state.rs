@@ -107,6 +107,12 @@ impl VimState {
         self.pending_operator.take()
     }
 
+    /// Whether a command is half typed: a count, an operator or a prefix
+    /// waits on the keys that complete it.
+    pub fn has_pending(&self) -> bool {
+        self.count.is_some() || self.pending_operator.is_some() || !self.partial_keys.is_empty()
+    }
+
     /// Add a character to partial key sequence.
     pub fn push_partial_key(&mut self, ch: char) {
         self.partial_keys.push(ch);

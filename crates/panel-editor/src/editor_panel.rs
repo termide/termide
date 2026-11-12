@@ -750,7 +750,8 @@ impl Panel for Editor {
 
     fn captures_escape(&self) -> bool {
         // Capture Escape when the inline find bar is open, search is active,
-        // popups are open, the language picker is open, or vim is in INSERT mode
+        // popups are open, the language picker is open, vim is in INSERT mode
+        // or waits on the rest of a command (Esc drops what it typed)
         self.syntax_picker.is_some()
             || self.find_bar.is_some()
             || self.search.state.is_some()
@@ -759,7 +760,7 @@ impl Panel for Editor {
             || self
                 .vim
                 .as_ref()
-                .map(|v| v.mode.is_insert())
+                .map(|v| v.mode.is_insert() || v.has_pending())
                 .unwrap_or(false)
     }
 
@@ -1104,6 +1105,26 @@ mod hover_key_tests {
                     .into(),
             }),
             range: None,
+        }
+    }
+
+    /// Escape drops a half-typed Vim command in the editor instead of
+    /// reaching the app, which would offer to close the panel.
+    #[test]
+    fn escape_after_a_half_typed_vim_command_stays_in_the_editor() {
+        let mut e = editor(true);
+        assert!(!e.captures_escape(), "nothing pending: Escape is the app's");
+        let key = |c| KeyChord::identity(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+        for typed in [&['d'][..], &['g'], &['2'], &['z']] {
+            for &c in typed {
+                e.handle_key(key(c));
+            }
+            assert!(e.captures_escape(), "after {typed:?}");
+            e.handle_key(KeyChord::identity(KeyEvent::new(
+                KeyCode::Esc,
+                KeyModifiers::NONE,
+            )));
+            assert!(!e.captures_escape(), "Escape dropped {typed:?}");
         }
     }
 

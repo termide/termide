@@ -1,0 +1,1 @@
+- **`Escape` after a half-typed Vim command no longer offers to close the editor.** With a count, an operator or a prefix such as `g` waiting, `Escape` drops it and the panel stays open.
