@@ -203,6 +203,11 @@ impl GitDiffCache {
     /// markers). Returns `Result` for call-site ergonomics.
     pub fn load_original_from_head(&mut self) -> Result<()> {
         let from_git = crate::command::head_file_content(&self.file_path);
+        // The index's version too, as the background load reads it: without
+        // it every line would count as a change the index lacks.
+        self.index_content = from_git
+            .as_ref()
+            .and_then(|_| crate::lines::index_file_content(&self.file_path));
         self.take_original(from_git);
         Ok(())
     }

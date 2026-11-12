@@ -158,3 +158,19 @@ fn an_unchanged_line_offers_nothing() {
     e.cursor.line = 4;
     assert!(actions(&e).is_empty());
 }
+
+#[test]
+fn a_freshly_opened_file_offers_nothing_on_an_unchanged_line() {
+    // Before the background load: the git markers the editor opens with.
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo.join("f"), COMMITTED).unwrap();
+    git(repo, &["add", "f"]);
+    git(repo, &["commit", "-q", "-m", "one"]);
+    std::fs::write(repo.join("f"), "a\nB\nc\nd\ne\nf\ng\nh\n").unwrap();
+    let mut e = Editor::open_file_with_config(repo.join("f"), EditorConfig::default()).unwrap();
+    assert!(actions(&e).is_empty(), "line 1 is as committed");
+    e.cursor.line = 1;
+    assert_eq!(actions(&e), [STAGE_CHANGE_ACTION, REVERT_CHANGE_ACTION]);
+}
