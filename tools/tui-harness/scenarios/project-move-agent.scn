@@ -1,0 +1,34 @@
+# Moving a project carries its agent sessions along (doc/en/projects.md):
+# the session log goes to the new path with its header's directory
+# rewritten, and the reopened agent panel shows the conversation again.
+size 160x40
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Let me look at how the reorder report is built." 20
+wait "Agent wants to run shell" 20
+type "1"
+wait "Want me to highlight critical rows" 30
+wait-gone "[■]" 15
+
+key F9 Right Right
+wait "Change root"
+key Up F6
+wait "Move 'inventory' to"
+type "2"
+key Enter
+wait "inventory2 ≡"
+wait "Want me to highlight critical rows"
+snapshot moved
+# The log went along and names the new directory; none is left at the old.
+run "f=$(find \"$HOME\" -path '*sessions*/inventory2/*.jsonl'); test -n \"$f\" && head -1 \"$f\" | grep -q '/inventory2\"'"
+run "test -z \"$(find \"$HOME\" -path '*sessions*/inventory/*.jsonl')\""
+# The repository and its worktree still find each other.
+run "git -C inventory-csv-export status --short"
+run "! git -C inventory2 worktree list | grep -q prunable"
+quit

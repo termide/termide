@@ -115,7 +115,7 @@ fn holds_agent_work(root: &Path) -> bool {
 }
 
 /// `root` as the menus and messages name it.
-fn display_root(root: &Path) -> String {
+pub(super) fn display_root(root: &Path) -> String {
     termide_core::util::shorten_home_path(&root.display().to_string())
 }
 
@@ -129,7 +129,7 @@ fn hosted_instance() -> Option<String> {
 }
 
 /// Why the project at `root` does not open here: `owner` has it open.
-fn open_elsewhere_message(root: &Path, owner: &termide_project::Owner) -> String {
+pub(super) fn open_elsewhere_message(root: &Path, owner: &termide_project::Owner) -> String {
     let t = i18n::t();
     let path = display_root(root);
     match &owner.instance {
@@ -763,33 +763,126 @@ impl App {
             }
         }
         if let Some(mut parked) = self.open_projects.close(root) {
-            // Its agent panels go with it, and the tasks they handed over
-            // stop with them, as when a panel is closed.
-            for panel in parked.layout.iter_all_panels_mut() {
-                if let Some(agent) = panel.downcast_ref::<termide_panel_agent::AgentPanel>() {
-                    termide_panel_agent::live::stop_all(agent.panel_id());
-                    termide_panel_agent::live::clear_parked_of(agent.panel_id());
-                }
-            }
-            // As closing an editor panel does: the server forgets the file.
-            if let Some(lsp_manager) = self.state.lsp_manager.as_ref() {
-                for panel in parked.layout.iter_all_panels_mut() {
-                    if let Some(editor) = panel.as_editor_mut() {
-                        editor.cleanup_lsp(lsp_manager);
-                    }
-                }
-            }
-            if self.persist_layout {
-                if let Err(e) = save_layout_of(root, &mut parked.layout) {
-                    log::error!("Failed to save the layout of {:?}: {}", root, e);
-                }
-            }
+            self.retire_layout(root, &mut parked.layout, self.persist_layout);
             log::info!("Closed project {:?}", root);
-            // Release the watches its panels held.
-            self.state.needs_watcher_registration = true;
         }
         self.sync_open_projects();
         self.return_to_projects(from)
+    }
+
+    /// Wind down the panels of `layout`, the project at `root` leaving for
+    /// good, before it is dropped: its agents stop with the tasks they handed
+    /// over, as when a panel is closed, and the language servers forget its
+    /// files. With `save` its layout is saved first.
+    fn retire_layout(&mut self, root: &Path, layout: &mut LayoutManager, save: bool) {
+        for panel in layout.iter_all_panels_mut() {
+            if let Some(agent) = panel.downcast_ref::<termide_panel_agent::AgentPanel>() {
+                termide_panel_agent::live::stop_all(agent.panel_id());
+                termide_panel_agent::live::clear_parked_of(agent.panel_id());
+            }
+        }
+        if let Some(lsp_manager) = self.state.lsp_manager.as_ref() {
+            for panel in layout.iter_all_panels_mut() {
+                if let Some(editor) = panel.as_editor_mut() {
+                    editor.cleanup_lsp(lsp_manager);
+                }
+            }
+        }
+        if save {
+            if let Err(e) = save_layout_of(root, layout) {
+                log::error!("Failed to save the layout of {:?}: {}", root, e);
+            }
+        }
+        // Release the watches its panels held.
+        self.state.needs_watcher_registration = true;
+    }
+
+    /// Whether the panels of the open project at `root` hold running
+    /// processes or unsaved changes.
+    pub(super) fn project_requires_confirmation(&self, root: &Path) -> bool {
+        if root == self.project_root {
+            return self.has_panels_requiring_confirmation();
+        }
+        self.open_projects
+            .parked()
+            .any(|(parked_root, parked)| parked_root == root && parked.requires_confirmation())
+    }
+
+    /// Save the layout of the open project at `root` as it stands.
+    pub(super) fn save_open_project_layout(&mut self, root: &Path) {
+        if root == self.project_root {
+            self.auto_save_layout();
+            return;
+        }
+        if !self.persist_layout {
+            return;
+        }
+        if let Some((_, parked)) = self
+            .open_projects
+            .parked_mut()
+            .find(|(parked_root, _)| *parked_root == root)
+        {
+            if let Err(e) = save_layout_of(root, &mut parked.layout) {
+                log::error!("Failed to save the layout of {:?}: {}", root, e);
+            }
+        }
+    }
+
+    /// Empty the open project at `root` for its directory to move: its
+    /// layout is saved and its panels close. The current project stays
+    /// current with nothing but the operations panel; a parked one is closed,
+    /// and its place in the list handed back. Its claim is handed back too,
+    /// for no other instance to open it while it moves.
+    pub(super) fn vacate_project(
+        &mut self,
+        root: &Path,
+    ) -> (Option<usize>, Option<termide_project::ProjectClaim>) {
+        let claim = self.project_claims.remove(root);
+        if root == self.project_root {
+            let operations_panel = self.close_operations_panel();
+            self.auto_save_layout();
+            self.drop_current_layout();
+            self.vacated_root = Some(root.to_path_buf());
+            self.carry_operations_panel(operations_panel);
+            // Out of the directory about to move.
+            if let Some(parent) = root.parent() {
+                let _ = std::env::set_current_dir(parent);
+            }
+            return (None, claim);
+        }
+        let position = self.open_projects.position(root);
+        if let Some(mut parked) = self.open_projects.close(root) {
+            self.retire_layout(root, &mut parked.layout, self.persist_layout);
+        }
+        self.sync_open_projects();
+        (position, claim)
+    }
+
+    /// Close every panel of the current project without saving its layout:
+    /// its project has moved or is about to.
+    pub(super) fn drop_current_layout(&mut self) {
+        let root = self.project_root.clone();
+        let mut layout = std::mem::replace(&mut self.layout_manager, LayoutManager::new());
+        self.retire_layout(&root, &mut layout, false);
+        self.state.needs_redraw = true;
+    }
+
+    /// Close the parked project at `root` without saving its layout.
+    pub(super) fn drop_parked_project(&mut self, root: &Path) {
+        if let Some(mut parked) = self.open_projects.close(root) {
+            self.retire_layout(root, &mut parked.layout, false);
+        }
+    }
+
+    /// Hold `claim` on the open project at `root`.
+    pub(super) fn keep_project_claim(
+        &mut self,
+        root: PathBuf,
+        claim: Option<termide_project::ProjectClaim>,
+    ) {
+        if let Some(claim) = claim {
+            self.project_claims.insert(root, claim);
+        }
     }
 
     /// Go back to where closing or deleting a project was started.
@@ -828,7 +921,11 @@ impl App {
     /// as [`Self::keep_unsaved_changes`] does for all projects.
     pub(super) fn keep_parked_unsaved_changes(&mut self) {
         let persist = self.persist_layout;
+        let vacated = self.vacated_root.clone();
         for (root, parked) in self.open_projects.parked_mut() {
+            if vacated.as_deref() == Some(root) {
+                continue;
+            }
             super::project_layout::keep_unsaved_changes_of(root, &mut parked.layout, persist);
         }
     }
@@ -838,7 +935,12 @@ impl App {
         if !self.persist_layout {
             return;
         }
+        let vacated = self.vacated_root.clone();
         for (root, parked) in self.open_projects.parked_mut() {
+            // Emptied for its move; its layout was saved before.
+            if vacated.as_deref() == Some(root) {
+                continue;
+            }
             if let Err(e) = save_layout_of(root, &mut parked.layout) {
                 log::error!("Failed to save the layout of {:?}: {}", root, e);
             }

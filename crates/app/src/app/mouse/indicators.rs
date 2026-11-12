@@ -68,6 +68,7 @@ impl App {
             net_up_rate: self.state.system_monitor.net_upload_rate(),
             battery: self.state.system_monitor.battery_cached(),
             projects: &project_buttons,
+            project_menu_open: self.state.ui.project_action_menu.open,
         };
         menu_bar_layout(self.state.terminal.width, &params)
     }

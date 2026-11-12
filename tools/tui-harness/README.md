@@ -75,7 +75,7 @@ Timeouts are in seconds and default to 10.
 | `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
 | `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …` |
 | `mock-acp-count "TEXT" N` | Check that the ACP stand-in's log holds TEXT exactly N times |
-| `run "COMMAND"` | Run a shell command in the project, outside termide |
+| `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away |
 | `snapshot NAME` | Save the screen as text |
 | `sleep S` | Let termide run for S seconds |
 | `quit [--force]` | `Alt+Q` and wait for termide to exit; `--force` confirms a "Quit anyway?" |
@@ -99,7 +99,11 @@ to the mode worked in, past the ones `Shift+Tab` passes through) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in
 its system prompt, and a clean-context carry-out in a new session) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
-a session opened from its list).
+a session opened from its list), `project-move` (`F6` and `F5` on a
+project in the Projects menu: the directory moved and reopened with its
+layout, a copy opened beside it) and `project-move-agent` (a moved
+project's agent session found again at the new path, and its git worktree
+still linked).
 
 ## Writing one
 

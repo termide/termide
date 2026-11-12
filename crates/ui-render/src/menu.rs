@@ -17,7 +17,7 @@ use termide_system_monitor::{format_net_speed, BatteryInfo, RamUnit};
 use termide_theme::Theme;
 use termide_ui::str_display_width;
 
-use crate::project_strip::{fit_project_strip, ProjectButton, ProjectStrip, SEPARATOR};
+use crate::project_strip::{fit_project_strip, ProjectButton, ProjectStrip, MENU_GLYPH, SEPARATOR};
 
 /// Parameters for rendering the menu bar.
 pub struct MenuRenderParams<'a> {
@@ -37,6 +37,8 @@ pub struct MenuRenderParams<'a> {
     /// The open projects, in the order the menus list them. A waiting one
     /// that has no button on screen marks the Projects title instead.
     pub projects: &'a [ProjectButton],
+    /// The current project's menu is open: its `≡` is drawn selected.
+    pub project_menu_open: bool,
 }
 
 /// Menu labels cached per UI language. Recomputed (and leaked) when the
@@ -330,6 +332,19 @@ impl MenuBarLayout {
             .find(|button| button.range().contains(&x))
             .map(|button| button.index)
     }
+
+    /// Whether column `x` is the current project's `≡`.
+    pub fn is_project_menu(&self, x: u16) -> bool {
+        self.project_menu_x() == Some(x)
+    }
+
+    /// The column of the current project's `≡`, when its button is shown.
+    pub fn project_menu_x(&self) -> Option<u16> {
+        self.projects
+            .buttons
+            .iter()
+            .find_map(|button| button.menu_x)
+    }
 }
 
 /// Lay the menu bar out in `area_width` columns.
@@ -448,6 +463,16 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
         };
         spans.push(Span::styled(button.label.clone(), style));
         column = column.max(button.x as usize) + button.label.width();
+        if let Some(menu_x) = button.menu_x {
+            pad(&mut spans, column, menu_x as usize);
+            let menu_style = if params.project_menu_open {
+                selected_style
+            } else {
+                Style::default().fg(params.theme.accented_fg)
+            };
+            spans.push(Span::styled(MENU_GLYPH, menu_style));
+            column = menu_x as usize + MENU_GLYPH.width();
+        }
     }
     if let Some((x, text)) = &bar.projects.overflow {
         pad(&mut spans, column, *x as usize);
@@ -580,6 +605,7 @@ mod tests {
             net_up_rate: 0,
             battery: None,
             projects,
+            project_menu_open: false,
         }
     }
 
@@ -654,7 +680,10 @@ mod tests {
                 .collect();
             assert_eq!(at, button.label);
         }
-        assert!(row.contains("nvn | zarab"), "{row}");
+        assert!(row.contains("nvn ≡ | zarab"), "{row}");
+        let menu_x = bar.project_menu_x().unwrap();
+        assert!(bar.is_project_menu(menu_x));
+        assert_eq!(bar.project_at(menu_x), None);
         let strip_start = row.find("nvn").unwrap();
         assert_eq!(
             &row[strip_start - 2..strip_start],
@@ -676,11 +705,16 @@ mod tests {
         let buffer = terminal.backend().buffer().clone();
         let bar = menu_bar_layout(160, &params);
         let (first, second) = (&bar.projects.buttons[0], &bar.projects.buttons[1]);
+        // The current project's menu follows its name in its colour.
+        let menu_x = first.menu_x.unwrap();
+        assert_eq!(menu_x, first.range().end + 1);
+        assert_eq!(buffer[(menu_x, 0)].symbol(), MENU_GLYPH);
+        assert_ne!(buffer[(menu_x, 0)].style().fg, Some(theme.disabled));
         // The columns between two buttons are the separator, not a button.
-        assert_eq!(buffer[(first.range().end, 0)].symbol(), " ");
-        assert_eq!(buffer[(first.range().end + 1, 0)].symbol(), "|");
+        assert_eq!(buffer[(menu_x + 1, 0)].symbol(), " ");
+        assert_eq!(buffer[(menu_x + 2, 0)].symbol(), "|");
         assert_eq!(buffer[(second.x - 1, 0)].symbol(), " ");
-        for x in first.range().end..second.x {
+        for x in menu_x + 1..second.x {
             assert_eq!(buffer[(x, 0)].style().fg, Some(theme.disabled));
         }
         assert_ne!(buffer[(first.x, 0)].style().fg, Some(theme.disabled));

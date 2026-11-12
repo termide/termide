@@ -500,11 +500,15 @@ class Run:
         file.write_text(self.term.text() + "\n")
 
     def v_run(self, command):
-        """Run a shell command in the project directory, on the host."""
+        """Run a shell command in the project directory, on the host; in
+        the directory holding it once it has moved away."""
+        cwd = self.project or self.scratch
+        if not cwd.exists():
+            cwd = cwd.parent
         result = subprocess.run(
             command,
             shell=True,
-            cwd=self.project or self.scratch,
+            cwd=cwd,
             env=self.env(),
             capture_output=True,
             text=True,

@@ -60,6 +60,7 @@ mod plugin_providers;
 mod plugin_windows;
 mod plugins;
 mod project_layout;
+mod project_transfer;
 mod recent_destinations;
 mod stop_editing;
 pub(crate) mod usage;
@@ -128,6 +129,11 @@ pub struct App {
     /// Taken before a project opens and let go once it is closed; a project
     /// opened unguarded (see [`termide_project::claim_project`]) has none.
     project_claims: std::collections::HashMap<std::path::PathBuf, termide_project::ProjectClaim>,
+    /// Projects moving or being copied, until their file operations end.
+    project_transfers: Vec<project_transfer::ProjectTransfer>,
+    /// The root of the current project while it is emptied for its move:
+    /// its layout, saved before, is not saved over with the empty one.
+    vacated_root: Option<std::path::PathBuf>,
     /// Reopen the projects of the last run as soon as the loop starts, as
     /// the Projects menu item does: `Some(true)` for `termide --restore`,
     /// which also resumes agents' unfinished work, `Some(false)` for
@@ -257,6 +263,8 @@ impl App {
             persist_layout: true,
             saved_open_projects: None,
             project_claims: Default::default(),
+            project_transfers: Vec::new(),
+            vacated_root: None,
             project_drag: None,
             restore_projects: None,
             last_focus_sig: None,
@@ -369,6 +377,8 @@ impl App {
             persist_layout: true,
             saved_open_projects: None,
             project_claims: Default::default(),
+            project_transfers: Vec::new(),
+            vacated_root: None,
             project_drag: None,
             restore_projects: None,
             last_focus_sig: None,

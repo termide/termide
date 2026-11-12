@@ -158,6 +158,22 @@ pub enum PendingAction {
         /// Where to return afterwards.
         from: ProjectsOrigin,
     },
+    /// Move the project at `root` (or with `copy`, copy it) to the path the
+    /// destination prompt is answered with
+    TransferProject {
+        root: PathBuf,
+        copy: bool,
+        /// Where to return when cancelled.
+        from: ProjectsOrigin,
+    },
+    /// Move the project at `root` to `target`, closing panels that run
+    /// processes or hold unsaved changes (with confirmation)
+    ConfirmProjectMove {
+        root: PathBuf,
+        target: PathBuf,
+        /// Where to return when refused.
+        from: ProjectsOrigin,
+    },
     /// Create a new project in specified directory
     NewProject,
     /// Delete the saved layout of a project (with confirmation)

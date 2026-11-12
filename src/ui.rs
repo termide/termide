@@ -283,6 +283,20 @@ fn render_dropdowns_and_modals(
         }
     }
 
+    // The current project's menu, under the ≡ after its name
+    if state.ui.project_action_menu.open {
+        let items = termide_ui_render::get_project_action_menu_items(state.open_projects.len() > 1);
+        let (x, y) = termide_ui_render::panel_action_dropdown_position(
+            &items,
+            state.ui.project_action_menu.anchor_x,
+            0,
+            state.terminal.width,
+            state.terminal.height,
+        );
+        Dropdown::new(&items, state.ui.project_action_menu.selected, x, y, theme)
+            .render(frame.buffer_mut());
+    }
+
     // Per-operation popup menu (Pause/Resume/Cancel on an Operations card)
     if state.ui.operation_action_menu.open {
         let items = termide_ui_render::get_operation_action_menu_items(
@@ -399,6 +413,7 @@ pub fn render_layout_with_accordion(
         net_up_rate: state.system_monitor.net_upload_rate(),
         battery: state.system_monitor.battery_cached(),
         projects: &project_buttons,
+        project_menu_open: state.ui.project_action_menu.open,
     };
     render_menu(frame, main_chunks[0], &menu_params);
 

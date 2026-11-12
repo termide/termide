@@ -2,8 +2,9 @@
 //! the indicators.
 //!
 //! Every button is a bare `name`, kept apart by a dim `" | "` that belongs
-//! to no button of its own. The strip starts two columns after the menu
-//! titles, so it reads as a block of its own. When the
+//! to no button of its own; the current project's is followed by `≡`, which
+//! opens the menu of what can be done with it. The strip starts two columns
+//! after the menu titles, so it reads as a block of its own. When the
 //! names do not fit, they lose their start, and the room is shared fairly:
 //! a short name keeps what it needs and the long ones split what is left.
 //! When even cut names do not fit, buttons drop out — the one the user acts
@@ -39,6 +40,22 @@ pub struct PlacedButton {
     pub x: u16,
     /// The text drawn: the name, after its attention mark when it waits.
     pub label: String,
+    /// The column of the current project's [`MENU_GLYPH`], one blank after
+    /// its label; `None` on the other buttons.
+    pub menu_x: Option<u16>,
+}
+
+/// What opens the current project's menu, after its button.
+pub const MENU_GLYPH: &str = "≡";
+
+/// Columns the current project's menu takes after its label: a blank and
+/// the glyph.
+fn menu_width(current: bool) -> usize {
+    if current {
+        1 + MENU_GLYPH.width()
+    } else {
+        0
+    }
 }
 
 impl PlacedButton {
@@ -97,7 +114,7 @@ fn share(all: &[ProjectButton], buttons: &[usize], avail: usize) -> Option<Vec<u
     let needs: Vec<usize> = buttons.iter().map(|&i| all[i].name.width()).collect();
     let fixed: usize = buttons
         .iter()
-        .map(|&i| mark(all[i].attention).width())
+        .map(|&i| mark(all[i].attention).width() + menu_width(all[i].current))
         .sum::<usize>()
         + buttons.len().saturating_sub(1) * SEPARATOR.width();
     let budget = avail.checked_sub(fixed)?;
@@ -131,11 +148,10 @@ fn share(all: &[ProjectButton], buttons: &[usize], avail: usize) -> Option<Vec<u
     )
 }
 
-/// Lay `buttons` out in `width` columns from column `start`. Nothing is
-/// shown for fewer than two projects: one button would only repeat what
-/// the screen shows.
+/// Lay `buttons` out in `width` columns from column `start`. A single
+/// project gets its button too: its menu is reached there.
 pub fn fit_project_strip(buttons: &[ProjectButton], start: u16, width: usize) -> ProjectStrip {
-    if buttons.len() < 2 {
+    if buttons.is_empty() {
         return ProjectStrip::default();
     }
     let rank = |i: usize| {
@@ -174,8 +190,14 @@ pub fn fit_project_strip(buttons: &[ProjectButton], start: u16, width: usize) ->
                     cut_start(&button.name, name_width)
                 );
                 let label_width = label.width() as u16;
-                placed.push(PlacedButton { index, x, label });
-                x += label_width;
+                let menu_x = button.current.then_some(x + label_width + 1);
+                placed.push(PlacedButton {
+                    index,
+                    x,
+                    label,
+                    menu_x,
+                });
+                x += label_width + menu_width(button.current) as u16;
             }
             let overflow_x = if overflow.is_some() { x + 1 } else { x };
             return ProjectStrip {
@@ -215,11 +237,31 @@ mod tests {
     }
 
     #[test]
-    fn a_single_project_shows_no_buttons() {
-        assert_eq!(
-            fit_project_strip(&[button("termide")], 0, 80),
-            ProjectStrip::default()
-        );
+    fn no_project_shows_no_buttons() {
+        assert_eq!(fit_project_strip(&[], 0, 80), ProjectStrip::default());
+    }
+
+    /// The current project's button is followed by its menu, a single
+    /// project's too; the next button starts after the menu, the menu taken
+    /// into account when the names are cut.
+    #[test]
+    fn the_current_project_has_its_menu_after_its_name() {
+        let mut current = button("termide");
+        current.current = true;
+        let strip = fit_project_strip(std::slice::from_ref(&current), 4, 80);
+        assert_eq!(labels(&strip), ["termide"]);
+        assert_eq!(strip.buttons[0].menu_x, Some(4 + 7 + 1));
+
+        let strip = fit_project_strip(&[current.clone(), button("web")], 0, 80);
+        assert_eq!(strip.buttons[0].menu_x, Some(8));
+        assert_eq!(strip.buttons[1].menu_x, None);
+        assert_eq!(strip.buttons[1].x, 9 + SEPARATOR.width() as u16);
+
+        // 3 for the separator, 2 for the menu, 6 for the names: "web" and
+        // the current one cut to 3.
+        let strip = fit_project_strip(&[current, button("web")], 0, 11);
+        assert_eq!(labels(&strip), ["…de", "web"]);
+        assert_eq!(strip.buttons[0].menu_x, Some(4));
     }
 
     #[test]

@@ -48,6 +48,7 @@ pub mod prune;
 pub mod recall;
 pub mod recap;
 pub mod refusals;
+pub mod relocate;
 pub mod runtime;
 pub mod session;
 pub mod shell;

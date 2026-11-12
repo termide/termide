@@ -95,6 +95,32 @@ impl PanelActionMenuState {
     }
 }
 
+/// State for the current project's context menu, opened from the ≡ after
+/// its name in the menu bar.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct ProjectActionMenuState {
+    /// Whether the menu is open
+    pub open: bool,
+    /// Selected item index
+    pub selected: usize,
+    /// Screen X of the ≡ glyph
+    pub anchor_x: u16,
+}
+
+impl ProjectActionMenuState {
+    /// Open the menu under the ≡ at `anchor_x`
+    pub fn open(&mut self, anchor_x: u16) {
+        self.open = true;
+        self.selected = 0;
+        self.anchor_x = anchor_x;
+    }
+
+    /// Close the menu
+    pub fn close(&mut self) {
+        self.open = false;
+    }
+}
+
 /// State for the per-operation popup menu opened from the type icon
 /// on an operation card in the Operations panel (Pause/Resume/Cancel).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
@@ -350,6 +376,8 @@ pub struct UiState {
     pub panel_action_menu: PanelActionMenuState,
     /// Per-operation popup menu (Pause/Resume/Cancel) on Operations panel
     pub operation_action_menu: OperationActionMenuState,
+    /// The current project's ≡ context menu in the menu bar
+    pub project_action_menu: ProjectActionMenuState,
     /// Panel drag-and-drop state (grab a panel by its top border)
     pub panel_drag: PanelDragState,
     /// A press that only focused its panel is held until its release, so
@@ -379,6 +407,7 @@ impl UiState {
         self.stash_submenu.close();
         self.panel_action_menu.close();
         self.operation_action_menu.close();
+        self.project_action_menu.close();
         self.panel_drag.cancel();
     }
 }

@@ -96,6 +96,13 @@ impl App {
                     self.state.needs_redraw = true;
                 }
                 OperationEvent::Completed(id, result) => {
+                    // A project's own: handled whole, ahead of the batch
+                    // bookkeeping below, which would take it for one of its.
+                    if self.complete_project_transfer(id, &result) {
+                        should_refresh_file_managers = true;
+                        self.state.needs_redraw = true;
+                        continue;
+                    }
                     // Check if this operation is part of a BatchOperation
                     let has_batch = matches!(
                         self.state.pending_action,
