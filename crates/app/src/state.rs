@@ -74,6 +74,8 @@ pub struct AppState {
     pub pending_action: Option<PendingAction>,
     /// Receiver channel for background directory size calculation results
     pub dir_size_receiver: Option<mpsc::Receiver<DirSizeResult>>,
+    /// The agents' usage window's counting of the logs, and what it keeps.
+    pub(crate) usage: crate::app::usage::UsageState,
     /// Viewer URL fetches in flight (`Ctrl+G` with an `http(s)://` address, a
     /// followed link, a history step), each delivered to the viewer that
     /// waits under its id.
@@ -258,6 +260,7 @@ impl AppState {
             queued_info_modals: Vec::new(),
             pending_action: None,
             dir_size_receiver: None,
+            usage: crate::app::usage::UsageState::default(),
             view_fetches: Vec::new(),
             next_view_fetch_id: 0,
             git_operation_handle: None,

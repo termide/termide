@@ -525,14 +525,14 @@ you have named or sent even one message to is always kept.
 | `Ctrl+S` | Save the chat as a Markdown file (your messages and the agent's answers under who and when, each day under its own heading); also the `[≡]` menu |
 | `Ctrl+T` | In a view of another agent's task, take the task over, after a confirmation (see [Subagents](#subagents)) |
 | `F9` | In a view of another agent's task shown over the layout, move it into a panel of its own (see [Subagents](#subagents)) |
-| `F3` | Open the session-info modal (model, agent, mode, directory, created/last-active times, messages, compactions, cache hits, how much `shell` output was cleaned, tokens, context and what fills it, who spent the tokens on which model); also `/usage` and the `[≡]` menu |
+| `F3` | Open the usage window on the session info (model, agent, mode, directory, created/last-active times, messages, compactions, cache hits, how much `shell` output was cleaned, tokens, context and what fills it, who spent the tokens on which model), with the project's and every project's spending a `Tab` away (see [Usage across sessions](#usage-across-sessions)); also `/usage` and the `[≡]` menu |
 | `F4` | Pick a message to rewind the session to, as `Esc` does in the idle empty prompt |
 | `F5` | Fork this session (after a confirmation): its log is copied and the copy opens in a new agent panel, while this one goes on working at its own |
 | `F6` | Switch session — open the picker of this directory's sessions |
 | `Ctrl+F` | On a fresh session's banner, search its list of sessions by title in the prompt box; `Esc` ends the search |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/changes` reviews the agent's changes in the diff panel, `/new` starts a fresh session, `/fork [focus]` copies this one into a new panel (compacted on the focus when given), `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the session-info modal and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/changes` reviews the agent's changes in the diff panel, `/new` starts a fresh session, `/fork [focus]` copies this one into a new panel (compacted on the focus when given), `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the usage window on the session info and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | Move between the rows of the input as drawn, a wrapped line included; on the first or last row: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing. A recalled request opens with the cursor on the edge the arrow came in through, so repeated presses keep walking history |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
@@ -1097,6 +1097,37 @@ through them without the picker. A change applies at the agent's next tool
 call, so you can loosen the mode while a long task is running instead of
 answering the same prompt again and again. Neither switch touches the
 configuration file; the panel starts from `[ai]` again the next time.
+
+### Usage across sessions
+
+The session info is one tab of the **usage window**. **This session** is the
+panel's session, as described above; **Project** adds up every session of the
+project and **All projects** every session termide has logged, each over
+**Today**, **7 days**, **30 days** or **All time**. Without an agent panel, the
+window opens on the project from **AI → Usage…**.
+
+A scope over a period shows the tokens and the number of sessions that spent
+any, **Cache hits** and **Reasoning** as above, the same **Spent by** and **By
+model** breakdowns, **By agent** and, for all projects, **By project**; then
+**Top sessions**, the ten that spent the most, and **By day** (**By month** for
+all time), every day of the period listed, those that spent nothing too, each
+bar against the busiest day's. A session of the project opens from the list:
+pick it with `↑`/`↓` and `Enter`, or click it; a session of another project is
+shown but opens in its own project.
+
+`Tab` and `Shift+Tab` change the scope, `←`/`→` the period, which the window
+keeps for the next time; a click on a tab chooses it, `Esc` closes. A
+subagent's session counts inside the session that delegated it, as in the
+session info, and on its own only when that session's log is gone; a fork
+counts what it spent itself.
+
+The figures come from termide's session logs. Reading all of them takes a
+moment the first time; what was read is kept in `usage-cache.json` in the
+agents' directory, beside the logs, so later only the logs that changed are
+read again, and the window shows what it had while they are. What an agent
+spent outside termide — Claude Code or Codex run in a terminal, another
+editor — is not in these logs and not counted, and neither are a
+subscription's limits: the counts are tokens, as everywhere in the panel.
 
 ### Running a command yourself
 

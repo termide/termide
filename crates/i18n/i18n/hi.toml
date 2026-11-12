@@ -1195,6 +1195,25 @@ plugins_none = "कोई प्लगइन इंस्टॉल नहीं 
 command_report_no_output = "(कोई आउटपुट नहीं)"
 agent_unfinished_delegates_title = "पैनल अधूरी सौंपी गई समैलो के साथ बन्द होई। इसें जारी रखें?"
 agent_strip_left_unfinished = "अधूरी"
+menu_ai_usage = "उपयोग…"
+usage_title = "एजेंट का उपयोग"
+usage_scope_session = "यह सत्र"
+usage_scope_project = "प्रोजेक्ट"
+usage_scope_all = "सभी प्रोजेक्ट"
+usage_period_today = "आज"
+usage_period_week = "7 दिन"
+usage_period_month = "30 दिन"
+usage_period_all = "पूरा समय"
+usage_hint = "Tab दायरा · ←→ अवधि · ↑↓ सत्र · Enter खोलें · Esc बंद"
+usage_sessions = "सत्र"
+usage_by_day = "दिन के अनुसार"
+usage_by_month = "महीने के अनुसार"
+usage_by_agent = "एजेंट के अनुसार"
+usage_by_project = "प्रोजेक्ट के अनुसार"
+usage_top_sessions = "सबसे महंगे सत्र"
+usage_nothing = "इस अवधि में कुछ खर्च नहीं हुआ"
+usage_agent_unnamed = "(बिना नाम)"
+
 [formats]
 projects_delete_fmt = "{path} का लेआउट"
 projects_open_elsewhere_fmt = "{path} दूसरे termide में खुला है (pid {pid})"
@@ -1483,6 +1502,7 @@ debug_status_failed_fmt = "विफल: {error}"
 command_name_taken_fmt = "\"{name}\" नाम का कमांड पहले से मौजूद है"
 settings_kb_key_taken_fmt = "{key} इस क्रिया से पहले से बंधी है"
 settings_kb_conflict_fmt = "{key} {held} से भी बंधी है"
+usage_counting_fmt = "सत्र लॉग गिने जा रहे हैं: {total} में से {done}"
 
 [plurals]
 char = { one = "", other = "" }

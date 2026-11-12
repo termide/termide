@@ -368,7 +368,7 @@ fn a_fork_without_a_focus_starts_at_once() {
 fn f3_shows_a_session_summary() {
     let mut panel = panel(vec![]);
     let events = panel.handle_key(chord(KeyCode::F(3), KeyModifiers::NONE));
-    let Some(PanelEvent::ShowInfo { rows, .. }) = events.first() else {
+    let Some(PanelEvent::ShowSessionUsage { rows }) = events.first() else {
         panic!("F3 should show a summary modal, got {events:?}");
     };
     for label in ["Provider", "Model", "Agent", "Directory", "Tokens"] {

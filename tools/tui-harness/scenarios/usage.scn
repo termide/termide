@@ -1,0 +1,53 @@
+# The usage window: F3 on an agent panel opens it on the panel's session;
+# Tab goes to the project's spending and to every project's, the arrows
+# change the period, and a session of the project opens from its list.
+# Then the AI menu opens it without an agent panel, on the project.
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Agent wants to run shell" 20
+type "1"
+wait "Want me to highlight critical rows" 30
+wait-gone "[■]" 15
+key F3
+wait "This session"
+expect "Model"
+expect "Spent by"
+snapshot session
+key Tab
+wait "Top sessions" 20
+expect "Tokens"
+expect "By day"
+expect " 7 days "
+snapshot project
+key Right
+wait "By day"
+key Tab
+wait "By project"
+expect "demo/inventory"
+snapshot all
+key Tab
+wait "Spent by"
+key Tab
+wait "Top sessions"
+key Down Enter
+wait-gone "Top sessions"
+# The session was open already: its panel has the focus, none is added.
+expect "Want me to highlight critical rows"
+# From the menu, on the project.
+key Alt+M
+wait "Projects"
+key Right Right Right
+wait "Prompts"
+key Down Down Down Down Enter
+wait "Top sessions"
+expect-not "This session"
+snapshot menu
+key Esc
+wait-gone "Top sessions"
+quit

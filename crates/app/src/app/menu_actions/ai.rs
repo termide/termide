@@ -105,6 +105,11 @@ impl App {
                 super::super::agent_panel::toggle_web_browser();
                 return;
             }
+            if item.key == termide_ui_render::AI_USAGE_KEY {
+                self.state.close_menu();
+                self.open_usage(None);
+                return;
+            }
             let Some(section) = AiSection::from_key(&item.key) else {
                 return;
             };
@@ -526,7 +531,7 @@ mod tests {
     #[test]
     fn the_menu_rows_are_the_sections_in_order() {
         let items = termide_ui_render::get_ai_items(None);
-        assert_eq!(items.len(), termide_ui_render::AI_SUBMENU_ITEM_COUNT);
+        assert_eq!(items.len(), termide_ui_render::AI_SUBMENU_ITEM_COUNT + 2);
         for section in AiSection::ALL {
             assert_eq!(items[section.index()].key, section.key());
         }

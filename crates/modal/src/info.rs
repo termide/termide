@@ -232,7 +232,7 @@ impl InfoModal {
     }
 
     /// Wrap text to fit within max_width, respecting embedded newlines.
-    fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
+    pub(crate) fn wrap_text(text: &str, max_width: usize) -> Vec<String> {
         let mut all_lines = Vec::new();
         for paragraph in text.split('\n') {
             if paragraph.is_empty() {

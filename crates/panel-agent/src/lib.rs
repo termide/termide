@@ -78,6 +78,7 @@ pub use peers::PeerState;
 pub use pending::Card;
 pub use runtime::local_minute;
 pub use slash::user_skill_description;
+pub use spending::{usage_report_lines, UsageReportLine};
 pub use transcript::{FoldMode, Item, NoticeKind, Transcript};
 pub use watch::{DelegateControl, Watch};
 
@@ -1895,9 +1896,16 @@ fn shorten_path(path: &Path, max: usize) -> String {
     format!("…{tail}")
 }
 
-/// Token counts as the status line shows them: `32k`, `1.2M`.
+/// Token counts as the status line shows them: `32k`, `1.2M`, `2.8B`.
 pub(crate) fn format_tokens(tokens: u64) -> String {
-    if tokens >= 1_000_000 {
+    if tokens >= 1_000_000_000 {
+        let billions = tokens as f64 / 1_000_000_000.0;
+        if billions.fract() < 0.05 {
+            format!("{billions:.0}B")
+        } else {
+            format!("{billions:.1}B")
+        }
+    } else if tokens >= 1_000_000 {
         let millions = tokens as f64 / 1_000_000.0;
         if millions.fract() < 0.05 {
             format!("{millions:.0}M")

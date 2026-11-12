@@ -62,6 +62,7 @@ mod plugins;
 mod project_layout;
 mod recent_destinations;
 mod stop_editing;
+pub(crate) mod usage;
 mod vault;
 mod watcher;
 mod workspace_edit;
@@ -1301,6 +1302,9 @@ impl App {
 
             // Check channel for directory size calculation results
             self.check_dir_size_update();
+
+            // The usage window's counting of the session logs.
+            self.poll_usage();
 
             // Register panel watchers only when needed (panel added/navigated)
             if self.state.needs_watcher_registration {
