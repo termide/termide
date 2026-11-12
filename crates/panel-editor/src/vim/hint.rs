@@ -33,15 +33,25 @@ impl VimHint {
         let t = termide_i18n::t();
         let count = state.count.map(|n| n.to_string()).unwrap_or_default();
         let row = |keys: &str, what: &str| (keys.to_string(), what.to_string());
-        let (prefix, rows) = match state.partial_keys.first() {
-            Some('g') => (
+        let letter = state.pending_operator.map(|op| match op {
+            VimOperator::Delete => "d",
+            VimOperator::Yank => "y",
+            VimOperator::Change => "c",
+        });
+        let (prefix, rows) = match (state.partial_keys.first(), letter) {
+            // After an operator only `gg` takes it.
+            (Some('g'), Some(letter)) => (
+                format!("{letter}g"),
+                vec![row("g", t.vim_hint_file_lines())],
+            ),
+            (Some('g'), None) => (
                 "g".to_string(),
                 vec![
                     row("g", t.vim_hint_first_line()),
                     row("j k", t.vim_hint_screen_lines()),
                 ],
             ),
-            Some('z') => (
+            (Some('z'), _) => (
                 "z".to_string(),
                 vec![
                     row("a", t.vim_hint_toggle_fold()),
@@ -51,28 +61,22 @@ impl VimHint {
                     row("R", t.help_desc_unfold_all()),
                 ],
             ),
-            Some('\x17') => (
+            (Some('\x17'), _) => (
                 "Ctrl+W".to_string(),
                 vec![row("h j k l", t.vim_hint_panels())],
             ),
-            Some(_) => return None,
-            None => {
-                let letter = match state.pending_operator? {
-                    VimOperator::Delete => "d",
-                    VimOperator::Yank => "y",
-                    VimOperator::Change => "c",
-                };
-                (
-                    letter.to_string(),
-                    vec![
-                        row(letter, t.vim_hint_whole_line()),
-                        row("w b e", t.vim_hint_words()),
-                        row("^ $", t.vim_hint_line_ends()),
-                        row("h l", t.vim_hint_chars()),
-                        row("j k", t.vim_hint_lines()),
-                    ],
-                )
-            }
+            (Some(_), _) | (None, None) => return None,
+            (None, Some(letter)) => (
+                letter.to_string(),
+                vec![
+                    row(letter, t.vim_hint_whole_line()),
+                    row("w b e", t.vim_hint_words()),
+                    row("^ $", t.vim_hint_line_ends()),
+                    row("h l", t.vim_hint_chars()),
+                    row("j k", t.vim_hint_lines()),
+                    row("gg G", t.vim_hint_file_lines()),
+                ],
+            ),
         };
         Some(Self {
             title: format!("{count}{prefix}"),
@@ -155,6 +159,11 @@ mod tests {
         let hint = VimHint::for_state(&state).unwrap();
         assert_eq!(hint.title, "2d");
         assert_eq!(keys(&hint)[0], "d", "dd takes the whole line");
+
+        state.push_partial_key('g');
+        let hint = VimHint::for_state(&state).unwrap();
+        assert_eq!(hint.title, "2dg");
+        assert_eq!(keys(&hint), ["g"], "only gg takes an operator");
     }
 
     #[test]

@@ -697,6 +697,11 @@ drops the half-typed command and leaves the panel open.
 | `u` | Undo |
 | `Ctrl+R` | Redo |
 
+An operator takes any of the motions above. With `j`, `k`, `G` and `gg` it
+works on whole lines, from the cursor's to the one the motion reaches, up or
+down: `dk` deletes this line and the one above, `dG` everything to the end of
+the file, `y3gg` yanks down or up to line 3.
+
 ### Cyrillic Keyboard Support
 
 Vim mode works seamlessly with Cyrillic keyboard layouts. When typing in Russian or other Cyrillic layouts, all Vim commands are automatically translated:

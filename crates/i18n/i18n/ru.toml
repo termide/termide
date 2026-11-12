@@ -198,6 +198,7 @@ vim_hint_words = "Слово: следующее / предыдущее / кон
 vim_hint_line_ends = "До первого непробельного / конца строки"
 vim_hint_chars = "Символ влево / вправо"
 vim_hint_lines = "Со строкой ниже / выше"
+vim_hint_file_lines = "Строки до начала / конца файла"
 terminal_no_command_output = "Нет вывода команды для копирования"
 agent_mention_selection = "Выделенный текст редактора"
 agent_mention_term = "Выделение в терминале, последняя команда или последние строки"

@@ -15,8 +15,9 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
 
     // Check for Ctrl+w prefix for panel navigation
     if !state.partial_keys.is_empty() && state.partial_keys[0] == '\x17' {
-        // Ctrl+W was pressed, waiting for h/j/k/l
-        state.partial_keys.clear();
+        // Ctrl+W was pressed, waiting for h/j/k/l; whatever follows ends
+        // the command, a count or an operator before it too.
+        state.clear_pending();
         return match key.code {
             KeyCode::Char('h') => VimKeyResult::PanelNavigation(PanelDirection::Left),
             KeyCode::Char('j') => VimKeyResult::PanelNavigation(PanelDirection::Down),
@@ -32,19 +33,13 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
         return match key.code {
             KeyCode::Char('g') => {
                 // gg - go to document start (or line if count specified)
-                let count = state.effective_count();
+                let motion = match state.count {
+                    Some(line) => VimMotion::GoToLine(line),
+                    None => VimMotion::DocumentStart,
+                };
+                let operator = state.take_pending_operator();
                 state.clear_pending();
-                if count > 1 {
-                    VimKeyResult::Motion {
-                        motion: VimMotion::GoToLine(count),
-                        count: 1,
-                    }
-                } else {
-                    VimKeyResult::Motion {
-                        motion: VimMotion::DocumentStart,
-                        count: 1,
-                    }
-                }
+                document_motion(operator, motion)
             }
             // gj - visual line down (respects word wrap)
             KeyCode::Char('j') => {
@@ -64,7 +59,11 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
                     count,
                 }
             }
-            _ => VimKeyResult::Consumed,
+            // Anything else drops the whole command, as Escape does.
+            _ => {
+                state.clear_pending();
+                VimKeyResult::Consumed
+            }
         };
     }
 
@@ -123,10 +122,7 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
                 VimKeyResult::Consumed
             } else {
                 // '0' at start means line start
-                VimKeyResult::Motion {
-                    motion: VimMotion::LineStart,
-                    count: 1,
-                }
+                line_start(state)
             }
         }
 
@@ -154,9 +150,10 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             if let Some(op) = state.take_pending_operator() {
                 state.clear_pending();
                 // j with operator is linewise
-                VimKeyResult::LinewiseOperator {
+                VimKeyResult::LinewiseMotion {
                     operator: op,
-                    count: count + 1, // Current line + count lines down
+                    motion: VimMotion::Down,
+                    count,
                 }
             } else {
                 state.clear_pending();
@@ -171,9 +168,10 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             let count = state.effective_count();
             if let Some(op) = state.take_pending_operator() {
                 state.clear_pending();
-                VimKeyResult::LinewiseOperator {
+                VimKeyResult::LinewiseMotion {
                     operator: op,
-                    count: count + 1,
+                    motion: VimMotion::Down,
+                    count,
                 }
             } else {
                 state.clear_pending();
@@ -189,9 +187,10 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             if let Some(op) = state.take_pending_operator() {
                 state.clear_pending();
                 // k with operator is linewise
-                VimKeyResult::LinewiseOperator {
+                VimKeyResult::LinewiseMotion {
                     operator: op,
-                    count: count + 1, // Current line + count lines up
+                    motion: VimMotion::Up,
+                    count,
                 }
             } else {
                 state.clear_pending();
@@ -206,9 +205,10 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             let count = state.effective_count();
             if let Some(op) = state.take_pending_operator() {
                 state.clear_pending();
-                VimKeyResult::LinewiseOperator {
+                VimKeyResult::LinewiseMotion {
                     operator: op,
-                    count: count + 1,
+                    motion: VimMotion::Up,
+                    count,
                 }
             } else {
                 state.clear_pending();
@@ -324,13 +324,7 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
                 }
             }
         }
-        KeyCode::Home => {
-            state.clear_pending();
-            VimKeyResult::Motion {
-                motion: VimMotion::LineStart,
-                count: 1,
-            }
-        }
+        KeyCode::Home => line_start(state),
 
         // Document motions
         KeyCode::Char('g') => {
@@ -342,19 +336,13 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             VimKeyResult::Consumed
         }
         KeyCode::Char('G') => {
-            let count = state.count;
+            let motion = match state.count {
+                Some(line) => VimMotion::GoToLine(line),
+                None => VimMotion::DocumentEnd,
+            };
+            let operator = state.take_pending_operator();
             state.clear_pending();
-            if let Some(line_num) = count {
-                VimKeyResult::Motion {
-                    motion: VimMotion::GoToLine(line_num),
-                    count: 1,
-                }
-            } else {
-                VimKeyResult::Motion {
-                    motion: VimMotion::DocumentEnd,
-                    count: 1,
-                }
-            }
+            document_motion(operator, motion)
         }
 
         // Operators
@@ -481,5 +469,36 @@ pub(super) fn handle_normal_mode(state: &mut VimState, key: KeyEvent) -> VimKeyR
             state.clear_pending();
             VimKeyResult::Unhandled
         }
+    }
+}
+
+/// A move to a line of the document (G, gg), or with an operator the whole
+/// lines from the cursor's to that one.
+fn document_motion(operator: Option<VimOperator>, motion: VimMotion) -> VimKeyResult {
+    match operator {
+        Some(operator) => VimKeyResult::LinewiseMotion {
+            operator,
+            motion,
+            count: 1,
+        },
+        None => VimKeyResult::Motion { motion, count: 1 },
+    }
+}
+
+/// A move to the line's first column (0, Home), or with an operator the
+/// characters before the cursor.
+fn line_start(state: &mut VimState) -> VimKeyResult {
+    let operator = state.take_pending_operator();
+    state.clear_pending();
+    match operator {
+        Some(operator) => VimKeyResult::OperatorMotion {
+            operator,
+            motion: VimMotion::LineStart,
+            count: 1,
+        },
+        None => VimKeyResult::Motion {
+            motion: VimMotion::LineStart,
+            count: 1,
+        },
     }
 }

@@ -1,0 +1,1 @@
+- **Vim operators work up the file and to its ends.** `dk` and `yk` take the line above instead of the one below, `dG`, `dgg` and `d{number}G` take the whole lines to the end, the start or that line, `d0` deletes to the line start instead of leaving `d` waiting, and deleting the last line no longer leaves an empty line in its place.

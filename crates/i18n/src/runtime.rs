@@ -415,6 +415,7 @@ impl Translation for RuntimeTranslation {
         vim_hint_line_ends,
         vim_hint_chars,
         vim_hint_lines,
+        vim_hint_file_lines,
         terminal_no_command_output,
         agent_mention_selection,
         agent_mention_term,

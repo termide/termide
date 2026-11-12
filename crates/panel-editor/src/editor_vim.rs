@@ -104,25 +104,29 @@ impl Editor {
                 self.selection = None;
             }
             VimKeyResult::LinewiseOperator { operator, count } => {
-                let start_line = self.cursor.line;
-                let end_line =
-                    (start_line + count - 1).min(self.buffer.line_count().saturating_sub(1));
-
-                if let Some(vim) = self.vim.as_mut() {
-                    if let Ok(op_result) = operators::execute_linewise_operator(
-                        operator,
-                        start_line,
-                        end_line,
-                        &mut self.buffer,
-                        vim,
-                    ) {
-                        self.cursor = op_result.cursor;
-                        if op_result.enter_insert {
-                            vim.enter_insert();
-                        }
-                    }
-                }
-                self.selection = None;
+                let start = self.cursor.line;
+                let last = self.buffer.line_count().saturating_sub(1);
+                self.run_linewise_operator(operator, start, (start + count - 1).min(last));
+            }
+            VimKeyResult::LinewiseMotion {
+                operator,
+                motion,
+                count,
+            } => {
+                let target = execute_motion(
+                    motion,
+                    &self.cursor,
+                    &self.buffer,
+                    count,
+                    self.viewport.height,
+                    WrapLayout {
+                        width: self.render_cache.content_width,
+                        smart: true,
+                        tab_size: self.config.tab_size,
+                    },
+                );
+                let line = self.cursor.line;
+                self.run_linewise_operator(operator, line.min(target.line), line.max(target.line));
             }
             VimKeyResult::VisualOperator { operator } => {
                 if let (Some(selection), Some(vim)) = (self.selection.as_ref(), self.vim.as_mut()) {
@@ -347,4 +351,32 @@ impl Editor {
             Some(events)
         }
     }
+
+    /// Apply `operator` to the whole lines `start_line..=end_line`.
+    fn run_linewise_operator(
+        &mut self,
+        operator: crate::vim::VimOperator,
+        start_line: usize,
+        end_line: usize,
+    ) {
+        if let Some(vim) = self.vim.as_mut() {
+            if let Ok(op_result) = crate::vim::operators::execute_linewise_operator(
+                operator,
+                start_line,
+                end_line,
+                &mut self.buffer,
+                vim,
+            ) {
+                self.cursor = op_result.cursor;
+                if op_result.enter_insert {
+                    vim.enter_insert();
+                }
+            }
+        }
+        self.selection = None;
+    }
 }
+
+#[cfg(test)]
+#[path = "editor_vim_tests.rs"]
+mod tests;

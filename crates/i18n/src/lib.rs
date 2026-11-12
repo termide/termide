@@ -256,6 +256,7 @@ pub trait Translation: Send + Sync {
     fn vim_hint_line_ends(&self) -> &str;
     fn vim_hint_chars(&self) -> &str;
     fn vim_hint_lines(&self) -> &str;
+    fn vim_hint_file_lines(&self) -> &str;
     fn terminal_no_command_output(&self) -> &str;
     fn terminal_command_output_copied(&self, lines: usize) -> String;
     fn editor_folded_lines(&self, lines: usize) -> String;

@@ -35,4 +35,18 @@ wait "First line"
 key g
 wait-gone "First line"
 wait "Pos: 1:1"
+
+# dk takes the cursor's line and the one above.
+key z R j d k
+wait-gone "one();"
+expect "two();"
+expect-not "fn outer"
+
+# After an operator g offers only gg.
+key d g
+wait "Lines to the file's start / end"
+expect " dg "
+expect-not "Screen line"
+key Esc
+wait-gone "Lines to the file's start"
 quit --force

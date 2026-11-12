@@ -38,6 +38,13 @@ pub enum VimKeyResult {
     },
     /// Execute a linewise operator (dd, yy, cc).
     LinewiseOperator { operator: VimOperator, count: usize },
+    /// Execute an operator on the whole lines from the cursor's to the one
+    /// `motion` reaches, either way (dj, dk, dG, dgg).
+    LinewiseMotion {
+        operator: VimOperator,
+        motion: VimMotion,
+        count: usize,
+    },
     /// Execute operator on visual selection.
     VisualOperator { operator: VimOperator },
     /// Enter insert mode at position.

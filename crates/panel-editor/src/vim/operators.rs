@@ -202,13 +202,17 @@ fn normalize_range(start: Cursor, end: Cursor) -> (Cursor, Cursor) {
 /// Delete lines from buffer (inclusive).
 fn delete_lines(buffer: &mut TextBuffer, start_line: usize, end_line: usize) -> anyhow::Result<()> {
     // Delete from start of first line to start of line after last (or end of document)
-    let start = Cursor::at(start_line, 0);
-    let end = if end_line + 1 < buffer.line_count() {
-        Cursor::at(end_line + 1, 0)
+    let (start, end) = if end_line + 1 < buffer.line_count() {
+        (Cursor::at(start_line, 0), Cursor::at(end_line + 1, 0))
     } else {
-        // Last line - delete to end of line
-        let last_line_len = buffer.line_len_graphemes(end_line);
-        Cursor::at(end_line, last_line_len)
+        // Through the last line: take the line break before the lines too,
+        // or an empty line would stay in their place.
+        let end = Cursor::at(end_line, buffer.line_len_graphemes(end_line));
+        let start = match start_line.checked_sub(1) {
+            Some(above) => Cursor::at(above, buffer.line_len_graphemes(above)),
+            None => Cursor::at(0, 0),
+        };
+        (start, end)
     };
 
     buffer.delete_range(&start, &end)?;
