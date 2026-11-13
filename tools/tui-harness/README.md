@@ -100,7 +100,9 @@ to the mode worked in, past the ones `Shift+Tab` passes through) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in
 its system prompt, and a clean-context carry-out in a new session),
 `acp-agent-file` (Claude Code started by an `AGENT.md` `command` and served
-termide's tools as on a connection) and
+termide's tools as on a connection), `settings-fields` (the settings
+window's Option as Alt and git graph fields on General, the terminal session
+limit and the bell on the AI page) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
 a session opened from its list), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its

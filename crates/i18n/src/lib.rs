@@ -1509,6 +1509,8 @@ pub trait Translation: Send + Sync {
     /// AI settings: how many messages agents pass one another without the
     /// user, `ai.max_agent_messages`.
     fn settings_agent_max_agent_messages(&self) -> &str;
+    fn settings_agent_bell_on_attention(&self) -> &str;
+    fn settings_agent_max_terminal_sessions(&self) -> &str;
     /// Settings modal: AI tab, web tools field labels.
     fn settings_web_backend(&self) -> &str;
     /// AI menu: the row that shows or hides the agents' web browser window.
@@ -1728,6 +1730,8 @@ pub trait Translation: Send + Sync {
     fn detach_failed(&self) -> &str;
     fn settings_general_always_detachable(&self) -> &str;
     fn settings_general_restore_projects(&self) -> &str;
+    fn settings_general_report_all_keys(&self) -> &str;
+    fn settings_general_unicode_git_graph(&self) -> &str;
     fn help_desc_detach_instance(&self) -> &str;
 
     // Directory picker

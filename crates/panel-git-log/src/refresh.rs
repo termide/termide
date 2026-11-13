@@ -133,7 +133,7 @@ impl GitLogPanel {
     /// new ones arrive and reads at least as far as it had, so a watcher
     /// refresh neither blanks the list nor loses the reader's place; another
     /// repository or branch starts at the top.
-    fn restart_log(&mut self) {
+    pub(crate) fn restart_log(&mut self) {
         let Some(repo) = self.repo_manager.current() else {
             self.clear_git_state();
             return;
@@ -415,6 +415,27 @@ mod tests {
         // Enter opens the diff whatever the binding.
         let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
         assert!(opens_diff(panel.handle_key_inner(enter)));
+    }
+
+    /// `git_log.unicode_graph` switched in the settings reaches an open
+    /// panel: its rows are read again in the graph style now chosen.
+    #[test]
+    fn switching_the_graph_style_reads_the_log_again() {
+        let dir = repo(3);
+        let mut panel = panel(dir.path());
+        settle(&mut panel, |p| idle(p) && p.log.is_some());
+        let graph = |p: &GitLogPanel| p.commits[0].graph.clone().unwrap_or_default();
+        assert!(graph(&panel).contains('●'), "{:?}", graph(&panel));
+
+        let mut config = Config::default();
+        config.git_log.unicode_graph = false;
+        let config = std::sync::Arc::new(config);
+        let theme = termide_theme::Theme::default();
+        crate::Panel::prepare_render(&mut panel, &theme, &config);
+        settle(&mut panel, |p| {
+            idle(p) && p.log.is_some() && !p.commits.is_empty() && !graph(p).contains('●')
+        });
+        assert!(graph(&panel).contains('*'), "{:?}", graph(&panel));
     }
 
     #[test]

@@ -1402,7 +1402,8 @@ when termide quits, or, for a subagent, when its task is over. A project
 kept open in the background keeps its terminals too. A subagent's terminals
 are its own: the agent that handed the task over does not see them. One
 agent session keeps at most `max_terminal_sessions` terminals open (10 by
-default); past that the call fails with the list of open ones, and nothing
+default; also on the settings window's AI page, and open panels take a change
+at once); past that the call fails with the list of open ones, and nothing
 is closed for the agent.
 
 The terminals show in the strip above the panel's input and the status bar
@@ -1638,7 +1639,8 @@ in front of you in a focused terminal window, the question also rings the
 terminal bell, and so does the end of a run that took ten seconds or more (not
 one you stopped, nor one an active `/goal` or `/loop` carries on from: those
 ring when they end); it rings once until you look at the panel, and
-`bell_on_attention = false` under `[ai]` silences it. "In this project" keeps
+`bell_on_attention = false` under `[ai]`, or the bell's field on the settings
+window's AI page, silences it. "In this project" keeps
 the rule in termide's data directory, filed under the project
 (`trust/<project path>/permissions.toml`), "everywhere" appends it to the
 global configuration; answers for the session live until the panel closes.

@@ -92,6 +92,9 @@ by:
 report_all_keys = true  # default
 ```
 
+It is also *Option as Alt* in the Input group of the settings window's
+General page; a change takes effect when termide starts again.
+
 The flag has one cost: dead-key and IME composition no longer reaches
 termide, so `Option+E` `E` → `é` stops working inside the application.
 Users who need composed input should set `report_all_keys = false` and

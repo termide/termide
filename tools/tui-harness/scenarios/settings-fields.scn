@@ -1,0 +1,17 @@
+# The settings window's fields for keys that had none: Option as Alt and
+# the git log's graph on General, the bell and the terminal session limit
+# on the AI page.
+size 140x44
+start
+wait "README.md"
+key Alt+P
+wait "Option as Alt (macOS, after a restart)"
+expect "Box-drawing graph in the git log"
+snapshot general
+key Down Down Down Down Down Down Down Down
+wait "Terminal sessions per agent"
+expect "Bell when an agent waits for you"
+expect "Notifications"
+snapshot ai
+key Esc
+quit --force

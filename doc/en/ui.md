@@ -220,7 +220,9 @@ properties, and `Backspace` or `Delete` discards its changes after asking.
 The **git log** panel draws the commit graph with box-drawing pseudographics
 (`● │ ├ ╮ ╯`) laid out from each commit's parents, with each lane coloured so a
 branch can be followed by colour. To fall back to git's native ASCII `--graph`
-instead, set it in `config.toml`:
+instead, untick *Box-drawing graph in the git log* on the settings window's
+General page, or set it in `config.toml`; an open log is read again in the
+style chosen:
 
 ```toml
 [git_log]

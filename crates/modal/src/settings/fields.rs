@@ -118,6 +118,14 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_general_restore_projects(),
                 field_type: FieldType::Bool,
             },
+            FieldDescriptor {
+                label: t.settings_general_report_all_keys(),
+                field_type: FieldType::Bool,
+            },
+            FieldDescriptor {
+                label: t.settings_general_unicode_git_graph(),
+                field_type: FieldType::Bool,
+            },
         ],
         SettingsTab::Editor => vec![
             FieldDescriptor {
@@ -292,6 +300,14 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 label: t.settings_agent_max_agent_messages(),
                 field_type: FieldType::Number,
             },
+            FieldDescriptor {
+                label: t.settings_agent_bell_on_attention(),
+                field_type: FieldType::Bool,
+            },
+            FieldDescriptor {
+                label: t.settings_agent_max_terminal_sessions(),
+                field_type: FieldType::Number,
+            },
         ],
         SettingsTab::Connection => super::connection::connection_fields(),
         SettingsTab::LspServer => super::lsp_server::lsp_server_fields(),
@@ -318,6 +334,8 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             8 => config.general.resource_monitor_interval.to_string(),
             9 => bool_str(config.general.always_detachable),
             10 => bool_str(config.general.restore_projects),
+            11 => bool_str(config.general.report_all_keys),
+            12 => bool_str(config.git_log.unicode_graph),
             _ => String::new(),
         },
         SettingsTab::Editor => match index {
@@ -394,6 +412,8 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
                 0 => i18n::t().settings_value_no_limit().to_string(),
                 n => n.to_string(),
             },
+            AI_BELL_ON_ATTENTION_FIELD => bool_str(config.ai.bell_on_attention),
+            AI_MAX_TERMINAL_SESSIONS_FIELD => config.ai.max_terminal_sessions.to_string(),
             index => match side_field(config, index) {
                 Some((side, false)) => side_connection_label(&side.connection),
                 Some((side, true)) if side.model.is_empty() => i18n::t()
@@ -479,6 +499,8 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
             }
             9 => config.general.always_detachable = !config.general.always_detachable,
             10 => config.general.restore_projects = !config.general.restore_projects,
+            11 => config.general.report_all_keys = !config.general.report_all_keys,
+            12 => config.git_log.unicode_graph = !config.git_log.unicode_graph,
             _ => {}
         },
         SettingsTab::Editor => match index {
@@ -503,6 +525,11 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
         SettingsTab::Terminal => {
             if index == 2 {
                 config.terminal.shell_integration = !config.terminal.shell_integration;
+            }
+        }
+        SettingsTab::Ai => {
+            if index == AI_BELL_ON_ATTENTION_FIELD {
+                config.ai.bell_on_attention = !config.ai.bell_on_attention;
             }
         }
         _ => {}
@@ -713,6 +740,11 @@ pub(super) const AI_ON_LIMIT_FIELD: usize = 10;
 /// The AI tab's field for how many messages agents pass one another
 /// without the user.
 pub(super) const AI_MAX_AGENT_MESSAGES_FIELD: usize = 17;
+/// The AI tab's field for the bell when a panel waits for the user.
+pub(super) const AI_BELL_ON_ATTENTION_FIELD: usize = 18;
+/// The AI tab's field for how many terminal sessions an agent session may
+/// have open at once.
+pub(super) const AI_MAX_TERMINAL_SESSIONS_FIELD: usize = 19;
 
 /// A limit policy's localized name.
 fn on_limit_label(policy: LimitPolicy) -> String {
@@ -1078,7 +1110,11 @@ mod field_index_tests {
         let mut config = Config::default();
 
         let fields = fields_for_tab(SettingsTab::General);
-        assert_eq!(fields.len(), index + 1, "restore_projects must be last");
+        assert_eq!(
+            fields.len(),
+            index + 3,
+            "only report_all_keys and unicode_graph follow restore_projects"
+        );
         assert!(matches!(fields[index].field_type, FieldType::Bool));
 
         assert!(config.general.restore_projects, "on by default");
@@ -1094,15 +1130,49 @@ mod field_index_tests {
         );
     }
 
+    /// The toggles for keys that had no field: each flips its own setting,
+    /// and only it.
+    #[test]
+    fn the_late_toggles_read_and_write_their_own_settings() {
+        type Read = fn(&Config) -> bool;
+        let cases: [(SettingsTab, usize, Read); 3] = [
+            (SettingsTab::General, 11, |c| c.general.report_all_keys),
+            (SettingsTab::General, 12, |c| c.git_log.unicode_graph),
+            (SettingsTab::Ai, AI_BELL_ON_ATTENTION_FIELD, |c| {
+                c.ai.bell_on_attention
+            }),
+        ];
+        for (tab, index, read) in cases {
+            let mut config = Config::default();
+            assert!(matches!(
+                fields_for_tab(tab)[index].field_type,
+                FieldType::Bool
+            ));
+            let before = read(&config);
+            assert_eq!(get_field_value(&config, tab, index), bool_str(before));
+            toggle_field(&mut config, tab, index);
+            assert_eq!(read(&config), !before, "{tab:?} field {index}");
+            assert_eq!(get_field_value(&config, tab, index), bool_str(!before));
+            for (_, _, other) in cases.iter().filter(|c| (c.0, c.1) != (tab, index)) {
+                assert_eq!(other(&config), other(&Config::default()));
+            }
+        }
+        assert!(matches!(
+            fields_for_tab(SettingsTab::Ai)[AI_MAX_TERMINAL_SESSIONS_FIELD].field_type,
+            FieldType::Number
+        ));
+    }
+
     #[test]
     fn web_fields_read_and_write_their_own_settings() {
         let mut config = Config::default();
         let fields = fields_for_tab(SettingsTab::Ai);
         assert_eq!(
             fields.len(),
-            18,
+            20,
             "the permission mode, its reviewer and model, the limit policy, the side \
-             models and the agent message limit follow the web fields"
+             models, the agent message limit, the bell and the terminal session limit \
+             follow the web fields"
         );
         assert!(matches!(fields[6].field_type, FieldType::OptionalText));
         assert!(matches!(fields[7].field_type, FieldType::Enum));

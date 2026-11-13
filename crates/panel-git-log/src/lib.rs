@@ -291,7 +291,14 @@ impl Panel for GitLogPanel {
     fn prepare_render(&mut self, theme: &Theme, config: &std::sync::Arc<Config>) {
         self.cached_theme = ThemeColors::from(theme);
         self.vim_mode = config.general.vim_mode;
-        self.unicode_graph = config.git_log.unicode_graph;
+        // The rows are parsed for one graph style: another one, switched in
+        // the settings, reads the log again.
+        if self.unicode_graph != config.git_log.unicode_graph {
+            self.unicode_graph = config.git_log.unicode_graph;
+            if self.log_view.is_some() {
+                self.restart_log();
+            }
+        }
         let config_ptr = std::sync::Arc::as_ptr(config) as usize;
         if self.last_config_ptr != config_ptr {
             self.last_config_ptr = config_ptr;

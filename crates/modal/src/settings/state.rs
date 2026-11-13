@@ -510,12 +510,14 @@ impl SettingsModal {
         match self.field_tab() {
             SettingsTab::General => vec![
                 Header(t.settings_header_appearance()),
-                Field(1), // theme
-                Field(2), // language
-                Field(3), // icon_mode
+                Field(1),  // theme
+                Field(2),  // language
+                Field(3),  // icon_mode
+                Field(12), // git_log.unicode_graph
                 Spacer,
                 Header(t.settings_header_input()),
-                Field(0), // vim_mode
+                Field(0),  // vim_mode
+                Field(11), // report_all_keys
                 Spacer,
                 Header(t.settings_header_layout()),
                 Field(4), // auto_stack_threshold
@@ -600,6 +602,10 @@ impl SettingsModal {
                     Field(8),  // auto mode reviewer
                     Field(9),  // its model
                     Field(17), // messages between agents without the user
+                    Field(19), // terminal sessions an agent session keeps open
+                    Spacer,
+                    Header(t.settings_header_notifications()),
+                    Field(18), // the bell when a panel waits for the user
                     Spacer,
                     Header(t.settings_header_transcript()),
                     Field(2), // autofold
@@ -924,6 +930,11 @@ impl SettingsModal {
                 super::fields::AI_MAX_AGENT_MESSAGES_FIELD => {
                     self.config.ai.max_agent_messages = u32::try_from(val).unwrap_or(u32::MAX);
                 }
+                super::fields::AI_MAX_TERMINAL_SESSIONS_FIELD => {
+                    // The agent keeps one at least, whatever the field says.
+                    self.config.ai.max_terminal_sessions =
+                        usize::try_from(val).unwrap_or(usize::MAX).max(1);
+                }
                 _ => {}
             },
             SettingsTab::Connection => self.apply_connection_number(index, val),
@@ -1072,6 +1083,33 @@ mod content_row_tests {
         assert_eq!(
             modal.field_value(field),
             termide_i18n::t().settings_value_no_limit()
+        );
+    }
+
+    #[test]
+    fn the_terminal_sessions_field_edits_the_limit_and_keeps_one() {
+        let field = super::super::fields::AI_MAX_TERMINAL_SESSIONS_FIELD;
+        let mut modal = SettingsModal::new(Config::default(), Config::default(), false);
+        modal.active_tab = SettingsTab::Ai;
+        modal.field_cursor = modal
+            .content_rows()
+            .iter()
+            .position(|row| *row == ContentRow::Field(field))
+            .expect("the terminal sessions field is shown");
+        assert_eq!(modal.field_value(field), "10");
+
+        let set = |modal: &mut SettingsModal, text: &str| {
+            modal.start_edit();
+            modal.edit_input = termide_ui::TextInput::with_text(text.to_string());
+            modal.commit_edit();
+        };
+        set(&mut modal, "4");
+        assert_eq!(modal.config.ai.max_terminal_sessions, 4);
+        set(&mut modal, "0");
+        assert_eq!(modal.config.ai.max_terminal_sessions, 1);
+        assert_eq!(
+            modal.config.ai.max_agent_messages,
+            Config::default().ai.max_agent_messages
         );
     }
 }
