@@ -47,7 +47,8 @@ minute.
   result said of the language server's errors. It logs the model every call asks for. `mock-acp codex`
   (or `claude_code`, `gemini_cli`) makes that ACP agent the connection and
   puts the stand-in adapters of `tools/screenshots/mock-acp` first on
-  `PATH`. Neither touches the network.
+  `PATH`; `mock-acp claude_code agent` only puts them on `PATH`, for an
+  `AGENT.md` whose `command` starts one. Neither touches the network.
 
 ## Scenarios
 
@@ -60,7 +61,7 @@ Timeouts are in seconds and default to 10.
 | `project demo` \| `empty` | The project termide starts in (before `start`) |
 | `config FILE` | Use FILE (relative to the scenario) instead of `config.toml`; `{mock_llm_port}` in it is filled in |
 | `mock-llm [flavor]` | Start the mock model: `default`, `llamacpp`, `omlx` or `openrouter` |
-| `mock-acp PROVIDER` | Connect the `claude_code`, `codex` or `gemini_cli` stand-in |
+| `mock-acp PROVIDER [agent]` | Connect the `claude_code`, `codex` or `gemini_cli` stand-in; with `agent`, only put the stand-ins on `PATH` |
 | `lsp` | Let language servers run (no `--no-lsp`); a rustup-installed one keeps the real `RUSTUP_HOME` and `CARGO_HOME` (before `start`) |
 | `start [ARGS...]` | Run termide in the project, waiting for its first frame; `{project}` in ARGS is the project's path |
 | `key K...` | Press keys: `Enter`, `Esc`, `Tab`, `Alt+T`, `Ctrl+S`, `Shift+Up`, `Alt+F11`, `PgDn`, `x` |
@@ -73,7 +74,7 @@ Timeouts are in seconds and default to 10.
 | `expect-row N "REGEX"` | Check row N (0 is the top, -1 the bottom) |
 | `file-contains PATH "TEXT" [T]` | Wait until the project's file PATH holds TEXT |
 | `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
-| `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …` |
+| `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …`, and each tool termide's MCP server lists to it as `tool: …` |
 | `mock-acp-count "TEXT" N` | Check that the ACP stand-in's log holds TEXT exactly N times |
 | `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away |
 | `snapshot NAME` | Save the screen as text |
@@ -97,7 +98,9 @@ going on once allowed), `goal` (`/goal` with its judge on the model
 `[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
 to the mode worked in, past the ones `Shift+Tab` passes through) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in
-its system prompt, and a clean-context carry-out in a new session) and
+its system prompt, and a clean-context carry-out in a new session),
+`acp-agent-file` (Claude Code started by an `AGENT.md` `command` and served
+termide's tools as on a connection) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
 a session opened from its list), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its

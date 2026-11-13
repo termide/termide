@@ -1932,18 +1932,26 @@ done"#;
         .0
         .get("question")
         .is_none());
-    // An external delegate drives its own tools: none of ours, nor the
-    // MCP servers'.
+    // An external delegate is offered what the default agent is, the MCP
+    // servers' tools too, whatever its `tools` list says: its backend
+    // serves it those its program takes.
     let outside = tmp.path().join("ai/agents/outside");
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::write(
         outside.join(AGENT_FILE),
-        "---\ncommand: my-agent --acp\n---\n",
+        "---\ncommand: my-agent --acp\ntools: read\n---\n",
     )
     .unwrap();
     let external = catalog.dirs.agent("outside");
     let (tools, _, _) = subagents.toolset("outside", &external, true);
-    assert!(tools.is_empty(), "{:?}", tools.names());
+    assert_eq!(
+        tools.names(),
+        subagents
+            .toolset(DEFAULT_AGENT, &everything, true)
+            .0
+            .names()
+    );
+    assert!(tools.get("docs__lookup").is_some() && tools.get("question").is_some());
 }
 
 #[test]
@@ -2146,18 +2154,24 @@ fn the_catalog_turns_definitions_into_profiles() {
     let review = catalog.resolve("review").unwrap();
     assert_eq!(review.tools.names(), ["read", "shell", "skill"]);
 
-    // A `command` makes an external agent: no tools of ours, a backend.
+    // A `command` makes an external agent: a backend, offered every tool
+    // the default agent has, as a CLI connection's agent is, whatever its
+    // `tools` list says; the backend serves it those its program takes.
     let outside = global.join("agents/outside");
     std::fs::create_dir_all(&outside).unwrap();
     std::fs::write(
             outside.join(AGENT_FILE),
-            "---\ndescription: Claude Code\ncommand: npx -y @agentclientprotocol/claude-agent-acp\n---\n",
+            "---\ndescription: Claude Code\ncommand: npx -y @agentclientprotocol/claude-agent-acp\ntools: read\n---\n",
         )
         .unwrap();
     let outside = catalog.resolve("outside").unwrap();
     assert!(outside.backend.is_some());
-    assert!(outside.tools.is_empty());
-    assert!(outside.late_tools.is_none());
+    assert_eq!(
+        outside.tools.names(),
+        catalog.resolve(DEFAULT_AGENT).unwrap().tools.names()
+    );
+    assert!(outside.tools.names().contains(&"question"));
+    assert!(outside.late_tools.is_some());
     let default = catalog.resolve(DEFAULT_AGENT).unwrap();
     assert_eq!(default.system_prompt, "- deploy: Ship it\n");
 }

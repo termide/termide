@@ -731,7 +731,10 @@ impl AgentCatalog for FsCatalog {
             return None;
         }
         let definition = self.dirs.agent(name);
-        // An external agent brings its own tools; ours would only confuse it.
+        // An external agent is offered the same tools as the built-in one,
+        // as a CLI connection's agent is: its backend serves it those its
+        // program takes in place of, or beside, its own (none at all to a
+        // generic one).
         let backend: Option<BackendFactory> = definition.spec.acp.clone().map(|config| {
             let agent = name.to_string();
             Arc::new(move |setup: termide_agent_core::BackendSetup| {
@@ -739,54 +742,46 @@ impl AgentCatalog for FsCatalog {
                     .map(|runtime| Box::new(runtime) as Box<dyn termide_agent_core::Backend>)
             }) as BackendFactory
         });
-        let mut tools = if backend.is_some() {
-            termide_agent_core::ToolRegistry::new()
-        } else {
-            base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref())
-        };
+        let mut tools = base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref());
         // Someone watches the panel's agent to answer its questions, to
         // confirm a command it is offered and to start a goal or a loop it
         // offers; a subagent and headless mode build their tools without them.
-        if backend.is_none() {
-            tools.insert(Arc::new(QuestionTool));
-            tools.insert(Arc::new(SuggestCommandTool));
-            tools.insert(Arc::new(SuggestGoalTool));
-            tools.insert(Arc::new(SuggestLoopTool));
-            // The agents of the other panels are there to write to.
-            for tool in peers::peer_tools(name, &self.project_root) {
-                tools.insert(tool);
-            }
-            // Part of the work handed over to a copy of the session.
-            tools.insert(peers::fork_tool(name, &self.project_root));
-            // The debugger, driven as the user drives it in the debug panel.
-            tools.insert(debug_tool::debug_tool(&self.project_root));
+        tools.insert(Arc::new(QuestionTool));
+        tools.insert(Arc::new(SuggestCommandTool));
+        tools.insert(Arc::new(SuggestGoalTool));
+        tools.insert(Arc::new(SuggestLoopTool));
+        // The agents of the other panels are there to write to.
+        for tool in peers::peer_tools(name, &self.project_root) {
+            tools.insert(tool);
         }
+        // Part of the work handed over to a copy of the session.
+        tools.insert(peers::fork_tool(name, &self.project_root));
+        // The debugger, driven as the user drives it in the debug panel.
+        tools.insert(debug_tool::debug_tool(&self.project_root));
         // The `task` tool lets this agent hand work to the others, and its
         // `tools` list can leave it out like any other capability; a lone
-        // agent delegates to a copy of itself. Never for an external
-        // agent (it drives its own tools) or a subagent (no nesting: the
-        // subagent build path adds no task tool).
+        // agent delegates to a copy of itself. Never for a subagent (no
+        // nesting: the subagent build path adds no task tool).
         if let Some(subagents) = &self.subagents {
-            if backend.is_none() {
-                let delegates = self.delegatable();
-                if !delegates.is_empty() {
-                    let runner = Arc::clone(subagents);
-                    let caller = name.to_string();
-                    let run: SubagentRun = Arc::new(move |task, ctx, cancel, on_update| {
-                        if task.background {
-                            return runner.start_background(&caller, task, ctx).into();
-                        }
-                        runner.run_detachable(&caller, task, ctx, cancel, on_update)
-                    });
-                    tools.insert(Arc::new(TaskTool::new(delegates, run)));
-                }
+            let delegates = self.delegatable();
+            if !delegates.is_empty() {
+                let runner = Arc::clone(subagents);
+                let caller = name.to_string();
+                let run: SubagentRun = Arc::new(move |task, ctx, cancel, on_update| {
+                    if task.background {
+                        return runner.start_background(&caller, task, ctx).into();
+                    }
+                    runner.run_detachable(&caller, task, ctx, cancel, on_update)
+                });
+                tools.insert(Arc::new(TaskTool::new(delegates, run)));
             }
         }
         // What the agent set going is its own to see and stop.
+        tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
+        // An external agent's `tools` list is ignored, with a warning.
         if backend.is_none() {
-            tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
+            restrict_tools(&mut tools, &definition.spec.tools, name);
         }
-        restrict_tools(&mut tools, &definition.spec.tools, name);
         // Skills are instructions, not a capability, so an agent's `tools`
         // list does not govern them: the tool comes with the skills.
         let all_skills = self.dirs.model_skills();
@@ -795,7 +790,7 @@ impl AgentCatalog for FsCatalog {
             .into_iter()
             .filter(|skill| !off.contains(&format!("skill:{}", skill.name)))
             .collect();
-        if !skill_names.is_empty() && backend.is_none() {
+        if !skill_names.is_empty() {
             tools.insert(Arc::new(SkillTool::new(skills.clone())));
         }
         // What the session switched off leaves the registry here, before the
@@ -821,7 +816,7 @@ impl AgentCatalog for FsCatalog {
             model: definition.spec.model,
             mode: definition.spec.mode,
             // Subscribed with no servers too: a reload may bring some.
-            late_tools: backend.is_none().then(|| {
+            late_tools: Some({
                 // MCP servers and the project's plugins share the channel.
                 let (tx, rx) = std::sync::mpsc::channel();
                 self.mcp.subscribe_into(tx.clone());
@@ -1930,20 +1925,19 @@ impl Subagents {
         definition: &termide_agent_core::AgentDefinition,
         asks: bool,
     ) -> (ToolRegistry, Vec<termide_agent_core::SkillInfo>, String) {
-        // An external agent drives its own tools, as in a panel: none of
-        // ours, so its prompt lists none.
+        // An external agent is offered the same tools, as in a panel; its
+        // backend serves it those its program takes. Its `tools` list is
+        // ignored, with a warning.
         let external = definition.spec.acp.is_some();
-        let mut tools = if external {
-            ToolRegistry::new()
-        } else {
-            base_tools(&self.dirs, Some(&self.web), Some(&self.recall))
-        };
-        if asks && !external {
+        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
+        if asks {
             tools.insert(Arc::new(QuestionTool));
         }
-        restrict_tools(&mut tools, &definition.spec.tools, name);
+        if !external {
+            restrict_tools(&mut tools, &definition.spec.tools, name);
+        }
         let skills = self.dirs.model_skills();
-        if !skills.is_empty() && !external {
+        if !skills.is_empty() {
             tools.insert(Arc::new(SkillTool::new(skills.clone())));
         }
         apply_tool_texts(&mut tools, &self.dirs.tool_texts());
@@ -1954,10 +1948,8 @@ impl Subagents {
         let system_prompt = build_system_prompt(&options);
         // As for the panel's agent, the MCP servers' tools are neither listed
         // in the prompt nor narrowed by the agent's `tools` list.
-        if !external {
-            for tool in self.mcp.ready_tools() {
-                tools.insert(tool);
-            }
+        for tool in self.mcp.ready_tools() {
+            tools.insert(tool);
         }
         (tools, skills, system_prompt)
     }

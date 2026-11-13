@@ -243,6 +243,7 @@ class Run:
         self.config = HERE / "config.toml"
         self.mock_llm = None
         self.mock_acp = None
+        self.mock_acp_connection = False
         self.lsp = False
         self.term = None
         self.helpers = []
@@ -282,10 +283,14 @@ class Run:
         # finds its toolchains though HOME is the throwaway one.
         self.lsp = True
 
-    def v_mock_acp(self, provider):
+    def v_mock_acp(self, provider, role="connection"):
         if provider not in ("claude_code", "codex", "gemini_cli"):
             raise Failure("mock-acp takes claude_code, codex or gemini_cli")
+        if role not in ("connection", "agent"):
+            raise Failure("mock-acp's second word is connection or agent")
         self.mock_acp = provider
+        # `agent`: the stand-ins are only on PATH, for an AGENT.md `command`.
+        self.mock_acp_connection = role == "connection"
 
     def env(self):
         env = {
@@ -356,7 +361,7 @@ class Run:
             )
             wait_for_port(port)
         config = self.config.read_text().replace("{mock_llm_port}", str(port))
-        if self.mock_acp:
+        if self.mock_acp_connection:
             name = {"claude_code": "claude", "codex": "codex", "gemini_cli": "gemini"}[
                 self.mock_acp
             ]

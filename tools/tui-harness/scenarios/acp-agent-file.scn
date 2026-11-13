@@ -1,0 +1,23 @@
+# Claude Code as an agent defined by the `command` of its AGENT.md, not by
+# the connection: it is served termide's tools as a `claude_code`
+# connection's agent is. The stand-in in tools/screenshots/mock-acp logs
+# each tool termide's MCP server lists to it.
+mock-llm
+mock-acp claude_code agent
+start
+wait "README.md"
+# The global root: a project's `command` waits for /trust.
+run "d=\"$HOME/Library/Application Support/termide\"; [ -d \"$d\" ] || d=\"$HOME/.config/termide\"; mkdir -p \"$d/ai/agents/default\" && printf -- '---\ncommand: npx -y @agentclientprotocol/claude-agent-acp\n---\n' > \"$d/ai/agents/default/AGENT.md\""
+key Alt+A
+wait "Agent"
+type "flag critical low-stock items in the reorder report"
+key Enter
+mock-acp-got "session/new" 20
+mock-acp-got "tool: read" 20
+mock-acp-got "tool: shell" 5
+mock-acp-got "tool: question" 5
+mock-acp-got "tool: send_message" 5
+mock-acp-count "tool: question" 1
+mock-acp-got "prompt: flag critical low-stock items" 5
+snapshot asked
+quit --force

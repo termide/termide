@@ -177,6 +177,8 @@ def tool_names():
 
 def run_task(session_id, request_id):
     names = tool_names() if state["mcp"] else set()
+    for name in sorted(names):
+        note("tool: " + name)
     used = 18_400
     for step, entry in enumerate(SCRIPT):
         time.sleep(0.5)
