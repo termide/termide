@@ -974,6 +974,7 @@ projects_already_open = "Эта директория уже занята дру�
 projects_already_current = "Это текущий проект"
 projects_move = "Перенести проект…"
 projects_copy = "Копировать проект…"
+projects_switch = "Перейти в проект"
 projects_move_title = "Перенести проект?"
 projects_transfer_busy = "Проект сейчас переносится или копируется"
 detach_instance = "Отсоединить экземпляр"

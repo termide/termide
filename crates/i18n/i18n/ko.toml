@@ -390,6 +390,7 @@ projects_already_open = "이 디렉터리는 이미 열려 있는 다른 프로�
 projects_already_current = "현재 프로젝트입니다"
 projects_move = "프로젝트 이동…"
 projects_copy = "프로젝트 복사…"
+projects_switch = "프로젝트로 전환"
 projects_move_title = "프로젝트를 이동할까요?"
 projects_transfer_busy = "프로젝트를 이동 또는 복사하는 중입니다"
 detach_instance = "인스턴스 분리"

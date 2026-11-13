@@ -1065,28 +1065,43 @@ pub fn panel_action_dropdown_position(
 }
 
 // ────────────────────────────────────────────────────────────────────
-// Project action menu (the `≡` after the current project's button)
+// Project action menu (a project's button in the menu bar)
 // ────────────────────────────────────────────────────────────────────
 
+pub const PROJECT_ACTION_SWITCH: &str = "__project_action_switch__";
 pub const PROJECT_ACTION_MOVE: &str = "__project_action_move__";
 pub const PROJECT_ACTION_COPY: &str = "__project_action_copy__";
 pub const PROJECT_ACTION_CHANGE_ROOT: &str = "__project_action_change_root__";
 pub const PROJECT_ACTION_CLOSE: &str = "__project_action_close__";
 
-/// The items of the current project's menu, with the keys that do the same
-/// on a project in the Projects menu or on its button. Closing is offered
-/// only while another project is open: the current one closes by switching
-/// to it.
-pub fn get_project_action_menu_items(can_close: bool) -> Vec<DropdownItem> {
+/// The items of an open project's menu, with the keys that do the same on a
+/// project in the Projects menu. Another project is switched to; the root is
+/// changed only for the current one, which closes only while another
+/// project is open: closing it switches to that one.
+pub fn get_project_action_menu_items(current: bool, can_close: bool) -> Vec<DropdownItem> {
     let t = termide_i18n::t();
-    let mut items = vec![
+    let mut items = Vec::with_capacity(4);
+    if !current {
+        items.push(DropdownItem::new(
+            t.projects_switch(),
+            PROJECT_ACTION_SWITCH,
+        ));
+    }
+    items.push(
         DropdownItem::new(t.projects_move(), PROJECT_ACTION_MOVE)
             .with_shortcut(Some("F6".to_string())),
+    );
+    items.push(
         DropdownItem::new(t.projects_copy(), PROJECT_ACTION_COPY)
             .with_shortcut(Some("F5".to_string())),
-        DropdownItem::new(t.projects_change_root(), PROJECT_ACTION_CHANGE_ROOT),
-    ];
-    if can_close {
+    );
+    if current {
+        items.push(DropdownItem::new(
+            t.projects_change_root(),
+            PROJECT_ACTION_CHANGE_ROOT,
+        ));
+    }
+    if can_close || !current {
         items.push(
             DropdownItem::new(t.panel_action_close(), PROJECT_ACTION_CLOSE)
                 .with_shortcut(Some("F8".to_string())),
@@ -1276,6 +1291,48 @@ mod operation_menu_tests {
     fn command_operation_offers_only_cancel() {
         assert_eq!(keys(false, true), vec![OPERATION_ACTION_CANCEL]);
         assert_eq!(keys(true, true), vec![OPERATION_ACTION_CANCEL]);
+    }
+}
+
+#[cfg(test)]
+mod project_menu_tests {
+    use super::*;
+
+    fn keys(current: bool, can_close: bool) -> Vec<String> {
+        get_project_action_menu_items(current, can_close)
+            .into_iter()
+            .map(|i| i.key)
+            .collect()
+    }
+
+    /// The current project's root can change; it closes only while another
+    /// project is open, to be switched to.
+    #[test]
+    fn the_current_project_changes_its_root() {
+        let base = [
+            PROJECT_ACTION_MOVE,
+            PROJECT_ACTION_COPY,
+            PROJECT_ACTION_CHANGE_ROOT,
+        ];
+        assert_eq!(keys(true, false), base);
+        assert_eq!(
+            keys(true, true),
+            [&base[..], &[PROJECT_ACTION_CLOSE]].concat()
+        );
+    }
+
+    /// Another project is switched to, and always closes.
+    #[test]
+    fn another_project_is_switched_to() {
+        assert_eq!(
+            keys(false, true),
+            [
+                PROJECT_ACTION_SWITCH,
+                PROJECT_ACTION_MOVE,
+                PROJECT_ACTION_COPY,
+                PROJECT_ACTION_CLOSE
+            ]
+        );
     }
 }
 

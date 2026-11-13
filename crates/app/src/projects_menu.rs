@@ -9,8 +9,8 @@ use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use termide_ui_render::{
-    get_menu_item_x_position, get_projects_items, project_button_of, DropdownItem, ProjectButton,
-    PROJECTS_MENU_INDEX, PROJECTS_SUBMENU_ITEM_COUNT,
+    get_menu_item_x_position, get_project_action_menu_items, get_projects_items, project_button_of,
+    DropdownItem, ProjectButton, PROJECTS_MENU_INDEX, PROJECTS_SUBMENU_ITEM_COUNT,
 };
 
 use crate::open_projects::OpenProjectView;
@@ -297,6 +297,16 @@ impl AppState {
                 }
             })
             .collect()
+    }
+
+    /// The items of the open project's menu: the one under a project's
+    /// button in the menu bar.
+    pub fn project_action_items(&self) -> Vec<DropdownItem> {
+        let current = self
+            .open_projects
+            .get(self.ui.project_action_menu.project)
+            .is_none_or(|view| view.root == self.project_root);
+        get_project_action_menu_items(current, self.open_projects.len() > 1)
     }
 
     /// Load the projects worked on.

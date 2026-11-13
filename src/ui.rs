@@ -283,9 +283,9 @@ fn render_dropdowns_and_modals(
         }
     }
 
-    // The current project's menu, under the ≡ after its name
+    // An open project's menu, under its button
     if state.ui.project_action_menu.open {
-        let items = termide_ui_render::get_project_action_menu_items(state.open_projects.len() > 1);
+        let items = state.project_action_items();
         let (x, y) = termide_ui_render::panel_action_dropdown_position(
             &items,
             state.ui.project_action_menu.anchor_x,
@@ -413,7 +413,6 @@ pub fn render_layout_with_accordion(
         net_up_rate: state.system_monitor.net_upload_rate(),
         battery: state.system_monitor.battery_cached(),
         projects: &project_buttons,
-        project_menu_open: state.ui.project_action_menu.open,
     };
     render_menu(frame, main_chunks[0], &menu_params);
 

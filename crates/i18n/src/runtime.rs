@@ -1024,6 +1024,7 @@ impl Translation for RuntimeTranslation {
         projects_already_current,
         projects_move,
         projects_copy,
+        projects_switch,
         projects_move_title,
         projects_transfer_busy,
         detach_instance,

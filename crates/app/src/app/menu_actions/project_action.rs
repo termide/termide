@@ -1,37 +1,40 @@
-//! The current project's menu, opened from the `≡` after its name in the
-//! menu bar: move, copy, change root, close.
+//! An open project's menu, opened from its button in the menu bar as a menu
+//! title opens its dropdown: switch, move, copy, change root, close.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use termide_ui_render::{
-    get_project_action_menu_items, panel_action_dropdown_position, DropdownItem,
-    PROJECT_ACTION_CHANGE_ROOT, PROJECT_ACTION_CLOSE, PROJECT_ACTION_COPY, PROJECT_ACTION_MOVE,
+    panel_action_dropdown_position, PROJECT_ACTION_CHANGE_ROOT, PROJECT_ACTION_CLOSE,
+    PROJECT_ACTION_COPY, PROJECT_ACTION_MOVE, PROJECT_ACTION_SWITCH,
 };
 
 use super::super::App;
 use crate::state::ProjectsOrigin;
 
 impl App {
-    /// Open the current project's menu under its `≡` at `anchor_x`.
-    pub(in crate::app) fn open_project_action_menu(&mut self, anchor_x: u16) {
-        self.state.close_menu();
+    /// Open the menu of project button `index` under the button, the menu
+    /// bar selection on it. The status bar shows the project's full path,
+    /// which its button may have cut.
+    pub(in crate::app) fn open_project_button_menu(&mut self, index: usize) {
+        self.state.close_indicator_modal();
         self.state.ui.close_all_submenus();
-        self.state.ui.project_action_menu.open(anchor_x);
+        let anchor_x = self.menu_bar().project_x(index).unwrap_or(0);
+        self.state.ui.project_action_menu.open(index, anchor_x);
+        if let Some(view) = self.state.open_projects.get(index) {
+            let path = termide_core::util::shorten_home_path(&view.root.display().to_string());
+            self.state.set_info(path);
+        }
         self.state.needs_redraw = true;
     }
 
-    fn project_action_menu_items(&self) -> Vec<DropdownItem> {
-        get_project_action_menu_items(self.open_projects.count() > 1)
-    }
-
-    /// Handle a click while the menu is open: run the item clicked, or
-    /// close the menu for a click elsewhere.
+    /// Handle a click below the menu bar while the menu is open: run the
+    /// item clicked, or close the menu bar for a click elsewhere.
     pub(in crate::app) fn handle_project_action_menu_click(
         &mut self,
         x: u16,
         y: u16,
     ) -> Result<()> {
-        let items = self.project_action_menu_items();
+        let items = self.state.project_action_items();
         let (dropdown_x, dropdown_y) = panel_action_dropdown_position(
             &items,
             self.state.ui.project_action_menu.anchor_x,
@@ -51,15 +54,21 @@ impl App {
             self.state.ui.project_action_menu.selected = index;
             return self.execute_project_action_menu_action();
         }
-        self.state.ui.project_action_menu.close();
+        self.state.close_menu();
         self.state.needs_redraw = true;
         Ok(())
     }
 
     /// Handle a key while the menu is open. The keys its items show do
-    /// their items here too.
+    /// their items here too; `←`/`→` walk the menu bar, and the keys that
+    /// move a project in the Projects menu move this one's button.
     pub(in crate::app) fn handle_project_action_menu_key(&mut self, key: KeyEvent) -> Result<()> {
-        let items = self.project_action_menu_items();
+        if let Some(step) = self.project_step_of(&key) {
+            let project = self.state.ui.project_action_menu.project;
+            self.move_project_button(project, step);
+            return Ok(());
+        }
+        let items = self.state.project_action_items();
         let count = items.len();
         let by_key = |action: &str| items.iter().position(|item| item.key == action);
         let shortcut = match key.code {
@@ -74,7 +83,9 @@ impl App {
         }
         let menu = &mut self.state.ui.project_action_menu;
         match key.code {
-            KeyCode::Esc | KeyCode::Left | KeyCode::Right => menu.close(),
+            KeyCode::Esc => self.state.close_menu(),
+            KeyCode::Left => return self.switch_to_prev_menu(),
+            KeyCode::Right => return self.switch_to_next_menu(),
             KeyCode::Up => menu.selected = (menu.selected + count - 1) % count,
             KeyCode::Down => menu.selected = (menu.selected + 1) % count,
             KeyCode::Enter => return self.execute_project_action_menu_action(),
@@ -84,18 +95,21 @@ impl App {
         Ok(())
     }
 
-    /// Run the selected item on the current project.
+    /// Run the selected item on the menu's project.
     fn execute_project_action_menu_action(&mut self) -> Result<()> {
-        let items = self.project_action_menu_items();
+        let items = self.state.project_action_items();
         let key = items
             .get(self.state.ui.project_action_menu.selected)
             .map(|item| item.key.clone());
-        self.state.ui.project_action_menu.close();
+        let button = self.state.ui.project_action_menu.project;
+        self.state.close_menu();
         self.state.needs_redraw = true;
-        let root = self.project_root.clone();
-        let button = self.open_projects.position(&root).unwrap_or(0);
+        let Some(root) = self.listed_open_roots().get(button).cloned() else {
+            return Ok(());
+        };
         let from = ProjectsOrigin::Button(button);
         match key.as_deref() {
+            Some(PROJECT_ACTION_SWITCH) => self.switch_to_project(root)?,
             Some(PROJECT_ACTION_MOVE) => self.prompt_project_transfer(root, false, from),
             Some(PROJECT_ACTION_COPY) => self.prompt_project_transfer(root, true, from),
             Some(PROJECT_ACTION_CHANGE_ROOT) => self.handle_change_root_path()?,

@@ -292,6 +292,7 @@ projects_already_open = "Dieses Verzeichnis gehört bereits zu einem anderen ge�
 projects_already_current = "Das ist das aktuelle Projekt"
 projects_move = "Projekt verschieben…"
 projects_copy = "Projekt kopieren…"
+projects_switch = "Zum Projekt wechseln"
 projects_move_title = "Projekt verschieben?"
 projects_transfer_busy = "Das Projekt wird gerade verschoben oder kopiert"
 detach_instance = "Instanz abtrennen"

@@ -331,6 +331,7 @@ projects_already_open = "ไดเรกทอรีนี้เป็นขอ�
 projects_already_current = "นี่คือโปรเจกต์ปัจจุบัน"
 projects_move = "ย้ายโปรเจกต์…"
 projects_copy = "คัดลอกโปรเจกต์…"
+projects_switch = "สลับไปที่โปรเจกต์"
 projects_move_title = "ย้ายโปรเจกต์หรือไม่?"
 projects_transfer_busy = "กำลังย้ายหรือคัดลอกโปรเจกต์"
 detach_instance = "แยกอินสแตนซ์"

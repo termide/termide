@@ -231,7 +231,7 @@ impl App {
             return Ok(());
         }
 
-        // The current project's menu, opened from its ≡
+        // An open project's menu, opened from its button
         if self.state.ui.project_action_menu.open
             && matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
         {
@@ -573,17 +573,9 @@ impl App {
 
         let bar = self.menu_bar();
 
-        // The ≡ before the current project's name opens its menu.
-        if bar.is_project_menu(x) {
-            if let Some(original_name) = self.state.ui.theme_preview_original.take() {
-                self.state.theme = Theme::get_by_name(&original_name);
-            }
-            self.open_project_action_menu(x);
-            return Ok(());
-        }
-
         // A project button is held: released where it was pressed it
-        // switches to its project, dragged along the bar it moves.
+        // switches to its project, or opens the current one's menu; dragged
+        // along the bar it moves.
         if let Some(index) = bar.project_at(x) {
             if let Some(original_name) = self.state.ui.theme_preview_original.take() {
                 self.state.theme = Theme::get_by_name(&original_name);

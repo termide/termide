@@ -1714,6 +1714,7 @@ pub trait Translation: Send + Sync {
     fn projects_already_current(&self) -> &str;
     fn projects_move(&self) -> &str;
     fn projects_copy(&self) -> &str;
+    fn projects_switch(&self) -> &str;
     fn projects_move_title(&self) -> &str;
     fn projects_transfer_busy(&self) -> &str;
     fn projects_transfer_exists_fmt(&self, path: &str) -> String;
