@@ -233,7 +233,7 @@ impl App {
         if let Some(locations) = pending_references_event {
             let event = if locations.is_empty() {
                 termide_core::PanelEvent::SetStatusMessage {
-                    message: "No references found".to_string(),
+                    message: termide_i18n::t().references_none().to_string(),
                     is_error: false,
                 }
             } else {

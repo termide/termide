@@ -136,6 +136,11 @@ pub fn profile_in_use(profile: &Path) -> bool {
 #[cfg(unix)]
 fn process_alive(pid: i32) -> bool {
     // Signal 0 checks existence; EPERM still means the process is there.
+    // 0 and negative pids name process groups, not one browser.
+    if pid <= 0 {
+        return false;
+    }
+    // SAFETY: kill(2) takes plain integers and touches no memory of ours.
     let alive = unsafe { libc::kill(pid, 0) } == 0;
     alive || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
 }
@@ -653,12 +658,14 @@ fn spawn_with_pipe(executable: &Path, args: &[String]) -> Result<(Child, Cdp), S
 
     fn pipe() -> Result<(i32, i32), String> {
         let mut fds = [0; 2];
+        // SAFETY: `fds` is a live array of the two ints pipe(2) writes.
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
             return Err(format!("pipe: {}", std::io::Error::last_os_error()));
         }
         // Close-on-exec on both ends, so no other child inherits them; the
         // browser gets its copies through dup2, which clears the flag.
         for fd in fds {
+            // SAFETY: fcntl(2) on a descriptor pipe(2) just returned to us.
             unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
         }
         Ok((fds[0], fds[1]))
@@ -673,6 +680,8 @@ fn spawn_with_pipe(executable: &Path, args: &[String]) -> Result<(Child, Cdp), S
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    // SAFETY: the hook runs in the forked child before exec and calls only
+    // fcntl and dup2, which are async-signal-safe; it allocates nothing.
     unsafe {
         command.pre_exec(move || {
             // Move both ends above 3 and 4 first, so neither dup2 clobbers
@@ -691,10 +700,13 @@ fn spawn_with_pipe(executable: &Path, args: &[String]) -> Result<(Child, Cdp), S
     }
     let spawned = command.spawn();
     // The browser's ends belong to the child now.
+    // SAFETY: both are descriptors of ours from pipe(), closed once here.
     unsafe {
         libc::close(browser_in);
         libc::close(browser_out);
     }
+    // SAFETY: our ends of the pipes, owned by nothing else; the Files take
+    // them over and close them.
     let (commands, replies) = unsafe { (File::from_raw_fd(commands), File::from_raw_fd(replies)) };
     let child =
         spawned.map_err(|error| format!("cannot start {}: {error}", executable.display()))?;

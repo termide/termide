@@ -420,8 +420,12 @@ termide [OPTIONS] [FILE]...
                        Установить автодополнение для $SHELL или названной оболочки
   --prompt <PROMPT>    Выполнить одну задачу агента без UI, напечатать ответ
                        в stdout и выйти; `-` читает запрос из stdin
+  --recall <QUERY>     Искать в прежних сессиях агента, истории git и коде
+                       проекта, как инструмент агента recall, напечатать
+                       результаты и выйти; код выхода 1, если ничего не найдено
   --agent <NAME>       С --prompt: какое определение агента использовать
-  --output <FORMAT>    С --prompt: text (по умолчанию), json или stream-json
+  --output <FORMAT>    С --prompt: text (по умолчанию), json или stream-json;
+                       с --recall: text или json
   -h, --help           Показать справку
   -V, --version        Показать версию
 ```

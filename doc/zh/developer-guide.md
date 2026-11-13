@@ -63,7 +63,7 @@ nix flake check
 
 #### 平台说明
 
-CI 在 Linux 和 macOS 上运行 fmt / check / clippy / test 门禁；Windows 和交叉编译
+CI 在 Linux 和 macOS 上运行 fmt / clippy / test 门禁；Windows 和交叉编译
 目标在发布时构建。使用平台设施的代码需要为每个平台写一个分支——现有的例子有进程
 自省（Linux 上的 `/proc`、macOS 上的 libproc、Windows 上的 ToolHelp 快照）、挂载表
 （`/proc/mounts` 与 `getmntinfo`）以及键盘增强标志。
@@ -81,31 +81,36 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 ### 运行测试
 
 ```bash
-# 运行所有测试
-cargo test
+# 运行所有测试（根 crate 本身也是一个包：不加 --workspace 只运行它自己的测试）
+cargo test --workspace
 
 # 运行测试并显示输出
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # 运行特定测试
-cargo test test_name
+cargo test --workspace test_name
+
+# 更快，与 pre-commit 钩子和 CI 一样（cargo install cargo-nextest）
+cargo nextest run --workspace
 ```
 
 ### 代码质量检查
 
 ```bash
-# 检查编译错误
-cargo check
-
-# 运行 clippy 代码检查器
-cargo clippy
+# 运行 clippy 代码检查器（包含编译器检查，无需单独的 cargo check）
+cargo clippy --workspace --all-targets -- -D warnings
 
 # 格式化代码
-cargo fmt
+cargo fmt --all
 
 # 检查格式但不修改文件
-cargo fmt --check
+cargo fmt --all -- --check
+
+# 查找未使用的依赖声明（cargo install cargo-machete）
+cargo machete
 ```
+
+这些就是 pre-commit 钩子（`.githooks/pre-commit`，通过 `git config core.hooksPath .githooks` 启用）的检查项：fmt、machete、clippy 和测试。
 
 ## 项目结构
 
@@ -123,6 +128,7 @@ termide/
 │   ├── agent-hooks/          # 命令钩子：在工具调用时运行的外部程序
 │   ├── agent-mcp/            # MCP 客户端（来自服务器的工具）及 termide 自身的 MCP 服务器
 │   ├── agent-providers/      # 模型提供商（OpenAI 兼容的 chat completions）
+│   ├── agent-recall/         # recall 工具：对代理会话、git 历史和代码的排序搜索
 │   ├── agent-tools/          # 内置智能体工具：read、edit、write、shell
 │   ├── agent-web/            # 网络工具：fetch 和 web_search，经 HTTP 或本地 Chrome
 │   ├── app/                  # 应用编排器、事件处理、面板管理
@@ -132,6 +138,7 @@ termide/
 │   ├── config/               # 配置管理（TOML）
 │   ├── core/                 # 核心 Panel trait 与共享类型
 │   ├── db/                   # 数据库访问核心（SQLite、PostgreSQL、MySQL）
+│   ├── debug/                # 断点与命令行调试器的启动
 │   ├── detach/               # 可分离（守护进程化）实例托管
 │   ├── fetch/                # 供查看器面板使用的最小化、受安全约束的 HTTP(S) GET
 │   ├── file-ops/             # 文件操作队列（复制、移动、删除、上传、下载）
@@ -151,6 +158,7 @@ termide/
 │   ├── panel-binary/         # 二进制文件查看/编辑面板（hex/ASCII）
 │   ├── panel-csv/            # CSV/TSV 表格查看面板
 │   ├── panel-db/             # 数据库查看面板
+│   ├── panel-debug/          # 调试会话面板（DAP 调用栈、变量、输出）
 │   ├── panel-diagnostics/    # LSP 诊断面板
 │   ├── panel-editor/         # 文本编辑器面板
 │   ├── panel-file-manager/   # 文件管理器面板
@@ -164,13 +172,16 @@ termide/
 │   ├── panel-misc/           # 帮助、日志（Journal）与引用面板
 │   ├── panel-operations/     # 后台操作面板
 │   ├── panel-outline/        # 大纲面板
+│   ├── panel-plugin-list/    # 以行列表形式绘制、带操作的插件面板
 │   ├── panel-terminal/       # 终端模拟器面板（PTY）
+│   ├── plugin-perforce/      # 内置 Perforce 插件（`termide --plugin perforce`）
 │   ├── plugins/              # 插件：清单、JSON-RPC 与进程宿主
 │   ├── project/              # 已保存的项目布局
 │   ├── richtext/             # 富文本布局引擎（样式片段转为自动换行的行）
+│   ├── secrets/              # 以主密码加密的凭据库
 │   ├── state/                # 应用状态（batch、layout、operations、ui）
 │   ├── system-monitor/       # CPU/RAM/磁盘监控
-│   ├── theme/                # 主题系统与 38 个内置主题
+│   ├── theme/                # 主题系统与 44 个内置主题
 │   ├── ui/                   # UI 组件与路径格式化
 │   ├── ui-render/            # UI 渲染（菜单、状态栏、面板）
 │   ├── unicode-width-fix/    # 修补版 unicode-width（东亚字符宽度修正）
@@ -335,9 +346,9 @@ WARN Missing translation key: my_key (using English fallback)
 4. **充分测试**（参见上面的清单）
 5. **运行代码质量检查：**
    ```bash
-   cargo fmt
-   cargo clippy
-   cargo test
+   cargo fmt --all
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
    ```
 6. **提交** 带有清晰、描述性的提交消息
 7. **推送** 到您的 fork
@@ -351,10 +362,15 @@ WARN Missing translation key: my_key (using English fallback)
 
 ### 日志
 
-Termide 将日志写入：
-- Linux: `~/.cache/termide/termide.log`
-- macOS: `~/Library/Caches/termide/termide.log`
-- Windows: `%LOCALAPPDATA%\\termide\\cache\\termide.log`
+每次运行都把日志写入项目数据目录中的 `session-<日期>-<时间>.log`（Linux 上为 `~/.local/share/termide/projects/<项目>/`，macOS 上为 `~/Library/Application Support/termide/projects/<项目>/`）；超过 24 小时的日志在启动时删除。`[logging]` 部分可以改变这一点：
+
+```toml
+[logging]
+file_path = "/tmp/termide.log"  # 改为一个固定文件；仅限全局配置
+min_level = "info"              # trace、debug、info、warn 或 error（默认：info）
+```
+
+`--log-level` 在单次运行中覆盖 `min_level`，不会保存。同样的记录也显示在日志面板（`Alt+L`）中。
 
 在代码中使用日志：
 ```rust

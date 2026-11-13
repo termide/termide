@@ -408,7 +408,7 @@ impl Editor {
         match self.replace_current() {
             Ok(()) => vec![PanelEvent::NeedsRedraw],
             Err(e) => vec![PanelEvent::SetStatusMessage {
-                message: format!("Replace failed: {e}"),
+                message: termide_i18n::t().editor_replace_failed_fmt(&e.to_string()),
                 is_error: true,
             }],
         }

@@ -68,7 +68,7 @@ In tree view, selecting a directory with `Insert` cascades the selection to all 
 | `R` / `F2`        | Rename file/directory                      |
 | `V` / `F3`        | View file (preview without executing)      |
 | `Ctrl+R`          | Refresh current directory contents         |
-| `Space`           | Show file/directory information            |
+| `Space` / `F12`  | Show file/directory information            |
 
 Copy and move work between panels the way they do in two-pane file managers:
 open a second file manager beside the first, select files in one and press

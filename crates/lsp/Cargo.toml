@@ -14,8 +14,8 @@ glob.workspace = true
 log.workspace = true
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
-lsp-types = "0.97"
-url = "2"
+lsp-types.workspace = true
+url.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -42,7 +42,7 @@ _termide() {
   if [[ "$cur" == -* ]]; then
     COMPREPLY=($(compgen -W "--log-level --no-lsp -r --restore --no-restore --config --diagnostics \
       -d --detached --no-attach --attach -f --force --kill --list-instances --completions --install-completions \
-      --prompt --recall --agent --output --help --version" -- "$cur"))
+      --prompt --recall --agent --output -h --help -V --version" -- "$cur"))
   else
     COMPREPLY=($(compgen -f -- "$cur"))
   fi

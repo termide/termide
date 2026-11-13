@@ -740,7 +740,7 @@ impl Panel for Editor {
 
     fn needs_close_confirmation(&self) -> Option<String> {
         if self.buffer.is_modified() {
-            Some("File has unsaved changes. Close anyway?".to_string())
+            Some(termide_i18n::t().panel_close_unsaved_question().to_string())
         } else if self.file_state.external_change_detected {
             Some("File changed on disk. Close anyway?".to_string())
         } else {

@@ -260,4 +260,4 @@ error = "Red"
 
 ## 主题截图
 
-请参阅 [README](../../README.zh.md#可用主题) 查看内置主题列表。
+请参阅 [README](../../README.zh.md#主题) 查看内置主题的截图。

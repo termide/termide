@@ -65,7 +65,7 @@ compiler.
 
 #### Platform notes
 
-CI runs the fmt / check / clippy / test gates on Linux and macOS; Windows and
+CI runs the fmt / clippy / test gates on Linux and macOS; Windows and
 the cross-compiled targets are built at release time. Code that reaches for
 platform facilities needs a branch per platform — the existing examples are
 process introspection (`/proc` on Linux, libproc on macOS, ToolHelp snapshots
@@ -86,14 +86,18 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 ### Running Tests
 
 ```bash
-# Run all tests
-cargo test
+# Run all tests (the root crate is a package too: without --workspace
+# only its own tests run)
+cargo test --workspace
 
 # Run tests with output
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # Run specific test
-cargo test test_name
+cargo test --workspace test_name
+
+# Faster, as the pre-commit hook and CI do (cargo install cargo-nextest)
+cargo nextest run --workspace
 ```
 
 UI and agent behaviour is checked live with
@@ -111,18 +115,22 @@ tools/tui-harness/run.sh agent     # one of them
 ### Code Quality Checks
 
 ```bash
-# Check for compilation errors
-cargo check
-
-# Run clippy linter
-cargo clippy
+# Run clippy linter (covers the compiler checks; no separate cargo check)
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Format code
-cargo fmt
+cargo fmt --all
 
 # Check formatting without modifying files
-cargo fmt --check
+cargo fmt --all -- --check
+
+# Find unused dependency declarations (cargo install cargo-machete)
+cargo machete
 ```
+
+These are the gates of the pre-commit hook (`.githooks/pre-commit`, enabled
+with `git config core.hooksPath .githooks`): fmt, machete, clippy and the
+test suite.
 
 ## Project Structure
 
@@ -140,6 +148,7 @@ termide/
 │   ├── agent-hooks/          # Command hooks: external programs run on tool calls
 │   ├── agent-mcp/            # MCP client (tools from servers) and termide's own MCP server
 │   ├── agent-providers/      # Model providers (OpenAI-compatible chat completions)
+│   ├── agent-recall/         # The recall tool: ranked search over agent sessions, git history and code
 │   ├── agent-tools/          # Built-in agent tools: read, edit, write, shell
 │   ├── agent-web/            # Web tools: fetch and web_search, over HTTP or a local Chrome
 │   ├── app/                  # Application orchestrator, event handling, panel management
@@ -149,6 +158,7 @@ termide/
 │   ├── config/               # Configuration management (TOML)
 │   ├── core/                 # Core Panel trait and shared types
 │   ├── db/                   # Database access core (SQLite, PostgreSQL, MySQL)
+│   ├── debug/                # Breakpoints and command-line debugger launches
 │   ├── detach/               # Detached (daemonised) instance hosting
 │   ├── fetch/                # Minimal, security-bounded HTTP(S) GET for viewer panels
 │   ├── file-ops/             # File operations queue (copy, move, delete, upload, download)
@@ -168,6 +178,7 @@ termide/
 │   ├── panel-binary/         # Binary file viewer/editor panel (hex/ASCII)
 │   ├── panel-csv/            # CSV/TSV table viewer panel
 │   ├── panel-db/             # Database viewer panel
+│   ├── panel-debug/          # Debug session panel (DAP call stack, variables, output)
 │   ├── panel-diagnostics/    # LSP diagnostics panel
 │   ├── panel-editor/         # Text editor panel
 │   ├── panel-file-manager/   # File manager panel
@@ -181,13 +192,16 @@ termide/
 │   ├── panel-misc/           # Help, Journal, and References panels
 │   ├── panel-operations/     # Background operations panel
 │   ├── panel-outline/        # Outline panel
+│   ├── panel-plugin-list/    # A plugin's panel drawn as a list of rows with actions
 │   ├── panel-terminal/       # Terminal emulator panel (PTY)
+│   ├── plugin-perforce/      # Built-in Perforce plugin (`termide --plugin perforce`)
 │   ├── plugins/              # Plugins: manifests, the JSON-RPC peer and the process host
 │   ├── project/              # Saved project layouts
 │   ├── richtext/             # Rich-text layout engine (styled runs to wrapped lines)
+│   ├── secrets/              # Master-password encrypted credential vault
 │   ├── state/                # Application state (batch, layout, operations, ui)
 │   ├── system-monitor/       # CPU/RAM/Disk monitoring
-│   ├── theme/                # Theme system and 38 built-in themes
+│   ├── theme/                # Theme system and 44 built-in themes
 │   ├── ui/                   # UI components and path formatting
 │   ├── ui-render/            # UI rendering (menu, status bar, panels)
 │   ├── unicode-width-fix/    # Patched unicode-width (East Asian width corrections)
@@ -352,9 +366,9 @@ When making changes, test:
 4. **Test thoroughly** (see checklist above)
 5. **Run code quality checks:**
    ```bash
-   cargo fmt
-   cargo clippy
-   cargo test
+   cargo fmt --all
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
    ```
 6. **Commit** with clear, descriptive messages
 7. **Push** to your fork
@@ -368,10 +382,20 @@ When making changes, test:
 
 ### Logging
 
-Termide writes logs to:
-- Linux: `~/.cache/termide/termide.log`
-- macOS: `~/Library/Caches/termide/termide.log`
-- Windows: `%LOCALAPPDATA%\\termide\\cache\\termide.log`
+Each run writes its log to `session-<date>-<time>.log` in the project's data
+directory (`~/.local/share/termide/projects/<project>/` on Linux,
+`~/Library/Application Support/termide/projects/<project>/` on macOS); logs
+older than 24 hours are removed at startup. The `[logging]` section changes
+this:
+
+```toml
+[logging]
+file_path = "/tmp/termide.log"  # one fixed file instead; global config only
+min_level = "info"              # trace, debug, info, warn or error (default: info)
+```
+
+`--log-level` overrides `min_level` for one run without saving it. The same
+records show in the journal panel (`Alt+L`).
 
 Use logging in code:
 ```rust

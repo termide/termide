@@ -26,7 +26,7 @@ const ENTRY_INFO: &[u8] = b"termide-vault-v1 entry";
 
 pub(crate) fn random<const N: usize>() -> Result<[u8; N], Error> {
     let mut buf = [0u8; N];
-    getrandom::getrandom(&mut buf).map_err(|e| Error::Random(e.to_string()))?;
+    getrandom::fill(&mut buf).map_err(|e| Error::Random(e.to_string()))?;
     Ok(buf)
 }
 

@@ -237,8 +237,10 @@ turned on:
 | Start debugging | `F5` | `editor` |
 | Next change | `F7` | `editor` |
 | Previous change | `Shift+F7` | `editor` |
+| Unpack archives | `Alt+F9` | `file_manager` |
 | View file | `F3` | `git_status` |
 | Edit file | `F4` | `git_status` |
+| Clear the filter | `Shift+F3` | `database` |
 
 Termide logs a startup warning listing them when it starts on macOS.
 Either enable the setting, or rebind these actions through

@@ -100,8 +100,14 @@ pub fn kill_process_tree(pid: u32) {
     {
         // Kill the entire session (negative PID) with SIGKILL.
         // Works because build_command_command() calls setsid() in pre_exec.
+        // A pid of 0 would make it `kill(0)`, our own process group, and one
+        // past i32::MAX would wrap: neither names a child, so neither is sent.
+        let Some(pid) = i32::try_from(pid).ok().filter(|pid| *pid > 0) else {
+            return;
+        };
+        // SAFETY: kill(2) takes plain integers and touches no memory of ours.
         unsafe {
-            libc::kill(-(pid as i32), libc::SIGKILL);
+            libc::kill(-pid, libc::SIGKILL);
         }
     }
     #[cfg(not(unix))]

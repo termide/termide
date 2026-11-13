@@ -11,7 +11,7 @@ to crates.io**, and the original package name here cannot be removed.
 From source via Cargo:
 
 ```bash
-cargo install --git https://github.com/termide/termide --locked
+CFLAGS=-fno-strict-aliasing cargo install --git https://github.com/termide/termide --locked
 ```
 
 Or download a prebuilt binary / run the installer:

@@ -150,6 +150,8 @@ Clicking the same indicator again closes the window it opened (toggle); the same
 
 Color coding (CPU / RAM): green < 50%, yellow 50–75%, red > 75%. Battery uses the same scale inverted (green when charging or above 50%, red below 25%). The battery reading is cached for 5 seconds so the per-frame render path never touches `/sys`.
 
+The indicators, and a details window while it is open, are sampled every `resource_monitor_interval` milliseconds under `[general]` (default `2000`; **General → Resource monitor interval (ms)** in the settings).
+
 **Network activity modal** shows:
 - **Application** — process name
 - **Ports** — listening TCP ports (e.g. `80, 443`)

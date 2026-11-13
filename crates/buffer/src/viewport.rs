@@ -1,6 +1,3 @@
-// WIP module: fields/methods used in upcoming phases
-#![allow(dead_code)]
-
 use super::Cursor;
 
 /// Viewport for virtual scrolling

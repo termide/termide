@@ -415,8 +415,11 @@ termide [OPTIONS] [FILE]...
                        为 $SHELL 或指定的 shell 安装补全脚本
   --prompt <PROMPT>    不启动 UI 运行一次智能体任务，将回答打印到 stdout 后退出；
                        `-` 表示从 stdin 读取提示
+  --recall <QUERY>     像智能体的 recall 工具那样搜索项目以往的智能体会话、
+                       git 历史和代码，打印结果后退出；无结果时退出码为 1
   --agent <NAME>       与 --prompt 连用：使用的智能体定义
-  --output <FORMAT>    与 --prompt 连用：text（默认）、json 或 stream-json
+  --output <FORMAT>    与 --prompt 连用：text（默认）、json 或 stream-json；
+                       与 --recall 连用：text 或 json
   -h, --help           打印帮助
   -V, --version        打印版本
 ```

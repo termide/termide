@@ -2,9 +2,6 @@
 //!
 //! Provides translation loading and language detection.
 
-// I18n trait methods are prepared for future use
-#![allow(dead_code)]
-
 use std::sync::RwLock;
 
 mod detect;
@@ -77,7 +74,6 @@ pub trait Translation: Send + Sync {
     fn git_operation_cancelled(&self) -> &str;
 
     // Modal buttons
-    fn modal_yes(&self) -> &str;
     fn modal_ok(&self) -> &str;
     // Panel titles
     fn panel_help(&self) -> &str;
@@ -316,8 +312,6 @@ pub trait Translation: Send + Sync {
     fn help_desc_open_path(&self) -> &str;
     fn help_desc_stage_file(&self) -> &str;
     fn help_desc_unstage_file(&self) -> &str;
-    fn help_desc_terminal_copy(&self) -> &str;
-    fn help_desc_terminal_paste(&self) -> &str;
     fn help_desc_scroll_up(&self) -> &str;
     fn help_desc_scroll_down(&self) -> &str;
     fn help_desc_scroll_top(&self) -> &str;
@@ -353,7 +347,6 @@ pub trait Translation: Send + Sync {
     fn help_desc_edit_paste(&self) -> &str;
     fn help_desc_view_diff(&self) -> &str;
     fn help_desc_revert(&self) -> &str;
-    fn help_desc_copy_hash(&self) -> &str;
     fn help_desc_scroll_half_down(&self) -> &str;
     fn help_desc_toggle_stage(&self) -> &str;
     fn help_desc_discard_hunk(&self) -> &str;
@@ -382,7 +375,6 @@ pub trait Translation: Send + Sync {
     fn help_desc_db_filter(&self) -> &str;
     fn help_desc_db_clear_filter(&self) -> &str;
     fn help_desc_db_detail(&self) -> &str;
-    fn help_desc_db_copy_cell(&self) -> &str;
     fn help_desc_db_copy_row(&self) -> &str;
     fn help_desc_toggle_filter(&self) -> &str;
     fn help_desc_pause_resume(&self) -> &str;
@@ -461,6 +453,22 @@ pub trait Translation: Send + Sync {
     fn status_error_save(&self, error: &str) -> String;
     fn status_file_reloaded(&self) -> &str;
     fn status_error_reload(&self, error: &str) -> String;
+    fn binary_save_before_text_view(&self) -> &str;
+    fn panel_close_unsaved_question(&self) -> &str;
+    fn editor_force_saved(&self) -> &str;
+    fn editor_nothing_to_copy(&self) -> &str;
+    fn mermaid_flowchart_not_laid_out(&self) -> &str;
+    fn mermaid_kind_not_rendered(&self) -> &str;
+    fn mermaid_not_recognized(&self) -> &str;
+    fn references_none(&self) -> &str;
+    fn fm_search_no_matches(&self) -> &str;
+    fn binary_open_failed_fmt(&self, error: &str) -> String;
+    fn editor_force_save_failed_fmt(&self, error: &str) -> String;
+    fn editor_clipboard_error_fmt(&self, error: &str) -> String;
+    fn editor_replace_failed_fmt(&self, error: &str) -> String;
+    fn status_copied_fmt(&self, text: &str) -> String;
+    /// The editor's note after a copy: the text's start and its length.
+    fn editor_copied_fmt(&self, preview: &str, count: usize) -> String;
     fn status_error_open_file(&self, name: &str, error: &str) -> String;
     fn status_opening_external(&self, name: &str) -> String;
 
@@ -477,10 +485,6 @@ pub trait Translation: Send + Sync {
     fn modal_trash_single_title(&self, name: &str) -> String;
     fn modal_trash_multiple_title(&self, count: usize) -> String;
     fn modal_save_as_title(&self) -> &str;
-    fn modal_copy_single_prompt(&self, name: &str) -> String;
-    fn modal_copy_multiple_prompt(&self, count: usize) -> String;
-    fn modal_move_single_prompt(&self, name: &str) -> String;
-    fn modal_move_multiple_prompt(&self, count: usize) -> String;
 
     // Batch results
     fn batch_result_file_copied(&self) -> &str;
@@ -502,33 +506,28 @@ pub trait Translation: Send + Sync {
     fn command_params_title(&self) -> &str;
     fn command_params_run(&self) -> &str;
     fn command_params_cancel(&self) -> &str;
-    fn command_run_label(&self) -> &str;
+    fn command_run_label_fmt(&self, name: &str) -> String;
     fn command_confirm_project_title(&self) -> &str;
     fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String;
 
     // Command config modal (create/edit)
-    fn command_config_label_name(&self) -> &str;
     fn command_config_label_command(&self) -> &str;
     fn command_config_label_group(&self) -> &str;
     fn command_config_label_display_name(&self) -> &str;
     fn command_config_label_mode(&self) -> &str;
     fn command_config_label_hotkey(&self) -> &str;
-    fn command_config_label_project(&self) -> &str;
     fn command_config_project_checkbox(&self) -> &str;
     /// Where the command runs: checked is the project root, unchecked the
     /// focused panel's folder.
     fn command_config_cwd_checkbox(&self) -> &str;
-    fn command_config_hotkey_hint(&self) -> &str;
     fn command_config_hotkey_invalid(&self) -> &str;
     fn command_config_hotkey_conflict(&self) -> &str;
     fn command_config_button_create(&self) -> &str;
     fn command_config_button_save(&self) -> &str;
-    fn command_config_button_edit_file(&self) -> &str;
     fn command_config_button_cancel(&self) -> &str;
     fn command_config_mode_terminal(&self) -> &str;
     fn command_config_mode_background(&self) -> &str;
     fn command_config_mode_report(&self) -> &str;
-    fn command_config_group_root(&self) -> &str;
 
     fn menu_options(&self) -> &str;
     fn menu_quit(&self) -> &str;
@@ -809,7 +808,6 @@ pub trait Translation: Send + Sync {
     fn agent_notice_busy(&self) -> &str;
     fn agent_notice_delegates_running_fmt(&self, count: usize) -> String;
     fn agent_notice_no_log_to_name(&self) -> &str;
-    fn agent_notice_will_pause(&self) -> &str;
     fn agent_notice_nothing_to_pause(&self) -> &str;
     fn agent_notice_already_running(&self) -> &str;
     fn agent_notice_nothing_to_continue(&self) -> &str;
@@ -1291,8 +1289,6 @@ pub trait Translation: Send + Sync {
     fn agent_undo(&self) -> &str;
     /// Agent transcript: the action word after a reasoning block's `@`.
     fn agent_thinking(&self) -> &str;
-    /// Agent transcript: one-line summary of a folded thinking block.
-    fn agent_thought_chars(&self, count: usize) -> String;
     /// Agent transcript: hidden lines above a folded tool's tail preview.
     fn agent_more_lines_above(&self, count: usize) -> String;
     /// Agent transcript: hidden lines below a folded message/output preview.
@@ -1768,11 +1764,8 @@ pub trait Translation: Send + Sync {
     /// Status-bar label for the entry's size, e.g. "Size:".
     fn status_size(&self) -> &str;
     fn status_selected(&self) -> &str;
-    fn status_pos(&self) -> &str;
-    fn status_tab(&self) -> &str;
     fn status_tab_modal_title(&self) -> &str;
     fn status_plain_text(&self) -> &str;
-    fn status_readonly(&self) -> &str;
     fn status_terminal(&self) -> &str;
     fn status_layout(&self) -> &str;
     // UI elements
@@ -1823,20 +1816,9 @@ pub trait Translation: Send + Sync {
     fn file_type_directory(&self) -> &str;
     fn file_type_file(&self) -> &str;
     // Progress modal
-    fn progress_scanning(&self) -> &str;
     fn progress_delete_title(&self) -> &str;
     fn progress_copy_title(&self) -> &str;
     fn progress_move_title(&self) -> &str;
-    fn progress_resume(&self) -> &str;
-    fn progress_suspend(&self) -> &str;
-    fn progress_pause(&self) -> &str;
-    fn progress_abort(&self) -> &str;
-    fn progress_counting_files(&self) -> &str;
-    fn progress_files_count(&self, current: usize, total: usize) -> String;
-    fn progress_files_size(&self, count: &str, size: &str) -> String;
-    fn progress_data_count(&self, current: &str, total: &str) -> String;
-    fn progress_speed_eta(&self, speed: &str, eta: &str) -> String;
-    fn progress_speed(&self, speed: &str) -> String;
 
     // Conflict modal
     fn conflict_directory_title(&self) -> &str;
@@ -2081,15 +2063,11 @@ pub trait Translation: Send + Sync {
     fn csv_menu_copy_row(&self) -> &str;
     fn csv_menu_change_delimiter(&self) -> &str;
     fn csv_menu_toggle_header(&self) -> &str;
-    fn db_filter_operator(&self) -> &str;
-    fn db_filter_value(&self) -> &str;
-    fn db_filter_hint(&self) -> &str;
     fn db_filter_title(&self) -> &str;
     fn db_filter_apply(&self) -> &str;
     fn db_filter_clear(&self) -> &str;
     fn db_filter_cancel(&self) -> &str;
     fn db_edit_needs_primary_key(&self) -> &str;
-    fn db_edit_title(&self) -> &str;
     fn db_edit_save(&self) -> &str;
     fn db_edit_null_checkbox(&self) -> &str;
     fn db_edit_null_value(&self) -> &str;
@@ -2104,7 +2082,6 @@ pub trait Translation: Send + Sync {
     fn db_filter_count_fmt(&self, count: usize) -> String;
     fn db_connection_failed_fmt(&self, error: &str) -> String;
     fn db_auth_failed_fmt(&self, error: &str) -> String;
-    fn db_filter_title_fmt(&self, column: &str) -> String;
     fn db_row_title_fmt(&self, table: &str) -> String;
 
     // VFS remote connections

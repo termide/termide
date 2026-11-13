@@ -27,6 +27,11 @@ when nothing is selected). With an operation highlighted, `Esc`
 cancels that operation instead of closing the panel — see the
 keybindings below.
 
+When a file operation, or a git push or pull, finishes, termide rings
+the terminal bell. `bell_on_operation_complete = false` under
+`[general]` (**General → Bell on operation complete** in the settings)
+silences it; it is on by default.
+
 ## Keybindings
 
 | Shortcut                       | Action                                            |

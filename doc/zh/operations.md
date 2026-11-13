@@ -21,6 +21,10 @@
 `Esc`）。当某个操作被高亮时，`Esc` 会取消该操作而不是关闭面板——
 详见下文快捷键。
 
+文件操作或 git push/pull 结束时，termide 会发出终端提示音。在
+`[general]` 中设置 `bell_on_operation_complete = false`（设置中为
+**常规 → 操作完成时提示音**）即可关闭；默认开启。
+
 ## 快捷键
 
 | 快捷键                          | 操作                                              |

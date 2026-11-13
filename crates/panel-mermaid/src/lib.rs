@@ -124,10 +124,11 @@ impl MermaidPanel {
 
     /// Source view with a one-line note for kinds without a layout yet.
     fn placeholder(&self) -> Vec<String> {
+        let t = termide_i18n::t();
         let note = match self.kind {
-            DiagramKind::Flowchart => "Flowchart layout is not implemented yet — showing source:",
-            DiagramKind::Other => "This diagram kind is not rendered yet — showing source:",
-            _ => "Not a recognized Mermaid diagram — showing source:",
+            DiagramKind::Flowchart => t.mermaid_flowchart_not_laid_out(),
+            DiagramKind::Other => t.mermaid_kind_not_rendered(),
+            _ => t.mermaid_not_recognized(),
         };
         let mut out = vec![note.to_string(), String::new()];
         out.extend(self.source.lines().map(|l| l.to_string()));

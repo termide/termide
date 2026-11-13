@@ -293,7 +293,7 @@ impl App {
                         .collect();
                     if ref_locations.is_empty() {
                         events.push(termide_core::PanelEvent::SetStatusMessage {
-                            message: "No references found".to_string(),
+                            message: i18n::t().references_none().to_string(),
                             is_error: false,
                         });
                     } else {
@@ -501,26 +501,14 @@ impl App {
                 .unwrap_or("?");
 
             if is_copy {
-                (
-                    t.modal_copy_single_title(source_name),
-                    t.modal_copy_single_prompt(source_name),
-                )
+                (t.modal_copy_single_title(source_name), String::new())
             } else {
-                (
-                    t.modal_move_single_title(source_name),
-                    t.modal_move_single_prompt(source_name),
-                )
+                (t.modal_move_single_title(source_name), String::new())
             }
         } else if is_copy {
-            (
-                t.modal_copy_multiple_title(sources.len()),
-                t.modal_copy_multiple_prompt(sources.len()),
-            )
+            (t.modal_copy_multiple_title(sources.len()), String::new())
         } else {
-            (
-                t.modal_move_multiple_title(sources.len()),
-                t.modal_move_multiple_prompt(sources.len()),
-            )
+            (t.modal_move_multiple_title(sources.len()), String::new())
         };
 
         let mut modal =

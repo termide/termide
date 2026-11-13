@@ -278,7 +278,7 @@ impl App {
                 );
                 actions.push(format!("run_command:{command_key}"));
                 entries.push(CommandEntry {
-                    label: t.command_run_label().replace("{name}", display_name),
+                    label: t.command_run_label_fmt(display_name),
                     category: t.palette_category_commands(),
                     keybinding: key_str.to_string(),
                 });
