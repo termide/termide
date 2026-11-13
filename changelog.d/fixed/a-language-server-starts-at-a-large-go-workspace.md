@@ -1,0 +1,1 @@
+- **A language server starts at a large Go workspace.** termide asks the toolchain where a package's workspace begins; an answer longer than 64 KB, such as `go work edit -json` on a big `go.work`, filled the pipe, the tool hung until the 3-second limit and the server started at the package instead. The answer is now read as it comes.

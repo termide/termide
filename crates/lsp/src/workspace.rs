@@ -172,17 +172,40 @@ fn run(mut command: Command, dir: &Path) -> Option<String> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let started = Instant::now();
+    let deadline = Instant::now() + TOOL_TIMEOUT;
+    // Drained on a thread of its own: a child whose output outgrows the pipe
+    // buffer blocks on the write until someone reads, so waiting for the exit
+    // first would hold it until the timeout.
+    let mut pipe = child.stdout.take()?;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut stdout = String::new();
+        let read = pipe.read_to_string(&mut stdout).map(|_| stdout);
+        let _ = tx.send(read);
+    });
+    let give_up = |child: &mut std::process::Child| {
+        log::warn!("LSP: {:?} gave no answer in {:?}", command, TOOL_TIMEOUT);
+        let _ = child.kill();
+        let _ = child.wait();
+    };
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let stdout = match rx.recv_timeout(remaining) {
+        Ok(read) => read.ok(),
+        Err(_) => {
+            give_up(&mut child);
+            return None;
+        }
+    };
+    // The output ended, so the child is exiting; wait out the rest of the
+    // deadline for its status.
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < TOOL_TIMEOUT => {
+            Ok(None) if Instant::now() < deadline => {
                 std::thread::sleep(Duration::from_millis(5));
             }
             _ => {
-                log::warn!("LSP: {:?} gave no answer in {:?}", command, TOOL_TIMEOUT);
-                let _ = child.kill();
-                let _ = child.wait();
+                give_up(&mut child);
                 return None;
             }
         }
@@ -190,9 +213,7 @@ fn run(mut command: Command, dir: &Path) -> Option<String> {
     if !status.success() {
         return None;
     }
-    let mut stdout = String::new();
-    child.stdout.take()?.read_to_string(&mut stdout).ok()?;
-    Some(stdout)
+    stdout
 }
 
 #[cfg(test)]
@@ -216,6 +237,18 @@ mod tests {
             .stderr(Stdio::null())
             .status()
             .is_ok()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn output_larger_than_a_pipe_buffer_is_read_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut command = Command::new("sh");
+        command.args(["-c", "head -c 1000000 /dev/zero | tr '\\0' x"]);
+        let started = Instant::now();
+        let out = run(command, dir.path()).expect("the command answers");
+        assert_eq!(out.len(), 1_000_000);
+        assert!(started.elapsed() < TOOL_TIMEOUT);
     }
 
     #[test]
