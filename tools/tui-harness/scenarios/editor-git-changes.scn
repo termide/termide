@@ -19,7 +19,7 @@ key Alt+K
 wait "Stage change"
 expect "Revert change"
 snapshot menu
-key Enter
+key Down Enter
 wait-gone "Stage change"
 run "git diff --cached | grep -qx +five"
 run "! git diff --cached | grep -q twenty-five"
@@ -28,7 +28,7 @@ run "! git diff --cached | grep -q twenty-five"
 key Alt+K
 wait "Unstage change"
 expect-not "Stage change"
-key Enter
+key Down Enter
 run "! git diff --cached | grep -q five"
 snapshot unstaged
 
@@ -38,7 +38,7 @@ wait "Pos: 25:1"
 key Alt+K
 wait "Revert change"
 snapshot menu2
-key Down Enter
+key Down Down Enter
 wait-gone "twenty-five"
 key Ctrl+S
 file-contains nums.txt "24"

@@ -162,16 +162,14 @@ impl App {
                 self.state.needs_redraw = true;
             }
             KeyCode::Up => {
-                let sel = &mut self.state.ui.panel_action_menu.selected;
-                *sel = if *sel == 0 { count - 1 } else { *sel - 1 };
+                self.state.ui.panel_action_menu.choose_prev(count);
                 self.state.needs_redraw = true;
             }
             KeyCode::Down => {
-                let sel = &mut self.state.ui.panel_action_menu.selected;
-                *sel = (*sel + 1) % count;
+                self.state.ui.panel_action_menu.choose_next(count);
                 self.state.needs_redraw = true;
             }
-            KeyCode::Enter => {
+            KeyCode::Enter if self.state.ui.panel_action_menu.chosen => {
                 self.execute_panel_action_menu_action()?;
             }
             _ => {}

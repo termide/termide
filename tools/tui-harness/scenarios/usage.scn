@@ -44,7 +44,7 @@ key Alt+M
 wait "Projects"
 key Right Right Right
 wait "Prompts"
-key Down Down Down Down Enter
+key Down Down Down Down Down Enter
 wait "Top sessions"
 expect-not "This session"
 snapshot menu

@@ -33,7 +33,8 @@ fn render_dropdowns_and_modals(
         && state.ui.projects_submenu.open
     {
         let menu = state.projects_menu();
-        Dropdown::new(&menu.items, menu.selected, menu.x, menu.y, theme).render(frame.buffer_mut());
+        let selected = state.ui.projects_submenu.chosen.then_some(menu.selected);
+        Dropdown::new(&menu.items, selected, menu.x, menu.y, theme).render(frame.buffer_mut());
     }
 
     // Render Tools submenu if open
@@ -49,7 +50,7 @@ fn render_dropdowns_and_modals(
         let tools_items = get_tools_items(Some(&state.config.general.keybindings));
         let dropdown = Dropdown::new(
             &tools_items,
-            state.ui.tools_submenu.selected,
+            state.ui.tools_submenu.highlighted(),
             menu_x,
             dropdown_y,
             theme,
@@ -104,7 +105,7 @@ fn render_dropdowns_and_modals(
             let commands_items = get_commands_items(&registry, &state.ui.plugin_commands);
             let dropdown = Dropdown::new(
                 &commands_items,
-                state.ui.commands_submenu.selected,
+                state.ui.commands_submenu.highlighted(),
                 menu_x,
                 dropdown_y,
                 theme,
@@ -146,7 +147,7 @@ fn render_dropdowns_and_modals(
         let ai_items = get_ai_items(termide_app::web_browser_shown());
         let dropdown = Dropdown::new(
             &ai_items,
-            state.ui.ai_submenu.selected,
+            state.ui.ai_submenu.highlighted(),
             menu_x,
             dropdown_y,
             theme,
@@ -189,7 +190,7 @@ fn render_dropdowns_and_modals(
         );
         let dropdown = Dropdown::new(
             &bookmarks_items,
-            state.ui.bookmarks_submenu.selected,
+            state.ui.bookmarks_submenu.highlighted(),
             menu_x,
             dropdown_y,
             theme,
@@ -231,7 +232,7 @@ fn render_dropdowns_and_modals(
                 termide_ui_render::get_stash_items(&state.stash.entries, state.stash.has_changes);
             let dropdown = termide_ui_render::Dropdown::new(
                 &items,
-                state.ui.stash_submenu.selected,
+                state.ui.stash_submenu.highlighted(),
                 btn_area.x,
                 btn_area.bottom(),
                 theme,
@@ -278,7 +279,13 @@ fn render_dropdowns_and_modals(
                 state.terminal.width,
                 state.terminal.height,
             );
-            let dropdown = Dropdown::new(&items, state.ui.panel_action_menu.selected, x, y, theme);
+            let dropdown = Dropdown::new(
+                &items,
+                state.ui.panel_action_menu.highlighted(),
+                x,
+                y,
+                theme,
+            );
             dropdown.render(frame.buffer_mut());
         }
     }
@@ -293,8 +300,14 @@ fn render_dropdowns_and_modals(
             state.terminal.width,
             state.terminal.height,
         );
-        Dropdown::new(&items, state.ui.project_action_menu.selected, x, y, theme)
-            .render(frame.buffer_mut());
+        Dropdown::new(
+            &items,
+            state.ui.project_action_menu.highlighted(),
+            x,
+            y,
+            theme,
+        )
+        .render(frame.buffer_mut());
     }
 
     // Per-operation popup menu (Pause/Resume/Cancel on an Operations card)
@@ -311,8 +324,13 @@ fn render_dropdowns_and_modals(
                 state.terminal.width,
                 state.terminal.height,
             );
-            let dropdown =
-                Dropdown::new(&items, state.ui.operation_action_menu.selected, x, y, theme);
+            let dropdown = Dropdown::new(
+                &items,
+                state.ui.operation_action_menu.highlighted(),
+                x,
+                y,
+                theme,
+            );
             dropdown.render(frame.buffer_mut());
         }
     }
@@ -333,7 +351,7 @@ fn render_dropdowns_and_modals(
         );
         let dropdown = Dropdown::new(
             &options_items,
-            state.ui.options_submenu.selected,
+            state.ui.options_submenu.highlighted(),
             menu_x,
             dropdown_y,
             theme,

@@ -414,7 +414,7 @@ impl App {
                     self.state.ui.stash_button_area = Some(button_area);
                     self.state.stash.repo_path = Some(repo_path);
                     self.state.stash.has_changes = has_changes;
-                    self.state.ui.stash_submenu.open();
+                    self.state.ui.stash_submenu.open_unchosen();
                     self.state.needs_redraw = true;
                 }
             }

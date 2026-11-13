@@ -121,7 +121,7 @@ impl App {
             self.state.ui.options_submenu.selected,
             screen,
         ) {
-            self.state.ui.options_submenu.selected = item_index;
+            self.state.ui.options_submenu.select(item_index);
             // Themes and Language toggle their nested dropdown on a second
             // click, which the keyboard path has no equivalent for; every
             // other entry is dispatched by `execute_submenu_action` so that
@@ -200,7 +200,7 @@ impl App {
         };
         let target = ProjectsTarget::of(menu.rows.get(index));
         drop(menu);
-        self.state.ui.projects_submenu.selected = index;
+        self.state.ui.projects_submenu.select(index);
         match open_place {
             Some(place) => self.begin_project_drag(ProjectDragSurface::Menu, place, x, y),
             None => self.activate_projects_target(target)?,
@@ -267,7 +267,7 @@ impl App {
             self.state.ui.tools_submenu.selected,
             self.screen_rect(),
         ) {
-            self.state.ui.tools_submenu.selected = index;
+            self.state.ui.tools_submenu.select(index);
             self.execute_tools_submenu_action()?;
             return Ok(true);
         }
@@ -326,7 +326,7 @@ impl App {
             self.state.ui.commands_submenu.selected,
             self.screen_rect(),
         ) {
-            self.state.ui.commands_submenu.selected = index;
+            self.state.ui.commands_submenu.select(index);
             self.execute_commands_submenu_action()?;
             return Ok(true);
         }
@@ -375,7 +375,7 @@ impl App {
             self.state.ui.ai_submenu.selected,
             self.screen_rect(),
         ) {
-            self.state.ui.ai_submenu.selected = index;
+            self.state.ui.ai_submenu.select(index);
             self.open_ai_selected_section();
             return Ok(true);
         }
@@ -400,7 +400,7 @@ impl App {
                 self.state.ui.stash_submenu.selected,
                 self.screen_rect(),
             ) {
-                self.state.ui.stash_submenu.selected = index;
+                self.state.ui.stash_submenu.select(index);
                 self.execute_stash_submenu_action()?;
                 return Ok(());
             }
@@ -466,7 +466,7 @@ impl App {
             self.state.ui.bookmarks_submenu.selected,
             self.screen_rect(),
         ) {
-            self.state.ui.bookmarks_submenu.selected = index;
+            self.state.ui.bookmarks_submenu.select(index);
             self.execute_bookmarks_submenu_action()?;
             return Ok(true);
         }

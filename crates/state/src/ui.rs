@@ -9,8 +9,12 @@
 pub struct SubmenuState {
     /// Whether the submenu is open
     pub open: bool,
-    /// Selected item index within the submenu
+    /// Selected item index within the submenu; 0 while none is chosen
     pub selected: usize,
+    /// An item is chosen: a menu opened from the menu bar or a button opens
+    /// with none, so that Left/Right walk on and Enter does nothing until
+    /// Up or Down picks one.
+    pub chosen: bool,
 }
 
 impl SubmenuState {
@@ -19,45 +23,72 @@ impl SubmenuState {
         Self {
             open: false,
             selected: 0,
+            chosen: false,
         }
     }
 
-    /// Open the submenu and reset selection to first item
+    /// Open the submenu with its first item selected
     pub fn open(&mut self) {
+        self.open_at(0);
+    }
+
+    /// Open the submenu with no item chosen
+    pub fn open_unchosen(&mut self) {
         self.open = true;
         self.selected = 0;
+        self.chosen = false;
     }
 
     /// Open the submenu with a specific initial selection
     pub fn open_at(&mut self, index: usize) {
         self.open = true;
+        self.select(index);
+    }
+
+    /// Choose item `index`
+    pub fn select(&mut self, index: usize) {
         self.selected = index;
+        self.chosen = true;
+    }
+
+    /// The chosen item, if any
+    pub fn highlighted(&self) -> Option<usize> {
+        self.chosen.then_some(self.selected)
     }
 
     /// Close the submenu and reset selection
     pub fn close(&mut self) {
         self.open = false;
         self.selected = 0;
+        self.chosen = false;
     }
 
-    /// Move selection up (wrapping to last item if at first)
+    /// Move selection up (wrapping to last item if at first); with none
+    /// chosen, choose the last
     pub fn select_prev(&mut self, item_count: usize) {
         if item_count == 0 {
             return;
         }
-        if self.selected > 0 {
+        if !self.chosen {
+            self.select(item_count - 1);
+        } else if self.selected > 0 {
             self.selected -= 1;
         } else {
             self.selected = item_count.saturating_sub(1);
         }
     }
 
-    /// Move selection down (wrapping to first item if at last)
+    /// Move selection down (wrapping to first item if at last); with none
+    /// chosen, choose the first
     pub fn select_next(&mut self, item_count: usize) {
         if item_count == 0 {
             return;
         }
-        self.selected = (self.selected + 1) % item_count;
+        if !self.chosen {
+            self.select(0);
+        } else {
+            self.selected = (self.selected + 1) % item_count;
+        }
     }
 }
 
@@ -66,8 +97,10 @@ impl SubmenuState {
 pub struct PanelActionMenuState {
     /// Whether the menu is open
     pub open: bool,
-    /// Selected item index
+    /// Selected item index; 0 while none is chosen
     pub selected: usize,
+    /// An item is chosen: the menu opens with none
+    pub chosen: bool,
     /// Group index of the panel
     pub group_idx: usize,
     /// Panel index within the group
@@ -83,6 +116,7 @@ impl PanelActionMenuState {
     pub fn open(&mut self, group_idx: usize, panel_idx: usize, anchor_x: u16, anchor_y: u16) {
         self.open = true;
         self.selected = 0;
+        self.chosen = false;
         self.group_idx = group_idx;
         self.panel_idx = panel_idx;
         self.anchor_x = anchor_x;
@@ -101,8 +135,10 @@ impl PanelActionMenuState {
 pub struct ProjectActionMenuState {
     /// Whether the menu is open
     pub open: bool,
-    /// Selected item index
+    /// Selected item index; 0 while none is chosen
     pub selected: usize,
+    /// An item is chosen: the menu opens with none
+    pub chosen: bool,
     /// Whose menu it is: the project's place in the order the menus list
     /// the open projects
     pub project: usize,
@@ -116,6 +152,7 @@ impl ProjectActionMenuState {
     pub fn open(&mut self, project: usize, anchor_x: u16) {
         self.open = true;
         self.selected = 0;
+        self.chosen = false;
         self.project = project;
         self.anchor_x = anchor_x;
     }
@@ -131,7 +168,10 @@ impl ProjectActionMenuState {
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct OperationActionMenuState {
     pub open: bool,
+    /// Selected item index; 0 while none is chosen
     pub selected: usize,
+    /// An item is chosen: the menu opens with none
+    pub chosen: bool,
     /// Operation id (uuid u128) so we can target the right operation
     /// even if the panel reorders.
     /// Raw operation id (OperationId.0); kept as u64 here so this
@@ -161,6 +201,7 @@ impl OperationActionMenuState {
     ) {
         self.open = true;
         self.selected = 0;
+        self.chosen = false;
         self.op_id = op_id;
         self.anchor_x = anchor_x;
         self.anchor_y = anchor_y;
@@ -172,6 +213,53 @@ impl OperationActionMenuState {
         self.open = false;
     }
 }
+
+/// Up/Down in a popup menu with `selected` and `chosen` fields: the next
+/// or previous item, wrapping, or with none chosen the first or the last.
+macro_rules! menu_choice {
+    ($($menu:ty),*) => {$(
+        impl $menu {
+            /// Choose the previous item of `count`, or the last with none
+            /// chosen
+            pub fn choose_prev(&mut self, count: usize) {
+                if count == 0 {
+                    return;
+                }
+                self.selected = if !self.chosen || self.selected == 0 {
+                    count - 1
+                } else {
+                    self.selected - 1
+                };
+                self.chosen = true;
+            }
+
+            /// Choose the next item of `count`, or the first with none
+            /// chosen
+            pub fn choose_next(&mut self, count: usize) {
+                if count == 0 {
+                    return;
+                }
+                self.selected = if self.chosen {
+                    (self.selected + 1) % count
+                } else {
+                    0
+                };
+                self.chosen = true;
+            }
+
+            /// The chosen item, if any
+            pub fn highlighted(&self) -> Option<usize> {
+                self.chosen.then_some(self.selected)
+            }
+        }
+    )*};
+}
+
+menu_choice!(
+    PanelActionMenuState,
+    ProjectActionMenuState,
+    OperationActionMenuState
+);
 
 /// State for divider drag resize operation
 #[derive(Debug, Default, Clone)]
@@ -391,6 +479,20 @@ pub struct UiState {
 }
 
 impl UiState {
+    /// A menu bar title's dropdown is open with no item chosen.
+    pub fn bar_dropdown_unchosen(&self) -> bool {
+        [
+            &self.projects_submenu,
+            &self.tools_submenu,
+            &self.commands_submenu,
+            &self.ai_submenu,
+            &self.bookmarks_submenu,
+            &self.options_submenu,
+        ]
+        .iter()
+        .any(|menu| menu.open && !menu.chosen)
+    }
+
     /// Close all main-level submenus (projects, tools, options, commands, bookmarks)
     /// and their nested submenus. Use before opening a specific submenu.
     pub fn close_all_submenus(&mut self) {
@@ -484,7 +586,7 @@ mod tests {
     #[test]
     fn test_submenu_state_select_prev() {
         let mut state = SubmenuState::new();
-        state.selected = 2;
+        state.select(2);
 
         state.select_prev(5);
         assert_eq!(state.selected, 1);
@@ -500,7 +602,7 @@ mod tests {
     #[test]
     fn test_submenu_state_select_next() {
         let mut state = SubmenuState::new();
-        state.selected = 3;
+        state.select(3);
 
         state.select_next(5);
         assert_eq!(state.selected, 4);
@@ -568,6 +670,54 @@ mod tests {
         assert!(!ui.bookmarks_submenu.open);
         assert!(ui.current_commands_group.is_none());
         assert!(ui.current_bookmarks_group.is_none());
+    }
+
+    /// A menu opened unchosen highlights nothing; Down then chooses the
+    /// first item and Up the last, and only then do they step.
+    #[test]
+    fn an_unchosen_submenu_chooses_its_first_or_last_item() {
+        let mut menu = SubmenuState::new();
+        menu.open_unchosen();
+        assert_eq!(menu.highlighted(), None);
+        menu.select_next(3);
+        assert_eq!(menu.highlighted(), Some(0));
+        menu.select_next(3);
+        assert_eq!(menu.highlighted(), Some(1));
+
+        menu.open_unchosen();
+        menu.select_prev(3);
+        assert_eq!(menu.highlighted(), Some(2));
+
+        // A nested submenu still opens on its first item.
+        menu.open();
+        assert_eq!(menu.highlighted(), Some(0));
+        menu.close();
+        assert_eq!(menu.highlighted(), None);
+    }
+
+    #[test]
+    fn a_popup_menu_opens_unchosen() {
+        let mut menu = ProjectActionMenuState::default();
+        menu.open(1, 10);
+        assert_eq!(menu.highlighted(), None);
+        menu.choose_prev(4);
+        assert_eq!(menu.highlighted(), Some(3));
+        menu.choose_next(4);
+        assert_eq!(menu.highlighted(), Some(0));
+
+        menu.open(1, 10);
+        menu.choose_next(4);
+        assert_eq!(menu.highlighted(), Some(0));
+    }
+
+    #[test]
+    fn only_an_unchosen_bar_dropdown_counts() {
+        let mut ui = UiState::default();
+        assert!(!ui.bar_dropdown_unchosen());
+        ui.ai_submenu.open_unchosen();
+        assert!(ui.bar_dropdown_unchosen());
+        ui.ai_submenu.select_next(4);
+        assert!(!ui.bar_dropdown_unchosen());
     }
 
     // =========================================================================

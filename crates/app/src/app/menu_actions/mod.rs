@@ -58,7 +58,29 @@ enum SubmenuNavAction {
 /// Handle generic submenu keyboard navigation.
 /// Updates selection on Up/Down and returns the action for Esc/Enter.
 /// `separators` lists indices of separator items that should be skipped.
+/// With no item chosen, the keys that act on one do nothing.
 fn navigate_submenu(
+    key: &crossterm::event::KeyEvent,
+    submenu: &mut termide_state::SubmenuState,
+    item_count: usize,
+    separators: &[usize],
+) -> SubmenuNavAction {
+    let chosen = submenu.chosen;
+    let action = step_submenu(key, submenu, item_count, separators);
+    match action {
+        SubmenuNavAction::Execute
+        | SubmenuNavAction::Rename
+        | SubmenuNavAction::Edit
+        | SubmenuNavAction::Delete
+            if !chosen =>
+        {
+            SubmenuNavAction::None
+        }
+        action => action,
+    }
+}
+
+fn step_submenu(
     key: &crossterm::event::KeyEvent,
     submenu: &mut termide_state::SubmenuState,
     item_count: usize,

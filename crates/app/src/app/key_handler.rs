@@ -65,6 +65,19 @@ impl App {
             return self.handle_modal_key(key);
         }
 
+        // A menu bar dropdown opened with no item chosen: Left/Right walk
+        // the bar on, Up/Down choose an item, and the keys that act on one
+        // wait for it.
+        if self.state.is_menu_open() && self.state.ui.bar_dropdown_unchosen() {
+            use crossterm::event::KeyCode;
+            match key.code {
+                KeyCode::Left => return self.switch_to_prev_menu(),
+                KeyCode::Right => return self.switch_to_next_menu(),
+                KeyCode::Up | KeyCode::Down | KeyCode::Esc => {}
+                _ => return Ok(()),
+            }
+        }
+
         // If Projects submenu is open, handle its navigation
         if self.state.ui.projects_submenu.open {
             return self.handle_projects_submenu_key(key);

@@ -29,7 +29,7 @@ wait "harness-42"
 
 key Alt+K
 wait "Send to agent"
-key Enter
+key Down Enter
 wait "[#1 terminal bash, 2 lines]"
 type "and this"
 key Enter

@@ -86,9 +86,9 @@ impl App {
             KeyCode::Esc => self.state.close_menu(),
             KeyCode::Left => return self.switch_to_prev_menu(),
             KeyCode::Right => return self.switch_to_next_menu(),
-            KeyCode::Up => menu.selected = (menu.selected + count - 1) % count,
-            KeyCode::Down => menu.selected = (menu.selected + 1) % count,
-            KeyCode::Enter => return self.execute_project_action_menu_action(),
+            KeyCode::Up => menu.choose_prev(count),
+            KeyCode::Down => menu.choose_next(count),
+            KeyCode::Enter if menu.chosen => return self.execute_project_action_menu_action(),
             _ => return Ok(()),
         }
         self.state.needs_redraw = true;
