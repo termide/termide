@@ -20,7 +20,8 @@ use termide_agent_core::{
 
 use termide_agent_tools::ShellProgram;
 use termide_panel_terminal::agent_shell::{
-    AgentShell, RunEnd, RunError, ScreenText, SendEnd, SendWait, SessionShell, ShellStatus,
+    AgentShell, RunEnd, RunError, ScreenText, SendEnd, SendError, SendWait, SessionShell,
+    ShellStatus,
 };
 use termide_panel_terminal::Terminal;
 
@@ -398,14 +399,13 @@ impl TerminalSessions for AgentTerminals {
         let outcome = shell
             .send(send.input, send.keys, &wait, &|| send.cancel.is_cancelled())
             .map_err(|error| match error {
-                RunError::Exited => format!(
+                SendError::Exited => format!(
                     "the shell of terminal session `{}` has exited; close it",
                     send.name
                 ),
-                RunError::Input(error) => {
+                SendError::Input(error) => {
                     format!("cannot type into terminal session `{}`: {error}", send.name)
                 }
-                RunError::Busy { .. } => unreachable!("input is never refused as busy"),
             })?;
         let chunk = shell.tap().read_since(outcome.from);
         let dropped = chunk.from - outcome.from;

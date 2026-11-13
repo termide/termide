@@ -284,6 +284,16 @@ pub enum RunError {
     Input(String),
 }
 
+/// Why input was not typed. Unlike a command, input is never refused
+/// while another command runs: that command takes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SendError {
+    /// The shell has exited.
+    Exited,
+    /// The input could not be typed.
+    Input(String),
+}
+
 /// What the session is doing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellStatus {
@@ -699,24 +709,24 @@ impl AgentShell {
         keys: &[String],
         wait: &SendWait<'_>,
         cancelled: &dyn Fn() -> bool,
-    ) -> Result<SendOutcome, RunError> {
+    ) -> Result<SendOutcome, SendError> {
         let application_cursor = read_screen(&self.screen).application_cursor_keys;
         let mut bytes = input.replace("\r\n", "\r").replace('\n', "\r").into_bytes();
         for key in keys {
             let Some(key) = key_bytes(key, application_cursor) else {
-                return Err(RunError::Input(format!("unknown key `{key}`")));
+                return Err(SendError::Input(format!("unknown key `{key}`")));
             };
             bytes.extend(key);
         }
         let _turn = lock(&self.turn);
         if self.tap.is_closed() {
-            return Err(RunError::Exited);
+            return Err(SendError::Exited);
         }
         let from = self.tap.end();
         if !bytes.is_empty() {
             self.input
                 .send(bytes)
-                .map_err(|e| RunError::Input(e.to_string()))?;
+                .map_err(|e| SendError::Input(e.to_string()))?;
         }
         let outcome = |end| Ok(SendOutcome { end, from });
         let deadline = Instant::now() + wait.timeout;
