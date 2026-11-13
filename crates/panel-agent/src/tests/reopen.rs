@@ -288,6 +288,33 @@ fn a_paused_run_reopens_in_the_mode_it_ran_in() {
 }
 
 #[test]
+fn a_session_never_switched_reopens_in_the_mode_it_worked_in() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut configured = setup(vec![reply("done")]);
+    configured.rules.mode = Mode::Auto;
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::create(dir.path(), Path::new("/tmp")).unwrap()),
+        ..configured
+    });
+    let _ = panel.send_message(UserMessage::text("build it"));
+    settle(&mut panel);
+    let path = panel.session.as_ref().unwrap().path().to_path_buf();
+    drop(panel);
+
+    // The configured mode changed meanwhile; the session keeps its own.
+    let mut configured = setup(vec![]);
+    configured.rules.mode = Mode::Plan;
+    let panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::open_exclusive(&path).unwrap()),
+        ..configured
+    });
+    assert_eq!(panel.mode.get(), Mode::Auto);
+    assert_eq!(panel.rules.mode, Mode::Auto);
+}
+
+#[test]
 fn a_finished_run_reopens_idle() {
     let dir = tempfile::tempdir().unwrap();
     let path = logged_request(dir.path(), |session| {
