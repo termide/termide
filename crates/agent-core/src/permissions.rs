@@ -1217,9 +1217,12 @@ impl PermissionHooks {
                 // Keys typed into a program the shell runs, or that edit the
                 // line unseen, are read by no check: the same keys mean
                 // something else each time, so each send is answered alone.
+                // So is a message to another agent: what it asks for is in
+                // its text, which no rule reads.
                 let destructive = parts.iter().any(|p| destructive_command(&p.text))
                     || self.guards_git_dir(call, &subject)
-                    || (call.name == "terminals" && !command_line);
+                    || (call.name == "terminals" && !command_line)
+                    || call.name == "send_message";
                 let delegating = parts.iter().any(|p| delegating_command(&p.text));
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
@@ -1383,6 +1386,20 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
                 }
             }
             subject.trim_end().to_string()
+        }
+        // Whom it goes to and all it says: `info 1a2b3c4d: text`.
+        "send_message" => {
+            let arg = |key: &str| match &call.arguments[key] {
+                Value::String(text) => text.trim().to_string(),
+                Value::Null => String::new(),
+                other => other.to_string(),
+            };
+            format!(
+                "{} {}: {}",
+                arg("kind"),
+                arg("to"),
+                arg("text").escape_debug()
+            )
         }
         "read" | "edit" | "write" => {
             let raw = call.arguments["path"].as_str().unwrap_or("");

@@ -168,6 +168,23 @@ BREAK_SCRIPT = [
 ]
 
 
+# A fourth, played when the user asks to "message the other panel" (the TUI
+# harness's agent-send-message): the agent sends another panel a message,
+# which asks the user, then says how it went.
+MESSAGE = "message the other panel"
+MESSAGE_SCRIPT = [
+    {
+        "reasoning": "",
+        "text": "I'll tell the other panel.",
+        "tool": (
+            "send_message",
+            {"to": "1a2b3c4d", "kind": "info", "text": "The reorder report is done."},
+        ),
+    },
+    {"reasoning": "", "text": "The message is dealt with.", "tool": None},
+]
+
+
 def lsp_echo(messages):
     """The final step of BREAK: the first lines of the edit's LSP note."""
     for message in messages:
@@ -252,6 +269,8 @@ class Handler(BaseHTTPRequestHandler):
             main = any(DELEGATE in u for u in users)
             if any(BREAK in u for u in users):
                 step = BREAK_SCRIPT[done] if done < len(BREAK_SCRIPT) else lsp_echo(messages)
+            elif any(MESSAGE in u for u in users):
+                step = MESSAGE_SCRIPT[min(done, len(MESSAGE_SCRIPT) - 1)]
             elif not main and any("SUBTASK" in u for u in users):
                 time.sleep(SUBAGENT_DELAY)
                 step = {"reasoning": "", "text": SUBREPORT + model + ".", "tool": None}

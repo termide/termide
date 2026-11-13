@@ -2364,7 +2364,8 @@ agent opens with `&` in the transcript, the verb saying which way it goes:
 `& Replying to session 5e6f7a8b · …` and `& Telling session 1a2b3c4d · …`
 for a message sent, `& Listing agent panels` for `agents`. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
-in plan mode none goes; `agents` only reads. Agents may pass ten messages to
+seeing whom it goes to and all it says, and no answer outlasts it — what it
+asks for is in its text, which no rule reads; in plan mode none goes; `agents` only reads. Agents may pass ten messages to
 one another without you — `max_agent_messages` under `[ai]`, also on the
 settings window's AI page, sets how many, `0` for no limit, and open panels
 take a change at once. Before the next, the agent asks you on a card whether

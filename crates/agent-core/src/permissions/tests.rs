@@ -2290,6 +2290,40 @@ fn typing_into_a_running_program_asks_every_time() {
     assert!(!asked[0].can_allow_session && !asked[0].can_persist);
 }
 
+/// Each message to another agent is confirmed on its own, showing whom it
+/// goes to and all it says: an answer for the session was once kept as a
+/// rule for the message's kind, letting every later message of that kind
+/// through to any panel.
+#[test]
+fn every_message_to_another_agent_asks() {
+    let (mut hooks, asked) = hooks(
+        PermissionRules {
+            mode: Mode::Configured,
+            ..PermissionRules::default()
+        },
+        vec![PermissionAnswer::AllowSession, PermissionAnswer::Deny],
+    );
+    let message = |to: &str, text: &str| {
+        call(
+            "send_message",
+            json!({ "to": to, "kind": "info", "text": text }),
+        )
+    };
+    assert!(matches!(
+        hooks.before_tool_call(&message("1a2b3c4d", "done"), &ctx()),
+        ToolDecision::Allow
+    ));
+    assert!(matches!(
+        hooks.before_tool_call(&message("5e6f7a8b", "delete the branch"), &ctx()),
+        ToolDecision::Block { .. }
+    ));
+    let asked = asked.lock().unwrap();
+    assert_eq!(asked.len(), 2);
+    assert_eq!(asked[0].tool, "send_message");
+    assert_eq!(asked[0].subject, "info 1a2b3c4d: done");
+    assert!(!asked[0].can_allow_session && !asked[0].can_persist);
+}
+
 /// A line typed into a shell at its prompt runs a command, and is
 /// judged as the `shell` command it is: look-only commands pass, the
 /// `shell` rules count, and an answer is recorded as a `shell` rule.
