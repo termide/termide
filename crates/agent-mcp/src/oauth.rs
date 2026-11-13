@@ -685,7 +685,7 @@ fn read_callback(mut stream: TcpStream, state: &str) -> Option<Result<String, St
 /// 32 random bytes, URL-safe: a PKCE verifier or a state.
 fn random_token() -> String {
     let mut bytes = [0u8; 32];
-    getrandom::getrandom(&mut bytes).expect("the system has a random source");
+    getrandom::fill(&mut bytes).expect("the system has a random source");
     URL_SAFE_NO_PAD.encode(bytes)
 }
 

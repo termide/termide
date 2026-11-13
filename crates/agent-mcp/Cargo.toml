@@ -9,12 +9,12 @@ description = "MCP client for the termide coding agent: tools from servers over 
 
 [dependencies]
 base64.workspace = true
-getrandom = "0.2"
+getrandom.workspace = true
 log.workspace = true
 open = "5"
 serde.workspace = true
 serde_json.workspace = true
-sha2 = "0.10"
+sha2.workspace = true
 ureq.workspace = true
 url.workspace = true
 

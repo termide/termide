@@ -10,7 +10,7 @@ ratatui.workspace = true
 unicode-width.workspace = true
 
 # Workspace crates
-lsp-types = "0.97"
+lsp-types.workspace = true
 termide-clipboard = { path = "../clipboard" }
 termide-config = { path = "../config" }
 termide-core = { path = "../core" }

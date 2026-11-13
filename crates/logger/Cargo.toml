@@ -9,4 +9,4 @@ description = "Logging infrastructure for termide"
 
 [dependencies]
 chrono.workspace = true
-log = "0.4"
+log.workspace = true
