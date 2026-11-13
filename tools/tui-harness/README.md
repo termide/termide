@@ -103,7 +103,9 @@ a session opened from its list), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its
 layout, a copy opened beside it) and `project-move-agent` (a moved
 project's agent session found again at the new path, and its git worktree
-still linked).
+still linked) and `viewer` (the HTML and Markdown previews from `F3`: a
+search with its match count, a same-page link followed, `G` to the last
+line, the toggle to the source).
 
 ## Writing one
 

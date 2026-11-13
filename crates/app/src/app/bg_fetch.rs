@@ -13,6 +13,7 @@ use std::sync::mpsc::TryRecvError;
 
 use termide_panel_html::HtmlPanel;
 use termide_panel_markdown::MarkdownPanel;
+use termide_viewer::{Viewer, ViewerPanel};
 
 use super::App;
 use crate::state::ViewFetch;
@@ -42,18 +43,14 @@ impl App {
     /// place (a followed link or a history step inside a fetched page).
     pub(super) fn start_url_fetch_in_place(&mut self, url: String) {
         let id = self.state.next_view_fetch_id;
-        let waiting = match self.layout_manager.active_panel_mut() {
-            Some(panel) => {
-                let any = panel.as_any_mut();
-                if let Some(html) = any.downcast_mut::<HtmlPanel>() {
-                    html.start_loading(id, url.clone());
-                    true
-                } else if let Some(md) = any.downcast_mut::<MarkdownPanel>() {
-                    md.start_loading(id, url.clone());
-                    true
-                } else {
-                    false
-                }
+        let waiting = match self
+            .layout_manager
+            .active_panel_mut()
+            .and_then(|panel| viewer_mut(panel.as_any_mut()))
+        {
+            Some(view) => {
+                view.start_loading(id, url.clone());
+                true
             }
             None => false,
         };
@@ -145,16 +142,27 @@ impl App {
     }
 }
 
+/// The document viewer inside an HTML or Markdown viewer panel.
+fn viewer(panel: &dyn std::any::Any) -> Option<&Viewer> {
+    match panel.downcast_ref::<HtmlPanel>() {
+        Some(html) => Some(html.view()),
+        None => panel.downcast_ref::<MarkdownPanel>().map(ViewerPanel::view),
+    }
+}
+
+/// [`viewer`], to change.
+fn viewer_mut(panel: &mut dyn std::any::Any) -> Option<&mut Viewer> {
+    if panel.is::<HtmlPanel>() {
+        return panel.downcast_mut::<HtmlPanel>().map(ViewerPanel::view_mut);
+    }
+    panel
+        .downcast_mut::<MarkdownPanel>()
+        .map(ViewerPanel::view_mut)
+}
+
 /// Whether `panel` is a viewer waiting for fetch `id`.
 fn waits_for(panel: &dyn std::any::Any, id: u64) -> bool {
-    let waiting = if let Some(html) = panel.downcast_ref::<HtmlPanel>() {
-        html.loading_id()
-    } else if let Some(md) = panel.downcast_ref::<MarkdownPanel>() {
-        md.loading_id()
-    } else {
-        None
-    };
-    waiting == Some(id)
+    viewer(panel).and_then(Viewer::loading_id) == Some(id)
 }
 
 /// Put a fetch result into the viewer `slot` waiting for it: into its page
@@ -176,62 +184,51 @@ fn deliver(
             format!("Unsupported content type: {}", fetched.content_type),
         );
     };
-    let any = slot.as_any_mut();
-    if let Some(html) = any.downcast_mut::<HtmlPanel>() {
-        let placeholder = html.is_placeholder();
-        match kind {
-            ViewKind::Html(src) => {
-                html.apply_fetched(title, src, url);
-                FollowUp::Done
-            }
-            ViewKind::Markdown(src) if placeholder => {
-                *slot = Box::new(MarkdownPanel::from_source(title, src, Some(url)));
-                FollowUp::Done
-            }
-            ViewKind::Image(bytes, ext) if placeholder => {
-                image_into_placeholder(slot, &bytes, &ext, url)
-            }
-            ViewKind::Image(bytes, ext) => {
-                html.stop_loading();
-                FollowUp::OpenImage(bytes, ext, url)
-            }
-            kind => {
-                html.stop_loading();
-                FollowUp::OpenNew(kind, url)
-            }
+    let html = slot.downcast_ref::<HtmlPanel>();
+    let is_html = html.is_some();
+    // Only an HTML placeholder, still without a page, can become another kind.
+    let placeholder = html.is_some_and(HtmlPanel::is_placeholder);
+    let Some(view) = viewer_mut(slot.as_any_mut()) else {
+        return FollowUp::Done;
+    };
+    match kind {
+        ViewKind::Html(src) if is_html => {
+            view.apply_fetched(title, src, url);
+            FollowUp::Done
         }
-    } else if let Some(md) = any.downcast_mut::<MarkdownPanel>() {
-        match kind {
-            ViewKind::Markdown(src) => {
-                md.apply_fetched(title, src, url);
-                FollowUp::Done
-            }
-            ViewKind::Image(bytes, ext) => {
-                md.stop_loading();
-                FollowUp::OpenImage(bytes, ext, url)
-            }
-            kind => {
-                md.stop_loading();
-                FollowUp::OpenNew(kind, url)
-            }
+        ViewKind::Markdown(src) if !is_html => {
+            view.apply_fetched(title, src, url);
+            FollowUp::Done
         }
-    } else {
-        FollowUp::Done
+        ViewKind::Markdown(src) if placeholder => {
+            *slot = Box::new(MarkdownPanel::from_source(title, src, Some(url)));
+            FollowUp::Done
+        }
+        ViewKind::Image(bytes, ext) if placeholder => {
+            image_into_placeholder(slot, &bytes, &ext, url)
+        }
+        ViewKind::Image(bytes, ext) => {
+            view.stop_loading();
+            FollowUp::OpenImage(bytes, ext, url)
+        }
+        kind => {
+            view.stop_loading();
+            FollowUp::OpenNew(kind, url)
+        }
     }
 }
 
 /// A failed fetch: a placeholder shows `message` in place of its page, a
 /// viewer that has a page keeps it and the app shows the message.
 fn fail(slot: &mut Box<dyn termide_core::Panel>, message: String) -> FollowUp {
-    let any = slot.as_any_mut();
-    if let Some(html) = any.downcast_mut::<HtmlPanel>() {
-        let placeholder = html.is_placeholder();
-        html.fail_loading(message.clone());
-        if placeholder {
+    if let Some(html) = slot.downcast_mut::<HtmlPanel>() {
+        if html.is_placeholder() {
+            html.fail_loading(message);
             return FollowUp::Done;
         }
-    } else if let Some(md) = any.downcast_mut::<MarkdownPanel>() {
-        md.stop_loading();
+    }
+    if let Some(view) = viewer_mut(slot.as_any_mut()) {
+        view.stop_loading();
     }
     FollowUp::ErrorModal(message)
 }
@@ -264,7 +261,7 @@ fn image_into_placeholder(
         escape_html(&title).replace('"', "&quot;"),
     );
     if let Some(html) = slot.downcast_mut::<HtmlPanel>() {
-        html.apply_fetched(title, page, url);
+        html.view_mut().apply_fetched(title, page, url);
     }
     match open::that(&path) {
         Ok(()) => FollowUp::Done,
@@ -393,7 +390,7 @@ mod tests {
         );
         assert!(matches!(follow, FollowUp::Done));
         let html = slot.downcast_ref::<HtmlPanel>().unwrap();
-        assert_eq!(html.loading_id(), None);
+        assert_eq!(html.view().loading_id(), None);
         assert!(!html.is_placeholder());
         assert_eq!(slot.title(), "https://ex.com/a");
     }
@@ -416,21 +413,27 @@ mod tests {
             deliver(&mut slot, Err("timed out".to_string())),
             FollowUp::Done
         ));
-        assert_eq!(slot.downcast_ref::<HtmlPanel>().unwrap().loading_id(), None);
+        assert_eq!(
+            slot.downcast_ref::<HtmlPanel>()
+                .unwrap()
+                .view()
+                .loading_id(),
+            None
+        );
 
         let mut page = HtmlPanel::from_source(
             "a".into(),
             "<p>old</p>".into(),
             Some("https://ex.com/a".into()),
         );
-        page.start_loading(2, "https://ex.com/b".into());
+        page.view_mut().start_loading(2, "https://ex.com/b".into());
         let mut slot: Box<dyn Panel> = Box::new(page);
         assert!(matches!(
             deliver(&mut slot, Err("timed out".to_string())),
             FollowUp::ErrorModal(m) if m == "Fetch failed: timed out"
         ));
         let html = slot.downcast_ref::<HtmlPanel>().unwrap();
-        assert_eq!(html.loading_id(), None);
+        assert_eq!(html.view().loading_id(), None);
         assert_eq!(slot.title(), "https://ex.com/a");
     }
 
@@ -441,7 +444,8 @@ mod tests {
             "<p>old</p>".into(),
             Some("https://ex.com/a".into()),
         );
-        page.start_loading(3, "https://ex.com/r.md".into());
+        page.view_mut()
+            .start_loading(3, "https://ex.com/r.md".into());
         let mut slot: Box<dyn Panel> = Box::new(page);
         let follow = deliver(
             &mut slot,

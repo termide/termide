@@ -11,7 +11,7 @@ use termide_core::ThemeColors;
 use termide_html::HtmlState;
 use termide_richtext::{Builder, DiagramFold};
 
-pub use termide_richtext::{LinkSpan, Rendered};
+pub use termide_richtext::Rendered;
 
 /// Render `src` for the given inner `width`.
 #[must_use]

@@ -12,12 +12,9 @@ crossterm.workspace = true
 ratatui.workspace = true
 pulldown-cmark.workspace = true
 unicode-width.workspace = true
-url.workspace = true
 
 # Workspace crates
-termide-config = { path = "../config" }
 termide-core = { path = "../core" }
 termide-richtext = { path = "../richtext" }
+termide-viewer = { path = "../viewer" }
 termide-html = { path = "../html" }
-termide-modal = { path = "../modal" }
-termide-ui = { path = "../ui" }

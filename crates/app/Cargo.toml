@@ -62,6 +62,7 @@ termide-panel-plugin-list = { path = "../panel-plugin-list" }
 termide-panel-mermaid = { path = "../panel-mermaid" }
 termide-panel-csv = { path = "../panel-csv" }
 termide-panel-html = { path = "../panel-html" }
+termide-viewer = { path = "../viewer" }
 termide-fetch = { path = "../fetch" }
 termide-panel-git-status = { path = "../panel-git-status" }
 termide-panel-git-log = { path = "../panel-git-log" }

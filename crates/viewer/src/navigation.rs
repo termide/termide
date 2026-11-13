@@ -1,16 +1,16 @@
-//! Cursor movement, scrolling, selection, and line metrics for the preview.
+//! Cursor movement, scrolling, layout, and text selection.
 
-use crate::render::{self, LinkSpan};
-use crate::{MarkdownPanel, Pos};
+use super::{Pos, Viewer};
+use termide_richtext::LinkSpan;
 use termide_ui::text_utils::{char_col_to_display, slice_chars};
 
-impl MarkdownPanel {
-    pub(crate) fn line_count(&self) -> usize {
+impl Viewer {
+    pub fn line_count(&self) -> usize {
         self.doc.lines.len()
     }
 
     /// Plain text of a rendered line (concatenated span contents).
-    pub(crate) fn line_text(&self, i: usize) -> String {
+    pub fn line_text(&self, i: usize) -> String {
         self.doc
             .lines
             .get(i)
@@ -19,23 +19,23 @@ impl MarkdownPanel {
     }
 
     /// Character count of a rendered line.
-    pub(crate) fn line_len(&self, i: usize) -> usize {
+    pub fn line_len(&self, i: usize) -> usize {
         self.line_text(i).chars().count()
     }
 
-    pub(crate) fn viewport_height(&self) -> usize {
+    pub fn viewport_height(&self) -> usize {
         self.last_area.height.max(1) as usize
     }
 
-    pub(crate) fn max_top(&self) -> usize {
+    pub fn max_top(&self) -> usize {
         self.line_count().saturating_sub(self.viewport_height())
     }
 
-    pub(crate) fn relayout_if_needed(&mut self, width: u16) {
+    pub fn relayout_if_needed(&mut self, width: u16) {
         if width == self.layout_width || width == 0 {
             return;
         }
-        self.doc = render::render_markdown(&self.source, width, &self.colors, self.is_light);
+        self.doc = (self.layout)(&self.source, width, &self.colors, self.is_light);
         self.layout_width = width;
         self.clamp_cursor();
         self.run_search(); // re-locate matches against the new wrapping
@@ -46,7 +46,7 @@ impl MarkdownPanel {
         }
     }
 
-    pub(crate) fn clamp_cursor(&mut self) {
+    pub fn clamp_cursor(&mut self) {
         let lines = self.line_count();
         if lines == 0 {
             self.cursor = (0, 0);
@@ -56,20 +56,20 @@ impl MarkdownPanel {
         self.cursor.1 = self.cursor.1.min(self.line_len(self.cursor.0));
     }
 
-    pub(crate) fn scroll_by(&mut self, delta: i32) {
+    pub fn scroll_by(&mut self, delta: i32) {
         let max = self.max_top();
         self.top = (self.top as i64 + delta as i64).clamp(0, max as i64) as usize;
     }
 
     /// Keep the cursor line within the viewport.
-    pub(crate) fn ensure_cursor_visible(&mut self) {
+    pub fn ensure_cursor_visible(&mut self) {
         let h = self.viewport_height();
         self.top = termide_ui::ensure_offset_visible(self.top, self.cursor.0, h);
         self.top = self.top.min(self.max_top());
     }
 
     /// Move the cursor, optionally extending the selection.
-    pub(crate) fn move_cursor(&mut self, to: Pos, extend: bool) {
+    pub fn move_cursor(&mut self, to: Pos, extend: bool) {
         if extend {
             if self.anchor.is_none() {
                 self.anchor = Some(self.cursor);
@@ -82,7 +82,7 @@ impl MarkdownPanel {
         self.ensure_cursor_visible();
     }
 
-    pub(crate) fn move_vertical(&mut self, delta: i32, extend: bool) {
+    pub fn move_vertical(&mut self, delta: i32, extend: bool) {
         let lines = self.line_count();
         if lines == 0 {
             return;
@@ -92,7 +92,7 @@ impl MarkdownPanel {
         self.move_cursor((line, col), extend);
     }
 
-    pub(crate) fn move_horizontal(&mut self, forward: bool, extend: bool) {
+    pub fn move_horizontal(&mut self, forward: bool, extend: bool) {
         let (mut line, mut col) = self.cursor;
         if forward {
             if col < self.line_len(line) {
@@ -111,7 +111,7 @@ impl MarkdownPanel {
     }
 
     /// Select the whole document, leaving the view where it is.
-    pub(crate) fn select_all(&mut self) {
+    pub fn select_all(&mut self) {
         let Some(last) = self.line_count().checked_sub(1) else {
             return;
         };
@@ -120,7 +120,7 @@ impl MarkdownPanel {
     }
 
     /// Normalized selection range `(start, end)` with `start <= end`.
-    pub(crate) fn selection(&self) -> Option<(Pos, Pos)> {
+    pub fn selection(&self) -> Option<(Pos, Pos)> {
         let a = self.anchor?;
         let b = self.cursor;
         if a <= b {
@@ -131,7 +131,7 @@ impl MarkdownPanel {
     }
 
     /// Text of the current selection, or the cursor's line when none.
-    pub(crate) fn selected_text(&self) -> String {
+    pub fn selected_text(&self) -> String {
         let Some((start, end)) = self.selection() else {
             return self.line_text(self.cursor.0);
         };
@@ -157,7 +157,7 @@ impl MarkdownPanel {
     }
 
     /// The link under display column `col` on the given rendered line.
-    pub(crate) fn link_at(&self, line: usize, col: u16) -> Option<&LinkSpan> {
+    pub fn link_at(&self, line: usize, col: u16) -> Option<&LinkSpan> {
         self.doc
             .links
             .iter()
@@ -166,9 +166,19 @@ impl MarkdownPanel {
 
     /// The link under the cursor (cursor column is a char index; compare in
     /// display columns, which match for the common ASCII case).
-    pub(crate) fn link_under_cursor(&self) -> Option<&LinkSpan> {
+    pub fn link_under_cursor(&self) -> Option<&LinkSpan> {
         let (line, col) = self.cursor;
         let disp = char_col_to_display(&self.line_text(line), col);
         self.link_at(line, disp as u16)
+    }
+
+    /// Scroll so the named anchor's line is at the top of the view. No-op if
+    /// the anchor is unknown.
+    pub fn scroll_to_anchor(&mut self, frag: &str) {
+        if let Some(&(_, line)) = self.doc.anchors.iter().find(|(id, _)| id == frag) {
+            self.top = line.min(self.max_top());
+            self.cursor = (line, 0);
+            self.anchor = None;
+        }
     }
 }
