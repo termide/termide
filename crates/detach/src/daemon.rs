@@ -73,6 +73,8 @@ pub fn spawn_detached(project_root: &Path, args: &[OsString]) -> Result<String> 
         .with_context(|| format!("Failed to bind {}", socket.display()))?;
     restrict_socket(&socket)?;
 
+    // SAFETY: the caller guarantees no other thread exists yet (see above),
+    // so the child inherits no lock held by a thread it does not have.
     match unsafe { nix::unistd::fork() } {
         Ok(nix::unistd::ForkResult::Parent { child }) => {
             registry::write_info(&InstanceInfo {

@@ -1057,14 +1057,21 @@ impl Terminal {
 
                 // SAFETY: CreateToolhelp32Snapshot with TH32CS_SNAPPROCESS takes a
                 // snapshot of all processes. The returned handle must be closed.
+                // SAFETY: a plain call; the handle is checked below and closed.
                 let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
                 if !snapshot.is_null() && snapshot != -1isize as *mut _ {
+                    // SAFETY: PROCESSENTRY32W is plain integers and arrays, valid
+                    // when zeroed.
                     let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
                     entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
 
                     // Find child process of our shell
                     let mut found_child = None;
                     let mut shell_name = None;
+
+                    // SAFETY: `snapshot` is a live handle and `entry` has its dwSize set,
+
+                    // as Process32FirstW/NextW require.
 
                     unsafe {
                         if Process32FirstW(snapshot, &mut entry) != 0 {
@@ -1840,10 +1847,17 @@ impl Panel for Terminal {
                 use windows_sys::Win32::Foundation::CloseHandle;
                 use windows_sys::Win32::System::Diagnostics::ToolHelp::*;
 
+                // SAFETY: a plain call; the handle is checked below and closed.
                 let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
                 if !snapshot.is_null() && snapshot != -1isize as *mut _ {
+                    // SAFETY: PROCESSENTRY32W is plain integers and arrays, valid
+                    // when zeroed.
                     let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
                     entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+
+                    // SAFETY: `snapshot` is a live handle and `entry` has its dwSize set,
+
+                    // as Process32FirstW/NextW require.
 
                     unsafe {
                         if Process32FirstW(snapshot, &mut entry) != 0 {

@@ -317,6 +317,7 @@ impl FileManager {
             let (owner, group, file_mode, perm_access) = {
                 use std::os::unix::fs::MetadataExt;
                 use termide_modal::PermAccess;
+                // SAFETY: geteuid(2) takes nothing and cannot fail.
                 let euid = unsafe { libc::geteuid() };
                 let file_uid = metadata.uid();
                 let access = if euid == 0 {

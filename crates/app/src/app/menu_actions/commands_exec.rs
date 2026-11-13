@@ -532,6 +532,8 @@ fn build_command_command(
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
+        // SAFETY: the hook runs in the forked child before exec and calls only
+        // setsid, which is async-signal-safe.
         unsafe {
             cmd.pre_exec(|| {
                 libc::setsid();

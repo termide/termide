@@ -508,6 +508,10 @@ pub fn get_disk_space_info(path: &std::path::Path) -> Option<DiskSpaceInfo> {
     let mut total_bytes: u64 = 0;
     let mut _total_free_bytes: u64 = 0;
 
+    // SAFETY: `wide_path` is NUL-terminated and outlives the call; the
+
+    // out-pointers are live locals.
+
     let success = unsafe {
         windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
             wide_path.as_ptr(),
@@ -546,6 +550,10 @@ pub fn get_all_disk_space_info() -> Vec<DiskSpaceInfo> {
         let mut free_bytes_available: u64 = 0;
         let mut total_bytes: u64 = 0;
         let mut _total_free_bytes: u64 = 0;
+
+        // SAFETY: `wide_path` is NUL-terminated and outlives the call; the
+
+        // out-pointers are live locals.
 
         let success = unsafe {
             windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(
