@@ -998,6 +998,25 @@ fn list_sorts_newest_first_with_first_prompt() {
 }
 
 #[test]
+fn list_follows_logs_changed_or_removed_since_the_last_call() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut kept = Session::create(dir.path(), Path::new("/w")).unwrap();
+    kept.append_message(&Message::User(UserMessage::text("kept")))
+        .unwrap();
+    let gone = Session::create(dir.path(), Path::new("/w")).unwrap();
+    let gone_path = gone.path().to_path_buf();
+    drop(gone);
+    assert_eq!(Session::list(dir.path()).unwrap().len(), 2);
+
+    kept.set_name("renamed").unwrap();
+    std::fs::remove_file(&gone_path).unwrap();
+
+    let list = Session::list(dir.path()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].label(), "renamed");
+}
+
+#[test]
 fn a_message_timing_survives_reopen_and_is_optional() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();

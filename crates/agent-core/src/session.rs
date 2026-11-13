@@ -2015,24 +2015,121 @@ impl Session {
     }
 
     /// Summaries of every session in `dir`, newest first.
+    ///
+    /// A summary takes reading its whole log, and a project gathers hundreds
+    /// of them, so summaries are kept for the run while their file keeps its
+    /// size and modification time, and the logs not seen yet are read side
+    /// by side. Calls wait for one another: panels restored together then
+    /// read a directory once instead of each on its own.
     pub fn list(dir: &Path) -> std::io::Result<Vec<SessionSummary>> {
-        let mut summaries = Vec::new();
         let Ok(read_dir) = std::fs::read_dir(dir) else {
-            return Ok(summaries);
+            return Ok(Vec::new());
         };
-        for entry in read_dir.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
-                continue;
-            }
-            match Session::open(&path) {
-                Ok(session) => summaries.push(SessionSummary::from(&session)),
-                Err(error) => log::warn!("skipping {}: {error}", path.display()),
+        let logs: Vec<(PathBuf, SummaryStamp)> = read_dir
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("jsonl"))
+            .filter_map(|path| {
+                let stamp = SummaryStamp::of(&path)?;
+                Some((path, stamp))
+            })
+            .collect();
+        let mut cache = summary_cache()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let unread: Vec<&Path> = logs
+            .iter()
+            .filter(|(path, stamp)| cache.get(path).is_none_or(|(kept, _)| kept != stamp))
+            .map(|(path, _)| path.as_path())
+            .collect();
+        for (path, summary) in read_summaries(&unread) {
+            match summary {
+                Ok(summary) => {
+                    // Stamped as listed: a log written to meanwhile is read
+                    // again next time.
+                    if let Some((_, stamp)) = logs.iter().find(|(listed, _)| *listed == path) {
+                        cache.insert(path, (*stamp, summary));
+                    }
+                }
+                Err(error) => {
+                    cache.remove(&path);
+                    log::warn!("skipping {}: {error}", path.display());
+                }
             }
         }
+        // Logs gone from the directory leave the cache with it.
+        cache.retain(|path, _| path.parent() != Some(dir) || logs.iter().any(|(p, _)| p == path));
+        let mut summaries: Vec<SessionSummary> = logs
+            .iter()
+            .filter_map(|(path, stamp)| {
+                cache
+                    .get(path)
+                    .filter(|(kept, _)| kept == stamp)
+                    .map(|(_, summary)| summary.clone())
+            })
+            .collect();
+        drop(cache);
         summaries.sort_by(|a, b| b.modified.cmp(&a.modified).then(b.created.cmp(&a.created)));
         Ok(summaries)
     }
+}
+
+/// What tells a session log apart from the one a summary was read from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SummaryStamp {
+    len: u64,
+    modified: Option<std::time::SystemTime>,
+}
+
+impl SummaryStamp {
+    fn of(path: &Path) -> Option<Self> {
+        let metadata = std::fs::metadata(path).ok()?;
+        Some(Self {
+            len: metadata.len(),
+            modified: metadata.modified().ok(),
+        })
+    }
+}
+
+type SummaryCache = HashMap<PathBuf, (SummaryStamp, SessionSummary)>;
+
+fn summary_cache() -> &'static Mutex<SummaryCache> {
+    static CACHE: OnceLock<Mutex<SummaryCache>> = OnceLock::new();
+    CACHE.get_or_init(Mutex::default)
+}
+
+/// The summaries of `paths`, read on several threads: each log is parsed
+/// whole, and one large log must not hold up the others.
+fn read_summaries(paths: &[&Path]) -> Vec<(PathBuf, std::io::Result<SessionSummary>)> {
+    let read = |path: &Path| Session::open(path).map(|session| SessionSummary::from(&session));
+    let workers = std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(8)
+        .min(paths.len());
+    if workers <= 1 {
+        return paths
+            .iter()
+            .map(|path| (path.to_path_buf(), read(path)))
+            .collect();
+    }
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut done = Vec::new();
+                    while let Some(path) = paths.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        done.push((path.to_path_buf(), read(path)));
+                    }
+                    done
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .flat_map(|handle| handle.join().unwrap_or_default())
+            .collect()
+    })
 }
 
 impl SessionSummary {
