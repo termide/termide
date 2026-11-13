@@ -1,0 +1,32 @@
+# The help window (doc/en/ui.md): F1 opens it on the section of the panel
+# in focus, typing narrows it, F1 or Esc closes it, and Enter opens the
+# help panel at the section in view.
+start
+wait "README.md"
+key F1
+wait "Type to filter ·"
+# Opened from the file manager, its section heads the view.
+expect-re "^.{0,20}│ ═══ FILE MANAGER ═"
+snapshot file-manager
+type "unstage"
+wait "Unstage file"
+expect-not "FILE MANAGER"
+expect "GIT STATUS"
+snapshot filtered
+type "zzq"
+wait "No matches"
+key F1
+wait-gone "Type to filter ·"
+
+# From the git status panel, on its section; Enter pins it as a panel.
+key Alt+G
+wait "Stage all"
+key F1
+wait "Type to filter ·"
+expect-re "^.{0,20}│ ═══ GIT STATUS ═"
+key Enter
+wait-gone "Type to filter ·"
+wait "═══ GIT STATUS ═"
+expect "Help"
+snapshot pinned
+quit

@@ -110,7 +110,8 @@ layout, a copy opened beside it) and `project-move-agent` (a moved
 project's agent session found again at the new path, and its git worktree
 still linked) and `viewer` (the HTML and Markdown previews from `F3`: a
 search with its match count, a same-page link followed, `G` to the last
-line, the toggle to the source).
+line, the toggle to the source) and `help` (`F1`'s window on the focused
+panel's section, filtered by typing, and `Enter` pinning it as a panel).
 
 ## Writing one
 

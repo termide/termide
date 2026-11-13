@@ -80,6 +80,9 @@ impl App {
                 if matches!(modal, ActiveModal::Usage(_)) {
                     return self.finish_usage(result);
                 }
+                if matches!(modal, ActiveModal::Help(_)) {
+                    return self.finish_help(result);
+                }
                 // Check modal type before taking state references
                 let is_rename_pattern = matches!(modal, ActiveModal::RenamePattern(_));
 
@@ -264,6 +267,9 @@ impl App {
             if let Some(result) = modal_result {
                 if matches!(modal, termide_modal::ActiveModal::Usage(_)) {
                     return self.finish_usage(result);
+                }
+                if matches!(modal, termide_modal::ActiveModal::Help(_)) {
+                    return self.finish_help(result);
                 }
                 // Check if this is a git push/pull action that should keep modal open
                 if self.handle_git_push_pull_from_modal(&result)? {

@@ -216,7 +216,8 @@ pub trait Panel {
 - Fallback to Unicode block characters
 
 **Help** (`crates/panel-misc/src/help.rs`)
-- Dynamic help content generated from keybindings config
+- Dynamic help content generated from keybindings config (`crates/modal/src/help_content.rs`, shared with the help window `crates/modal/src/help.rs`)
+- Opened from the help window at the section in view, and in an empty layout
 - Pseudo-graphic tables with full-width layout
 - Scrollable with keyboard and mouse
 - Auto-closes when other panel opens

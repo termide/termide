@@ -39,6 +39,8 @@ pub mod directory_picker;
 pub mod directory_switcher;
 pub mod editable_select;
 pub mod find_bar;
+pub mod help;
+pub mod help_content;
 pub mod info;
 pub mod info_action;
 pub mod input;
@@ -71,6 +73,8 @@ pub use directory_picker::DirectoryPickerModal;
 pub use directory_switcher::{DirectoryItem, DirectorySwitcherModal};
 pub use editable_select::EditableSelectModal;
 pub use find_bar::{Btn as FindBarBtn, FindBar, FindBarAction, FindBarConfig, FindField};
+pub use help::HelpModal;
+pub use help_content::{HelpEntry, HelpGenerator, HelpLines, HelpSection};
 pub use info::{InfoModal, ModalValue, SegmentStyle, StyledSegment};
 pub use info_action::{
     ActionButton, InfoActionModal, InfoActionResult, PermAccess, PermissionsState,
@@ -138,6 +142,8 @@ pub enum ActiveModal {
     DbRowEdit(Box<DbRowEditModal>),
     /// The agents' usage window
     Usage(Box<UsageModal>),
+    /// The help window
+    Help(Box<HelpModal>),
 }
 
 /// A modal's typed result as the [`ModalOutput`] every modal shares.
@@ -177,6 +183,7 @@ macro_rules! dispatch_modal {
             ActiveModal::DbFilter(m) => m.$method($($arg),*),
             ActiveModal::DbRowEdit(m) => m.$method($($arg),*),
             ActiveModal::Usage(m) => m.$method($($arg),*),
+            ActiveModal::Help(m) => m.$method($($arg),*),
         }
     };
 }
@@ -210,6 +217,7 @@ macro_rules! dispatch_modal_erased {
             ActiveModal::DbFilter(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::DbRowEdit(m) => m.$method($($arg),*)?.map(erase_modal_result),
             ActiveModal::Usage(m) => m.$method($($arg),*)?.map(erase_modal_result),
+            ActiveModal::Help(m) => m.$method($($arg),*)?.map(erase_modal_result),
         }
     };
 }

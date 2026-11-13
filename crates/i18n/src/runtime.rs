@@ -192,6 +192,8 @@ impl Translation for RuntimeTranslation {
         usage_period_month,
         usage_period_all,
         usage_hint,
+        help_filter_placeholder,
+        help_hint,
         usage_sessions,
         usage_by_day,
         usage_by_month,

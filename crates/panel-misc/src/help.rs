@@ -21,12 +21,14 @@ use termide_i18n;
 use termide_theme::Theme;
 use termide_ui::ScrollBar;
 
-use crate::help_generator::{HelpGenerator, HelpSection};
+use termide_modal::{HelpGenerator, HelpSection};
 
 /// Help panel showing keybindings reference.
 pub struct HelpPanel {
     /// Help sections data
     sections: Vec<HelpSection>,
+    /// The section to show first, placed by the first render.
+    start: Option<usize>,
     /// Scrollbar drawn by the last render, for mouse thumb dragging.
     scrollbars: termide_core::ScrollBars,
     /// Current scroll offset (first visible line)
@@ -48,6 +50,7 @@ impl HelpPanel {
 
         Self {
             sections,
+            start: None,
             scrollbars: termide_core::ScrollBars::default(),
             scroll_offset: 0,
             last_width: 0,
@@ -57,11 +60,23 @@ impl HelpPanel {
         }
     }
 
+    /// Open at `section` (an index among the generated sections) rather
+    /// than at the top.
+    #[must_use]
+    pub fn at_section(mut self, section: usize) -> Self {
+        self.start = Some(section);
+        self
+    }
+
     /// Regenerate cached lines if width changed.
     fn regenerate_if_needed(&mut self, width: u16) {
         if width != self.last_width {
-            self.cached_lines =
-                HelpGenerator::format_lines(&self.sections, width as usize, &self.cached_theme);
+            let formatted =
+                HelpGenerator::format(&self.sections, width as usize, &self.cached_theme, "");
+            if let Some(line) = self.start.take().and_then(|s| formatted.line_of(s)) {
+                self.scroll_offset = line;
+            }
+            self.cached_lines = formatted.lines;
             self.last_width = width;
             // Clamp scroll offset after regeneration
             self.clamp_scroll(0);

@@ -25,6 +25,15 @@ The application uses interactive modal windows for various operations:
 - Live preview for search/replace operations
 - State preservation (last entered text saved)
 
+### Help Window
+
+`F1` or `Alt+H` (menu **Options → Help**) opens every key termide binds, as set in the config, in a window over the panels. It opens on the section of the panel in focus — the git status panel's keys from the git status panel — with the general keys above it.
+
+- Typing filters the list: an entry stays when its keys or description hold the text, a whole section when its title does; `Backspace` and `Ctrl+U` take the text back.
+- `Tab` / `Shift+Tab` go to the next or previous section; the arrows, `PgUp` / `PgDn`, `Home` / `End` and the mouse wheel scroll.
+- `Enter` closes the window and opens the help as a panel at the section in view, to keep beside the work; the panel closes when another panel opens.
+- `F1`, `Alt+H`, `Esc` or a click outside close it.
+
 ### Settings Modal
 
 Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horizontal-tab layout has been replaced by a **sidebar layout**:
@@ -130,7 +139,7 @@ Menu activation/deactivation and each item can be accessed by mouse click or [ke
   - Themes — theme selection with live preview
   - Language — UI language with live preview
   - Settings — open the settings modal
-  - Help — open help panel
+  - Help — open the help window
   - Detach instance — leave this instance running in the background (shown only when it can detach; see [Detached Instances](detached-instances.md))
   - Quit — exit application
 
@@ -176,7 +185,7 @@ The layout adapts to the terminal width, showing more panel groups on wider scre
 - [coding agent](agent.md) — `Alt+A`
 - [operations](operations.md)
 - image viewer
-- help — `Alt+H`
+- help — `Enter` in the help window
 - journal — `Alt+L`
 
 The **git status** panel has two selectors on top: the repository and the

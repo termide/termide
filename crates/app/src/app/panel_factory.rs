@@ -149,9 +149,30 @@ impl App {
 
     /// Open or switch to help panel
     pub(super) fn handle_new_help(&mut self) -> Result<()> {
-        let help = Help::new(&self.state.config);
-        self.add_panel(Box::new(help));
-        self.auto_save_layout();
+        use termide_modal::{ActiveModal, HelpModal};
+        let panel = self.layout_manager.active_panel().map(|p| p.name());
+        let modal = HelpModal::new(&self.state.config, panel);
+        self.state
+            .show_message_modal(ActiveModal::Help(Box::new(modal)));
+        self.state.needs_redraw = true;
+        Ok(())
+    }
+
+    /// Close the help window; confirmed with a section, open the help panel
+    /// there.
+    pub(super) fn finish_help(
+        &mut self,
+        result: termide_modal::ModalResult<termide_modal::ModalOutput>,
+    ) -> Result<()> {
+        self.state.close_modal();
+        self.state.needs_redraw = true;
+        if let termide_modal::ModalResult::Confirmed(value) = result {
+            let section = value.get::<usize>().copied().unwrap_or(0);
+            self.close_help_panels();
+            let help = Help::new(&self.state.config).at_section(section);
+            self.add_panel(Box::new(help));
+            self.auto_save_layout();
+        }
         Ok(())
     }
 

@@ -923,6 +923,8 @@ pub trait Translation: Send + Sync {
     fn usage_period_month(&self) -> &str;
     fn usage_period_all(&self) -> &str;
     fn usage_hint(&self) -> &str;
+    fn help_filter_placeholder(&self) -> &str;
+    fn help_hint(&self) -> &str;
     fn usage_sessions(&self) -> &str;
     fn usage_by_day(&self) -> &str;
     fn usage_by_month(&self) -> &str;

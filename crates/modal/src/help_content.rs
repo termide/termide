@@ -1,7 +1,8 @@
 //! Dynamic help text generator from keybindings configuration.
 //!
 //! Generates localized help text based on actual keybindings from config,
-//! formatted as pseudo-graphic tables that span full panel width.
+//! formatted as pseudo-graphic tables that span the full width. The help
+//! window and the help panel both show it.
 
 use ratatui::{
     style::Style,
@@ -16,6 +17,7 @@ use termide_i18n;
 use termide_theme::Theme;
 
 /// A single help entry with keybinding and description.
+#[derive(Debug)]
 pub struct HelpEntry {
     /// Keybinding string, e.g., "Alt+M" or "C / F5"
     pub keys: String,
@@ -24,11 +26,46 @@ pub struct HelpEntry {
 }
 
 /// A section of help entries with a header.
+#[derive(Debug)]
 pub struct HelpSection {
     /// Section header, e.g., "GLOBAL KEYS"
     pub header: String,
     /// List of entries in this section
     pub entries: Vec<HelpEntry>,
+    /// The panels (by [`Panel::name`](termide_core::Panel::name)) whose keys
+    /// it lists; help opened from one of them starts here.
+    pub panels: &'static [&'static str],
+}
+
+/// Help formatted for one width and filter.
+#[derive(Debug)]
+pub struct HelpLines {
+    pub lines: Vec<Line<'static>>,
+    /// The sections shown, in order: each one's index among the sections
+    /// and the line its header is on.
+    pub anchors: Vec<(usize, usize)>,
+}
+
+impl HelpLines {
+    /// The section whose header is at `line` or the nearest above it.
+    #[must_use]
+    pub fn section_at(&self, line: usize) -> Option<usize> {
+        self.anchors
+            .iter()
+            .take_while(|(_, at)| *at <= line)
+            .last()
+            .or(self.anchors.first())
+            .map(|(section, _)| *section)
+    }
+
+    /// The header line of `section`, when it is shown.
+    #[must_use]
+    pub fn line_of(&self, section: usize) -> Option<usize> {
+        self.anchors
+            .iter()
+            .find(|(s, _)| *s == section)
+            .map(|(_, line)| *line)
+    }
 }
 
 /// Generator for dynamic help content.
@@ -62,6 +99,12 @@ impl HelpGenerator {
             Self::generate_references_section(t),
             Self::generate_image_section(t),
         ]
+    }
+
+    /// The section listing the keys of the panel named `panel`.
+    #[must_use]
+    pub fn section_for_panel(sections: &[HelpSection], panel: &str) -> Option<usize> {
+        sections.iter().position(|s| s.panels.contains(&panel))
     }
 
     /// Format keybinding to display string.
@@ -191,6 +234,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_global_keys().to_string(),
             entries,
+            panels: &[],
         }
     }
 
@@ -305,6 +349,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_panels().to_string(),
             entries,
+            panels: &[],
         }
     }
 
@@ -439,6 +484,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_file_manager_keys().to_string(),
             entries,
+            panels: &["file_manager"],
         }
     }
 
@@ -601,6 +647,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_editor_keys().to_string(),
             entries,
+            panels: &["editor"],
         }
     }
 
@@ -651,6 +698,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_git_status().to_string(),
             entries,
+            panels: &["git_status"],
         }
     }
 
@@ -717,6 +765,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_git_diff().to_string(),
             entries,
+            panels: &["git_diff"],
         }
     }
 
@@ -760,6 +809,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_git_log().to_string(),
             entries,
+            panels: &["git_log"],
         }
     }
 
@@ -814,6 +864,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_terminal_keys().to_string(),
             entries,
+            panels: &["terminal"],
         }
     }
 
@@ -858,6 +909,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_agent().to_string(),
             entries,
+            panels: &["agent"],
         }
     }
 
@@ -900,6 +952,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_database().to_string(),
             entries,
+            panels: &["db"],
         }
     }
 
@@ -935,6 +988,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_navigation().to_string(),
             entries,
+            panels: &[],
         }
     }
 
@@ -957,6 +1011,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_diagnostics().to_string(),
             entries,
+            panels: &["diagnostics"],
         }
     }
 
@@ -978,6 +1033,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_operations().to_string(),
             entries,
+            panels: &["operations"],
         }
     }
 
@@ -996,6 +1052,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_outline().to_string(),
             entries,
+            panels: &["outline"],
         }
     }
 
@@ -1008,6 +1065,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_references().to_string(),
             entries,
+            panels: &["references"],
         }
     }
 
@@ -1050,6 +1108,7 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_viewers().to_string(),
             entries,
+            panels: &["markdown", "html"],
         }
     }
 
@@ -1075,16 +1134,25 @@ impl HelpGenerator {
         HelpSection {
             header: t.help_section_image().to_string(),
             entries,
+            panels: &["image"],
         }
     }
 
-    /// Format sections as ratatui Lines for direct rendering.
-    /// Sections use double-line headers spanning full width.
-    pub fn format_lines(
+    /// Format sections as ratatui Lines for direct rendering, keeping only
+    /// what `filter` finds. Sections use double-line headers spanning the
+    /// full width.
+    ///
+    /// The filter ignores case and matches an entry's keys or description;
+    /// matching a section's header keeps the whole section.
+    pub fn format(
         sections: &[HelpSection],
         width: usize,
         theme: &Theme,
-    ) -> Vec<Line<'static>> {
+        filter: &str,
+    ) -> HelpLines {
+        let filter = filter.trim().to_lowercase();
+        let found = |text: &str| filter.is_empty() || text.to_lowercase().contains(&filter);
+        let mut anchors = Vec::new();
         let mut lines = Vec::new();
         let header_style = Style::default().fg(theme.accented_fg);
         let key_style = Style::default().fg(theme.fg);
@@ -1102,8 +1170,15 @@ impl HelpGenerator {
         ));
         lines.push(Line::from(""));
 
-        for section in sections {
-            if section.entries.is_empty() {
+        for (index, section) in sections.iter().enumerate() {
+            let whole = found(&section.header);
+            let entries: Vec<&HelpEntry> = section
+                .entries
+                .iter()
+                .filter(|e| !e.keys.is_empty())
+                .filter(|e| whole || found(&e.keys) || found(&e.description))
+                .collect();
+            if entries.is_empty() {
                 continue;
             }
 
@@ -1118,16 +1193,14 @@ impl HelpGenerator {
             let header_prefix = format!("═══ {} ", section.header);
             let prefix_len = header_prefix.chars().count();
             let padding = width.saturating_sub(prefix_len);
+            anchors.push((index, lines.len()));
             lines.push(Line::styled(
                 format!("{}{}", header_prefix, "═".repeat(padding)),
                 header_style,
             ));
             lines.push(Line::from(""));
 
-            for entry in &section.entries {
-                if entry.keys.is_empty() {
-                    continue; // skip entries with no binding
-                }
+            for entry in entries {
                 let keys_padded = Self::pad_string(&entry.keys, max_keys_len + 2);
                 lines.push(Line::from(vec![
                     Span::raw("  "),
@@ -1139,7 +1212,7 @@ impl HelpGenerator {
             lines.push(Line::from(""));
         }
 
-        lines
+        HelpLines { lines, anchors }
     }
 
     /// Pad string to specified width (character-aware).

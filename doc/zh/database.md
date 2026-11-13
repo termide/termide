@@ -79,7 +79,7 @@ Termide 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** �
 | `Ctrl+Y` | 将当前行复制为制表符分隔的值 |
 | `Ctrl+R` | 刷新表列表并重新加载当前视图 |
 
-这些操作键可在配置的 `[database.keybindings]` 中自定义，并显示在帮助面板中。
+这些操作键可在配置的 `[database.keybindings]` 中自定义，并显示在帮助窗口（`F1`）中。
 导航键（Tab、方向键、PageUp/Down、Home/End）是固定的。
 
 **鼠标：** 点击表选择器将其打开，点击列标题切换其排序，点击数据单元格将光标移到该处。

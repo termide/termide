@@ -88,7 +88,7 @@ shows the current range, total row count, active sort and filter, e.g.
 | `Ctrl+R` | Refresh the table list and reload the current view |
 
 These action keys are configurable under `[database.keybindings]` in the config
-and appear in the Help panel. Navigation keys (Tab, arrows, PageUp/Down,
+and appear in the help window (`F1`). Navigation keys (Tab, arrows, PageUp/Down,
 Home/End) are fixed.
 
 **Mouse:** click the table selector to open it, click a column header to cycle
