@@ -25,18 +25,16 @@ pub fn copy_to_clipboard(selected_text: Option<String>) -> ClipboardResult {
 
             match termide_clipboard::copy(&text) {
                 Ok(()) => ClipboardResult {
-                    status_message: format!(
-                        "Copied to clipboard: {:?} ({} chars)",
-                        preview, char_count
-                    ),
+                    status_message: termide_i18n::t()
+                        .editor_copied_fmt(&format!("{preview:?}"), char_count),
                 },
                 Err(e) => ClipboardResult {
-                    status_message: format!("Clipboard error: {}", e),
+                    status_message: termide_i18n::t().editor_clipboard_error_fmt(&e.to_string()),
                 },
             }
         }
         None => ClipboardResult {
-            status_message: "Nothing selected to copy".to_string(),
+            status_message: termide_i18n::t().editor_nothing_to_copy().to_string(),
         },
     }
 }

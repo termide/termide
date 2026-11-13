@@ -384,7 +384,7 @@ impl Panel for GitLogPanel {
                     if !commit.hash.is_empty() {
                         let hash = commit.hash.clone();
                         let _ = termide_clipboard::copy(&hash);
-                        self.status_message = Some(format!("Copied: {}", hash));
+                        self.status_message = Some(termide_i18n::t().status_copied_fmt(&hash));
                     }
                 }
                 CommandResult::Handled(true)

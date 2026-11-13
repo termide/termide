@@ -14,5 +14,6 @@ ratatui.workspace = true
 # Workspace crates
 termide-clipboard = { path = "../clipboard" }
 termide-core = { path = "../core" }
+termide-i18n = { path = "../i18n" }
 termide-modal = { path = "../modal" }
 termide-ui = { path = "../ui" }

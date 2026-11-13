@@ -271,7 +271,6 @@ impl Translation for RuntimeTranslation {
         plugins_none,
         command_report_no_output,
         git_operation_cancelled,
-        modal_yes,
         modal_ok,
         panel_help,
         panel_journal,
@@ -467,8 +466,6 @@ impl Translation for RuntimeTranslation {
         help_desc_open_external,
         help_desc_stage_file,
         help_desc_unstage_file,
-        help_desc_terminal_copy,
-        help_desc_terminal_paste,
         help_desc_scroll_up,
         help_desc_scroll_down,
         help_desc_scroll_top,
@@ -496,7 +493,6 @@ impl Translation for RuntimeTranslation {
         help_desc_db_filter,
         help_desc_db_clear_filter,
         help_desc_db_detail,
-        help_desc_db_copy_cell,
         help_desc_db_copy_row,
         help_desc_toggle_filter,
         help_desc_pause_resume,
@@ -540,6 +536,15 @@ impl Translation for RuntimeTranslation {
         help_desc_viewer_external,
         help_desc_viewer_history,
         status_file_reloaded,
+        binary_save_before_text_view,
+        panel_close_unsaved_question,
+        editor_force_saved,
+        editor_nothing_to_copy,
+        mermaid_flowchart_not_laid_out,
+        mermaid_kind_not_rendered,
+        mermaid_not_recognized,
+        references_none,
+        fm_search_no_matches,
         modal_create_file_title,
         modal_create_dir_title,
         modal_save_as_title,
@@ -562,28 +567,22 @@ impl Translation for RuntimeTranslation {
         command_params_title,
         command_params_run,
         command_params_cancel,
-        command_run_label,
         command_confirm_project_title,
-        command_config_label_name,
         command_config_label_command,
         command_config_label_group,
         command_config_label_display_name,
         command_config_label_mode,
         command_config_label_hotkey,
-        command_config_label_project,
         command_config_project_checkbox,
         command_config_cwd_checkbox,
-        command_config_hotkey_hint,
         command_config_hotkey_invalid,
         command_config_hotkey_conflict,
         command_config_button_create,
         command_config_button_save,
-        command_config_button_edit_file,
         command_config_button_cancel,
         command_config_mode_terminal,
         command_config_mode_background,
         command_config_mode_report,
-        command_config_group_root,
         menu_options,
         menu_quit,
         menu_bookmarks,
@@ -733,7 +732,6 @@ impl Translation for RuntimeTranslation {
         agent_cmd_desc_prompt,
         agent_notice_busy,
         agent_notice_no_log_to_name,
-        agent_notice_will_pause,
         agent_strip_pause,
         agent_strip_after_step,
         agent_strip_paused,
@@ -1055,11 +1053,8 @@ impl Translation for RuntimeTranslation {
         status_owner,
         status_size,
         status_selected,
-        status_pos,
-        status_tab,
         status_tab_modal_title,
         status_plain_text,
-        status_readonly,
         status_terminal,
         status_layout,
         ui_yes,
@@ -1093,15 +1088,9 @@ impl Translation for RuntimeTranslation {
         perm_others,
         file_type_directory,
         file_type_file,
-        progress_scanning,
         progress_delete_title,
         progress_copy_title,
         progress_move_title,
-        progress_resume,
-        progress_suspend,
-        progress_pause,
-        progress_abort,
-        progress_counting_files,
         conflict_directory_title,
         conflict_file_title,
         conflict_overwrite,
@@ -1242,7 +1231,6 @@ impl Translation for RuntimeTranslation {
         help_desc_edit_paste,
         help_desc_view_diff,
         help_desc_revert,
-        help_desc_copy_hash,
         help_desc_scroll_half_down,
         help_desc_toggle_stage,
         help_desc_discard_hunk,
@@ -1342,7 +1330,6 @@ impl Translation for RuntimeTranslation {
         db_copied,
         db_copied_cell,
         db_edit_needs_primary_key,
-        db_edit_title,
         db_edit_save,
         db_edit_null_checkbox,
         db_edit_null_value,
@@ -1359,9 +1346,6 @@ impl Translation for RuntimeTranslation {
         csv_menu_copy_row,
         csv_menu_change_delimiter,
         csv_menu_toggle_header,
-        db_filter_operator,
-        db_filter_value,
-        db_filter_hint,
         db_filter_title,
         db_filter_apply,
         db_filter_clear,
@@ -2068,8 +2052,8 @@ impl Translation for RuntimeTranslation {
         self.format("db_auth_failed_fmt", &[("error", error)])
     }
 
-    fn db_filter_title_fmt(&self, column: &str) -> String {
-        self.format("db_filter_title_fmt", &[("column", column)])
+    fn command_run_label_fmt(&self, name: &str) -> String {
+        self.format("command_run_label_fmt", &[("name", name)])
     }
 
     fn db_row_title_fmt(&self, table: &str) -> String {
@@ -2278,6 +2262,38 @@ impl Translation for RuntimeTranslation {
         self.format("status_error_save", &[("error", error)])
     }
 
+    fn binary_open_failed_fmt(&self, error: &str) -> String {
+        self.format("binary_open_failed_fmt", &[("error", error)])
+    }
+
+    fn editor_force_save_failed_fmt(&self, error: &str) -> String {
+        self.format("editor_force_save_failed_fmt", &[("error", error)])
+    }
+
+    fn editor_clipboard_error_fmt(&self, error: &str) -> String {
+        self.format("editor_clipboard_error_fmt", &[("error", error)])
+    }
+
+    fn editor_replace_failed_fmt(&self, error: &str) -> String {
+        self.format("editor_replace_failed_fmt", &[("error", error)])
+    }
+
+    fn status_copied_fmt(&self, text: &str) -> String {
+        self.format("status_copied_fmt", &[("text", text)])
+    }
+
+    fn editor_copied_fmt(&self, preview: &str, count: usize) -> String {
+        let plural = self.pluralize(count, "char");
+        self.format(
+            "editor_copied_fmt",
+            &[
+                ("preview", preview),
+                ("count", &count.to_string()),
+                ("plural", plural),
+            ],
+        )
+    }
+
     fn status_error_reload(&self, error: &str) -> String {
         self.format("status_error_reload", &[("error", error)])
     }
@@ -2341,30 +2357,6 @@ impl Translation for RuntimeTranslation {
         )
     }
 
-    fn modal_copy_single_prompt(&self, name: &str) -> String {
-        self.format("modal_copy_single_prompt", &[("name", name)])
-    }
-
-    fn modal_copy_multiple_prompt(&self, count: usize) -> String {
-        let element = self.pluralize(count, "element");
-        self.format(
-            "modal_copy_multiple_prompt",
-            &[("count", &count.to_string()), ("element", element)],
-        )
-    }
-
-    fn modal_move_single_prompt(&self, name: &str) -> String {
-        self.format("modal_move_single_prompt", &[("name", name)])
-    }
-
-    fn modal_move_multiple_prompt(&self, count: usize) -> String {
-        let element = self.pluralize(count, "element");
-        self.format(
-            "modal_move_multiple_prompt",
-            &[("count", &count.to_string()), ("element", element)],
-        )
-    }
-
     fn batch_result_skipped_fmt(&self, count: usize) -> String {
         self.format("batch_result_skipped_fmt", &[("count", &count.to_string())])
     }
@@ -2375,9 +2367,6 @@ impl Translation for RuntimeTranslation {
 
     fn git_init_success(&self, path: &str) -> String {
         self.format("git_init_success", &[("path", path)])
-    }
-    fn agent_thought_chars(&self, count: usize) -> String {
-        self.format("agent_thought_chars", &[("count", &count.to_string())])
     }
 
     fn agent_more_lines_above(&self, count: usize) -> String {
@@ -2756,35 +2745,6 @@ impl Translation for RuntimeTranslation {
 
     fn file_info_git_behind(&self, count: usize) -> String {
         self.format("file_info_git_behind", &[("count", &count.to_string())])
-    }
-
-    fn progress_files_count(&self, current: usize, total: usize) -> String {
-        self.format(
-            "progress_files_count",
-            &[
-                ("current", &current.to_string()),
-                ("total", &total.to_string()),
-            ],
-        )
-    }
-
-    fn progress_files_size(&self, count: &str, size: &str) -> String {
-        self.format("progress_files_size", &[("count", count), ("size", size)])
-    }
-
-    fn progress_data_count(&self, current: &str, total: &str) -> String {
-        self.format(
-            "progress_data_count",
-            &[("current", current), ("total", total)],
-        )
-    }
-
-    fn progress_speed_eta(&self, speed: &str, eta: &str) -> String {
-        self.format("progress_speed_eta", &[("speed", speed), ("eta", eta)])
-    }
-
-    fn progress_speed(&self, speed: &str) -> String {
-        self.format("progress_speed", &[("speed", speed)])
     }
 
     fn conflict_already_exists(&self, item_type: &str, name: &str) -> String {

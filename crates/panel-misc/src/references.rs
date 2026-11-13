@@ -152,7 +152,7 @@ impl termide_core::Panel for ReferencesPanel {
 
         if self.items.is_empty() {
             let msg = Line::from(Span::styled(
-                "No references found",
+                termide_i18n::t().references_none(),
                 Style::default().fg(theme.disabled),
             ));
             buf.set_line(inner.x, inner.y, &msg, inner.width);

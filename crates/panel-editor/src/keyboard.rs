@@ -628,21 +628,25 @@ impl EditorCommand {
             Self::ForceSave => {
                 match editor.force_save() {
                     Err(e) => {
-                        editor.status_message = Some(format!("Force save failed: {}", e));
+                        editor.status_message =
+                            Some(termide_i18n::t().editor_force_save_failed_fmt(&e.to_string()));
                         Err(e)
                     }
                     Ok(_upload_op) => {
                         // Discard upload operation - async handling not implemented in keyboard shortcuts yet
-                        editor.status_message = Some("File force saved".to_string());
+                        editor.status_message =
+                            Some(termide_i18n::t().editor_force_saved().to_string());
                         Ok(())
                     }
                 }
             }
             Self::ReloadFromDisk => {
                 if let Err(e) = editor.reload_from_disk() {
-                    editor.status_message = Some(format!("Reload failed: {}", e));
+                    editor.status_message =
+                        Some(termide_i18n::t().status_error_reload(&e.to_string()));
                 } else {
-                    editor.status_message = Some("File reloaded from disk".to_string());
+                    editor.status_message =
+                        Some(termide_i18n::t().status_file_reloaded().to_string());
                 }
                 Ok(())
             }

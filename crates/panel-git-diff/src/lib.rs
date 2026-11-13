@@ -371,7 +371,7 @@ impl Panel for GitDiffPanel {
                 if let Some(diff) = self.diffs.get(self.selected_file) {
                     let path = diff.path.clone();
                     let _ = termide_clipboard::copy(&path);
-                    self.status_message = Some(format!("Copied: {}", path));
+                    self.status_message = Some(termide_i18n::t().status_copied_fmt(&path));
                 }
                 CommandResult::Handled(true)
             }

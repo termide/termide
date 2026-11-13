@@ -62,15 +62,9 @@ impl App {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| root.display().to_string());
         let (title, prompt) = if copy {
-            (
-                t.modal_copy_single_title(&name),
-                t.modal_copy_single_prompt(&name),
-            )
+            (t.modal_copy_single_title(&name), String::new())
         } else {
-            (
-                t.modal_move_single_title(&name),
-                t.modal_move_single_prompt(&name),
-            )
+            (t.modal_move_single_title(&name), String::new())
         };
         let base = root.parent().unwrap_or(&root).to_path_buf();
         let default = format!("{}/", base.display().to_string().trim_end_matches('/'));

@@ -182,7 +182,7 @@ impl BinaryPanel {
             Err(e) => {
                 self.file = None;
                 self.len = 0;
-                self.error = Some(format!("Cannot open file: {e}"));
+                self.error = Some(termide_i18n::t().binary_open_failed_fmt(&e.to_string()));
             }
         }
         self.file_path = path;
@@ -228,7 +228,7 @@ impl BinaryPanel {
             // there are unsaved hex edits (mirrors the editor's hex toggle).
             if self.editable && self.is_modified() {
                 return vec![PanelEvent::ShowMessage(
-                    "Save the file before switching to text view".to_string(),
+                    termide_i18n::t().binary_save_before_text_view().to_string(),
                 )];
             }
             return vec![PanelEvent::SwapActiveToText(self.file_path.clone())];
@@ -661,7 +661,7 @@ impl Panel for BinaryPanel {
 
     fn needs_close_confirmation(&self) -> Option<String> {
         if self.editable && self.is_modified() {
-            Some("File has unsaved changes. Close anyway?".to_string())
+            Some(termide_i18n::t().panel_close_unsaved_question().to_string())
         } else {
             None
         }

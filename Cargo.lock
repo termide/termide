@@ -5637,6 +5637,7 @@ dependencies = [
  "ratatui",
  "termide-clipboard",
  "termide-core",
+ "termide-i18n",
  "termide-modal",
  "termide-ui",
 ]
