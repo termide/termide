@@ -422,7 +422,7 @@ Termide 内置 LSP 支持，提供智能代码辅助。当配置了可用的语�
 [lsp]
 enabled = true              # 启用/禁用 LSP（默认：true）
 auto_completion = true      # 输入时自动触发补全（默认：true）
-completion_delay_ms = 100   # 自动补全延迟（默认：100）
+completion_delay_ms = 150   # 自动补全延迟（默认：150）
 hover_delay_ms = 1000       # 鼠标停留多久后显示悬停文档（默认：1000）
 
 [lsp.servers.rust]

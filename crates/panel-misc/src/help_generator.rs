@@ -830,7 +830,10 @@ impl HelpGenerator {
         };
         let entries = vec![
             entry("Enter", t.help_desc_agent_send()),
-            entry("Shift+Enter / Ctrl+J", t.help_desc_agent_newline()),
+            entry(
+                "Shift+Enter / Alt+Enter / Ctrl+J",
+                t.help_desc_agent_newline(),
+            ),
             entry("Esc", t.help_desc_agent_esc()),
             entry("Tab", t.help_desc_agent_tab()),
             entry("Shift+Tab", t.help_desc_agent_mode()),

@@ -210,6 +210,13 @@ Choosing a branch never checks it out — it only changes what the panel shows:
 branch selector marks branches the same way and only picks whose history to
 show; after a checkout a log that follows HEAD moves to the new branch.
 
+On a changed file, `S` stages it (a directory too) and `U` unstages it, `F3`
+opens it to view and `F4` in the editor, `Space` or `F12` shows its
+properties, and `Backspace` or `Delete` discards its changes after asking.
+`Ctrl+R` reloads the status and fetches from the remote. These are `stage`,
+`unstage`, `view`, `edit`, `info`, `revert` and `refresh` under
+`[git_status.keybindings]`.
+
 The **git log** panel draws the commit graph with box-drawing pseudographics
 (`● │ ├ ╮ ╯`) laid out from each commit's parents, with each lane coloured so a
 branch can be followed by colour. To fall back to git's native ASCII `--graph`

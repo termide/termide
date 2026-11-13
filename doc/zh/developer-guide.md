@@ -94,6 +94,14 @@ cargo test --workspace test_name
 cargo nextest run --workspace
 ```
 
+界面和代理的行为用 [`tools/tui-harness`](../../tools/tui-harness/README.md) 实地检查：它在 pty 中以无界面方式运行构建好的二进制文件，按场景脚本（按键、等待、对屏幕内容的检查）执行，使用一次性的 HOME、演示项目以及模拟模型或 ACP 代理。
+
+```bash
+cargo build
+tools/tui-harness/run.sh           # 全部场景
+tools/tui-harness/run.sh agent     # 其中一个
+```
+
 ### 代码质量检查
 
 ```bash

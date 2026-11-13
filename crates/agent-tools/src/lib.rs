@@ -3,6 +3,9 @@
 //! Four tools cover what a coding agent needs on a local checkout: `read`,
 //! `edit`, `write` and `shell`; `skill` joins them when the project or the
 //! user defines skills, `question` when someone watches the run to answer.
+//! The tools that reach the rest of termide (`terminals`, `debug`, `task`,
+//! `jobs`, `agents`, `send_message`, `fork`, `suggest_*`) live here too, but
+//! the app registers them, since it owns what they reach.
 //! Search is left to the shell (`rg`, `find`), which every model already
 //! knows. Contracts follow the cross-agent
 //! comparison in `doc/en/agent-design.md`: numbered lines on read,

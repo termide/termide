@@ -257,7 +257,7 @@ const BUILTINS: [Builtin; 17] = [
     },
     Builtin {
         name: FORK_COMMAND,
-        hint: |_| "",
+        hint: |_| "[focus]",
         description: |t| t.agent_cmd_desc_fork(),
         offer: Offer::WithSessions,
     },

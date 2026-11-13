@@ -29,3 +29,5 @@
 
 - [开发者指南](developer-guide.md) - 参与 Termide 开发
 - [架构](architecture.md) - 技术架构和设计决策
+- [代理设计说明](../en/agent-design.md) - 编码代理为何如此工作，基于对现有代理的比较（英文）
+- [插件设计说明](../en/plugins-design.md) - 插件系统的信任边界、生命周期和协议（英文）

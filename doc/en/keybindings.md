@@ -51,7 +51,9 @@ cannot deliver any of the configured Enhanced-tier chords.
 
 ### Enhanced tier (requires Kitty keyboard protocol)
 
-- `Ctrl+punctuation` (`Ctrl+/`, `Ctrl+-`, `Ctrl+=`, `Ctrl+,`, `Ctrl+.`).
+- `Ctrl+punctuation` (`Ctrl+-`, `Ctrl+=`, `Ctrl+,`, `Ctrl+.`) —
+  except `Ctrl+/` and `Ctrl+\`, which reach termide on legacy terminals
+  too (see the note under the defaults below).
 - `Ctrl+Shift+letter`.
 - `Ctrl+Alt+anything`.
 - `Alt+Shift+letter` and `Alt+Shift+arrow` — VTE in legacy mode emits
@@ -59,11 +61,12 @@ cannot deliver any of the configured Enhanced-tier chords.
   `Alt+Shift+...` binding cannot match.
 - `Super` / `Meta` / `Hyper` modifiers.
 
-Enhanced-tier defaults that termide ships (`Ctrl+/` for `toggle_comment`,
-`Ctrl+\` for `switch_directory`, `Ctrl+Alt+R` for `replace_all`) are kept because
-they are de-facto standards across editors. On a terminal without
-Kitty proto, termide logs a startup warning listing the affected
-bindings; the user can rebind them through Settings → Keybindings.
+Enhanced-tier defaults that termide ships (`Ctrl+Alt+R` for
+`replace_all`, `Ctrl+.` for `toggle_comment`) are kept because they are
+de-facto standards across editors, each with a Universal alternative
+(`Alt+R`, `Ctrl+/`). On a terminal without Kitty proto, termide logs a
+startup warning listing the affected bindings; the user can rebind them
+through Settings → Keybindings.
 
 ## macOS: Option is not Alt
 

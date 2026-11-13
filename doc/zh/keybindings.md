@@ -44,7 +44,8 @@ Termide 在与绑定匹配前对每个按键事件进行规范化。规范化在
 
 ### 增强层(需要 Kitty 键盘协议)
 
-- `Ctrl+标点`(`Ctrl+/`、`Ctrl+-`、`Ctrl+=`、`Ctrl+,`、`Ctrl+.`)。
+- `Ctrl+标点`(`Ctrl+-`、`Ctrl+=`、`Ctrl+,`、`Ctrl+.`)—— `Ctrl+/` 和 `Ctrl+\`
+  除外,它们在传统终端上也能到达 termide(见下文默认值下的注)。
 - `Ctrl+Shift+字母`。
 - `Ctrl+Alt+任意键`。
 - `Alt+Shift+字母` 和 `Alt+Shift+方向键` —— VTE 在传统模式下
@@ -52,9 +53,9 @@ Termide 在与绑定匹配前对每个按键事件进行规范化。规范化在
   `Alt+Shift+...` 绑定不能匹配。
 - `Super` / `Meta` / `Hyper` 修饰符。
 
-termide 自带的增强层默认值(`toggle_comment` 的 `Ctrl+/`,
-`switch_directory` 的 `Ctrl+\`,`replace_all` 的 `Ctrl+Alt+R`)被保留,因为它们是编辑器
-中的事实标准。在不支持 Kitty 协议的终端上,termide 在启动时记录
+termide 自带的增强层默认值(`replace_all` 的 `Ctrl+Alt+R`,`toggle_comment` 的
+`Ctrl+.`)被保留,因为它们是编辑器中的事实标准,且各有一个通用层的替代键
+(`Alt+R`、`Ctrl+/`)。在不支持 Kitty 协议的终端上,termide 在启动时记录
 警告,列出受影响的绑定;用户可通过设置 → 键绑定重新绑定。
 
 ## macOS: Option 不是 Alt

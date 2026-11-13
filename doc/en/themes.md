@@ -84,10 +84,10 @@ Termide comes with 44 built-in themes and supports custom user themes. You can s
 
 ### Method 2: Using Keyboard Shortcut
 
-1. Press `Alt+P` while running Termide to open the configuration file in the built-in editor
-2. Find the `theme` parameter
-3. Change it to your desired theme name (e.g., `theme = "dracula"`)
-4. Save the file with `Ctrl+S` - the new theme will be applied immediately
+1. Press `Alt+P` while running Termide to open the Settings window
+2. Select the **General** section
+3. Pick the theme in the **Theme** field
+4. The theme is applied and saved at once
 
 ### Method 3: Manual Edit
 
@@ -108,13 +108,14 @@ You can also edit the configuration file directly with any text editor:
 ~/.config/termide/config.toml
 ```
 
-Change the `theme` parameter:
+Change the `theme` parameter in the `[general]` section:
 ```toml
+[general]
 theme = "dracula"
 language = "auto"
 ```
 
-If you edit the file while Termide is running and it's opened via `Alt+P`, the theme will be applied immediately when you save. Otherwise, the new theme will be applied when you start Termide.
+If you edit the file in Termide's own editor, the theme is applied as soon as you save. Otherwise, the new theme will be applied when you start Termide.
 
 ## Custom Themes
 

@@ -275,7 +275,7 @@ while !state.should_quit {
 - 点击标题区域 → 激活面板（双击文件管理器 → 目录选择器）
 - **拖拽标题区域** → 双模式手势：
   - 在源组所在列内释放 → 垂直 resize：被拖面板上方的分隔线跟随光标。
-  - 在另一列或两列之间释放 → 移动面板：ghost 跟随光标，drop 区高亮；释放在另一个面板的标题上则插入到该组，释放在两组之间则创建新组。`Escape` 取消。
+  - 在另一列或两列之间释放 → 移动面板：一条粗线显示面板将落在何处；释放在另一个面板的标题上则插入到该组，释放在两组之间则创建新组。`Escape` 取消。
 
 **面板内容：**
 - 点击转发到 `panel.handle_mouse()`
@@ -379,7 +379,7 @@ fn render_main_area(frame, layout_manager, state) {
 - `unicode` — 无图标、无箭头，仅 `[≡]`
 
 **Drag Overlay：**
-拖拽面板顶部边框时，`render_drag_overlay()`（在 `src/ui.rs`）在主面板渲染之后、dropdowns/modals 之前运行。它高亮 drop 目标（`IntoGroup` 是目标面板的顶部边框，`NewGroup` 是组间的垂直线）并在光标下绘制 ghost 图标。命中测试重用 `termide_layout` 中的自由函数 `calculate_panel_rects` / `compute_drop_target`，因此鼠标处理器和渲染器对几何一致。
+拖拽面板顶部边框时，`render_drag_overlay()`（在 `src/ui.rs`）在主面板渲染之后、dropdowns/modals 之前运行。绘制内容由意图决定（`PanelDragIntent::ResizeAbove`、`PanelDragIntent::Move { target: IntoGroup, drop_y }` 或 `PanelDragIntent::Move { target: NewGroup, .. }`）：对 `ResizeAbove` 和 `IntoGroup`，在 `drop_y` 行画一条粗线 `━`（将来的分隔线 / 拆分行）；对 `NewGroup`，在间隔列画一条粗线 `┃`。没有 ghost 图标——用户从线的形状和位置读出操作。命中测试重用 `termide_layout` 中的 `calculate_panel_rects` / `classify_panel_drag` / `compute_drop_target`，因此鼠标处理器和渲染器对几何一致。另有一个 `render_v_divider_ghost` 覆盖层处理组内底部边框的拖拽（`Vertical­Divider­Drag­State`），在受影响组的整个宽度上画一条 `━` 线。
 
 **边框渲染：**
 边框和按钮由 `panel_rendering.rs` 绘制，然后面板的 `render()` 方法在内部区域绘制内容。
@@ -705,7 +705,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
    - 带进度指示器的后台任务
 
 2. **插件面板**
-   - 插件（`crates/plugins`，见 `plugins-design.md`）作为进程在 termide 旁运行；
+   - 插件（`crates/plugins`，见 `doc/en/plugins-design.md`）作为进程在 termide 旁运行；
      由插件发送的富文本模型绘制的插件自有面板是下一阶段
 
 3. **网络面板**

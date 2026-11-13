@@ -276,7 +276,7 @@ Handles mouse input:
 - Click title area → Activate panel (double-click on file manager → directory picker)
 - **Drag title area** → Two-mode gesture:
   - Drop inside the source group's column → vertical resize (the divider above the dragged panel snaps to the cursor).
-  - Drop in another column or between columns → panel move: ghost follows cursor, drop zone is highlighted; release over another panel's header inserts into that group, between groups creates a new one. `Escape` cancels.
+  - Drop in another column or between columns → panel move: a thick line shows where the panel would land; release over another panel's header inserts into that group, between groups creates a new one. `Escape` cancels.
 
 **Panel Content:**
 - Clicks forwarded to `panel.handle_mouse()`

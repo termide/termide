@@ -398,7 +398,7 @@ termide [OPTIONS] [FILE]...
   --no-lsp             禁用 LSP 语言服务器
   -r, --restore        从上次运行所在的项目开始，而不是当前目录
   --no-restore         本次只打开当前目录的项目
-  --config <PATH>      使用自定义配置文件路径
+  --config <PATH>      用此文件代替全局 config.toml
   --diagnostics        运行启动前诊断并退出（无 UI）
   -d, --detached       启动一个在终端关闭后仍继续运行的可分离实例，并接入它
                        （仅限 Unix）
@@ -471,6 +471,8 @@ Termide 遵循 [XDG Base Directory 规范](https://specifications.freedesktop.or
 - macOS: `~/Library/Application Support/termide/config.toml`
 - Windows: `%APPDATA%\termide\config.toml`
 
+项目可以在 `<project>/.termide/config.toml` 中覆盖其中任何设置。类型或取值错误的设置会被单独忽略，并在日志（Journal）中报告；文件的其余部分照常生效。由于下一次从设置中保存会重写该文件、去掉被忽略的设置，原样的文件会先复制到同目录下的 `config.toml.bak`。`termide --diagnostics` 会列出同样的问题。
+
 **项目数据位置：**
 - Linux/BSD: `~/.local/share/termide/projects/`（或 `$XDG_DATA_HOME/termide/projects/`）
 - macOS: `~/Library/Application Support/termide/projects/`
@@ -503,6 +505,8 @@ resource_monitor_interval = 1000
 tab_size = 4
 show_git_diff = true
 word_wrap = true
+auto_indent = true
+auto_close_brackets = true
 
 [file_manager]
 extended_view_width = 50
@@ -533,7 +537,7 @@ min_level = "info"
 - macOS: `~/Library/Application Support/termide/themes/`
 - Windows: `%APPDATA%\termide\themes\`
 
-用户主题优先于同名的内置主题。请参阅仓库中的 `themes/` 目录了解主题文件格式示例。
+用户主题优先于同名的内置主题。请参阅仓库中的 `crates/theme/themes/` 目录了解主题文件格式示例。
 
 ### 自定义命令
 

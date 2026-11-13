@@ -502,7 +502,7 @@ Configure LSP in your configuration file (`~/.config/termide/config.toml`):
 [lsp]
 enabled = true              # Enable/disable LSP (default: true)
 auto_completion = true      # Auto-trigger completion on typing (default: true)
-completion_delay_ms = 100   # Delay before auto-completion (default: 100)
+completion_delay_ms = 150   # Delay before auto-completion (default: 150)
 hover_delay_ms = 1000       # Mouse rest before hover documentation (default: 1000)
 
 [lsp.servers.rust]
