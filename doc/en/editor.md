@@ -44,18 +44,20 @@ its new column.
 
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
-| `Ctrl+S`          | Save file                                  |
+| `Ctrl+S` / `F2`   | Save file                                  |
 | `Ctrl+Shift+S`    | Save As (with executable checkbox)         |
 | `Ctrl+Z`          | Undo last action                           |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo undone action               |
 | `Ctrl+D`          | Duplicate current line or selection        |
+| `F8`              | Delete current line                        |
+| `Ctrl+A`          | Select all                                 |
 | `Backspace`       | Delete character to the left of cursor     |
 | `Delete`          | Delete character to the right of cursor    |
 | `Ctrl+Backspace`  | Delete word to the left (Alt+Backspace also)|
 | `Ctrl+Delete`     | Delete word to the right                   |
 | `Enter`           | Insert new line (with auto-indentation)    |
 | `Tab`             | Insert indent (configurable, default 4)    |
-| `Ctrl+/`          | Toggle comment (line/block)                |
+| `Ctrl+/` / `Ctrl+.` | Toggle comment (line/block); `Ctrl+.` needs a terminal with the Kitty keyboard protocol |
 
 ## Changes on disk
 
@@ -228,7 +230,8 @@ introducers, including declarations inside inline `mod { ... }` values.
 `Ctrl+K` (or `Ctrl`+click on a symbol) asks the language server what it knows
 about the symbol under the cursor — its type, signature and doc comment — and
 shows the answer in a popup. Long content scrolls; `Esc` or moving the cursor
-closes it.
+closes it. Resting the mouse on a symbol opens the same popup after
+`hover_delay_ms` under `[lsp]` (default `1000`).
 
 **`Ctrl+C` while the popup is open copies its text** rather than the editor
 selection. What lands in the clipboard is the text as the server sent it, not
@@ -306,6 +309,10 @@ Enable/disable word wrap in your configuration file (`~/.config/termide/config.t
 [editor]
 word_wrap = true  # or false
 ```
+
+Lines are wrapped at word boundaries. In a file larger than
+`large_file_threshold_mb` (default `5`; **Editor → Large file threshold (MB)**
+in the settings) they are cut at the panel width instead, which is cheaper.
 
 ## Auto-Indentation
 
@@ -496,6 +503,7 @@ Configure LSP in your configuration file (`~/.config/termide/config.toml`):
 enabled = true              # Enable/disable LSP (default: true)
 auto_completion = true      # Auto-trigger completion on typing (default: true)
 completion_delay_ms = 100   # Delay before auto-completion (default: 100)
+hover_delay_ms = 1000       # Mouse rest before hover documentation (default: 1000)
 
 [lsp.servers.rust]
 command = "rust-analyzer"
@@ -543,6 +551,14 @@ its build of build scripts and proc macros go to `target/rust-analyzer`, so a
 directory's lock while it checks. The price is building those artifacts twice;
 the first start after an update builds them once.
 
+
+### Go to Definition
+
+| Shortcut           | Action                                     |
+|-------------------|--------------------------------------------|
+| `F12`             | Go to the definition of the symbol under cursor |
+
+`Ctrl`+click on a symbol does the same.
 
 ### Find References
 

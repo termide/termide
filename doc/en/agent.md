@@ -1218,8 +1218,11 @@ Code on termide's tools, also have **question**, **suggest_command**,
 **suggest_goal** and **suggest_loop**, described after the list, **agents**
 and **send_message** (see
 [Talking to other panels](#talking-to-other-panels)), **fork** (see
-[Forking part of the work](#forking-part-of-the-work)), and **debug** (see
-[Debugging](#debugging)).
+[Forking part of the work](#forking-part-of-the-work)), **debug** (see
+[Debugging](#debugging)), and **task**, which hands a job to another agent,
+with **jobs**, which lists and stops what the agent set going (see
+[Subagents](#subagents) and
+[What the agent set going](#what-the-agent-set-going)).
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
 `fetch`, `web_search`, `skill`, a look-only `shell` command such as `rg` or
@@ -1260,11 +1263,10 @@ something. How many delegated tasks think at once is the
   bash, zsh or fish, and with bash otherwise (sh, PowerShell, cmd and the
   like); the tool's description names the shell to the model, and the
   permission rules read the command in its syntax (see
-  [Permissions](#permissions)). The tool used to be called `bash`;
-  termide renames it once in what it keeps itself — the global config and
-  its `ai/` files, rules granted for projects, session logs. A project's own
-  files are not rewritten: a `bash` left in them is reported, as any name no
-  tool goes by is, and is for you to rename. With `session` or `background`
+  [Permissions](#permissions)). The tool used to be called `bash`; that
+  name is no longer read, and a `bash` left in a config, a rule or an
+  agent's `tools:` is reported as an unknown tool name, for you to rename
+  to `shell`. With `session` or `background`
   the command runs in a terminal that stays open; see
   [Terminal sessions](#terminal-sessions).
 - **terminals** lists the agent's terminal sessions, reads what one printed

@@ -66,7 +66,7 @@ nix flake check
 
 #### Особенности платформ
 
-CI прогоняет fmt / check / clippy / test на Linux и macOS; Windows и
+CI прогоняет fmt / clippy / test на Linux и macOS; Windows и
 кросс-компилируемые цели собираются на этапе релиза. Код, обращающийся к
 средствам операционной системы, требует отдельной ветки под каждую платформу —
 так уже сделано для получения сведений о процессах (`/proc` на Linux, libproc
@@ -87,14 +87,18 @@ rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 ### Запуск тестов
 
 ```bash
-# Запустить все тесты
-cargo test
+# Запустить все тесты (корневой крейт — тоже пакет: без --workspace
+# запускаются только его тесты)
+cargo test --workspace
 
 # Запустить тесты с выводом
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # Запустить конкретный тест
-cargo test test_name
+cargo test --workspace test_name
+
+# Быстрее, как в pre-commit хуке и CI (cargo install cargo-nextest)
+cargo nextest run --workspace
 ```
 
 Поведение интерфейса и агента проверяется вживую через
@@ -112,18 +116,21 @@ tools/tui-harness/run.sh agent     # один из них
 ### Проверка качества кода
 
 ```bash
-# Проверить ошибки компиляции
-cargo check
-
-# Запустить линтер clippy
-cargo clippy
+# Запустить линтер clippy (включает проверки компилятора; отдельный cargo check не нужен)
+cargo clippy --workspace --all-targets -- -D warnings
 
 # Форматировать код
-cargo fmt
+cargo fmt --all
 
 # Проверить форматирование без изменения файлов
-cargo fmt --check
+cargo fmt --all -- --check
+
+# Найти неиспользуемые зависимости (cargo install cargo-machete)
+cargo machete
 ```
+
+Это проверки pre-commit хука (`.githooks/pre-commit`, включается командой
+`git config core.hooksPath .githooks`): fmt, machete, clippy и тесты.
 
 ## Структура проекта
 
@@ -141,6 +148,7 @@ termide/
 │   ├── agent-hooks/          # Командные хуки: внешние программы на вызовы инструментов
 │   ├── agent-mcp/            # MCP-клиент (инструменты серверов) и собственный MCP-сервер termide
 │   ├── agent-providers/      # Провайдеры моделей (OpenAI-совместимые chat completions)
+│   ├── agent-recall/         # Инструмент recall: ранжированный поиск по сессиям агента, истории git и коду
 │   ├── agent-tools/          # Встроенные инструменты агента: read, edit, write, shell
 │   ├── agent-web/            # Веб-инструменты: fetch и web_search, по HTTP или через локальный Chrome
 │   ├── app/                  # Оркестратор приложения, обработка событий, управление панелями
@@ -150,6 +158,7 @@ termide/
 │   ├── config/               # Управление конфигурацией (TOML)
 │   ├── core/                 # Базовый трейт Panel и общие типы
 │   ├── db/                   # Ядро доступа к базам данных (SQLite, PostgreSQL, MySQL)
+│   ├── debug/                # Точки останова и запуск отладчиков командной строки
 │   ├── detach/               # Хостинг отсоединённых (демонизированных) экземпляров
 │   ├── fetch/                # Минимальный защищённый HTTP(S) GET для панелей просмотра
 │   ├── file-ops/             # Очередь файловых операций (копирование, перемещение, удаление, загрузка)
@@ -169,6 +178,7 @@ termide/
 │   ├── panel-binary/         # Панель просмотра и редактирования бинарных файлов (hex/ASCII)
 │   ├── panel-csv/            # Панель просмотра CSV/TSV в виде таблицы
 │   ├── panel-db/             # Панель просмотра баз данных
+│   ├── panel-debug/          # Панель сеанса отладки (стек вызовов DAP, переменные, вывод)
 │   ├── panel-diagnostics/    # Панель LSP-диагностик
 │   ├── panel-editor/         # Панель текстового редактора
 │   ├── panel-file-manager/   # Панель файлового менеджера
@@ -182,13 +192,16 @@ termide/
 │   ├── panel-misc/           # Панели Help, Journal и References
 │   ├── panel-operations/     # Панель фоновых операций
 │   ├── panel-outline/        # Панель структуры (Outline)
+│   ├── panel-plugin-list/    # Панель плагина в виде списка строк с действиями
 │   ├── panel-terminal/       # Панель эмулятора терминала (PTY)
+│   ├── plugin-perforce/      # Встроенный плагин Perforce (`termide --plugin perforce`)
 │   ├── plugins/              # Плагины: манифесты, JSON-RPC и хост процессов
 │   ├── project/              # Сохранённые раскладки проектов
 │   ├── richtext/             # Движок раскладки форматированного текста
+│   ├── secrets/              # Хранилище учётных данных, зашифрованное мастер-паролем
 │   ├── state/                # Состояние приложения (batch, layout, operations, ui)
 │   ├── system-monitor/       # Мониторинг CPU/RAM/Disk
-│   ├── theme/                # Система тем и 38 встроенных тем
+│   ├── theme/                # Система тем и 44 встроенных темы
 │   ├── ui/                   # UI-компоненты и форматирование путей
 │   ├── ui-render/            # Рендеринг UI (меню, статусная строка, панели)
 │   ├── unicode-width-fix/    # Исправленный unicode-width (ширина восточноазиатских символов)
@@ -353,9 +366,9 @@ WARN Missing translation key: my_key (using English fallback)
 4. **Тщательно протестируйте** (см. чек-лист выше)
 5. **Запустите проверки качества кода:**
    ```bash
-   cargo fmt
-   cargo clippy
-   cargo test
+   cargo fmt --all
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
    ```
 6. **Сделайте коммит** с чёткими, описательными сообщениями
 7. **Отправьте** в ваш форк
@@ -369,10 +382,19 @@ WARN Missing translation key: my_key (using English fallback)
 
 ### Логирование
 
-Termide записывает логи в:
-- Linux: `~/.cache/termide/termide.log`
-- macOS: `~/Library/Caches/termide/termide.log`
-- Windows: `%LOCALAPPDATA%\\termide\\cache\\termide.log`
+Каждый запуск пишет свой лог в `session-<дата>-<время>.log` в каталоге
+данных проекта (`~/.local/share/termide/projects/<проект>/` в Linux,
+`~/Library/Application Support/termide/projects/<проект>/` в macOS); логи
+старше 24 часов удаляются при запуске. Раздел `[logging]` меняет это:
+
+```toml
+[logging]
+file_path = "/tmp/termide.log"  # вместо этого один постоянный файл; только в глобальном конфиге
+min_level = "info"              # trace, debug, info, warn или error (по умолчанию: info)
+```
+
+`--log-level` заменяет `min_level` на один запуск, не сохраняя его. Те же
+записи видны в панели журнала (`Alt+L`).
 
 Используйте логирование в коде:
 ```rust

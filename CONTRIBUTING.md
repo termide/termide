@@ -80,11 +80,15 @@ cargo build
 # Run the application
 cargo run
 
-# Run tests
-cargo test
+# Run tests (the root crate is a package too, so plain `cargo test` covers
+# only it; --workspace covers every crate)
+cargo test --workspace
 
 # Run specific test
-cargo test test_name
+cargo test --workspace test_name
+
+# Run one crate's tests
+cargo test -p termide-git
 
 # Build for release
 cargo build --release
@@ -97,9 +101,10 @@ each commit:
 
 - ✅ Code formatting check (`cargo fmt --check`)
 - ✅ Unused dependency declarations (`cargo machete`, when installed)
-- ✅ Compilation and Clippy lints (`cargo clippy -- -D warnings`; CI's separate
-  `cargo check` is covered by it)
-- ✅ Test suite (`cargo nextest run`, or `cargo test` without nextest)
+- ✅ Compilation and Clippy lints (`cargo clippy --workspace --all-targets -- -D warnings`,
+  which runs the compiler checks, so there is no separate `cargo check`)
+- ✅ Test suite (`cargo nextest run --workspace`, or `cargo test --workspace`
+  without nextest)
 
 The hook lives at `.githooks/pre-commit` and is versioned with the code, so it
 is present in every clone — but git only runs it once you point the repository
@@ -135,7 +140,7 @@ We use Clippy in **strict mode** to maintain code quality:
 
 ```bash
 # Run clippy
-cargo clippy -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 **Important:**
@@ -149,13 +154,13 @@ All new features and bug fixes must include tests:
 
 ```bash
 # Run all tests
-cargo test
+cargo test --workspace
 
 # Run tests with output
-cargo test -- --nocapture
+cargo test --workspace -- --nocapture
 
 # Run tests for a specific module
-cargo test git::diff
+cargo test -p termide-git diff
 ```
 
 **Test Requirements:**
@@ -231,12 +236,15 @@ Add instructions for installing on Raspberry Pi and ARM servers.
 
 1. **Ensure code quality:**
    ```bash
-   cargo fmt
-   cargo clippy -- -D warnings
-   cargo test
+   cargo fmt --all
+   cargo clippy --workspace --all-targets -- -D warnings
+   cargo test --workspace
    ```
 
-2. **Update documentation** if your changes affect user-facing behavior
+2. **Update documentation** if your changes affect user-facing behavior, and
+   add a CHANGELOG entry for a user-visible change as a fragment under
+   `changelog.d/<section>/` rather than editing `CHANGELOG.md` (see
+   [changelog.d/README.md](changelog.d/README.md))
 
 3. **Add tests** for new features or bug fixes
 
@@ -266,10 +274,14 @@ Add instructions for installing on Raspberry Pi and ARM servers.
 
 All pull requests are automatically checked by our CI pipeline:
 
-- ✅ **Formatting** - `cargo fmt --check`
-- ✅ **Compilation** - `cargo check`
-- ✅ **Clippy** - `cargo clippy -- -D warnings` (strict mode)
-- ✅ **Tests** - `cargo test`
+- ✅ **Formatting** - `cargo fmt --all -- --check`
+- ✅ **Clippy** - `cargo clippy --workspace --all-targets -- -D warnings` (strict mode; it covers compilation)
+- ✅ **Tests** - `cargo nextest run --workspace --profile ci` on Linux and macOS, plus
+  `cargo test --release -p termide-highlight` on Linux (the grammars' C code optimised as released)
+- ✅ **Unused dependencies** - `cargo machete`
+- ✅ **Version** - `tools/release/version.sh --check` (the release version agrees in every copy)
+- ✅ **Translated docs** - `tools/docs/headings.sh` (`doc/ru/` keeps the headings of `doc/en/`)
+- ✅ **Supply chain** - `cargo deny check`
 
 Your PR must pass all checks before it can be merged.
 

@@ -260,4 +260,4 @@ Save this as `~/.config/termide/themes/my-dark-theme.toml` and set `theme = "my-
 
 ## Theme Screenshots
 
-See the [README](../../README.md#available-themes) for the list of built-in themes.
+See the [README](../../README.md#themes) for screenshots of built-in themes.

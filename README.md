@@ -419,8 +419,12 @@ Options:
                        Install the completion script for $SHELL, or the named one
   --prompt <PROMPT>    Run one agent task without the UI, print the answer to
                        stdout and exit; `-` reads the prompt from stdin
+  --recall <QUERY>     Search the project's earlier agent sessions, git
+                       history and code as the agent's recall tool does,
+                       print the results and exit; exits 1 when nothing is found
   --agent <NAME>       With --prompt: the agent definition to use
-  --output <FORMAT>    With --prompt: text (default), json or stream-json
+  --output <FORMAT>    With --prompt: text (default), json or stream-json;
+                       with --recall: text or json
   -h, --help           Print help
   -V, --version        Print version
 ```

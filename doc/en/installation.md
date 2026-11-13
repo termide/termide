@@ -162,8 +162,13 @@ cargo build --release
 cargo install --path .
 
 # Or install directly from the repository, without cloning first:
-cargo install --git https://github.com/termide/termide --locked
+CFLAGS=-fno-strict-aliasing cargo install --git https://github.com/termide/termide --locked
 ```
+
+`CFLAGS` carries the C flag the repository's `.cargo/config.toml` sets for
+the syntax grammars, which cargo does not read for an install from git;
+without it, GCC builds some grammars' scanners into code that writes into
+freed memory.
 
 > **Note:** Termide is **not** published to crates.io. `cargo install termide`
 > would fetch an obsolete, unrelated early release — always build from source
@@ -270,7 +275,7 @@ Termide runs natively on Windows 10+ using ConPTY. Requires Windows Terminal for
 **Configuration paths:**
 - Config: `%APPDATA%\termide\config.toml`
 - Projects: `%APPDATA%\termide\projects\`
-- Logs: `%LOCALAPPDATA%\termide\cache\termide.log`
+- Logs: `%APPDATA%\termide\projects\<project>\session-*.log`
 
 ### Windows (WSL)
 

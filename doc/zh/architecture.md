@@ -716,10 +716,10 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 ## 调试架构
 
 **日志系统：**
-- 所有日志写入配置目录中的 `termide.log`
-- 级别：INFO、ERROR、DEBUG
+- 每次运行写入项目数据目录中各自的 `session-*.log`，或写入 `[logging] file_path`（见开发者指南）
+- 级别：trace、debug、info、warn、error
 - 时间戳和组件前缀
-- 日志轮转防止无限增长
+- 启动时删除超过 24 小时的日志
 
 **调试面板：**
 - 应用状态实时查看

@@ -208,8 +208,10 @@ F 键行发送的是媒体键,任何 `F<n>` 绑定都无法到达。对大多数
 | 开始调试 | `F5` | `editor` |
 | 下一处更改 | `F7` | `editor` |
 | 上一处更改 | `Shift+F7` | `editor` |
+| 解压压缩包 | `Alt+F9` | `file_manager` |
 | 查看文件 | `F3` | `git_status` |
 | 编辑文件 | `F4` | `git_status` |
+| 清除过滤 | `Shift+F3` | `database` |
 
 termide 在 macOS 上启动时会记录一条列出这些绑定的警告。请启用该设置,或通过
 设置 → 键绑定重新绑定这些动作。

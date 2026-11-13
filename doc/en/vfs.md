@@ -243,6 +243,11 @@ operation fails and the panel shows a recovery dialog with three choices:
 directory), or **Close panel**. Pressing `Esc` dismisses the dialog and
 leaves the panel on its last listing. The panel never loops on the error.
 
+A connection that is still being opened after `connection_timeout_secs`
+seconds under `[vfs]` (default `60`; **VFS → Connection timeout (secs)**
+in the settings) is given up and the panel says so. Opening an archive is
+local work and is not timed out; `Esc` cancels it.
+
 ## Archives
 
 Archive files open in the file manager like directories: `Enter` on

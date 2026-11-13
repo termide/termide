@@ -160,8 +160,12 @@ cargo build --release
 cargo install --path .
 
 # 或者无需克隆，直接从仓库安装：
-cargo install --git https://github.com/termide/termide --locked
+CFLAGS=-fno-strict-aliasing cargo install --git https://github.com/termide/termide --locked
 ```
+
+`CFLAGS` 传入仓库 `.cargo/config.toml` 为语法高亮语法设置的 C 编译标志；
+从 git 安装时 cargo 不读取该文件。缺少它，GCC 会把某些语法的扫描器编译成
+向已释放内存写入的代码。
 
 > **注意：** Termide **未**发布到 crates.io。`cargo install termide` 会拉取一个
 > 过时且不相关的早期版本——请始终从源码构建（上面的克隆方式）或使用
@@ -265,7 +269,7 @@ Termide 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 Windows Ter
 **配置路径：**
 - 配置文件: `%APPDATA%\termide\config.toml`
 - 项目数据: `%APPDATA%\termide\projects\`
-- 日志文件: `%LOCALAPPDATA%\termide\cache\termide.log`
+- 日志文件: `%APPDATA%\termide\projects\<project>\session-*.log`
 
 ### Windows (WSL)
 

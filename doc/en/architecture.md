@@ -745,10 +745,10 @@ the app's `VaultState`. See `doc/en/passwords.md` for the user view.
 ## Debugging Architecture
 
 **Log System:**
-- All logs written to `termide.log` in config directory
-- Levels: INFO, ERROR, DEBUG
+- Each run logs to its own `session-*.log` in the project's data directory, or to `[logging] file_path` (see the developer guide)
+- Levels: trace, debug, info, warn, error
 - Timestamp and component prefixes
-- Rotate logs to prevent unbounded growth
+- Logs older than 24 hours are removed at startup
 
 **Debug Panel:**
 - Live view of application state
