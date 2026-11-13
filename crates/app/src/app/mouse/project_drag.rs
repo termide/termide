@@ -139,7 +139,8 @@ impl App {
     }
 
     /// Let go on `Up(Left)`. A press that moved nothing and ends on its own
-    /// project is a click on it: the project is switched to.
+    /// project is a click on it: the project is switched to, or the current
+    /// one's menu opens.
     pub(in crate::app) fn handle_project_drag_end(&mut self, x: u16, y: u16) -> Result<()> {
         self.state.held_project_button = None;
         let Some(drag) = self.project_drag.take() else {
@@ -162,9 +163,8 @@ impl App {
                 if drag.root != self.project_root {
                     self.switch_to_project(drag.root)?;
                 } else if let (Some(place), false) = (place, was_selected) {
-                    // The current project's button takes the menu bar
-                    // cursor, for the keys to close it or step to another;
-                    // a second click lets it go, as on a menu title.
+                    // The current project's button opens its menu, as a menu
+                    // title does; a second click closes it.
                     self.reopen_menu_bar_at_button(place);
                 }
                 Ok(())

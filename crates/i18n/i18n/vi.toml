@@ -391,6 +391,7 @@ projects_already_open = "Thư mục này đã thuộc về một dự án khác 
 projects_already_current = "Đây là dự án hiện tại"
 projects_move = "Di chuyển dự án…"
 projects_copy = "Sao chép dự án…"
+projects_switch = "Chuyển sang dự án"
 projects_move_title = "Di chuyển dự án?"
 projects_transfer_busy = "Dự án đang được di chuyển hoặc sao chép"
 detach_instance = "Tách thực thể"

@@ -95,23 +95,28 @@ impl PanelActionMenuState {
     }
 }
 
-/// State for the current project's context menu, opened from the ≡ after
-/// its name in the menu bar.
+/// State for an open project's menu, opened from its button in the menu
+/// bar as a menu title opens its dropdown.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ProjectActionMenuState {
     /// Whether the menu is open
     pub open: bool,
     /// Selected item index
     pub selected: usize,
-    /// Screen X of the ≡ glyph
+    /// Whose menu it is: the project's place in the order the menus list
+    /// the open projects
+    pub project: usize,
+    /// Screen X of the project's button
     pub anchor_x: u16,
 }
 
 impl ProjectActionMenuState {
-    /// Open the menu under the ≡ at `anchor_x`
-    pub fn open(&mut self, anchor_x: u16) {
+    /// Open the menu of open project `project` under its button at
+    /// `anchor_x`
+    pub fn open(&mut self, project: usize, anchor_x: u16) {
         self.open = true;
         self.selected = 0;
+        self.project = project;
         self.anchor_x = anchor_x;
     }
 
@@ -376,7 +381,7 @@ pub struct UiState {
     pub panel_action_menu: PanelActionMenuState,
     /// Per-operation popup menu (Pause/Resume/Cancel) on Operations panel
     pub operation_action_menu: OperationActionMenuState,
-    /// The current project's ≡ context menu in the menu bar
+    /// An open project's menu, under its button in the menu bar
     pub project_action_menu: ProjectActionMenuState,
     /// Panel drag-and-drop state (grab a panel by its top border)
     pub panel_drag: PanelDragState,

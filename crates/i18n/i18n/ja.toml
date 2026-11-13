@@ -390,6 +390,7 @@ projects_already_open = "このディレクトリは既に別の開いている�
 projects_already_current = "これは現在のプロジェクトです"
 projects_move = "プロジェクトを移動…"
 projects_copy = "プロジェクトをコピー…"
+projects_switch = "プロジェクトに切り替え"
 projects_move_title = "プロジェクトを移動しますか？"
 projects_transfer_busy = "プロジェクトは移動中またはコピー中です"
 detach_instance = "インスタンスをデタッチ"

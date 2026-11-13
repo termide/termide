@@ -95,7 +95,7 @@ impl App {
             return self.handle_bookmarks_submenu_key(key);
         }
 
-        // The current project's ≡ menu
+        // An open project's menu, under its button in the menu bar
         if self.state.ui.project_action_menu.open {
             return self.handle_project_action_menu_key(key);
         }

@@ -22,7 +22,7 @@ key Up F6
 wait "Move 'inventory' to"
 type "2"
 key Enter
-wait "≡ inventory2"
+wait-re "Options  inventory2 "
 wait "Want me to highlight critical rows"
 snapshot moved
 # The log went along and names the new directory; none is left at the old.

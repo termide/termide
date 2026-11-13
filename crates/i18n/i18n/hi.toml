@@ -331,6 +331,7 @@ projects_already_open = "यह डायरेक्टरी पहले स�
 projects_already_current = "यह मौजूदा प्रोजेक्ट है"
 projects_move = "प्रोजेक्ट ले जाएँ…"
 projects_copy = "प्रोजेक्ट कॉपी करें…"
+projects_switch = "प्रोजेक्ट पर जाएँ"
 projects_move_title = "प्रोजेक्ट ले जाएँ?"
 projects_transfer_busy = "प्रोजेक्ट ले जाया या कॉपी किया जा रहा है"
 detach_instance = "इंस्टेंस अलग करें"

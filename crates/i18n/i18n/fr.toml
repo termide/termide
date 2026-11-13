@@ -292,6 +292,7 @@ projects_already_open = "Ce répertoire appartient déjà à un autre projet ouv
 projects_already_current = "C'est le projet actuel"
 projects_move = "Déplacer le projet…"
 projects_copy = "Copier le projet…"
+projects_switch = "Passer au projet"
 projects_move_title = "Déplacer le projet ?"
 projects_transfer_busy = "Le projet est en cours de déplacement ou de copie"
 detach_instance = "Détacher l'instance"

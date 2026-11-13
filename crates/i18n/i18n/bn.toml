@@ -391,6 +391,7 @@ projects_already_open = "এই ডিরেক্টরিটি ইতিম�
 projects_already_current = "এটি বর্তমান প্রকল্প"
 projects_move = "প্রজেক্ট সরান…"
 projects_copy = "প্রজেক্ট কপি করুন…"
+projects_switch = "প্রজেক্টে যান"
 projects_move_title = "প্রজেক্ট সরাবেন?"
 projects_transfer_busy = "প্রজেক্টটি সরানো বা কপি করা হচ্ছে"
 detach_instance = "ইনস্ট্যান্স বিচ্ছিন্ন করুন"

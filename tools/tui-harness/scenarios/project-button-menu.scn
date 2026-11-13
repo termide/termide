@@ -1,0 +1,49 @@
+# A project's button in the menu bar opens its menu, as a menu title does
+# (doc/en/ui.md): walking onto it with the arrows opens it; the current
+# project's offers its root path, another's switching to it.
+size 160x36
+project empty
+start
+wait-re "^.*Options  project "
+
+# A copy opens in the background beside the current project.
+key F9 Right Right
+wait "Change root"
+key Up F5
+wait "Copy 'project' to"
+type "2"
+key Enter
+wait "project | project2"
+
+# Six titles, then the current project's button: its menu opens. Right
+# opens AI's first submenu before it leaves AI, and leaves Options from an
+# item without a submenu of its own.
+key F9 Right Right Right Right Right Right Down Down Right
+wait "Copy project…"
+expect "Change root path"
+expect-not "Switch to project"
+snapshot current-menu
+
+# The next button is another project's.
+key Right
+wait "Switch to project"
+expect-not "Change root path"
+snapshot other-menu
+
+# Alt+PgUp moves the button, and its menu goes along.
+key Alt+PgUp
+wait "project2 | project"
+expect "Switch to project"
+
+# Enter on Switch to project: project2 becomes the current one, and its
+# menu, now first, offers its root path.
+key Enter
+wait-gone "Switch to project"
+key F9 Right Right Right Right Right Right Down Down Right
+wait "Copy project…"
+expect "Change root path"
+key Right
+wait "Switch to project"
+key Esc
+wait-gone "Switch to project"
+quit
