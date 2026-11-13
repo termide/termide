@@ -5314,6 +5314,7 @@ dependencies = [
  "termide-ui",
  "termide-ui-render",
  "termide-vfs",
+ "termide-viewer",
  "termide-walk",
  "termide-watcher",
  "toml_edit",
@@ -5861,9 +5862,7 @@ dependencies = [
  "termide-html",
  "termide-html-markdown",
  "termide-i18n",
- "termide-modal",
- "termide-richtext",
- "termide-ui",
+ "termide-viewer",
  "url",
 ]
 
@@ -5889,14 +5888,11 @@ dependencies = [
  "crossterm",
  "pulldown-cmark",
  "ratatui",
- "termide-config",
  "termide-core",
  "termide-html",
- "termide-modal",
  "termide-richtext",
- "termide-ui",
+ "termide-viewer",
  "unicode-width",
- "url",
 ]
 
 [[package]]
@@ -6179,6 +6175,20 @@ dependencies = [
  "webpki-roots 1.0.10",
  "windows-sys 0.59.0",
  "zip",
+]
+
+[[package]]
+name = "termide-viewer"
+version = "0.49.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "termide-config",
+ "termide-core",
+ "termide-modal",
+ "termide-richtext",
+ "termide-ui",
+ "url",
 ]
 
 [[package]]

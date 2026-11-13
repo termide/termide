@@ -1,0 +1,20 @@
+[package]
+name = "termide-viewer"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Read-only rich-text viewer panel core shared by termide's HTML and Markdown panels"
+
+[dependencies]
+crossterm.workspace = true
+ratatui.workspace = true
+url.workspace = true
+
+# Workspace crates
+termide-config = { path = "../config" }
+termide-core = { path = "../core" }
+termide-modal = { path = "../modal" }
+termide-richtext = { path = "../richtext" }
+termide-ui = { path = "../ui" }

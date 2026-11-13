@@ -1,0 +1,46 @@
+# The HTML and Markdown previews (F3), which share one viewer: a search
+# from Ctrl+F with its match count, a same-page link followed with Enter,
+# the cursor line in the status bar, and the toggle to the editable source.
+start
+wait "README.md"
+run "{ echo '<h1>Page</h1><p><a href=\"#end\">to the end</a></p>'; for i in $(seq 60); do echo \"<p>row $i</p>\"; done; echo '<h2 id=\"end\">The end</h2>'; } > zz.html"
+wait "zz.html"
+sleep 1
+key End F3
+wait "[≡] zz.html"
+wait "to the end"
+expect "View: Rendered"
+# Search: the count shows in the find bar; Esc leaves the cursor on the
+# match, which is the link, and Enter follows it to the anchor.
+key Ctrl+F
+type "row 5"
+wait "1 of 11"
+key Esc
+wait-gone "1 of 11"
+key g
+key Ctrl+F
+type "to the end"
+wait "1 of 1"
+key Esc
+key Enter
+wait "The end"
+wait-gone "to the end"
+snapshot html
+
+# The README in the Markdown preview: G goes to its last line, and the
+# toggle-view hotkey swaps the preview for the editor.
+key Ctrl+E
+wait-gone "View: Rendered"
+key Alt+Left
+wait "README.md"
+key Up F3
+wait "[≡] README.md"
+wait "A small stock-keeping"
+key G
+wait-re "Line: (\d+)/\1"
+key Ctrl+F
+type "store"
+wait-re "1 of \d+"
+key Esc
+snapshot markdown
+quit

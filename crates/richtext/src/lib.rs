@@ -58,6 +58,7 @@ pub enum Join {
 }
 
 /// Rendered document: wrapped lines plus link hit-areas.
+#[derive(Default)]
 pub struct Rendered {
     pub lines: Vec<Line<'static>>,
     /// How each of `lines` reads when copied, one per line.

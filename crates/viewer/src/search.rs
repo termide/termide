@@ -1,13 +1,13 @@
-//! Incremental find-bar search over the rendered HTML preview.
+//! Incremental find-bar search over the rendered document.
 
 use termide_core::PanelEvent;
 use termide_modal::{FindBar, FindBarAction, FindBarBtn, FindBarConfig, FindField};
 
-use crate::HtmlPanel;
+use super::Viewer;
 use termide_ui::text_utils::{find_in_line, slice_chars};
 
-impl HtmlPanel {
-    pub(crate) fn open_find(&mut self) {
+impl Viewer {
+    pub fn open_find(&mut self) {
         let mut bar = FindBar::new(FindBarConfig {
             fields: vec![FindField::Find],
             // Same button order as the editor: [Aa] Case, ◄ Prev, Next ►.
@@ -28,13 +28,13 @@ impl HtmlPanel {
         self.run_search();
     }
 
-    pub(crate) fn close_find(&mut self) {
+    pub fn close_find(&mut self) {
         self.find_bar = None;
         self.matches.clear();
     }
 
     /// Re-run the search and jump to the first match at/after the cursor.
-    pub(crate) fn run_search(&mut self) {
+    pub fn run_search(&mut self) {
         let Some(bar) = self.find_bar.as_ref() else {
             return;
         };
@@ -68,7 +68,7 @@ impl HtmlPanel {
         self.jump_to_current_match();
     }
 
-    pub(crate) fn step_match(&mut self, forward: bool) {
+    pub fn step_match(&mut self, forward: bool) {
         if self.matches.is_empty() {
             return;
         }
@@ -93,7 +93,7 @@ impl HtmlPanel {
         }
     }
 
-    pub(crate) fn handle_find_action(&mut self, action: FindBarAction) -> Vec<PanelEvent> {
+    pub fn handle_find_action(&mut self, action: FindBarAction) -> Vec<PanelEvent> {
         match action {
             FindBarAction::QueryChanged | FindBarAction::Refresh => self.run_search(),
             FindBarAction::Next | FindBarAction::Submit => self.step_match(true),

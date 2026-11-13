@@ -8,12 +8,11 @@
 //! with copy-to-clipboard, clickable links and image placeholders (open in the
 //! browser), incremental search (`Ctrl+F`), and vertical scrolling with line
 //! wrapping. `Ctrl+E` (or the `Edit` status chip) swaps the panel in place for
-//! the editable source.
+//! the editable source. All of that is the shared
+//! [`Viewer`](termide_viewer::Viewer); this panel adds what plugin
+//! panels need.
 
-mod links;
-mod navigation;
 mod render;
-mod search;
 mod stream;
 
 pub use render::{render_markdown, render_markdown_with};
@@ -22,89 +21,22 @@ pub use stream::{render_streamed, StreamedHead};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::{buffer::Buffer, layout::Rect, style::Style};
+use crossterm::event::MouseEvent;
+use ratatui::{buffer::Buffer, layout::Rect};
 
-use render::Rendered;
 use termide_core::{
-    CommandResult, Config, HotkeyTable, KeyChord, Panel, PanelCommand, PanelEvent, PanelState,
-    RenderContext, SegmentKind, StatusSegment, Theme, ThemeColors, WidthPreference,
+    CommandResult, Config, KeyChord, Panel, PanelCommand, PanelEvent, PanelState, RenderContext,
+    SegmentKind, StatusSegment, Theme, WidthPreference,
 };
-use termide_modal::FindBar;
-use termide_ui::ScrollBar;
-
-use termide_ui::text_utils::{char_col_to_display, display_to_char_col, url_fragment};
+use termide_viewer::{Viewer, ViewerPanel};
 
 /// What a plugin panel's own `[≡]` entries are routed back under.
 const PLUGIN_MENU_PREFIX: &str = "plugin-menu:";
 
-/// A cursor / selection position: `(line index, character column)`.
-type Pos = (usize, usize);
-
-/// A search match: `(line index, character column)`.
-type Match = (usize, usize);
-
 /// Rendered Markdown viewer.
 pub struct MarkdownPanel {
-    /// Scrollbar drawn by the last render, for mouse thumb dragging.
-    scrollbars: termide_core::ScrollBars,
-    /// Path to the markdown file.
-    file_path: PathBuf,
-    /// Display title (filename).
-    title: String,
-    /// Raw markdown source.
-    source: String,
-    /// Error message if the file could not be read.
-    error: Option<String>,
-
-    /// Rendered output for `layout_width`; rebuilt when width or content changes.
-    doc: Rendered,
-    /// Width the current `doc` was laid out for.
-    layout_width: u16,
-    /// First visible line index (scroll offset).
-    top: usize,
-    /// Content area from the last render (for click mapping + paging).
-    last_area: Rect,
-    /// Cursor position (character column within the line).
-    cursor: Pos,
-    /// Selection anchor; `Some` while a selection is active.
-    anchor: Option<Pos>,
-    /// Origin of an in-progress mouse drag-selection.
-    drag_from: Option<Pos>,
-
-    /// Inline find bar, when open.
-    find_bar: Option<FindBar>,
-    /// Search matches (start of each occurrence).
-    matches: Vec<Match>,
-    /// Character length of the current search needle.
-    match_len: usize,
-    /// Index of the current match within `matches`.
-    match_idx: usize,
-
-    /// Cached theme colors.
-    colors: ThemeColors,
-    /// Full theme, cached for rendering the find bar.
-    theme_full: Option<Theme>,
-    /// Whether the active theme is light (for code highlighting).
-    is_light: bool,
-    /// Configurable hotkeys (toggle preview/source).
-    hotkeys: HotkeyTable,
-    /// Pointer of the last `Arc<Config>` used to build hotkeys.
-    last_config_ptr: usize,
-    /// Origin URL when the content was fetched (not read from a file). `None`
-    /// for file-backed viewers. Used for the title, base-URL link resolution,
-    /// and navigation; URL-backed viewers are not persisted across runs.
-    source_url: Option<String>,
-    /// Browsing history (URLs) for an in-panel navigated viewer.
-    history: Vec<String>,
-    /// Current position within `history`.
-    hist_idx: usize,
-    /// Fragment to scroll to once content is (re)laid out — set when content
-    /// loads from a URL carrying a `#fragment`.
-    pending_anchor: Option<String>,
-    /// The fetch this viewer waits for, `(request id, URL)`: its title shows a
-    /// spinner and the URL until the app delivers the page or the failure.
-    loading: Option<(u64, String)>,
+    /// The document, its cursor, search and links.
+    view: Viewer,
     /// The id the app gave the panel when a plugin opened it; its content
     /// comes from the plugin, a `plugin:` link is an action for it, and it
     /// has no source to edit nor a place in the saved layout.
@@ -114,44 +46,9 @@ pub struct MarkdownPanel {
 }
 
 impl MarkdownPanel {
-    /// A blank viewer with no content (file_path empty); fill via `set_file`
-    /// or `from_source`.
-    fn empty() -> Self {
+    fn with_view(view: Viewer) -> Self {
         Self {
-            file_path: PathBuf::new(),
-            title: String::new(),
-            source: String::new(),
-            error: None,
-            doc: Rendered {
-                lines: Vec::new(),
-                copy: Vec::new(),
-                links: Vec::new(),
-                anchors: Vec::new(),
-                diagrams: 0,
-                folded_diagrams: 0,
-                wide_diagrams: Vec::new(),
-            },
-            layout_width: 0,
-            top: 0,
-            scrollbars: termide_core::ScrollBars::default(),
-            last_area: Rect::default(),
-            cursor: (0, 0),
-            anchor: None,
-            drag_from: None,
-            find_bar: None,
-            matches: Vec::new(),
-            match_len: 0,
-            match_idx: 0,
-            colors: ThemeColors::default(),
-            theme_full: None,
-            is_light: false,
-            hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
-            source_url: None,
-            history: Vec::new(),
-            hist_idx: 0,
-            pending_anchor: None,
-            loading: None,
+            view,
             plugin_panel: None,
             plugin_menu: Vec::new(),
         }
@@ -160,9 +57,9 @@ impl MarkdownPanel {
     /// A panel a plugin opened: `source` is its Markdown, `id` what the app
     /// knows it by.
     pub fn for_plugin(id: u64, title: String, source: String) -> Self {
-        let mut panel = Self::empty();
-        panel.title = title;
-        panel.source = source;
+        let mut panel = Self::with_view(Viewer::new(render_markdown));
+        panel.view.title = title;
+        panel.view.source = source;
         panel.plugin_panel = Some(id);
         panel
     }
@@ -181,92 +78,59 @@ impl MarkdownPanel {
     /// Replace a plugin panel's content, keeping the reader where they were
     /// as far as the new content reaches.
     pub fn set_plugin_content(&mut self, title: Option<String>, source: String) {
+        let view = &mut self.view;
         if let Some(title) = title {
-            self.title = title;
+            view.title = title;
         }
-        self.source = source;
-        self.matches.clear();
-        self.anchor = None;
+        view.source = source;
+        view.matches.clear();
+        view.anchor = None;
         // Laid out again on the next render, which clamps the position.
-        self.layout_width = 0;
+        view.layout_width = 0;
     }
 
     /// Open a markdown file in the preview panel.
     pub fn new(path: PathBuf) -> anyhow::Result<Self> {
-        let mut panel = Self::empty();
-        panel.set_file(path);
-        Ok(panel)
+        let mut view = Viewer::new(render_markdown);
+        view.set_file(path);
+        Ok(Self::with_view(view))
     }
 
     /// Build a viewer over in-memory `source` (e.g. content fetched over HTTP),
     /// with `source_url` as its origin. Not read from, nor written to, disk.
     pub fn from_source(title: String, source: String, source_url: Option<String>) -> Self {
-        let mut panel = Self::empty();
-        panel.title = title;
-        panel.source = source;
-        if let Some(url) = &source_url {
-            panel.history = vec![url.clone()];
-            panel.hist_idx = 0;
-            panel.pending_anchor = url_fragment(url);
+        Self::with_view(Viewer::from_source(
+            render_markdown,
+            title,
+            source,
+            source_url,
+        ))
+    }
+}
+
+impl ViewerPanel for MarkdownPanel {
+    fn view(&self) -> &Viewer {
+        &self.view
+    }
+
+    fn view_mut(&mut self) -> &mut Viewer {
+        &mut self.view
+    }
+
+    /// A plugin's panel has no source to edit nor a file to re-read.
+    fn has_source_file(&self) -> bool {
+        self.plugin_panel.is_none()
+    }
+
+    fn follow_link(&mut self, href: &str) -> Vec<PanelEvent> {
+        // In a plugin's panel, `plugin:<action>` is a button of the plugin's.
+        if let (Some(panel), Some(action)) = (self.plugin_panel, href.strip_prefix("plugin:")) {
+            return vec![PanelEvent::PluginAction {
+                panel,
+                action: action.to_string(),
+            }];
         }
-        panel.source_url = source_url;
-        panel
-    }
-
-    /// Mark the viewer as waiting for fetch `id` of `url` (a followed link or
-    /// a history step); the page it shows stays until the result arrives.
-    pub fn start_loading(&mut self, id: u64, url: String) {
-        self.loading = Some((id, url));
-    }
-
-    /// The fetch this viewer waits for, if any.
-    pub fn loading_id(&self) -> Option<u64> {
-        self.loading.as_ref().map(|(id, _)| *id)
-    }
-
-    /// Stop waiting: the fetch failed or its result opened elsewhere.
-    pub fn stop_loading(&mut self) {
-        self.loading = None;
-    }
-
-    /// Replace the content in place with a navigated document (link/history
-    /// step). History is managed by the caller's navigation, not here.
-    pub fn apply_fetched(&mut self, title: String, source: String, final_url: String) {
-        self.loading = None;
-        self.title = title;
-        self.source = source;
-        self.pending_anchor = url_fragment(&final_url);
-        self.source_url = Some(final_url);
-        self.top = 0;
-        self.cursor = (0, 0);
-        self.anchor = None;
-        self.matches.clear();
-        self.layout_width = 0;
-    }
-
-    /// Point the panel at a new file, reloading its content.
-    pub fn set_file(&mut self, path: PathBuf) {
-        self.title = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("?")
-            .to_string();
-        self.file_path = path;
-        self.top = 0;
-        self.cursor = (0, 0);
-        self.anchor = None;
-        self.matches.clear();
-        match std::fs::read_to_string(&self.file_path) {
-            Ok(s) => {
-                self.source = s;
-                self.error = None;
-            }
-            Err(e) => {
-                self.source = String::new();
-                self.error = Some(e.to_string());
-            }
-        }
-        self.layout_width = 0; // force re-layout
+        self.view.activate_link(href)
     }
 }
 
@@ -276,25 +140,7 @@ impl Panel for MarkdownPanel {
     }
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
-        match cmd {
-            PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
-            PanelCommand::SetScrollOffset { offset, .. } => {
-                self.top = offset.min(self.line_count().saturating_sub(1));
-                CommandResult::NeedsRedraw(true)
-            }
-            // While the find bar is open it owns the keyboard (Ctrl+C/X/V
-            // reach it as keys); a terminal paste goes into its query too.
-            PanelCommand::PasteText { text } => match self.find_bar.as_mut() {
-                Some(bar) => {
-                    if let Some(action) = bar.paste(&text) {
-                        self.handle_find_action(action);
-                    }
-                    CommandResult::Handled(true)
-                }
-                None => CommandResult::None,
-            },
-            _ => CommandResult::None,
-        }
+        self.view.handle_command(cmd)
     }
 
     fn width_preference(&self) -> WidthPreference {
@@ -302,375 +148,56 @@ impl Panel for MarkdownPanel {
     }
 
     fn title(&self) -> String {
-        if let Some((_, url)) = &self.loading {
-            return format!("{} {url}", termide_config::constants::spinner_frame());
-        }
-        // A fetched page shows its URL; a file-backed view shows the filename.
-        self.source_url
-            .clone()
-            .unwrap_or_else(|| self.title.clone())
+        self.view.title()
     }
 
     fn icon(&self) -> Option<&str> {
-        // A globe for a fetched web page (matching the bookmark icon).
         if self.plugin_panel.is_some() {
             return Some("🧩");
         }
-        self.source_url.as_ref().map(|_| "🌐")
+        // A globe for a fetched web page (matching the bookmark icon).
+        self.view.source_url.as_ref().map(|_| "🌐")
     }
 
     fn tick(&mut self) -> Vec<PanelEvent> {
-        // Animate the title spinner while a fetch is in flight.
-        if self.loading.is_some() {
-            vec![PanelEvent::NeedsRedraw]
-        } else {
-            vec![]
-        }
+        self.view.tick()
     }
 
     fn prepare_render(&mut self, theme: &Theme, config: &Arc<Config>) {
-        let new_light = theme.is_light_theme();
-        if new_light != self.is_light {
-            self.layout_width = 0;
-        }
-        self.colors = ThemeColors::from(theme);
-        self.theme_full = Some(*theme);
-        self.is_light = new_light;
-
-        let ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != ptr {
-            self.last_config_ptr = ptr;
-            let mut t = HotkeyTable::new();
-            t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
-            t.insert("open_external", &config.viewer.keybindings.open_external);
-            self.hotkeys = t;
-        }
+        self.view.prepare_render(theme, config);
     }
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: &RenderContext) {
-        if area.width == 0 || area.height == 0 {
-            return;
-        }
-        buf.set_style(area, Style::default().fg(self.colors.fg).bg(self.colors.bg));
-
-        // Find bar docked at the BOTTOM with a separator above (where every
-        // input in termide lives).
-        let mut content = area;
-        if let (Some(bar), Some(theme)) = (self.find_bar.as_mut(), self.theme_full.as_ref()) {
-            let bar_h = bar.height().min(area.height);
-            let bar_area = Rect {
-                x: area.x,
-                y: area.y + area.height - bar_h,
-                width: area.width,
-                height: bar_h,
-            };
-            bar.render(bar_area, buf, theme, true);
-            // The bar draws its own titled top border, which is the divider.
-            content = Rect {
-                x: area.x,
-                y: area.y,
-                width: area.width,
-                height: area.height.saturating_sub(bar_h),
-            };
-        }
-        self.last_area = content;
-
-        if let Some(err) = &self.error {
-            let msg = ratatui::text::Line::styled(
-                format!(" Cannot open: {err}"),
-                Style::default().fg(self.colors.error),
-            );
-            buf.set_line(content.x, content.y, &msg, content.width);
-            return;
-        }
-
-        // Reserve the rightmost column as a scrollbar gutter so wrapped text
-        // never sits under the bar (keeps the layout stable frame-to-frame).
-        let text_width = content.width.saturating_sub(1).max(1);
-        self.relayout_if_needed(text_width);
-        self.top = self.top.min(self.max_top());
-
-        let sel = self.selection();
-        for i in 0..(content.height as usize) {
-            let line_idx = self.top + i;
-            let Some(line) = self.doc.lines.get(line_idx) else {
-                break;
-            };
-            let y = content.y + i as u16;
-            buf.set_line(content.x, y, line, text_width);
-
-            let text = self.line_text(line_idx);
-
-            // Search matches.
-            let match_style = Style::default().fg(self.colors.bg).bg(self.colors.warning);
-            for &(ml, mc) in &self.matches {
-                if ml != line_idx {
-                    continue;
-                }
-                let x0 = char_col_to_display(&text, mc) as u16;
-                let x1 = char_col_to_display(&text, mc + self.match_len) as u16;
-                for dx in x0..x1.max(x0) {
-                    if dx < text_width {
-                        buf[(content.x + dx, y)].set_style(match_style);
-                    }
-                }
-            }
-
-            // Selection highlight (per display column).
-            if let Some((s, e)) = sel {
-                if line_idx >= s.0 && line_idx <= e.0 {
-                    let c0 = if line_idx == s.0 { s.1 } else { 0 };
-                    let c1 = if line_idx == e.0 {
-                        e.1
-                    } else {
-                        text.chars().count()
-                    };
-                    let style = Style::default()
-                        .fg(self.colors.selection_fg)
-                        .bg(self.colors.selection_bg);
-                    let x0 = char_col_to_display(&text, c0) as u16;
-                    let x1 = char_col_to_display(&text, c1) as u16;
-                    for dx in x0..x1.max(x0) {
-                        if dx < text_width {
-                            buf[(content.x + dx, y)].set_style(style);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Cursor cell (only when focused, on a visible line, and not searching);
-        // an unfocused preview shows no cursor.
-        if ctx.is_focused
-            && self.find_bar.is_none()
-            && self.cursor.0 >= self.top
-            && self.cursor.0 < self.top + content.height as usize
-        {
-            let y = content.y + (self.cursor.0 - self.top) as u16;
-            let dx = char_col_to_display(&self.line_text(self.cursor.0), self.cursor.1) as u16;
-            if dx < text_width {
-                let style = Style::default().fg(self.colors.bg).bg(self.colors.cursor);
-                buf[(content.x + dx, y)].set_style(style);
-            }
-        }
-
-        // Vertical scrollbar on the panel's right border (replacing it), not one
-        // column inside it — otherwise it reads as detached from the edge.
-        self.scrollbars.vertical = ScrollBar::render_tracked(
-            buf,
-            ctx.border_right_x.unwrap_or(content.x + content.width - 1),
-            content.y,
-            content.height,
-            self.top,
-            content.height as usize,
-            self.line_count(),
-            &self.colors,
-            ctx.is_focused,
-        );
+        self.view.render(area, buf, ctx, None);
     }
 
     fn handle_key(&mut self, chord: KeyChord) -> Vec<PanelEvent> {
-        let key = chord.raw;
-
-        // While the find bar is open it owns input (Esc / Ctrl+F close it).
-        if self.find_bar.is_some() {
-            let shortcut = chord.canonical;
-            let ctrl_f =
-                shortcut.code == KeyCode::Char('f') && shortcut.modifiers == KeyModifiers::CONTROL;
-            if ctrl_f {
-                self.close_find();
-                return vec![PanelEvent::NeedsRedraw];
-            }
-            let action = self.find_bar.as_mut().unwrap().handle_key(key);
-            return match action {
-                Some(a) => self.handle_find_action(a),
-                None => vec![PanelEvent::NeedsRedraw],
-            };
-        }
-
-        // Below the find bar there is no text input, so match shortcuts against
-        // the canonical (layout-normalized) key — `[`/`]`, `o`, `g`, … then work
-        // regardless of the active keyboard layout (e.g. Cyrillic `х`/`ъ`).
-        let key = chord.canonical;
-
-        // A plugin's panel has no source to edit nor a file to re-read.
-        let from_file = self.plugin_panel.is_none();
-        if from_file && self.hotkeys.matches("toggle_view", &key) {
-            return vec![PanelEvent::SwapActiveToText(self.file_path.clone())];
-        }
-        // Open the link under the cursor outside termide (`O`/`Alt+Enter` by
-        // default), even where `Enter` would follow it in place.
-        if self.hotkeys.matches_canonical("open_external", &key) {
-            return match self.link_under_cursor().map(|l| l.url.clone()) {
-                Some(url) => self.activate_link_external(&url),
-                None => vec![],
-            };
-        }
-        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
-        let page = (self.viewport_height() as i32 - 1).max(1);
-
-        // Ctrl+R: re-read from disk (pick up external edits), keeping position.
-        if from_file && ctrl && key.code == KeyCode::Char('r') {
-            let (top, cursor) = (self.top, self.cursor);
-            let _ = self.reload();
-            self.cursor = cursor;
-            self.clamp_cursor();
-            self.top = top.min(self.max_top());
-            return vec![PanelEvent::NeedsRedraw];
-        }
-
-        if ctrl && key.code == KeyCode::Char('f') {
-            self.open_find();
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        if ctrl && key.code == KeyCode::Char('a') {
-            self.select_all();
-            return vec![PanelEvent::NeedsRedraw];
-        }
-        if ctrl && key.code == KeyCode::Char('c') {
-            let text = self.selected_text();
-            if text.is_empty() {
-                return vec![];
-            }
-            return vec![PanelEvent::CopyToClipboard(text)];
-        }
-
-        match key.code {
-            // History back/forward in a navigated view.
-            KeyCode::Char('[') | KeyCode::Backspace => return self.go_back(),
-            KeyCode::Char(']') => return self.go_forward(),
-            KeyCode::Up => self.move_vertical(-1, shift),
-            KeyCode::Down | KeyCode::Char('j') => self.move_vertical(1, shift),
-            KeyCode::Char('k') => self.move_vertical(-1, shift),
-            KeyCode::Left | KeyCode::Char('h') => self.move_horizontal(false, shift),
-            KeyCode::Right | KeyCode::Char('l') => self.move_horizontal(true, shift),
-            KeyCode::PageUp => self.move_vertical(-page, shift),
-            KeyCode::PageDown | KeyCode::Char(' ') => self.move_vertical(page, shift),
-            KeyCode::Home => self.move_cursor((self.cursor.0, 0), shift),
-            KeyCode::End => {
-                let end = self.line_len(self.cursor.0);
-                self.move_cursor((self.cursor.0, end), shift);
-            }
-            KeyCode::Char('g') => self.move_cursor((0, 0), shift),
-            KeyCode::Char('G') => {
-                let last = self.line_count().saturating_sub(1);
-                self.move_cursor((last, 0), shift);
-            }
-            KeyCode::Enter => {
-                if let Some(url) = self.link_under_cursor().map(|l| l.url.clone()) {
-                    return self.activate_link(&url);
-                }
-                return vec![];
-            }
-            KeyCode::Esc if self.anchor.is_some() => {
-                self.anchor = None;
-            }
-            _ => return vec![],
-        }
-        vec![PanelEvent::NeedsRedraw]
+        self.handle_viewer_key(chord).unwrap_or_default()
     }
 
     fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
-        self.scroll_by(delta);
-        vec![PanelEvent::NeedsRedraw]
+        self.view.handle_scroll(delta)
     }
 
     fn handle_mouse(&mut self, event: MouseEvent, _panel_area: Rect) -> Vec<PanelEvent> {
-        // Route what the find bar owns to it: a press on it, and a drag
-        // started there, which keeps selecting past its edges.
-        if let Some(bar) = self.find_bar.as_mut() {
-            if bar.mouse_hits(event) {
-                if let Some(action) = bar.handle_mouse(event) {
-                    return self.handle_find_action(action);
-                }
-                return vec![PanelEvent::NeedsRedraw];
-            }
-        }
-
-        // Map against the content area actually drawn in render (not the raw
-        // panel area, which may include a header), so clicks land precisely.
-        let area = self.last_area;
-        if event.column < area.x || event.row < area.y {
-            // Outside the content (e.g. the find bar zone) — ignore non-wheel.
-            if !matches!(
-                event.kind,
-                MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-            ) {
-                return vec![];
-            }
-        }
-        let rel_col = event.column.saturating_sub(area.x);
-        let rel_row = event.row.saturating_sub(area.y);
-        let line_idx = self.top + rel_row as usize;
-
-        match event.kind {
-            MouseEventKind::ScrollDown => {
-                self.scroll_by(3);
-            }
-            MouseEventKind::ScrollUp => {
-                self.scroll_by(-3);
-            }
-            MouseEventKind::Down(MouseButton::Left) => {
-                if line_idx >= self.line_count() {
-                    return vec![];
-                }
-                // Move the cursor to the click first, then open a link if the
-                // click landed on one.
-                let col = display_to_char_col(&self.line_text(line_idx), rel_col);
-                self.cursor = (line_idx, col);
-                self.anchor = None;
-                self.drag_from = Some(self.cursor);
-                if let Some(url) = self.link_at(line_idx, rel_col).map(|l| l.url.clone()) {
-                    // A click follows the link inside; Alt+Click opens it
-                    // outside, as `O` does.
-                    let mut evs = vec![PanelEvent::NeedsRedraw];
-                    if event.modifiers.contains(KeyModifiers::ALT) {
-                        evs.extend(self.activate_link_external(&url));
-                    } else {
-                        evs.extend(self.activate_link(&url));
-                    }
-                    return evs;
-                }
-            }
-            MouseEventKind::Drag(MouseButton::Left) => {
-                if let Some(origin) = self.drag_from {
-                    if line_idx < self.line_count() {
-                        let col = display_to_char_col(&self.line_text(line_idx), rel_col);
-                        self.anchor = Some(origin);
-                        self.cursor = (line_idx, col);
-                        self.clamp_cursor();
-                        self.ensure_cursor_visible();
-                    }
-                }
-            }
-            MouseEventKind::Up(MouseButton::Left) => {
-                self.drag_from = None;
-                if self.anchor == Some(self.cursor) {
-                    self.anchor = None; // a click, not a drag
-                }
-            }
-            _ => return vec![],
-        }
-        vec![PanelEvent::NeedsRedraw]
+        self.handle_viewer_mouse(event)
     }
 
     fn captures_escape(&self) -> bool {
-        self.find_bar.is_some() || self.anchor.is_some()
+        self.view.captures_escape()
     }
 
     fn status_segments(&self) -> Vec<StatusSegment> {
-        if self.error.is_some() {
+        if self.view.error.is_some() {
             return vec![];
         }
         let sep = || StatusSegment::new(" │ ", SegmentKind::Label);
-        let total = self.line_count().max(1);
-        let pos = (self.cursor.0 + 1).min(total);
+        let line = StatusSegment::new(self.view.line_position(), SegmentKind::Value);
         if self.plugin_panel.is_some() {
             return vec![
                 StatusSegment::new(" ", SegmentKind::Label),
                 StatusSegment::new("Line: ", SegmentKind::Label),
-                StatusSegment::new(format!("{pos}/{total}"), SegmentKind::Value),
+                line,
             ];
         }
         // Same field order as the editor: View first, then Edit.
@@ -683,7 +210,7 @@ impl Panel for MarkdownPanel {
             StatusSegment::clickable("No", SegmentKind::Active, "edit_source"),
             sep(),
             StatusSegment::new("Line: ", SegmentKind::Label),
-            StatusSegment::new(format!("{pos}/{total}"), SegmentKind::Value),
+            line,
         ]
     }
 
@@ -705,149 +232,54 @@ impl Panel for MarkdownPanel {
         }
         match action {
             "edit_source" if self.plugin_panel.is_none() => {
-                vec![PanelEvent::SwapActiveToText(self.file_path.clone())]
+                vec![PanelEvent::SwapActiveToText(self.view.file_path.clone())]
             }
             _ => vec![],
         }
     }
 
     fn reload(&mut self) -> anyhow::Result<()> {
-        // URL-backed content has no file to re-read; leave it as-is.
-        if self.source_url.is_some() {
-            return Ok(());
-        }
-        let path = self.file_path.clone();
-        self.set_file(path);
+        self.view.reload();
         Ok(())
     }
 
     fn to_state(&self, _project_dir: &Path) -> Option<PanelState> {
         // Only file-backed viewers persist; fetched URLs and plugin panels
         // are not restored.
-        if self.source_url.is_some() || self.plugin_panel.is_some() {
+        if self.view.source_url.is_some() || self.plugin_panel.is_some() {
             return None;
         }
         Some(PanelState::Markdown {
-            path: self.file_path.clone(),
+            path: self.view.file_path.clone(),
         })
     }
 
     fn get_working_directory(&self) -> Option<PathBuf> {
-        self.file_path.parent().map(|p| p.to_path_buf())
+        self.view.working_directory()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termide_modal::FindField;
 
     fn panel_from(src: &str) -> MarkdownPanel {
-        let mut p = MarkdownPanel {
-            file_path: PathBuf::from("/x/doc.md"),
-            title: "doc.md".to_string(),
-            source: src.to_string(),
-            error: None,
-            doc: Rendered {
-                lines: Vec::new(),
-                copy: Vec::new(),
-                links: Vec::new(),
-                anchors: Vec::new(),
-                diagrams: 0,
-                folded_diagrams: 0,
-                wide_diagrams: Vec::new(),
-            },
-            layout_width: 0,
-            top: 0,
-            scrollbars: termide_core::ScrollBars::default(),
-            last_area: Rect::new(0, 0, 80, 10),
-            cursor: (0, 0),
-            anchor: None,
-            drag_from: None,
-            find_bar: None,
-            matches: Vec::new(),
-            match_len: 0,
-            match_idx: 0,
-            colors: ThemeColors::default(),
-            theme_full: None,
-            is_light: false,
-            hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
-            source_url: None,
-            history: Vec::new(),
-            hist_idx: 0,
-            pending_anchor: None,
-            loading: None,
-            plugin_panel: None,
-            plugin_menu: Vec::new(),
-        };
-        p.doc = render::render_markdown(src, 80, &p.colors, false);
-        p.layout_width = 80;
-        p
-    }
-
-    /// End-to-end contract the mouse dispatcher relies on: after a render the
-    /// panel reports the bar it drew, a press on the thumb hit-tests, and the
-    /// offset it maps to actually scrolls the panel.
-    #[test]
-    fn reports_its_scrollbar_and_scrolls_to_a_dragged_offset() {
-        use termide_core::{CommandResult, PanelCommand, ScrollAxis};
-
-        let src = (0..200)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n\n");
-        let mut p = panel_from(&src);
-
-        let area = Rect::new(0, 0, 80, 10);
-        let mut buf = Buffer::empty(Rect::new(0, 0, 80, 12));
-        let colors = p.colors;
-        let ctx = RenderContext {
-            theme: &colors,
-            config: &termide_core::PanelConfig {
-                tab_size: 4,
-                word_wrap: false,
-                show_line_numbers: false,
-                show_hidden_files: false,
-            },
-            is_focused: true,
-            panel_index: 0,
-            terminal_width: 80,
-            terminal_height: 12,
-            border_right_x: Some(79),
-            border_left_x: None,
-            border_bottom_y: Some(11),
-        };
-        p.render(area, &mut buf, &ctx);
-
-        let CommandResult::ScrollBars(bars) = p.handle_command(PanelCommand::GetScrollBars) else {
-            panic!("panel did not report its scrollbars");
-        };
-        let bar = bars.vertical.expect("200 paragraphs overflow 10 rows");
-        assert_eq!(bar.x, 79, "bar must sit on the right border");
-        assert!(bar.hits_thumb(bar.x, bar.y + bar.thumb_pos));
-
-        // Grab the thumb's top row, drag to the track's end.
-        let target = bar.offset_for_drag(bar.x, bar.y + bar.len, 0);
-        assert_eq!(
-            target,
-            bar.max_offset(),
-            "dragging to the end pins to the end"
-        );
-        p.handle_command(PanelCommand::SetScrollOffset {
-            axis: ScrollAxis::Vertical,
-            offset: target,
-        });
-        assert_eq!(p.top, target.min(p.line_count() - 1));
-        assert!(p.top > 0, "the panel actually scrolled");
+        let mut view = Viewer::new(render_markdown);
+        view.file_path = PathBuf::from("/x/doc.md");
+        view.title = "doc.md".to_string();
+        view.source = src.to_string();
+        view.last_area = Rect::new(0, 0, 80, 10);
+        view.relayout_if_needed(80);
+        MarkdownPanel::with_view(view)
     }
 
     #[test]
     fn a_plugin_panel_hands_its_links_to_the_plugin() {
         let mut p =
             MarkdownPanel::for_plugin(7, "Status".into(), "[Refresh](plugin:refresh)".into());
-        p.relayout_if_needed(80);
+        p.view.relayout_if_needed(80);
         let url = p
+            .view
             .doc
             .links
             .first()
@@ -855,7 +287,7 @@ mod tests {
             .url
             .clone();
         assert!(matches!(
-            p.activate_link(&url).as_slice(),
+            p.follow_link(&url).as_slice(),
             [PanelEvent::PluginAction { panel: 7, action }] if action == "refresh"
         ));
         assert!(
@@ -872,30 +304,18 @@ mod tests {
             [PanelEvent::PluginAction { panel: 7, action }] if action == "refresh"
         ));
 
-        p.top = 0;
+        p.view.top = 0;
         p.set_plugin_content(Some("Status 2".into()), "# New\n\nmore".into());
-        p.relayout_if_needed(80);
-        assert_eq!(p.title, "Status 2");
-        assert!(p.selected_text().is_empty());
-        assert!((0..p.line_count()).any(|i| p.line_text(i).contains("New")));
+        p.view.relayout_if_needed(80);
+        assert_eq!(p.view.title, "Status 2");
+        assert!(p.view.selected_text().is_empty());
+        assert!((0..p.view.line_count()).any(|i| p.view.line_text(i).contains("New")));
         // A `plugin:` link in an ordinary viewer is not an action.
         let mut plain = panel_from("[x](plugin:refresh)");
         assert!(!matches!(
-            plain.activate_link("plugin:refresh").as_slice(),
+            plain.follow_link("plugin:refresh").as_slice(),
             [PanelEvent::PluginAction { .. }]
         ));
-    }
-
-    #[test]
-    fn selection_copies_across_lines() {
-        let mut p = panel_from("alpha\n\nbeta");
-        p.cursor = (0, 0);
-        p.anchor = Some((0, 0));
-        let last = p.line_count() - 1;
-        p.cursor = (last, p.line_len(last));
-        let text = p.selected_text();
-        assert!(text.contains("alpha"), "{text:?}");
-        assert!(text.contains("beta"), "{text:?}");
     }
 
     #[test]
@@ -923,38 +343,6 @@ mod tests {
     }
 
     #[test]
-    fn a_terminal_paste_goes_into_the_open_find_bar_and_searches() {
-        let mut p = panel_from("one two\n\ntwo three two");
-        let paste = |text: &str| PanelCommand::PasteText { text: text.into() };
-        assert!(matches!(
-            p.handle_command(paste("two")),
-            CommandResult::None
-        ));
-        p.open_find();
-        let result = p.handle_command(paste("two"));
-        assert!(matches!(result, CommandResult::Handled(true)));
-        assert_eq!(p.find_bar.as_ref().unwrap().find_text(), "two");
-        assert_eq!(p.matches.len(), 3, "the paste ran the search");
-    }
-
-    #[test]
-    fn search_finds_matches_and_moves_cursor() {
-        let mut p = panel_from("one two\n\ntwo three two");
-        p.open_find();
-        p.find_bar
-            .as_mut()
-            .unwrap()
-            .set_text(FindField::Find, "two".to_string());
-        p.run_search();
-        assert_eq!(p.matches.len(), 3, "{:?}", p.matches);
-        // Cursor jumps to the first match.
-        assert_eq!(p.cursor, p.matches[p.match_idx]);
-        let first = p.cursor;
-        p.step_match(true);
-        assert_ne!(p.cursor, first, "next match should move the cursor");
-    }
-
-    #[test]
     fn ctrl_a_selects_the_whole_page_for_ctrl_c() {
         use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
         let mut p = panel_from("# Top\n\nmiddle\n\nend");
@@ -968,27 +356,31 @@ mod tests {
                 },
             )
         };
-        let whole: Vec<String> = (0..p.line_count()).map(|i| p.line_text(i)).collect();
+        let whole: Vec<String> = (0..p.view.line_count())
+            .map(|i| p.view.line_text(i))
+            .collect();
         press(&mut p, 'a');
-        assert_eq!(p.top, 0, "the view stays where it was");
         let evs = press(&mut p, 'c');
         assert!(
             matches!(evs.as_slice(), [PanelEvent::CopyToClipboard(t)] if *t == whole.join("\n")),
             "{evs:?}"
         );
         assert!(whole.iter().any(|l| l.contains("Top")));
-        assert!(whole.iter().any(|l| l.contains("end")));
     }
 
     #[test]
-    fn a_followed_link_spins_in_the_title_and_keeps_the_page() {
-        let mut p = panel_from("# page");
-        p.start_loading(5, "https://ex.com/b.md".into());
-        assert!(Panel::title(&p).ends_with(" https://ex.com/b.md"));
-        assert!(matches!(p.tick().as_slice(), [PanelEvent::NeedsRedraw]));
-        assert_eq!(p.source, "# page");
-        p.stop_loading();
-        assert_eq!(Panel::title(&p), "doc.md");
-        assert!(p.tick().is_empty());
+    fn a_plugin_panel_has_no_source_to_edit_or_reload() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let mut p = MarkdownPanel::for_plugin(1, "S".into(), "body".into());
+        let ctrl_r = KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL);
+        Panel::handle_key(
+            &mut p,
+            KeyChord {
+                raw: ctrl_r,
+                canonical: ctrl_r,
+            },
+        );
+        assert_eq!(p.view.source, "body", "Ctrl+R did not read a file");
+        assert_eq!(p.view.error, None);
     }
 }

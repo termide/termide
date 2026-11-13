@@ -1,15 +1,15 @@
-//! Link resolution, activation, in-panel history, and anchor scrolling.
+//! Link resolution, activation, and in-panel history.
 
 use std::path::PathBuf;
 
 use termide_core::{LinkTarget, PanelEvent};
 
-use crate::MarkdownPanel;
+use super::Viewer;
 
-impl MarkdownPanel {
+impl Viewer {
     /// Resolve a link `href` to an absolute target: against the document URL for
     /// a fetched page, or against the file's directory for a file-backed view.
-    pub(crate) fn resolve(&self, href: &str) -> String {
+    pub fn resolve(&self, href: &str) -> String {
         if let Some(base) = &self.source_url {
             if let Ok(b) = url::Url::parse(base) {
                 if let Ok(joined) = b.join(href) {
@@ -34,16 +34,9 @@ impl MarkdownPanel {
     /// [`PanelEvent::OpenLink`], which opens a link the same way from every
     /// panel; a scheme it does not know (`mailto:`) goes to the system
     /// opener. [`Self::activate_link_external`] is the outside twin.
-    pub(crate) fn activate_link(&mut self, href: &str) -> Vec<PanelEvent> {
+    pub fn activate_link(&mut self, href: &str) -> Vec<PanelEvent> {
         if href.is_empty() {
             return vec![];
-        }
-        // In a plugin's panel, `plugin:<action>` is a button of the plugin's.
-        if let (Some(panel), Some(action)) = (self.plugin_panel, href.strip_prefix("plugin:")) {
-            return vec![PanelEvent::PluginAction {
-                panel,
-                action: action.to_string(),
-            }];
         }
         // Same-page anchor: scroll to it (don't hand "#" to the system opener).
         if let Some(frag) = href.strip_prefix('#') {
@@ -74,7 +67,7 @@ impl MarkdownPanel {
     /// address in the browser, a local file in its system application. A
     /// same-page `#anchor` of a file-backed view has nowhere outside to go,
     /// so it scrolls as a followed one does.
-    pub(crate) fn activate_link_external(&mut self, href: &str) -> Vec<PanelEvent> {
+    pub fn activate_link_external(&mut self, href: &str) -> Vec<PanelEvent> {
         if href.is_empty() {
             return vec![];
         }
@@ -93,7 +86,7 @@ impl MarkdownPanel {
     }
 
     /// Step back in history, re-fetching the previous page.
-    pub(crate) fn go_back(&mut self) -> Vec<PanelEvent> {
+    pub fn go_back(&mut self) -> Vec<PanelEvent> {
         if self.hist_idx > 0 {
             self.hist_idx -= 1;
             return vec![PanelEvent::NavigateUrl(self.history[self.hist_idx].clone())];
@@ -102,21 +95,11 @@ impl MarkdownPanel {
     }
 
     /// Step forward in history, re-fetching the next page.
-    pub(crate) fn go_forward(&mut self) -> Vec<PanelEvent> {
+    pub fn go_forward(&mut self) -> Vec<PanelEvent> {
         if self.hist_idx + 1 < self.history.len() {
             self.hist_idx += 1;
             return vec![PanelEvent::NavigateUrl(self.history[self.hist_idx].clone())];
         }
         vec![]
-    }
-
-    /// Scroll so the named anchor's line is at the top of the view. No-op if
-    /// the anchor is unknown.
-    pub(crate) fn scroll_to_anchor(&mut self, frag: &str) {
-        if let Some(&(_, line)) = self.doc.anchors.iter().find(|(id, _)| id == frag) {
-            self.top = line.min(self.max_top());
-            self.cursor = (line, 0);
-            self.anchor = None;
-        }
     }
 }
