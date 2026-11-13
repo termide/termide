@@ -101,7 +101,7 @@ struct Cli {
     /// The agent runs under the configured permission rules and mode with
     /// anything else refused, since nothing can prompt; set `mode = "auto"`
     /// or add allow rules for unattended use.
-    #[arg(long, value_name = "PROMPT")]
+    #[arg(long, value_name = "PROMPT", allow_hyphen_values = true)]
     prompt: Option<String>,
 
     /// Search the project's earlier agent sessions, git history and code the
@@ -948,6 +948,9 @@ mod cli_tests {
         let named =
             Cli::try_parse_from(["termide", "--prompt", "review", "--agent", "reviewer"]).unwrap();
         assert_eq!(named.agent.as_deref(), Some("reviewer"));
+        // A prompt may open with a hyphen, as a list item does.
+        let listed = Cli::try_parse_from(["termide", "--prompt", "- keep the weights"]).unwrap();
+        assert_eq!(listed.prompt.as_deref(), Some("- keep the weights"));
         // --agent without --prompt is rejected.
         assert!(Cli::try_parse_from(["termide", "--agent", "reviewer"]).is_err());
         // --output defaults to text, accepts json, rejects other values and

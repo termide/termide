@@ -1,0 +1,1 @@
+- **`termide --prompt` takes a prompt that opens with a hyphen.** A prompt starting as a list item (`- keep the weights…`) was read as an unknown option and the run never started.
