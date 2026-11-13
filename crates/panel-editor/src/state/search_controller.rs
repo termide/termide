@@ -20,24 +20,4 @@ impl SearchController {
     pub fn new() -> Self {
         Self::default()
     }
-
-    /// Check if search is active.
-    pub fn is_active(&self) -> bool {
-        self.state.is_some()
-    }
-
-    /// Save current search query as last query.
-    pub fn save_last_query(&mut self) {
-        if let Some(ref state) = self.state {
-            if !state.query.is_empty() {
-                self.last_query = Some(state.query.clone());
-            }
-        }
-    }
-
-    /// Clear active search state.
-    pub fn clear(&mut self) {
-        self.save_last_query();
-        self.state = None;
-    }
 }

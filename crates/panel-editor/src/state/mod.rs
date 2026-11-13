@@ -3,9 +3,6 @@
 //! Groups related Editor fields into focused structs for better organization
 //! and cache locality.
 
-// WIP module: fields/methods used in upcoming phases
-#![allow(dead_code)]
-
 mod file_state;
 mod git_integration;
 mod input_state;
