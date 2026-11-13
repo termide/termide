@@ -214,11 +214,10 @@ pub trait Panel {
 - 原生图片渲染（Kitty、iTerm2、Sixel 协议）
 - 回退到 Unicode 块字符
 
-**帮助** (`crates/panel-misc/src/help.rs`)
-- 基于快捷键配置动态生成的帮助内容
-- 带全宽布局的伪图形表格
-- 支持键盘和鼠标滚动
-- 打开其他面板时自动关闭
+**帮助窗口** (`crates/modal/src/help.rs`) — 模态窗口，而非面板
+- 基于快捷键配置动态生成的帮助内容（`crates/modal/src/help_content.rs`）
+- 打开时定位到当前焦点面板的章节
+- 可按输入的文字筛选；带全宽布局的伪图形表格
 
 ### 3. 事件处理
 

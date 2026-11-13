@@ -9,7 +9,7 @@ use crate::PanelExt;
 use termide_core::ReferenceLocation;
 use termide_panel_editor::Editor;
 use termide_panel_file_manager::FileManager;
-use termide_panel_misc::{HelpPanel as Help, JournalPanel as Journal, ReferencesPanel};
+use termide_panel_misc::{JournalPanel as Journal, ReferencesPanel};
 use termide_panel_terminal::Terminal;
 
 impl App {
@@ -24,7 +24,6 @@ impl App {
         &mut self,
         shell_path: Option<&str>,
     ) -> Result<()> {
-        self.close_help_panels();
         // Get working directory from current active panel
         let working_dir = self
             .layout_manager
@@ -66,8 +65,6 @@ impl App {
 
     /// Create new file manager
     pub(super) fn handle_new_file_manager(&mut self) -> Result<()> {
-        self.close_help_panels();
-
         // Check if active panel is a remote FileManager and clone it
         let remote_info = self
             .layout_manager
@@ -96,8 +93,6 @@ impl App {
 
     /// Create new editor
     pub(super) fn handle_new_editor(&mut self) -> Result<()> {
-        self.close_help_panels();
-
         // Get working directory from current active panel (e.g., FileManager)
         let initial_directory = self
             .layout_manager
@@ -121,7 +116,6 @@ impl App {
         }
 
         // No existing Journal panel found, create new one
-        self.close_help_panels();
         let journal_panel = Journal::new(self.state.theme);
         self.add_panel(Box::new(journal_panel));
         self.auto_save_layout();
@@ -147,7 +141,7 @@ impl App {
         false
     }
 
-    /// Open or switch to help panel
+    /// Open the help window on the keys of the panel in focus.
     pub(super) fn handle_new_help(&mut self) -> Result<()> {
         use termide_modal::{ActiveModal, HelpModal};
         let panel = self.layout_manager.active_panel().map(|p| p.name());
@@ -158,22 +152,10 @@ impl App {
         Ok(())
     }
 
-    /// Close the help window; confirmed with a section, open the help panel
-    /// there.
-    pub(super) fn finish_help(
-        &mut self,
-        result: termide_modal::ModalResult<termide_modal::ModalOutput>,
-    ) -> Result<()> {
+    /// Close the help window.
+    pub(super) fn finish_help(&mut self) {
         self.state.close_modal();
         self.state.needs_redraw = true;
-        if let termide_modal::ModalResult::Confirmed(value) = result {
-            let section = value.get::<usize>().copied().unwrap_or(0);
-            self.close_help_panels();
-            let help = Help::new(&self.state.config).at_section(section);
-            self.add_panel(Box::new(help));
-            self.auto_save_layout();
-        }
-        Ok(())
     }
 
     /// Open Settings modal with tabbed interface.
@@ -309,8 +291,6 @@ impl App {
 
     /// Open or focus the Outline panel (singleton).
     pub(super) fn handle_open_outline(&mut self) -> Result<()> {
-        self.close_help_panels();
-
         if !self.find_and_focus_panel_by_name("outline") {
             let outline = termide_panel_outline::OutlinePanel::new(*self.state.theme);
             self.add_panel(Box::new(outline));
@@ -323,8 +303,6 @@ impl App {
 
     /// Open Diagnostics panel
     pub(super) fn handle_open_diagnostics(&mut self) -> Result<()> {
-        self.close_help_panels();
-
         if !self.find_and_focus_panel_by_name("diagnostics") {
             let mut diagnostics_panel =
                 termide_panel_diagnostics::DiagnosticsPanel::new(self.state.theme);
@@ -355,7 +333,6 @@ impl App {
                 return Ok(());
             }
         }
-        self.close_help_panels();
 
         let paths = self.collect_repo_search_paths();
         let git_status_panel =
@@ -367,8 +344,6 @@ impl App {
 
     /// Open Git Log panel (singleton)
     pub(super) fn handle_open_git_log(&mut self) -> Result<()> {
-        self.close_help_panels();
-
         if !self.find_and_focus_panel_by_name("git_log") {
             let paths = self.collect_repo_search_paths();
             let git_log_panel =

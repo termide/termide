@@ -565,7 +565,6 @@ impl App {
     /// Open the read-only database viewer for a connection URL
     /// (`sqlite://`, `postgres://`, `mysql://`).
     pub(in crate::app) fn open_database(&mut self, url: String) {
-        self.close_help_panels();
         let panel = termide_panel_db::DbPanel::new(url, String::new());
         self.add_panel(Box::new(panel));
         self.auto_save_layout();
@@ -608,21 +607,18 @@ impl App {
                     }
                 }
                 // No active file manager - create new panel
-                self.close_help_panels();
                 let fm_panel = FileManager::new_with_path(PathBuf::from(path));
                 self.add_panel(Box::new(fm_panel));
                 self.auto_save_layout();
             }
             BookmarkType::TextFile => {
                 // Rendered types open in the viewer; everything else in the editor.
-                self.close_help_panels();
                 if !self.open_in_viewer_by_ext(path) {
                     let _ = self.open_editor_for_file(PathBuf::from(path));
                 }
             }
             BookmarkType::ViewerFile => {
                 // Images open in the image preview; other viewer files externally.
-                self.close_help_panels();
                 if !self.open_in_viewer_by_ext(path) {
                     self.open_external_detached(path);
                 }
@@ -630,7 +626,6 @@ impl App {
             BookmarkType::HttpLink => {
                 // Open in the built-in viewer (text-mode browse); `O` there
                 // hands the page on to the browser.
-                self.close_help_panels();
                 self.start_url_fetch(path.to_string());
             }
             BookmarkType::SftpPath
@@ -646,7 +641,6 @@ impl App {
                     }
                 }
                 // No active file manager - create new panel and navigate
-                self.close_help_panels();
                 let mut fm_panel = FileManager::new();
                 let _ = fm_panel.navigate_to_url(path);
                 self.add_panel(Box::new(fm_panel));
@@ -688,8 +682,6 @@ impl App {
                     cmd_parts.join(" ")
                 };
 
-                self.close_help_panels();
-
                 let width = self.state.terminal.width;
                 let height = self.state.terminal.height;
                 let term_height = height.saturating_sub(3);
@@ -714,7 +706,6 @@ impl App {
                 // Try to determine type and handle
                 let p = PathBuf::from(path);
                 if p.is_dir() {
-                    self.close_help_panels();
                     let fm_panel = FileManager::new_with_path(p);
                     self.add_panel(Box::new(fm_panel));
                     self.auto_save_layout();

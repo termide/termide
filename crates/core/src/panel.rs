@@ -508,11 +508,6 @@ pub trait Panel: Any {
     /// Terminate all child processes (for terminal).
     fn kill_processes(&mut self) {}
 
-    /// Check if this is a Help panel.
-    fn is_help_panel(&self) -> bool {
-        false
-    }
-
     /// Width preference for auto-stacking into existing groups.
     fn width_preference(&self) -> WidthPreference {
         WidthPreference::NoPreference

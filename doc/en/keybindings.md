@@ -322,8 +322,8 @@ control bytes, which crossterm parses as `Ctrl+7` / `Ctrl+4` and the
 normalizer rewrites back to the slash / backslash chord.
 
 Multiple alternatives are supported for any action: list them in an
-array. The first form is the canonical display string shown in help
-panels.
+array. The first form is the canonical display string shown in the help
+window.
 
 The same shape is editable without touching the file: in Settings →
 Keybindings each row lists every key its action accepts, `Left`/`Right`

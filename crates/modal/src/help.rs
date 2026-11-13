@@ -1,8 +1,6 @@
 //! The help window: every key termide binds, opened on the section of the
-//! panel it was called from, narrowed by what is typed.
-//!
-//! It confirms with the section at the top of its view, for its owner to
-//! open the help panel there and keep it beside the work.
+//! panel it was called from, narrowed by what is typed. It only closes:
+//! nothing is chosen in it.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
@@ -69,6 +67,7 @@ impl HelpModal {
     }
 
     /// The section at the top of the view.
+    #[cfg(test)]
     fn current_section(&self) -> usize {
         self.shown
             .as_ref()
@@ -159,8 +158,8 @@ impl HelpModal {
 }
 
 impl Modal for HelpModal {
-    /// The section to open the help panel at.
-    type Result = usize;
+    /// Never confirmed: the window only closes.
+    type Result = ();
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
@@ -233,7 +232,7 @@ impl Modal for HelpModal {
         );
     }
 
-    fn handle_key(&mut self, chord: termide_core::KeyChord) -> Result<Option<ModalResult<usize>>> {
+    fn handle_key(&mut self, chord: termide_core::KeyChord) -> Result<Option<ModalResult<()>>> {
         if self
             .toggle
             .as_ref()
@@ -245,7 +244,6 @@ impl Modal for HelpModal {
         let page = self.visible.max(2) as isize - 1;
         match key.code {
             KeyCode::Esc => return Ok(Some(ModalResult::Cancelled)),
-            KeyCode::Enter => return Ok(Some(ModalResult::Confirmed(self.current_section()))),
             KeyCode::BackTab => self.step_section(false),
             KeyCode::Tab if key.modifiers.contains(KeyModifiers::SHIFT) => {
                 self.step_section(false);
@@ -287,7 +285,7 @@ impl Modal for HelpModal {
         &mut self,
         mouse: MouseEvent,
         _modal_area: Rect,
-    ) -> Result<Option<ModalResult<usize>>> {
+    ) -> Result<Option<ModalResult<()>>> {
         match mouse.kind {
             MouseEventKind::ScrollUp => self.scroll_by(-3),
             MouseEventKind::ScrollDown => self.scroll_by(3),

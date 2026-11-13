@@ -12,8 +12,6 @@ use termide_panel_editor::Editor;
 impl App {
     /// Handle OpenFile event - open file in editor (reuse existing tab if already open)
     pub(super) fn event_open_file(&mut self, file_path: PathBuf) -> Result<()> {
-        self.close_help_panels();
-
         // Check if the file is already open — focus it instead of creating a duplicate
         if self.focus_editor_by_path(&file_path) {
             return Ok(());
@@ -25,7 +23,6 @@ impl App {
 
     /// Handle ViewFile event - open file in read-only editor mode
     pub(in crate::app) fn event_view_file(&mut self, file_path: PathBuf) -> Result<()> {
-        self.close_help_panels();
         let _ = self.open_editor_for_file_readonly(file_path);
         Ok(())
     }
@@ -37,7 +34,6 @@ impl App {
         line: usize,
         column: usize,
     ) -> Result<()> {
-        self.close_help_panels();
         let filename = file_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -90,8 +86,6 @@ impl App {
 
     /// Handle ExecuteFile event - run executable in a new terminal
     pub(super) fn event_execute_file(&mut self, file_path: PathBuf) -> Result<()> {
-        self.close_help_panels();
-
         let filename = file_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -137,7 +131,6 @@ impl App {
         command: &str,
         cwd: Option<PathBuf>,
     ) -> Result<()> {
-        self.close_help_panels();
         let mut terminal = self.create_terminal_panel(cwd)?;
         let typed = terminal.send_command(command);
         self.add_panel(Box::new(terminal));
@@ -219,7 +212,6 @@ impl App {
         // Each open creates its own focused viewer. Reusing a viewer in place
         // (replacing the open file) is intentionally image-only — that exists
         // so an album can be flipped through from the file manager.
-        self.close_help_panels();
         match MarkdownPanel::new(file_path) {
             Ok(panel) => {
                 self.add_panel(Box::new(panel));
@@ -250,7 +242,6 @@ impl App {
 
         // Each open creates its own focused viewer; reuse-in-place is
         // image-only (see event_view_markdown).
-        self.close_help_panels();
         match MermaidPanel::new(file_path) {
             Ok(panel) => {
                 self.add_panel(Box::new(panel));
@@ -280,7 +271,6 @@ impl App {
         // Each open creates its own focused viewer; reuse-in-place is
         // image-only (see event_view_markdown). Reading errors show in the
         // panel itself, so opening cannot fail here.
-        self.close_help_panels();
         let panel = termide_panel_csv::CsvPanel::new(file_path);
         self.add_panel(Box::new(panel));
         self.auto_save_layout();
@@ -318,7 +308,6 @@ impl App {
 
         // Each open creates its own focused viewer; reuse-in-place is
         // image-only (see event_view_markdown).
-        self.close_help_panels();
         match HtmlPanel::new(file_path) {
             Ok(panel) => {
                 self.add_panel(Box::new(panel));
@@ -356,7 +345,6 @@ impl App {
             }
         }
 
-        self.close_help_panels();
         match BinaryPanel::new(file_path) {
             Ok(panel) => {
                 self.add_panel(Box::new(panel));
@@ -373,7 +361,6 @@ impl App {
     /// the editable state is unambiguous.
     pub(super) fn event_edit_binary(&mut self, file_path: PathBuf) -> Result<()> {
         use termide_panel_binary::BinaryPanel;
-        self.close_help_panels();
         match BinaryPanel::new_editable(file_path) {
             Ok(panel) => {
                 self.add_panel(Box::new(panel));
@@ -417,7 +404,6 @@ impl App {
             }
 
             // No existing panel - create new one without changing focus
-            self.close_help_panels();
             match ImagePanel::new(file_path.clone()) {
                 Ok(panel) => {
                     self.add_panel_without_focus(Box::new(panel));
@@ -459,8 +445,6 @@ impl App {
 
     /// Handle OpenRemoteFile event - open remote file via VFS
     pub(super) fn event_open_remote_file(&mut self, url: String) -> Result<()> {
-        self.close_help_panels();
-
         // Parse URL to VfsPath
         let vfs_path = match termide_vfs::parse_vfs_url(&url) {
             Ok(path) => path,

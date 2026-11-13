@@ -31,7 +31,6 @@ The application uses interactive modal windows for various operations:
 
 - Typing filters the list: an entry stays when its keys or description hold the text, a whole section when its title does; `Backspace` and `Ctrl+U` take the text back.
 - `Tab` / `Shift+Tab` go to the next or previous section; the arrows, `PgUp` / `PgDn`, `Home` / `End` and the mouse wheel scroll.
-- `Enter` closes the window and opens the help as a panel at the section in view, to keep beside the work; the panel closes when another panel opens.
 - `F1`, `Alt+H`, `Esc` or a click outside close it.
 
 ### Settings Modal
@@ -185,7 +184,6 @@ The layout adapts to the terminal width, showing more panel groups on wider scre
 - [coding agent](agent.md) — `Alt+A`
 - [operations](operations.md)
 - image viewer
-- help — `Enter` in the help window
 - journal — `Alt+L`
 
 The **git status** panel has two selectors on top: the repository and the
@@ -329,7 +327,7 @@ toggle_hex = "Ctrl+L"
 
 **Features of closeable panels:**
 - Have `[≡]` action button in panel title (click to open context menu with Close / Split / Merge / Move)
-- Can be closed with Escape, Alt+W, Alt+X, or F10
+- Can be closed with Escape, Alt+W, Alt+X, or F10; closing the last one opens a file manager at the project root in its place
 - Column width adjustable with `Alt+=` / `Alt+-`
 - Per-panel height adjustable inside a stacked column with `Alt+Shift+=` / `Alt+Shift+-` (1-row step), by dragging the panel's bottom border with the mouse, or by dragging the panel header up/down within the column
 - `Alt+F11` toggles the "fullscreen current panel" preset (one panel fills the column, others collapse to one row); pressing it again restores the previous heights

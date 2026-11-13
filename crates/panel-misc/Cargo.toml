@@ -14,7 +14,6 @@ termide-core = { path = "../core" }
 termide-highlight = { path = "../highlight" }
 termide-i18n = { path = "../i18n" }
 termide-logger = { path = "../logger" }
-termide-modal = { path = "../modal" }
 termide-panel-editor = { path = "../panel-editor" }
 termide-theme = { path = "../theme" }
 termide-ui = { path = "../ui" }

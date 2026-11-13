@@ -162,7 +162,6 @@ impl App {
                 });
             }
             CommandMode::Terminal => {
-                self.close_help_panels();
                 let term_height = self.state.terminal.height.saturating_sub(3);
                 let term_width = self.state.terminal.width.saturating_sub(2);
                 match Terminal::new_with_cwd_env(term_height, term_width, Some(cwd), &env) {

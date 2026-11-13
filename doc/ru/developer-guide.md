@@ -189,7 +189,7 @@ termide/
 │   ├── panel-image/          # Панель просмотра изображений (нативная графика)
 │   ├── panel-markdown/       # Панель просмотра отрендеренного Markdown
 │   ├── panel-mermaid/        # Панель просмотра Mermaid-диаграмм (экспериментальная)
-│   ├── panel-misc/           # Панели Help, Journal и References
+│   ├── panel-misc/           # Панели Journal и References
 │   ├── panel-operations/     # Панель фоновых операций
 │   ├── panel-outline/        # Панель структуры (Outline)
 │   ├── panel-plugin-list/    # Панель плагина в виде списка строк с действиями

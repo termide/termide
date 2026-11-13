@@ -177,7 +177,7 @@ termide/
 │   ├── panel-image/          # 图片查看面板（原生图形）
 │   ├── panel-markdown/       # 渲染后的 Markdown 预览面板
 │   ├── panel-mermaid/        # Mermaid 图表查看面板（实验性）
-│   ├── panel-misc/           # 帮助、日志（Journal）与引用面板
+│   ├── panel-misc/           # 日志（Journal）与引用面板
 │   ├── panel-operations/     # 后台操作面板
 │   ├── panel-outline/        # 大纲面板
 │   ├── panel-plugin-list/    # 以行列表形式绘制、带操作的插件面板

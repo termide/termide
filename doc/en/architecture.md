@@ -215,12 +215,10 @@ pub trait Panel {
 - Native image rendering (Kitty, iTerm2, Sixel protocols)
 - Fallback to Unicode block characters
 
-**Help** (`crates/panel-misc/src/help.rs`)
-- Dynamic help content generated from keybindings config (`crates/modal/src/help_content.rs`, shared with the help window `crates/modal/src/help.rs`)
-- Opened from the help window at the section in view, and in an empty layout
-- Pseudo-graphic tables with full-width layout
-- Scrollable with keyboard and mouse
-- Auto-closes when other panel opens
+**Help window** (`crates/modal/src/help.rs`) — a modal, not a panel
+- Dynamic help content generated from keybindings config (`crates/modal/src/help_content.rs`)
+- Opens on the section of the focused panel (sections name their panels)
+- Filtered by typed text; pseudo-graphic tables with full-width layout
 
 ### 3. Event Handling
 

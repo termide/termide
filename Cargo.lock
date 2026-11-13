@@ -5919,7 +5919,6 @@ dependencies = [
  "termide-highlight",
  "termide-i18n",
  "termide-logger",
- "termide-modal",
  "termide-panel-editor",
  "termide-theme",
  "termide-ui",

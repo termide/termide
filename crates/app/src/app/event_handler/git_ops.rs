@@ -221,8 +221,6 @@ impl App {
     ) -> Result<()> {
         use termide_panel_git_diff::GitDiffPanel;
 
-        self.close_help_panels();
-
         // Check if a matching GitDiffPanel is already open
         let file_filter_str = file_path.as_ref().map(|p| p.to_string_lossy().to_string());
         for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
@@ -258,7 +256,6 @@ impl App {
     pub(super) fn event_open_agent_review(&mut self, repo_path: PathBuf, session: String) {
         use termide_panel_git_diff::GitDiffPanel;
 
-        self.close_help_panels();
         for (group_idx, group) in self.layout_manager.panel_groups.iter_mut().enumerate() {
             for (panel_idx, panel) in group.panels().iter().enumerate() {
                 if let Some(diff) = panel.downcast_ref::<GitDiffPanel>() {

@@ -6,7 +6,6 @@ use std::path::PathBuf;
 
 use super::App;
 use crate::PanelExt;
-use termide_panel_misc::HelpPanel as Help;
 
 impl App {
     /// Close active panel and switch focus to next visible panel
@@ -88,10 +87,8 @@ impl App {
         // Note: FileManager reload removed - FS watcher handles git status updates
         // when files change. Cascade reload caused O(n*m) delays on panel close.
 
-        // Add Help panel if no panels remain
-        let should_add_help = self.layout_manager.panel_groups.is_empty();
-
-        if should_add_help {
+        // A file manager at the project root when no panels remain
+        if self.layout_manager.panel_groups.is_empty() {
             // In $EDITOR mode (launched with file arguments), closing the last
             // panel returns control to the launching tool (git, crontab, ...)
             // like nano/vim would, instead of leaving an empty shell behind.
@@ -103,8 +100,9 @@ impl App {
                 }
                 return;
             }
-            let help = Help::new(&self.state.config);
-            self.add_panel(Box::new(help));
+            let file_manager =
+                termide_panel_file_manager::FileManager::new_with_path(self.project_root.clone());
+            self.add_panel(Box::new(file_manager));
         }
 
         // Active panel tracking is handled by LayoutManager

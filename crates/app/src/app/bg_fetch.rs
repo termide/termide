@@ -134,7 +134,6 @@ impl App {
     fn open_fetched_image(&mut self, bytes: &[u8], ext: &str, url: &str) {
         match cache_image(bytes, ext, url) {
             Ok(path) => {
-                self.close_help_panels();
                 let _ = self.event_preview_media(path);
             }
             Err(e) => self.show_error_modal(format!("Failed to cache image: {e}")),

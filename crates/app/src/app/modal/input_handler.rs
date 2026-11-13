@@ -67,7 +67,6 @@ impl App {
     pub(in crate::app) fn open_local_path(&mut self, path: PathBuf) -> Result<()> {
         // A directory opens in the file manager.
         if path.is_dir() {
-            self.close_help_panels();
             self.add_panel(Box::new(FileManager::new_with_path(path)));
             self.state.needs_watcher_registration = true;
             self.auto_save_layout();

@@ -1,12 +1,13 @@
 # The help window (doc/en/ui.md): F1 opens it on the section of the panel
-# in focus, typing narrows it, F1 or Esc closes it, and Enter opens the
-# help panel at the section in view.
+# in focus, typing narrows it, F1 or Esc closes it; Enter does nothing.
+# Closing the last panel leaves a file manager at the project root.
+size 80x30
 start
 wait "README.md"
 key F1
 wait "Type to filter ·"
 # Opened from the file manager, its section heads the view.
-expect-re "^.{0,20}│ ═══ FILE MANAGER ═"
+expect-re "^.{0,10}│ ═══ FILE MANAGER ═"
 snapshot file-manager
 type "unstage"
 wait "Unstage file"
@@ -15,18 +16,30 @@ expect "GIT STATUS"
 snapshot filtered
 type "zzq"
 wait "No matches"
+key Enter
+expect "No matches"
 key F1
 wait-gone "Type to filter ·"
 
-# From the git status panel, on its section; Enter pins it as a panel.
+# From the git status panel, on its section.
 key Alt+G
 wait "Stage all"
 key F1
 wait "Type to filter ·"
 expect-re "^.{0,20}│ ═══ GIT STATUS ═"
-key Enter
+key Esc
 wait-gone "Type to filter ·"
-wait "═══ GIT STATUS ═"
-expect "Help"
-snapshot pinned
+
+# Below 100 columns the layout is one file manager. With the git status
+# panel closed and the file manager moved into data/, closing it leaves a
+# new one at the project root.
+key Alt+W
+wait-gone "Stage all"
+key Down Down Down Enter
+wait "inventory.db"
+expect-not "README.md"
+key Alt+W
+wait "README.md"
+expect-not "inventory.db"
+snapshot last-panel
 quit

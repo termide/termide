@@ -189,7 +189,7 @@ termide/
 │   ├── panel-image/          # Image viewer panel (native graphics)
 │   ├── panel-markdown/       # Rendered Markdown preview panel
 │   ├── panel-mermaid/        # Mermaid diagram viewer panel (experimental)
-│   ├── panel-misc/           # Help, Journal, and References panels
+│   ├── panel-misc/           # Journal and References panels
 │   ├── panel-operations/     # Background operations panel
 │   ├── panel-outline/        # Outline panel
 │   ├── panel-plugin-list/    # A plugin's panel drawn as a list of rows with actions

@@ -177,50 +177,6 @@ impl App {
         closed
     }
 
-    /// Close all Help panels (called before opening new panel)
-    pub(super) fn close_help_panels(&mut self) {
-        let mut groups_to_remove = Vec::new();
-
-        for group_idx in (0..self.layout_manager.panel_groups.len()).rev() {
-            if let Some(group) = self.layout_manager.panel_groups.get_mut(group_idx) {
-                let mut panels_to_remove = Vec::new();
-
-                for panel_idx in (0..group.len()).rev() {
-                    if let Some(panel) = group.panels().get(panel_idx) {
-                        if panel.is_help_panel() {
-                            panels_to_remove.push(panel_idx);
-                        }
-                    }
-                }
-
-                for panel_idx in panels_to_remove {
-                    group.remove_panel(panel_idx);
-                }
-
-                if group.is_empty() {
-                    groups_to_remove.push(group_idx);
-                }
-            }
-        }
-
-        let groups_were_removed = !groups_to_remove.is_empty();
-        for group_idx in groups_to_remove {
-            self.layout_manager.panel_groups.remove(group_idx);
-        }
-
-        if !self.layout_manager.panel_groups.is_empty()
-            && self.layout_manager.focus >= self.layout_manager.panel_groups.len()
-        {
-            self.layout_manager.focus = self.layout_manager.panel_groups.len() - 1;
-        }
-
-        if groups_were_removed {
-            let terminal_width = self.state.terminal.width;
-            self.layout_manager
-                .redistribute_widths_proportionally(terminal_width);
-        }
-    }
-
     /// Alt+PageUp: move panel up in group, or move group left if at top
     pub(super) fn handle_swap_panel_left(&mut self) -> Result<()> {
         let terminal_width = self.state.terminal.width;

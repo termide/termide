@@ -59,24 +59,12 @@ fn it_opens_on_the_section_of_the_panel_it_was_called_from() {
     assert!(modal.scroll > 0, "scrolled down to the section");
     assert_eq!(modal.current_section(), section_of(&config, "git_status"));
 
-    let mut modal = HelpModal::new(&config, Some("help"));
+    let mut modal = HelpModal::new(&config, Some("journal"));
     draw(&mut modal);
     assert_eq!(
         modal.scroll, 0,
         "a panel without a section opens at the top"
     );
-}
-
-#[test]
-fn enter_asks_for_the_panel_at_the_section_in_view() {
-    let config = config();
-    let mut modal = HelpModal::new(&config, Some("editor"));
-    draw(&mut modal);
-    let result = modal.handle_key(press(KeyCode::Enter)).unwrap();
-    assert!(matches!(
-        result,
-        Some(ModalResult::Confirmed(at)) if at == section_of(&config, "editor")
-    ));
 }
 
 #[test]
@@ -120,11 +108,12 @@ fn typing_narrows_the_help_and_backspace_widens_it() {
 }
 
 #[test]
-fn the_help_key_and_escape_close_it() {
+fn the_help_key_and_escape_close_it_and_enter_does_not() {
     let config = config();
     let mut modal = HelpModal::new(&config, None);
     draw(&mut modal);
-    let closed = |r: Option<ModalResult<usize>>| matches!(r, Some(ModalResult::Cancelled));
+    assert!(modal.handle_key(press(KeyCode::Enter)).unwrap().is_none());
+    let closed = |r: Option<ModalResult<()>>| matches!(r, Some(ModalResult::Cancelled));
     assert!(closed(modal.handle_key(press(KeyCode::F(1))).unwrap()));
     assert!(closed(modal.handle_key(press(KeyCode::Esc)).unwrap()));
 }

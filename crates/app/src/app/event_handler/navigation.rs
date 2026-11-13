@@ -69,7 +69,6 @@ impl App {
         match link {
             LinkTarget::Url(url) => {
                 if url.starts_with("http://") || url.starts_with("https://") {
-                    self.close_help_panels();
                     self.start_url_fetch(url);
                 } else {
                     self.open_external_detached(&url);

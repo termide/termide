@@ -60,8 +60,6 @@ impl App {
     /// one, so several agents can work in a project at once. Reports an
     /// error instead of opening when there is no connection to run on.
     pub(in crate::app) fn handle_open_agent(&mut self) -> Result<()> {
-        self.close_help_panels();
-
         let settings = self.state.config.ai.clone();
         if usable_connection(&settings).is_none() {
             let t = termide_i18n::t();
