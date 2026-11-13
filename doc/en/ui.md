@@ -433,6 +433,7 @@ The disk window lists one row per storage pool, with the filesystem type as a se
 | `Alt+B`           | Add bookmark                               |
 | `Ctrl+P`          | Open command palette                       |
 | `Ctrl+G`          | Open a file, directory or URL              |
+| `Ctrl+C` / `Ctrl+X` / `Ctrl+V` | Copy / cut / paste in the focused panel |
 | `Alt+1-9`         | Switch to open project by number           |
 
 ### Command palette

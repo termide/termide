@@ -44,7 +44,8 @@ Termide канонизирует каждое событие клавиатур�
 - `Alt+буква`, `Ctrl+буква` (буквы → ASCII control 0x01–0x1A).
 - `F1`–`F12` и `F1`–`F12` с **одним** модификатором (`Shift+F*`,
   `Alt+F*`, `Ctrl+F*`).
-- Стрелки с **одним** модификатором (`Shift+Up`, `Ctrl+Up`, `Alt+Up`).
+- Стрелки с **одним** модификатором (`Shift+Up`, `Ctrl+Up`, `Alt+Up`),
+  а также с `Ctrl+Shift` (`Ctrl+Shift+Up` приходит как `\e[1;6A`).
 - `Home`, `End`, `PgUp`, `PgDn` + один модификатор.
 - `Enter`, `Tab`, `Esc`, `Backspace`, `Delete`, `Insert` + один
   модификатор.

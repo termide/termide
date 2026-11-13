@@ -42,7 +42,8 @@ cannot deliver any of the configured Enhanced-tier chords.
 - `Alt+letter`, `Ctrl+letter` (letters → ASCII control 0x01–0x1A).
 - `F1`–`F12` and `F1`–`F12` with **a single** modifier (`Shift+F*`,
   `Alt+F*`, `Ctrl+F*`).
-- Arrows with **a single** modifier (`Shift+Up`, `Ctrl+Up`, `Alt+Up`).
+- Arrows with **a single** modifier (`Shift+Up`, `Ctrl+Up`, `Alt+Up`),
+  and with `Ctrl+Shift` (`Ctrl+Shift+Up`, sent as `\e[1;6A`).
 - `Home`, `End`, `PgUp`, `PgDn` + a single modifier.
 - `Enter`, `Tab`, `Esc`, `Backspace`, `Delete`, `Insert` + a single
   modifier.

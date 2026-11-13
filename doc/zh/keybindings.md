@@ -36,7 +36,8 @@ Termide 在与绑定匹配前对每个按键事件进行规范化。规范化在
 - `Alt+字母`, `Ctrl+字母`(字母 → ASCII 控制码 0x01–0x1A)。
 - `F1`–`F12` 和带**单个**修饰符的 `F1`–`F12`(`Shift+F*`、
   `Alt+F*`、`Ctrl+F*`)。
-- 方向键带**单个**修饰符(`Shift+Up`、`Ctrl+Up`、`Alt+Up`)。
+- 方向键带**单个**修饰符(`Shift+Up`、`Ctrl+Up`、`Alt+Up`),以及带 `Ctrl+Shift`
+  (`Ctrl+Shift+Up` 以 `\e[1;6A` 发送)。
 - `Home`、`End`、`PgUp`、`PgDn` + 单个修饰符。
 - `Enter`、`Tab`、`Esc`、`Backspace`、`Delete`、`Insert` + 单个修饰符。
 - `Alt+数字`。
