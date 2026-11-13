@@ -16,6 +16,7 @@ container (the SWE-bench family included; its registry name is not checked yet).
 | `harbor_termide/agent.py` | Harbor adapter: uploads the binary, writes the config, runs one task, reads the result |
 | `build.sh` | builds this checkout as a static x86_64 musl binary into `bin/` |
 | `run.sh` | runs a job: dataset, model, task set, watchdog, `bench-meta.json` |
+| `resume.sh` | takes an interrupted job up again in the background |
 | `sets/*.txt` | named task subsets, one task name per line |
 | `report.py` | one job as a table of outcomes, or two jobs compared |
 | `watchdog.sh` | stops a run when OMLX loads another model (see below) |
@@ -71,9 +72,17 @@ the task container from npm or PyPI at their latest version unless
 
 Everything after the set name goes to `harbor run` as is
 (`--agent-timeout-multiplier`, `--verifier-timeout-multiplier`, `-k` for
-several attempts, `-i`/`-x` for more filters). An interrupted job resumes with
+several attempts, `-i`/`-x` for more filters).
+
+A full run takes a day or two on a local model, and it lives only as long as
+the terminal it was started in, the program running that terminal, and the
+machine. After a reboot or a closed terminal, `tools/bench/resume.sh <job>`
+takes the job up again: it drops the trial that was cut off (its containers
+and directory) so that it runs again from the start, starts the mirror if it
+is down, and resumes in the background, detached from the terminal, logging
+to `jobs/<job>.out`. It is
 `PYTHONPATH=tools/bench harbor job resume -p tools/bench/jobs/<job>`
-(`-f <ErrorType>` reruns the trials that failed with that error). Resuming
+underneath (`-f <ErrorType>` reruns the trials that failed with that error). Resuming
 keeps the job's settings: Harbor refuses a job whose `config.json` was
 edited. To give the trials that got no verdict another go with other limits,
 run them as a job of their own and merge it in the report:
