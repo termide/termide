@@ -104,6 +104,7 @@ The active section highlight in the sidebar is cleared when focus leaves it — 
 
 The menu bar is located at the top of the window and includes: menu items on the left, buttons of the open projects after them, system resource indicators (network speed, CPU, RAM and — when a battery is present — its charge), and a clock in HH:MM format on the right.
 Menu activation/deactivation and each item can be accessed by mouse click or [keyboard shortcuts](#keyboard-navigation-and-panel-management).
+A dropdown opens with no item chosen — a menu item's, a project button's, a panel's `[≡]` (`Alt+K`), an operation's and the stash button's: `←`/`→` walk on along the menu bar, `↓` chooses the first item and `↑` the last, and `Enter` acts only once an item is chosen. A submenu opened from an item with `▶` starts on its first item.
 
 **Menu items:**
 - `Bookmarks` — saved locations (directories, files, SSH, SFTP, web links). Opening one routes by type: directories and remote paths in the file manager, HTML/Markdown/Mermaid/CSV/image files and `http(s)` links in the built-in viewer (see [HTML preview](html.md); `O` there hands a page on to the browser), other text files in the editor, SSH in a terminal, databases in the DB viewer. Clicking a group header toggles its submenu, as in Commands.

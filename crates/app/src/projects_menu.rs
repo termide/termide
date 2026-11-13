@@ -259,7 +259,7 @@ impl AppState {
         if menu.items.get(index).is_some_and(|item| item.is_separator) {
             index = index.saturating_sub(1);
         }
-        self.ui.projects_submenu.selected = index;
+        self.ui.projects_submenu.select(index);
     }
 
     /// The open projects as the menu bar's buttons, in the order the menus

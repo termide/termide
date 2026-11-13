@@ -34,14 +34,14 @@ wait "Pos: 1:1"
 key Alt+K
 wait "Fold all"
 expect-not "Unfold all"
-key Enter
+key Down Enter
 wait "⋯ 4 lines"
 expect "⋯ 1 line "
 expect-not "needle"
 snapshot all-folded
 key Alt+K
 wait "Unfold all"
-key Down Enter
+key Down Down Enter
 wait "needle"
 expect-not "⋯"
 quit --force

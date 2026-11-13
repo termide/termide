@@ -529,11 +529,11 @@ impl App {
                     .iter()
                     .position(|i| i.has_submenu && i.key == group_name)
                     .unwrap_or(fallback_selected);
-                self.state.ui.commands_submenu.selected = group_idx;
+                self.state.ui.commands_submenu.select(group_idx);
                 self.state.open_commands_nested_submenu(group_name);
             }
         } else {
-            self.state.ui.commands_submenu.selected = fallback_selected;
+            self.state.ui.commands_submenu.select(fallback_selected);
         }
     }
 }

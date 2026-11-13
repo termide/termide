@@ -13,7 +13,7 @@ wait "gamma"
 key Shift+Down
 key Alt+K
 wait "Send to agent"
-key Enter
+key Down Enter
 wait "[#1 selection zz.txt:1]"
 snapshot selection
 
@@ -24,7 +24,7 @@ key Enter
 wait "harness-42"
 key Alt+K
 wait "Send to agent"
-key Enter
+key Down Enter
 wait "[#2 terminal bash, 2 lines]"
 
 type "@te"

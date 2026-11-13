@@ -382,26 +382,26 @@ impl AppState {
     /// Open submenu (e.g., Preferences dropdown)
     pub fn open_submenu(&mut self) {
         self.ui.close_all_submenus();
-        self.ui.options_submenu.open();
+        self.ui.options_submenu.open_unchosen();
     }
 
     /// Open Projects submenu
     pub fn open_projects_submenu(&mut self) {
         self.ui.close_all_submenus();
-        self.ui.projects_submenu.open();
+        self.ui.projects_submenu.open_unchosen();
         self.load_known_projects();
     }
 
     /// Open Tools submenu
     pub fn open_tools_submenu(&mut self) {
         self.ui.close_all_submenus();
-        self.ui.tools_submenu.open();
+        self.ui.tools_submenu.open_unchosen();
     }
 
     /// Open Commands submenu
     pub fn open_commands_submenu(&mut self) {
         self.ui.close_all_submenus();
-        self.ui.commands_submenu.open();
+        self.ui.commands_submenu.open_unchosen();
         // Force fresh load — the cache may have been populated before the
         // filesystem made command files visible (FUSE/autofs on NixOS, etc.).
         self.cache.commands_registry = None;
@@ -435,7 +435,7 @@ impl AppState {
     /// Open the AI submenu (Agents / Sessions / Skills / Prompts).
     pub fn open_ai_submenu(&mut self) {
         self.ui.close_all_submenus();
-        self.ui.ai_submenu.open();
+        self.ui.ai_submenu.open_unchosen();
     }
 
     /// Open the AI nested submenu for `section` (the section's item list).
@@ -816,7 +816,7 @@ impl AppState {
     /// Open bookmarks submenu
     pub fn open_bookmarks_submenu(&mut self) {
         self.ui.close_all_submenus();
-        self.ui.bookmarks_submenu.open();
+        self.ui.bookmarks_submenu.open_unchosen();
     }
 
     /// Open bookmarks nested submenu (for a group)

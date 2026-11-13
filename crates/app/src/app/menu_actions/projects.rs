@@ -214,10 +214,13 @@ impl App {
         let mut cursor = termide_state::SubmenuState {
             open: true,
             selected: menu.selected,
+            chosen: self.state.ui.projects_submenu.chosen,
         };
         let action = navigate_submenu(&key, &mut cursor, menu.items.len(), &menu.separators());
         drop(menu);
-        self.state.ui.projects_submenu.selected = cursor.selected;
+        if cursor.chosen {
+            self.state.ui.projects_submenu.select(cursor.selected);
+        }
 
         match action {
             SubmenuNavAction::Close => self.state.close_menu(),
@@ -257,7 +260,7 @@ impl App {
         };
         drop(menu);
         if let Some(place) = self.move_open_project(&root, step) {
-            self.state.ui.projects_submenu.selected = first + place;
+            self.state.ui.projects_submenu.select(first + place);
             self.state.needs_redraw = true;
         }
     }

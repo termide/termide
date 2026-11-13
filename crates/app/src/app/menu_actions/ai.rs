@@ -517,7 +517,7 @@ impl App {
         self.state.ui.menu_open = true;
         self.state.ui.selected_menu_item = Some(AI_MENU_INDEX);
         self.state.open_ai_submenu();
-        self.state.ui.ai_submenu.selected = section.index();
+        self.state.ui.ai_submenu.select(section.index());
         self.state.open_ai_nested_submenu(section);
     }
 }

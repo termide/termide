@@ -491,11 +491,11 @@ impl App {
                 .iter()
                 .position(|i| i.has_submenu && i.key == group_name && i.is_project == is_project)
                 .unwrap_or(fallback_selected);
-            self.state.ui.bookmarks_submenu.selected = group_idx;
+            self.state.ui.bookmarks_submenu.select(group_idx);
             self.state
                 .open_bookmarks_nested_submenu(group_name, is_project);
         } else {
-            self.state.ui.bookmarks_submenu.selected = fallback_selected;
+            self.state.ui.bookmarks_submenu.select(fallback_selected);
         }
     }
 

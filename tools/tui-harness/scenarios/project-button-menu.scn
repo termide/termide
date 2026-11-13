@@ -16,13 +16,17 @@ key Enter
 wait "project | project2"
 
 # Six titles, then the current project's button: its menu opens. Right
-# opens AI's first submenu before it leaves AI, and leaves Options from an
-# item without a submenu of its own.
-key F9 Right Right Right Right Right Right Down Down Right
+# walks on, the menus opening with no item chosen.
+key F9 Right Right Right Right Right Right
 wait "Copy project…"
 expect "Change root path"
 expect-not "Switch to project"
 snapshot current-menu
+# No item is chosen yet: Enter does nothing.
+key Enter
+sleep 0.3
+expect "Copy project…"
+expect-not "Move 'project' to"
 
 # The next button is another project's.
 key Right
@@ -36,10 +40,11 @@ wait "project2 | project"
 expect "Switch to project"
 
 # Enter on Switch to project: project2 becomes the current one, and its
-# menu, now first, offers its root path.
-key Enter
+# menu, now first, offers its root path. The menu opened with no item
+# chosen: Down chooses the first.
+key Down Enter
 wait-gone "Switch to project"
-key F9 Right Right Right Right Right Right Down Down Right
+key F9 Right Right Right Right Right Right
 wait "Copy project…"
 expect "Change root path"
 key Right

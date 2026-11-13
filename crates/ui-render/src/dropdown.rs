@@ -129,7 +129,8 @@ const MAX_PATH_WIDTH: usize = 96;
 /// Dropdown menu
 pub struct Dropdown<'a> {
     items: &'a [DropdownItem],
-    selected: usize,
+    /// The highlighted item; `None` while none is chosen.
+    selected: Option<usize>,
     x: u16,
     y: u16,
     theme: &'a Theme,
@@ -260,14 +261,14 @@ pub fn dropdown_geometry(
 impl<'a> Dropdown<'a> {
     pub fn new(
         items: &'a [DropdownItem],
-        selected: usize,
+        selected: impl Into<Option<usize>>,
         x: u16,
         y: u16,
         theme: &'a Theme,
     ) -> Self {
         Self {
             items,
-            selected,
+            selected: selected.into(),
             x,
             y,
             theme,
@@ -287,7 +288,13 @@ impl<'a> Dropdown<'a> {
 
     /// On-screen geometry of this dropdown once fitted to `screen`.
     pub fn geometry(&self, screen: Rect) -> ListGeometry {
-        dropdown_geometry(self.items, self.selected, self.x, self.y, screen)
+        dropdown_geometry(
+            self.items,
+            self.selected.unwrap_or(0),
+            self.x,
+            self.y,
+            screen,
+        )
     }
 
     pub fn render(&self, buf: &mut Buffer) {
@@ -338,7 +345,7 @@ impl<'a> Dropdown<'a> {
         // Render rows
         for (i, item) in visible_items.iter().enumerate() {
             let actual_index = scroll_offset + i;
-            let is_selected = actual_index == self.selected;
+            let is_selected = self.selected == Some(actual_index);
 
             let row_y = inner.y + i as u16;
             if row_y >= inner.y + inner.height {
@@ -1291,6 +1298,27 @@ mod operation_menu_tests {
     fn command_operation_offers_only_cancel() {
         assert_eq!(keys(false, true), vec![OPERATION_ACTION_CANCEL]);
         assert_eq!(keys(true, true), vec![OPERATION_ACTION_CANCEL]);
+    }
+}
+
+#[cfg(test)]
+mod unchosen_tests {
+    use super::*;
+
+    /// With no item chosen no row is drawn selected.
+    #[test]
+    fn an_unchosen_dropdown_highlights_no_row() {
+        let theme = Theme::get_by_name("default");
+        let items = vec![DropdownItem::new("one", "1"), DropdownItem::new("two", "2")];
+        let selected_rows = |selected: Option<usize>| {
+            let mut buf = Buffer::empty(Rect::new(0, 0, 20, 4));
+            Dropdown::new(&items, selected, 0, 0, theme).render(&mut buf);
+            (1..3)
+                .filter(|&y| buf[(2, y)].bg == theme.selected_bg)
+                .collect::<Vec<u16>>()
+        };
+        assert_eq!(selected_rows(Some(1)), [2]);
+        assert_eq!(selected_rows(None), Vec::<u16>::new());
     }
 }
 

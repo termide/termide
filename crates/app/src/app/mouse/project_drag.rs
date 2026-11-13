@@ -131,7 +131,7 @@ impl App {
             }
             ProjectDragSurface::Menu => {
                 if let Some(first) = first_project_row(&self.state.projects_menu().rows) {
-                    self.state.ui.projects_submenu.selected = first + place;
+                    self.state.ui.projects_submenu.select(first + place);
                 }
             }
         }
