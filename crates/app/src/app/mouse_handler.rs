@@ -573,7 +573,7 @@ impl App {
 
         let bar = self.menu_bar();
 
-        // The ≡ after the current project's name opens its menu.
+        // The ≡ before the current project's name opens its menu.
         if bar.is_project_menu(x) {
             if let Some(original_name) = self.state.ui.theme_preview_original.take() {
                 self.state.theme = Theme::get_by_name(&original_name);

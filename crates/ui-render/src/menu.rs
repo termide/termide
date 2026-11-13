@@ -441,11 +441,23 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
     // others dimmed; a dim separator keeps them apart.
     let separator = Style::default().fg(params.theme.disabled);
     for (step, button) in bar.projects.buttons.iter().enumerate() {
+        // The current project's button starts with its menu.
+        let start = button.menu_x.unwrap_or(button.x) as usize;
         if step > 0 {
-            let sep_x = button.x as usize - SEPARATOR.width();
+            let sep_x = start - SEPARATOR.width();
             pad(&mut spans, column, sep_x);
             spans.push(Span::styled(SEPARATOR, separator));
-            column = button.x as usize;
+            column = start;
+        }
+        if let Some(menu_x) = button.menu_x {
+            pad(&mut spans, column, menu_x as usize);
+            let menu_style = if params.project_menu_open {
+                selected_style
+            } else {
+                Style::default().fg(params.theme.accented_fg)
+            };
+            spans.push(Span::styled(MENU_GLYPH, menu_style));
+            column = menu_x as usize + MENU_GLYPH.width();
         }
         pad(&mut spans, column, button.x as usize);
         let project = &params.projects[button.index];
@@ -463,16 +475,6 @@ pub fn render_menu(frame: &mut Frame, area: Rect, params: &MenuRenderParams) {
         };
         spans.push(Span::styled(button.label.clone(), style));
         column = column.max(button.x as usize) + button.label.width();
-        if let Some(menu_x) = button.menu_x {
-            pad(&mut spans, column, menu_x as usize);
-            let menu_style = if params.project_menu_open {
-                selected_style
-            } else {
-                Style::default().fg(params.theme.accented_fg)
-            };
-            spans.push(Span::styled(MENU_GLYPH, menu_style));
-            column = menu_x as usize + MENU_GLYPH.width();
-        }
     }
     if let Some((x, text)) = &bar.projects.overflow {
         pad(&mut spans, column, *x as usize);
@@ -626,7 +628,13 @@ mod tests {
         let bar = menu_bar_layout(200, &params(&theme, &projects));
         let titles_end = 1 + MenuLayout::with_mark(false).total_width;
         let first = &bar.projects.buttons[0];
-        assert_eq!(first.x as usize, titles_end, "two columns after the titles");
+        // The current project's button starts with its menu.
+        assert_eq!(
+            first.menu_x,
+            Some(titles_end as u16),
+            "two columns after the titles"
+        );
+        assert_eq!(first.x as usize, titles_end + 2);
         let last = bar.projects.buttons.last().unwrap();
         assert!(last.range().end < bar.net.start, "clear of the indicators");
         assert_eq!(bar.project_at(first.x), Some(0));
@@ -680,11 +688,11 @@ mod tests {
                 .collect();
             assert_eq!(at, button.label);
         }
-        assert!(row.contains("nvn ≡ | zarab"), "{row}");
+        assert!(row.contains("≡ nvn | zarab"), "{row}");
         let menu_x = bar.project_menu_x().unwrap();
         assert!(bar.is_project_menu(menu_x));
         assert_eq!(bar.project_at(menu_x), None);
-        let strip_start = row.find("nvn").unwrap();
+        let strip_start = row.find("≡ nvn").unwrap();
         assert_eq!(
             &row[strip_start - 2..strip_start],
             "  ",
@@ -705,16 +713,17 @@ mod tests {
         let buffer = terminal.backend().buffer().clone();
         let bar = menu_bar_layout(160, &params);
         let (first, second) = (&bar.projects.buttons[0], &bar.projects.buttons[1]);
-        // The current project's menu follows its name in its colour.
+        // The current project's menu precedes its name in its colour.
         let menu_x = first.menu_x.unwrap();
-        assert_eq!(menu_x, first.range().end + 1);
+        assert_eq!(menu_x + 2, first.x);
         assert_eq!(buffer[(menu_x, 0)].symbol(), MENU_GLYPH);
         assert_ne!(buffer[(menu_x, 0)].style().fg, Some(theme.disabled));
         // The columns between two buttons are the separator, not a button.
-        assert_eq!(buffer[(menu_x + 1, 0)].symbol(), " ");
-        assert_eq!(buffer[(menu_x + 2, 0)].symbol(), "|");
+        let end = first.range().end;
+        assert_eq!(buffer[(end, 0)].symbol(), " ");
+        assert_eq!(buffer[(end + 1, 0)].symbol(), "|");
         assert_eq!(buffer[(second.x - 1, 0)].symbol(), " ");
-        for x in menu_x + 1..second.x {
+        for x in end..second.x {
             assert_eq!(buffer[(x, 0)].style().fg, Some(theme.disabled));
         }
         assert_ne!(buffer[(first.x, 0)].style().fg, Some(theme.disabled));

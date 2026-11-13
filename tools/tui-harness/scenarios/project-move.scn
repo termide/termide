@@ -6,8 +6,8 @@ project empty
 start
 run "echo hi > keep.txt"
 wait "keep.txt"
-# The current project's button ends with the ≡ of its menu.
-wait-re "^.*Options  project ≡"
+# The current project's button starts with the ≡ of its menu.
+wait-re "^.*Options  ≡ project"
 
 # Move: the prompt names the project's path; typing extends its name.
 key F9 Right Right
@@ -17,7 +17,7 @@ wait "Move 'project' to"
 snapshot move-prompt
 type "moved"
 key Enter
-wait "projectmoved ≡"
+wait "≡ projectmoved"
 wait "keep.txt"
 # The project directory is gone: `run` works in the one that held it.
 run "test -f projectmoved/keep.txt && test ! -e project"
@@ -30,7 +30,7 @@ key Up F5
 wait "Copy 'projectmoved' to"
 type "2"
 key Enter
-wait "projectmoved ≡ | projectmoved2"
+wait "≡ projectmoved | projectmoved2"
 run "test -f projectmoved2/keep.txt && test -f projectmoved/keep.txt"
 snapshot copied
 quit
