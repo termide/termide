@@ -1,0 +1,1 @@
+- **FTP listings keep names with spaces and symlinks.** A name with several spaces in a row lost all but one, and a symlink was listed as `name -> target`, so every operation on it went to a path that does not exist. Deleting a directory now removes a symlink inside it as a link, without going into what it points to.

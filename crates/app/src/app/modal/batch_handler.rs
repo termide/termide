@@ -36,6 +36,33 @@ pub(in crate::app::modal) fn make_copy_or_move_request(
     }
 }
 
+/// A batch item bound for a remote destination, as `remote_batch_target`
+/// resolves it.
+pub(in crate::app::modal) struct RemoteBatchTarget {
+    /// Reaches the destination (and a remote source).
+    pub(in crate::app::modal) manager: std::sync::Arc<termide_vfs::VfsManager>,
+    pub(in crate::app::modal) source: OperationPath,
+    /// The destination as typed, on the connection that reaches it.
+    pub(in crate::app::modal) destination: VfsPath,
+}
+
+impl RemoteBatchTarget {
+    /// The request that copies or moves the source onto `dest`: a local
+    /// source is uploaded.
+    pub(in crate::app::modal) fn request(&self, dest: VfsPath, is_move: bool) -> OperationRequest {
+        match &self.source {
+            OperationPath::Local(path) => {
+                let mut request = OperationRequest::upload(path.clone(), dest);
+                request.is_move = is_move;
+                request
+            }
+            remote => {
+                make_copy_or_move_request(remote.clone(), OperationPath::Remote(dest), is_move)
+            }
+        }
+    }
+}
+
 /// Calculate total size of all sources (files and directories recursively).
 fn scan_sources_total_bytes(sources: &[PathBuf]) -> u64 {
     fn dir_size(path: &Path) -> u64 {
@@ -263,6 +290,124 @@ impl App {
         Some((manager, directory, vfs_source))
     }
 
+    /// The two ends of a batch item bound for a remote destination: a remote
+    /// source keeps the connection it is read through, a local one is
+    /// uploaded through the panel connected to the destination. None when no
+    /// panel holds the connection.
+    pub(in crate::app::modal) fn remote_batch_target(
+        &self,
+        operation: &BatchOperation,
+        source: &Path,
+    ) -> Option<RemoteBatchTarget> {
+        let destination =
+            termide_vfs::parse_vfs_url(&operation.destination.to_string_lossy()).ok()?;
+        let (manager, connection, source) = if operation.source_is_remote(source) {
+            let (manager, connection, vfs_source) = self.remote_batch_source(operation, source)?;
+            (manager, connection, OperationPath::Remote(vfs_source))
+        } else {
+            let (manager, connection) = self.find_connected_vfs_manager(&destination)?;
+            (
+                manager,
+                connection,
+                OperationPath::Local(source.to_path_buf()),
+            )
+        };
+        Some(RemoteBatchTarget {
+            manager,
+            source,
+            destination: connection.with_path(destination.path),
+        })
+    }
+
+    /// Where on the server the item named `name` lands, and whether something
+    /// is there already, asked of the server. A renamed item goes into the
+    /// destination directory under its new name.
+    pub(in crate::app::modal) fn remote_item_destination(
+        &self,
+        target: &RemoteBatchTarget,
+        operation: &BatchOperation,
+        name: &str,
+        renamed: bool,
+    ) -> (VfsPath, bool) {
+        if renamed {
+            let dest = target.destination.join(name);
+            let exists = target.manager.exists(&dest).recv().unwrap_or(false);
+            return (dest, exists);
+        }
+        self.resolve_remote_dest(
+            &target.destination,
+            name,
+            &operation.destination.to_string_lossy(),
+            operation.sources.len() > 1,
+            &target.manager,
+        )
+    }
+
+    /// Copy or move the current item to a remote destination, asking first
+    /// when the server already has something under its name.
+    pub(in crate::app::modal) fn process_remote_batch_item(
+        &mut self,
+        mut operation: BatchOperation,
+        source: PathBuf,
+        name: &str,
+        renamed: bool,
+    ) {
+        let Some(target) = self.remote_batch_target(&operation, &source) else {
+            log::error!(
+                "No connection to the remote destination of {}",
+                source.display()
+            );
+            operation.increment_error();
+            operation.advance();
+            self.state.pending_action = Some(PendingAction::ContinueBatchOperation { operation });
+            return;
+        };
+        let (dest, exists) = self.remote_item_destination(&target, &operation, name, renamed);
+        if exists {
+            let shown = PathBuf::from(dest.to_url_string());
+            match self.settle_batch_conflict(operation, &source, &shown) {
+                Some(proceed) => operation = proceed,
+                None => return,
+            }
+        }
+        let is_move = operation.operation_type == BatchOperationType::Move;
+        let request = target.request(dest, is_move);
+        self.start_batch_sub_operation(request, target.manager, operation);
+    }
+
+    /// A batch item whose destination is taken: asks, or skips, as the
+    /// batch's conflict mode says, and hands the batch back only when the
+    /// item is to be overwritten.
+    fn settle_batch_conflict(
+        &mut self,
+        mut operation: BatchOperation,
+        source: &Path,
+        dest: &Path,
+    ) -> Option<BatchOperation> {
+        match operation.conflict_mode {
+            ConflictMode::Ask => {
+                let remaining_items = operation
+                    .sources
+                    .len()
+                    .saturating_sub(operation.current_index + 1);
+                let modal = ConflictModal::new(source, dest, remaining_items);
+                self.state.pending_action =
+                    Some(PendingAction::ContinueBatchOperation { operation });
+                self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
+                None
+            }
+            ConflictMode::SkipAll => {
+                operation.increment_skipped();
+                operation.advance();
+                // Store and return to allow UI update
+                self.state.pending_action =
+                    Some(PendingAction::ContinueBatchOperation { operation });
+                None
+            }
+            ConflictMode::OverwriteAll => Some(operation),
+        }
+    }
+
     /// Handle batch file operation (copy/move)
     pub(in crate::app) fn process_batch_operation(&mut self, mut operation: BatchOperation) {
         // Show progress modal for:
@@ -416,52 +561,18 @@ impl App {
         let dest_str = operation.destination.to_string_lossy().into_owned();
         let is_remote_dest = termide_vfs::is_vfs_url(&dest_str);
 
-        // Determine target path (considering rename pattern if set).
-        // For remote URLs, PathBuf::is_dir() returns false, so standard
-        // resolve functions don't work; compute the path component directly.
-        let final_dest = if operation.rename_pattern.is_some() {
-            // Apply rename pattern (get mutable counter first, then borrow pattern)
+        // Apply the rename pattern, if set (counter first, then the pattern).
+        let new_name = if operation.rename_pattern.is_some() {
             let counter = operation.get_and_increment_rename_counter();
             let metadata = source.metadata().ok();
             let created = metadata.as_ref().and_then(|m| m.created().ok());
             let modified = metadata.as_ref().and_then(|m| m.modified().ok());
-
-            // SAFETY: checked is_some() above; unwrap is safe
-            let pattern = operation.rename_pattern.as_ref().unwrap();
-            let new_name = pattern.apply(&item_name, counter, created, modified);
-
-            if is_remote_dest {
-                let base = termide_vfs::parse_vfs_url(&dest_str)
-                    .map(|p| p.path)
-                    .unwrap_or_else(|e| {
-                        log::warn!("Failed to parse VFS URL: {}", e);
-                        operation.destination.clone()
-                    });
-                base.join(&new_name)
-            } else {
-                path_utils::resolve_rename_destination_path(
-                    &operation.destination,
-                    &new_name,
-                    operation.destination_is_directory(),
-                )
-            }
-        } else if is_remote_dest {
-            // Remote destination: parse URL path and join filename
-            let base = termide_vfs::parse_vfs_url(&dest_str)
-                .map(|p| p.path)
-                .unwrap_or_else(|e| {
-                    log::warn!("Failed to parse VFS URL: {}", e);
-                    operation.destination.clone()
-                });
-            base.join(&item_name)
+            operation
+                .rename_pattern
+                .as_ref()
+                .map(|pattern| pattern.apply(&item_name, counter, created, modified))
         } else {
-            // Standard logic without renaming
-            path_utils::resolve_batch_destination_path(
-                &source,
-                &operation.destination,
-                operation.sources.len() == 1,
-                operation.destination_is_directory(),
-            )
+            None
         };
 
         // Update batch tracking file-level progress in Operations panel
@@ -471,69 +582,53 @@ impl App {
             self.state.needs_redraw = true;
         }
 
+        // A remote destination is asked of the server, not of the local disk.
+        if is_remote_dest {
+            let renamed = new_name.is_some();
+            let name = new_name.unwrap_or(item_name);
+            self.process_remote_batch_item(operation, source, &name, renamed);
+            return;
+        }
+
+        let final_dest = match &new_name {
+            Some(new_name) => path_utils::resolve_rename_destination_path(
+                &operation.destination,
+                new_name,
+                operation.destination_is_directory(),
+            ),
+            None => path_utils::resolve_batch_destination_path(
+                &source,
+                &operation.destination,
+                operation.sources.len() == 1,
+                operation.destination_is_directory(),
+            ),
+        };
+
         // An entry pasted onto itself is no conflict: the worker gives a copy
         // a fresh name and leaves a move where it is.
-        let onto_itself = !is_remote_dest
-            && !operation.source_is_remote(&source)
+        let onto_itself = !operation.source_is_remote(&source)
             && termide_file_ops::destination_overlap(&source, &final_dest)
                 == termide_file_ops::DestinationOverlap::SameAsSource;
 
-        // Check conflict
         if final_dest.exists() && !onto_itself {
-            match operation.conflict_mode {
-                ConflictMode::Ask => {
-                    // Show conflict resolution modal window
-                    let remaining_items = operation
-                        .sources
-                        .len()
-                        .saturating_sub(operation.current_index + 1);
-                    let modal = ConflictModal::new(&source, &final_dest, remaining_items);
-                    self.state.pending_action =
-                        Some(PendingAction::ContinueBatchOperation { operation });
-                    self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
-                    return;
-                }
-                ConflictMode::SkipAll => {
-                    // Skip file
-                    operation.increment_skipped();
-                    operation.advance();
-                    // Store and return to allow UI update
-                    self.state.pending_action =
-                        Some(PendingAction::ContinueBatchOperation { operation });
-                    return;
-                }
-                ConflictMode::OverwriteAll => {
-                    // Continue with overwrite (processing below)
-                }
+            match self.settle_batch_conflict(operation, &source, &final_dest) {
+                Some(proceed) => operation = proceed,
+                None => return,
             }
         }
 
-        // Execute operation - use remote path only when source or destination is actually remote.
-        let needs_remote = is_remote_dest || operation.source_is_remote(&source);
-        if needs_remote {
-            if let Some((vfs_manager, vfs_current_path, vfs_source)) =
+        // A remote source is downloaded to the local destination.
+        if operation.source_is_remote(&source) {
+            if let Some((vfs_manager, _, vfs_source)) =
                 self.remote_batch_source(&operation, &source)
             {
-                let is_move = operation.operation_type == BatchOperationType::Move;
-
-                let request = if is_remote_dest {
-                    let vfs_dest = Self::vfs_path_with_connection(&vfs_current_path, final_dest);
-                    make_copy_or_move_request(
-                        OperationPath::Remote(vfs_source),
-                        OperationPath::Remote(vfs_dest),
-                        is_move,
-                    )
-                } else {
-                    let r = OperationRequest::download(vfs_source.clone(), final_dest);
-                    if is_move {
-                        self.state.batch.pending_delete = Some(PendingRemoteDelete {
-                            vfs_source,
-                            vfs_manager: vfs_manager.clone(),
-                        });
-                    }
-                    r
-                };
-
+                let request = OperationRequest::download(vfs_source.clone(), final_dest);
+                if operation.operation_type == BatchOperationType::Move {
+                    self.state.batch.pending_delete = Some(PendingRemoteDelete {
+                        vfs_source,
+                        vfs_manager: vfs_manager.clone(),
+                    });
+                }
                 self.start_batch_sub_operation(request, vfs_manager, operation);
                 return;
             }

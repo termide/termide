@@ -217,39 +217,68 @@ impl App {
                                     if let Ok(remote_base) =
                                         termide_vfs::parse_vfs_url(&batch_upload.dest_base_url)
                                     {
-                                        let final_remote = remote_base.join(&source_name);
-                                        // Keep an exact copy of the next-file destination so
-                                        // the cancel-cleanup modal targets the right partial.
-                                        let next_remote_target = final_remote.clone();
+                                        // On the connection the first file went
+                                        // through: the URL may leave out the user
+                                        // or port the panel resolved.
+                                        let final_remote = match &batch_upload.current_remote_target
+                                        {
+                                            Some(connection) => connection
+                                                .with_path(remote_base.path.join(&source_name)),
+                                            None => remote_base.join(&source_name),
+                                        };
 
-                                        // Create upload request for next file
-                                        let request = termide_file_ops::OperationRequest::upload(
-                                            next_source.clone(),
-                                            final_remote,
-                                        );
+                                        // Something already there is asked about,
+                                        // as for the first file: the rest of the
+                                        // batch goes on as a batch operation.
+                                        if batch_upload
+                                            .vfs_manager
+                                            .exists(&final_remote)
+                                            .recv()
+                                            .unwrap_or(false)
+                                        {
+                                            self.ask_about_upload_conflict(
+                                                batch_upload,
+                                                next_source,
+                                                &final_remote,
+                                            );
+                                        } else {
+                                            // Keep an exact copy of the next-file destination so
+                                            // the cancel-cleanup modal targets the right partial.
+                                            let next_remote_target = final_remote.clone();
 
-                                        // Update batch state
-                                        batch_upload.current_source = next_source;
-                                        batch_upload.current_remote_target =
-                                            Some(next_remote_target);
+                                            // Create upload request for next file
+                                            let request =
+                                                termide_file_ops::OperationRequest::upload(
+                                                    next_source.clone(),
+                                                    final_remote,
+                                                );
 
-                                        // Start upload for next file
-                                        match self.state.start_operation_now(
-                                            request,
-                                            batch_upload.vfs_manager.clone(),
-                                        ) {
-                                            Ok(_) => {
-                                                // Put back for next tick
-                                                self.state.batch.pending_upload =
-                                                    Some(batch_upload);
-                                            }
-                                            Err(e) => {
-                                                log::error!("Failed to start next upload: {}", e);
-                                                self.state.close_modal();
-                                                self.show_error_modal(format!(
-                                                    "Upload failed: {}",
-                                                    e
-                                                ));
+                                            // Update batch state
+                                            batch_upload.current_source = next_source;
+                                            batch_upload.current_remote_target =
+                                                Some(next_remote_target);
+
+                                            // Start upload for next file
+                                            match self.state.start_operation_now(
+                                                request,
+                                                batch_upload.vfs_manager.clone(),
+                                            ) {
+                                                Ok(_) => {
+                                                    // Put back for next tick
+                                                    self.state.batch.pending_upload =
+                                                        Some(batch_upload);
+                                                }
+                                                Err(e) => {
+                                                    log::error!(
+                                                        "Failed to start next upload: {}",
+                                                        e
+                                                    );
+                                                    self.state.close_modal();
+                                                    self.show_error_modal(format!(
+                                                        "Upload failed: {}",
+                                                        e
+                                                    ));
+                                                }
                                             }
                                         }
                                     } else {

@@ -93,13 +93,6 @@ impl FtpProvider {
 
         let perms = parts[0];
         let size: u64 = parts[4].parse().unwrap_or(0);
-        let name = parts[8..].join(" ");
-
-        // Skip . and ..
-        if name == "." || name == ".." {
-            return None;
-        }
-
         let file_type = if perms.starts_with('d') {
             VfsFileType::Directory
         } else if perms.starts_with('l') {
@@ -107,8 +100,14 @@ impl FtpProvider {
         } else {
             VfsFileType::File
         };
+        let name = list_line_name(line, file_type)?;
 
-        let path = parent_path.join(&name);
+        // Skip . and ..
+        if name == "." || name == ".." {
+            return None;
+        }
+
+        let path = parent_path.join(name);
 
         let metadata = VfsMetadata {
             file_type,
@@ -419,6 +418,34 @@ impl VfsProvider for FtpProvider {
         VfsOperation::new(rx)
     }
 
+    /// FTP has no lstat: `SIZE` and `CWD` both follow a link. The parent's
+    /// listing marks a link with `l`, so a link found there is reported as
+    /// one; anything else falls back to `metadata`.
+    fn symlink_metadata(&self, path: &VfsPath) -> VfsOperation<VfsMetadata> {
+        let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+            return self.metadata(path);
+        };
+        let name = name.to_string_lossy().into_owned();
+        let listing = self.list_dir(&parent);
+        let followed = self.metadata(path);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let link = listing.recv().ok().and_then(|entries| {
+                entries.into_iter().find(|entry| {
+                    entry.name == name && entry.metadata.file_type == VfsFileType::Symlink
+                })
+            });
+            let result = match link {
+                Some(entry) => Ok(entry.metadata),
+                None => followed.recv(),
+            };
+            let _ = tx.send(result);
+        });
+
+        VfsOperation::new(rx)
+    }
+
     fn read_file(&self, path: &VfsPath) -> VfsOperation<Vec<u8>> {
         let stream = match self.get_stream() {
             Ok(s) => s,
@@ -652,9 +679,59 @@ impl VfsProvider for FtpProvider {
     }
 }
 
+/// The name in a Unix-style `LIST` line: everything after the eighth field,
+/// spaces inside it kept as they are. A symlink's line ends in
+/// `name -> target`; the target is not part of the name.
+fn list_line_name(line: &str, file_type: VfsFileType) -> Option<&str> {
+    let mut rest = line.trim_end_matches(['\r', '\n']);
+    for _ in 0..8 {
+        rest = rest.trim_start();
+        let end = rest.find(char::is_whitespace)?;
+        rest = &rest[end..];
+    }
+    let mut name = rest.trim_start();
+    if file_type == VfsFileType::Symlink {
+        if let Some((link, _target)) = name.split_once(" -> ") {
+            name = link;
+        }
+    }
+    (!name.is_empty()).then_some(name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn list_line_name_keeps_inner_spaces() {
+        assert_eq!(
+            list_line_name(
+                "-rw-r--r--  1 user group 12 Jan 01 12:00 two  spaces.txt\r",
+                VfsFileType::File
+            ),
+            Some("two  spaces.txt")
+        );
+    }
+
+    #[test]
+    fn list_line_name_drops_a_symlink_target() {
+        let line = "lrwxrwxrwx  1 user group 4 Jan 01 12:00 www -> /var/www";
+        assert_eq!(list_line_name(line, VfsFileType::Symlink), Some("www"));
+        let provider = FtpProvider::new("", None, None, false);
+        let parent = VfsPath::remote(VfsProtocol::Ftp, "host", "/home");
+        let entry = provider.parse_list_line(line, &parent).unwrap();
+        assert_eq!(entry.name, "www");
+        assert_eq!(entry.metadata.file_type, VfsFileType::Symlink);
+        assert_eq!(entry.path, parent.join("www"));
+    }
+
+    #[test]
+    fn list_line_name_needs_nine_fields() {
+        assert_eq!(
+            list_line_name("-rw-r--r-- 1 user group 12 Jan 01 12:00", VfsFileType::File),
+            None
+        );
+    }
 
     #[test]
     fn test_ftp_provider_creation() {

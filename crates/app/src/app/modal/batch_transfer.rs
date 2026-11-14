@@ -245,7 +245,8 @@ impl App {
                 remaining,
             );
             self.state.pending_action = Some(PendingAction::ContinueBatchOperation {
-                operation: BatchOperation::new(operation_type, sources, PathBuf::from(remote_url)),
+                operation: BatchOperation::new(operation_type, sources, PathBuf::from(remote_url))
+                    .with_source_location(SourceLocation::Local),
             });
             self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
             return Ok(());
@@ -307,6 +308,39 @@ impl App {
         Ok(())
     }
 
+    /// A file of a batch upload whose name is taken on the server: the rest
+    /// of the batch, from that file on, becomes a batch operation waiting on
+    /// the conflict dialog, as the first file's conflict does.
+    pub(in crate::app) fn ask_about_upload_conflict(
+        &mut self,
+        upload: crate::state::PendingBatchUpload,
+        source: PathBuf,
+        remote: &VfsPath,
+    ) {
+        let operation_type = if upload.is_move {
+            BatchOperationType::Move
+        } else {
+            BatchOperationType::Copy
+        };
+        let mut operation = BatchOperation::new(
+            operation_type,
+            upload.all_sources,
+            PathBuf::from(upload.dest_base_url),
+        )
+        .with_source_location(SourceLocation::Local);
+        for _ in 0..upload.current_index {
+            operation.advance();
+        }
+        let remaining = operation
+            .sources
+            .len()
+            .saturating_sub(operation.current_index + 1);
+        let modal = ConflictModal::new(&source, &PathBuf::from(remote.to_url_string()), remaining);
+        self.state.close_modal();
+        self.state.pending_action = Some(PendingAction::ContinueBatchOperation { operation });
+        self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
+    }
+
     /// Start a remote-to-remote copy/move on the same server.
     ///
     /// Sources are server-side absolute paths (from `get_selected_paths()` where
@@ -336,6 +370,18 @@ impl App {
         // (user URL may omit username/port that were resolved from SSH config)
         let remote_dest = Self::vfs_path_with_connection(&vfs_current_path, parsed_dest.path);
 
+        // The request below carries one entry; several go one by one through
+        // the batch, which asks the server about each destination.
+        if sources.len() > 1 {
+            let operation = BatchOperation::new(operation_type, sources, PathBuf::from(remote_url))
+                .with_source_location(SourceLocation::Vfs {
+                    manager: vfs_manager,
+                    directory: vfs_current_path,
+                });
+            self.process_batch_operation(operation);
+            return Ok(());
+        }
+
         let is_move = operation_type == BatchOperationType::Move;
         let total_files = sources.len();
 
@@ -359,7 +405,11 @@ impl App {
             let modal =
                 ConflictModal::new(source, &PathBuf::from(vfs_dest.to_url_string()), remaining);
             self.state.pending_action = Some(PendingAction::ContinueBatchOperation {
-                operation: BatchOperation::new(operation_type, sources, PathBuf::from(remote_url)),
+                operation: BatchOperation::new(operation_type, sources, PathBuf::from(remote_url))
+                    .with_source_location(SourceLocation::Vfs {
+                        manager: vfs_manager,
+                        directory: vfs_current_path,
+                    }),
             });
             self.state.active_modal = Some(ActiveModal::Conflict(Box::new(modal)));
             return Ok(());
@@ -412,7 +462,7 @@ impl App {
     ///    - If it exists as a file or a dangling symlink — conflict (return
     ///      dest path + exists=true)
     ///    - If doesn't exist — use as-is (rename)
-    fn resolve_remote_dest(
+    pub(in crate::app::modal) fn resolve_remote_dest(
         &self,
         remote_dest: &VfsPath,
         source_name: &str,
@@ -460,7 +510,7 @@ impl App {
     /// Find VFS manager from an existing connected FileManager panel.
     /// Returns None if no panel is connected to the target remote.
     /// Also returns the panel's VfsPath for connection info normalization.
-    fn find_connected_vfs_manager(
+    pub(in crate::app::modal) fn find_connected_vfs_manager(
         &self,
         remote_path: &termide_vfs::VfsPath,
     ) -> Option<(
