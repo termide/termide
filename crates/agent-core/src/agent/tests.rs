@@ -1081,6 +1081,82 @@ fn a_second_empty_cut_off_or_loop_stops_the_run() {
     }
 }
 
+/// What oMLX ends a reply with when it cannot parse a tool call, after the
+/// calls it did parse: `calls` of them.
+fn malformed_call_reply(calls: Vec<(&str, &str, serde_json::Value)>) -> AssistantMessage {
+    AssistantMessage {
+        error_message: Some(
+            "Model output contains an unrecoverable tool call. Previously delivered tool calls must not be executed again on retry.".into(),
+        ),
+        ..tool_reply(calls, StopReason::Error)
+    }
+}
+
+#[test]
+fn a_malformed_tool_call_runs_nothing_and_is_asked_again() {
+    let echo = Arc::new(EchoTool::default());
+    let mut tools = ToolRegistry::new();
+    tools.insert(echo.clone());
+    let (mut agent, _) = agent(
+        ScriptedProvider::new(vec![
+            malformed_call_reply(vec![("1", "echo", json!({"text": "parsed"}))]),
+            tool_reply(
+                vec![("2", "echo", json!({"text": "again"}))],
+                StopReason::ToolUse,
+            ),
+            text_reply("Done."),
+        ]),
+        tools,
+    );
+    let events = collect(&mut agent, "go", &mut NoHooks);
+
+    // The call that came before the broken one is not run: the model writes
+    // the reply's calls anew.
+    assert_eq!(*echo.executed.lock().unwrap(), vec!["2".to_string()]);
+    let Message::Assistant(cut) = &agent.messages()[1] else {
+        panic!("expected the cut reply");
+    };
+    assert!(cut.tool_calls().next().is_none());
+    assert_ne!(cut.stop_reason, StopReason::Error);
+    let Message::User(nudge) = &agent.messages()[2] else {
+        panic!("expected the nudge");
+    };
+    assert!(nudge.plain_text().contains("could not parse"));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, AgentEvent::MalformedToolCall)));
+    let Some(Message::Assistant(last)) = agent.messages().last() else {
+        panic!("expected the answer last");
+    };
+    assert_eq!(last.plain_text(), "Done.");
+}
+
+#[test]
+fn a_second_malformed_tool_call_ends_the_run_with_its_error() {
+    let (mut agent, _) = agent(
+        ScriptedProvider::new(vec![
+            malformed_call_reply(Vec::new()),
+            malformed_call_reply(Vec::new()),
+            text_reply("never"),
+        ]),
+        ToolRegistry::new(),
+    );
+    let events = collect(&mut agent, "go", &mut NoHooks);
+
+    assert_eq!(
+        events
+            .iter()
+            .filter(|e| matches!(e, AgentEvent::MalformedToolCall))
+            .count(),
+        1
+    );
+    let Some(Message::Assistant(last)) = agent.messages().last() else {
+        panic!("expected the failed reply last");
+    };
+    assert_eq!(last.stop_reason, StopReason::Error);
+    assert!(matches!(events.last(), Some(AgentEvent::AgentEnd)));
+}
+
 #[test]
 fn provider_error_halts_the_run() {
     let (mut agent, _) = agent(

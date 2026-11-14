@@ -661,6 +661,7 @@ agent_notice_restarted_after_stop = "エージェントを再起動しました:
 agent_notice_goal_stopped_failed = "ターンが失敗したため目標を停止しました"
 agent_notice_empty_cut_off_retry = "応答が出力上限に達し、使える内容がありませんでした。モデルにより小さな手順を求めます"
 agent_notice_empty_cut_off_stopped = "応答が再び出力上限に達し、使える内容がないため停止しました。どう進めるかモデルに指示してください。"
+agent_notice_malformed_call_retry = "サーバーがツール呼び出しを解析できませんでした。この応答の呼び出しは実行せず、モデルに書き直しを求めています"
 agent_notice_reasoning_budget_retry = "推論が予算を超えました。推論なしでモデルに再度尋ねます"
 agent_notice_reasoning_budget_stopped = "推論が再び予算を超えたため停止しました。どう進めるかモデルに指示してください。"
 agent_notice_compacting = "会話を圧縮中…"

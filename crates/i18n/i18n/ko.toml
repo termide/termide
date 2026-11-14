@@ -661,6 +661,7 @@ agent_notice_restarted_after_stop = "에이전트를 다시 시작했습니다: 
 agent_notice_goal_stopped_failed = "턴 실패로 목표 중지됨"
 agent_notice_empty_cut_off_retry = "응답이 쓸 만한 내용 없이 출력 한도에 도달했습니다. 모델에 더 작은 단계를 요청합니다"
 agent_notice_empty_cut_off_stopped = "응답이 다시 쓸 만한 내용 없이 출력 한도에 도달해 중지되었습니다. 모델에 진행 방법을 알려 주세요."
+agent_notice_malformed_call_retry = "서버가 도구 호출을 해석하지 못했습니다. 이 응답의 호출은 실행하지 않았고 모델에 다시 작성하도록 요청했습니다"
 agent_notice_reasoning_budget_retry = "추론이 예산을 넘었습니다. 추론 없이 모델에 다시 묻습니다"
 agent_notice_reasoning_budget_stopped = "추론이 다시 예산을 넘어 중지되었습니다. 모델에 진행 방법을 알려 주세요."
 agent_notice_compacting = "대화 압축 중…"

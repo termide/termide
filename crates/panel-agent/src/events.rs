@@ -704,6 +704,10 @@ impl AgentPanel {
                     self.notice(t.agent_notice_empty_cut_off_stopped(), NoticeKind::Warn);
                 }
             }
+            AgentEvent::MalformedToolCall => self.notice(
+                termide_i18n::t().agent_notice_malformed_call_retry(),
+                NoticeKind::Warn,
+            ),
             AgentEvent::ReasoningBudget { retrying, .. } => {
                 let t = termide_i18n::t();
                 if retrying {

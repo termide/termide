@@ -556,6 +556,11 @@ pub enum AgentEvent {
         budget: u64,
         retrying: bool,
     },
+    /// The server could not parse a tool call the model wrote and ended the
+    /// call with an error, as oMLX does. The loop runs none of
+    /// the reply's calls, tells the model and calls it once more. Emitted
+    /// only then: a second failure of the turn ends the run with the error.
+    MalformedToolCall,
     /// The loop stopped early on a pause request with work still pending, so
     /// the run can be resumed. Not emitted on a natural finish.
     Paused,
@@ -1158,6 +1163,16 @@ impl Agent {
                     EMPTY_CUT_OFF_NUDGE
                 };
                 self.push(Message::User(UserMessage::text(nudge)), emit);
+                emit(AgentEvent::MessageStart {
+                    prompt_tokens: Some(context_tokens(&self.messages)),
+                });
+                continue;
+            }
+            if !retried && !cancel.is_cancelled() && is_malformed_tool_call(&reply) {
+                self.push(Message::Assistant(cut_reasoning(reply, usize::MAX)), emit);
+                emit(AgentEvent::MalformedToolCall);
+                retried = true;
+                self.push(Message::User(UserMessage::text(MALFORMED_CALL_NUDGE)), emit);
                 emit(AgentEvent::MessageStart {
                     prompt_tokens: Some(context_tokens(&self.messages)),
                 });
@@ -1856,6 +1871,29 @@ fn reasoning_used_the_limit(reply: &AssistantMessage) -> bool {
         0 => reasoned >= 8 * 1024,
         output => reasoned as u64 >= output,
     }
+}
+
+/// What the model is told after a reply whose tool call the server could not
+/// parse; none of the reply's calls were run.
+const MALFORMED_CALL_NUDGE: &str = "Your last reply had a tool call the server could not parse (broken JSON or arguments cut off), so none of its tool calls were run. Make the call again with valid arguments, one call with short arguments if you can (a long file goes in parts).";
+
+/// A reply the server ended with an error because it could not parse a tool
+/// call the model wrote. oMLX reports it in the stream with the code
+/// `invalid_tool_call` or `incomplete_tool_call` and a message that says the
+/// output "contains an unrecoverable tool call"; only the message reaches
+/// the reply. Asking again is not repeating the request: the model is told,
+/// and writes the call anew.
+fn is_malformed_tool_call(reply: &AssistantMessage) -> bool {
+    reply.stop_reason == StopReason::Error
+        && reply.error_message.as_deref().is_some_and(|message| {
+            [
+                "unrecoverable tool call",
+                "invalid_tool_call",
+                "incomplete_tool_call",
+            ]
+            .iter()
+            .any(|marker| message.contains(marker))
+        })
 }
 
 /// A reply cut off by the output limit with no answer and no tool call:

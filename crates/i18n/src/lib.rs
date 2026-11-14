@@ -1162,6 +1162,7 @@ pub trait Translation: Send + Sync {
     /// the model asked again / the run stopped after a second one.
     fn agent_notice_empty_cut_off_retry(&self) -> &str;
     fn agent_notice_empty_cut_off_stopped(&self) -> &str;
+    fn agent_notice_malformed_call_retry(&self) -> &str;
     fn agent_notice_reasoning_budget_retry(&self) -> &str;
     fn agent_notice_reasoning_budget_stopped(&self) -> &str;
     fn agent_notice_model_list_unavailable_fmt(&self, error: &str) -> String;

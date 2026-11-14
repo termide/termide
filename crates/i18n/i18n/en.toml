@@ -695,6 +695,7 @@ agent_notice_restarted_after_stop = "agent restarted: stopped before its first r
 agent_notice_goal_stopped_failed = "goal stopped after a failed turn"
 agent_notice_empty_cut_off_retry = "the reply ran to the output limit with nothing usable; the model is asked for a smaller step"
 agent_notice_empty_cut_off_stopped = "the reply ran to the output limit with nothing usable again and was stopped. Tell the model how to proceed."
+agent_notice_malformed_call_retry = "the server could not parse a tool call; none of the reply's calls ran and the model is asked to write it again"
 agent_notice_reasoning_budget_retry = "the reasoning ran past its budget; the model is asked again without reasoning"
 agent_notice_reasoning_budget_stopped = "the reasoning ran past its budget again and was stopped. Tell the model how to proceed."
 agent_notice_compacting = "compacting the conversation…"

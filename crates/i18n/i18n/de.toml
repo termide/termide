@@ -662,6 +662,7 @@ agent_notice_restarted_after_stop = "Agent neu gestartet: vor seiner ersten Antw
 agent_notice_goal_stopped_failed = "Ziel nach fehlgeschlagener Runde gestoppt"
 agent_notice_empty_cut_off_retry = "die Antwort lief ohne brauchbares Ergebnis in das Ausgabelimit; das Modell wird um einen kleineren Schritt gebeten"
 agent_notice_empty_cut_off_stopped = "die Antwort lief erneut ohne brauchbares Ergebnis in das Ausgabelimit und wurde gestoppt. Sagen Sie dem Modell, wie es weitergehen soll."
+agent_notice_malformed_call_retry = "der Server konnte einen Werkzeugaufruf nicht lesen; keiner der Aufrufe der Antwort lief, das Modell soll ihn neu schreiben"
 agent_notice_reasoning_budget_retry = "das Nachdenken überschritt sein Budget; das Modell wird ohne Nachdenken erneut gefragt"
 agent_notice_reasoning_budget_stopped = "das Nachdenken überschritt sein Budget erneut und wurde gestoppt. Sagen Sie dem Modell, wie es weitergehen soll."
 agent_notice_compacting = "Gespräch wird verdichtet…"

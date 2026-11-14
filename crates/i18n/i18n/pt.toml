@@ -662,6 +662,7 @@ agent_notice_restarted_after_stop = "agente reiniciado: parado antes da primeira
 agent_notice_goal_stopped_failed = "objetivo parado após um turno com falha"
 agent_notice_empty_cut_off_retry = "a resposta chegou ao limite de saída sem nada utilizável; o modelo é solicitado a dar um passo menor"
 agent_notice_empty_cut_off_stopped = "a resposta chegou novamente ao limite de saída sem nada utilizável e foi interrompida. Diga ao modelo como prosseguir."
+agent_notice_malformed_call_retry = "o servidor não conseguiu interpretar uma chamada de ferramenta; nenhuma chamada da resposta foi executada e o modelo deve escrevê-la de novo"
 agent_notice_reasoning_budget_retry = "o raciocínio ultrapassou o orçamento; o modelo é consultado de novo sem raciocínio"
 agent_notice_reasoning_budget_stopped = "o raciocínio ultrapassou novamente o orçamento e foi interrompido. Diga ao modelo como prosseguir."
 agent_notice_compacting = "compactando a conversa…"

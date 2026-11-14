@@ -662,6 +662,7 @@ agent_notice_restarted_after_stop = "ajan yeniden başlatıldı: ilk yanıtında
 agent_notice_goal_stopped_failed = "başarısız bir turdan sonra hedef durduruldu"
 agent_notice_empty_cut_off_retry = "yanıt kullanılabilir bir şey üretmeden çıktı sınırına ulaştı; modelden daha küçük bir adım isteniyor"
 agent_notice_empty_cut_off_stopped = "yanıt yine kullanılabilir bir şey üretmeden çıktı sınırına ulaştı ve durduruldu. Modele nasıl devam edeceğini söyleyin."
+agent_notice_malformed_call_retry = "sunucu bir araç çağrısını çözümleyemedi; yanıttaki çağrıların hiçbiri çalıştırılmadı, modelden onu yeniden yazması istendi"
 agent_notice_reasoning_budget_retry = "akıl yürütme bütçesini aştı; modele akıl yürütmeden yeniden soruluyor"
 agent_notice_reasoning_budget_stopped = "akıl yürütme yine bütçesini aştı ve durduruldu. Modele nasıl devam edeceğini söyleyin."
 agent_notice_compacting = "konuşma sıkıştırılıyor…"

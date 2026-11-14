@@ -764,6 +764,7 @@ impl Translation for RuntimeTranslation {
         agent_notice_goal_stopped,
         agent_notice_empty_cut_off_retry,
         agent_notice_empty_cut_off_stopped,
+        agent_notice_malformed_call_retry,
         agent_notice_reasoning_budget_retry,
         agent_notice_reasoning_budget_stopped,
         agent_notice_goal_usage,

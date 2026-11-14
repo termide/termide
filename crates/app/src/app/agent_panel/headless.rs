@@ -279,6 +279,12 @@ pub fn run_agent_headless(
             AgentEvent::EmptyCutOff { retrying } if stream => {
                 line(serde_json::json!({ "type": "cut_off", "retrying": retrying }));
             }
+            AgentEvent::MalformedToolCall if stream => {
+                if let Some(text) = thinking.finish() {
+                    line(serde_json::json!({ "type": "thinking", "text": text }));
+                }
+                line(serde_json::json!({ "type": "malformed_call" }));
+            }
             AgentEvent::ReasoningBudget { budget, retrying } if stream => {
                 if let Some(text) = thinking.finish() {
                     line(serde_json::json!({ "type": "thinking", "text": text }));

@@ -2696,6 +2696,13 @@ reasoning is what used the limit up (about as many bytes of it as the reply
 spent tokens), the model is told to act on what it knows and the next call is
 made without reasoning, as after a loop.
 
+A server may fail to parse a tool call the model wrote — broken JSON,
+arguments cut off — and end the reply with an error, as oMLX does
+(`unrecoverable tool call`). The agent then runs none of that reply's calls,
+the panel warns, the model is told its call could not be parsed and asked to
+write it again; a second such reply in the same step stops the run with the
+error.
+
 [Recall](#recall)'s solver uses `recall.md`: the system prompt of the call that
 answers from the search results, with the question line in its front matter
 (`request:`, `{{question}}` for the queries); the results follow it. Reword it
@@ -3072,7 +3079,8 @@ characters, so a run killed mid-call still leaves it in the log, and a call's ar
 the same way as `tool_input` lines; a call cut
 for going round in circles adds a `loop` line with the `thoughts` it kept
 returning to and whether it is `retrying`, and a reply that ends at the
-output limit with nothing in it adds a `cut_off` line. `usage` counts the last answer's
+output limit with nothing in it adds a `cut_off` line, and one whose tool call the
+server could not parse a `malformed_call` line. `usage` counts the last answer's
 tokens, `usage_total` the whole run's.
 
 ```

@@ -662,6 +662,7 @@ agent_notice_restarted_after_stop = "agen dimulai ulang: dihentikan sebelum bala
 agent_notice_goal_stopped_failed = "tujuan dihentikan setelah giliran gagal"
 agent_notice_empty_cut_off_retry = "balasan mencapai batas keluaran tanpa hasil yang bisa dipakai; model diminta mengambil langkah lebih kecil"
 agent_notice_empty_cut_off_stopped = "balasan kembali mencapai batas keluaran tanpa hasil yang bisa dipakai dan dihentikan. Beri tahu model cara melanjutkan."
+agent_notice_malformed_call_retry = "server tidak dapat membaca panggilan alat; tidak ada panggilan dari balasan itu yang dijalankan dan model diminta menulisnya lagi"
 agent_notice_reasoning_budget_retry = "penalaran melampaui anggarannya; model ditanya lagi tanpa penalaran"
 agent_notice_reasoning_budget_stopped = "penalaran kembali melampaui anggarannya dan dihentikan. Beri tahu model cara melanjutkan."
 agent_notice_compacting = "memadatkan percakapan…"

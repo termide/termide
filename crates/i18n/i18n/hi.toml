@@ -662,6 +662,7 @@ agent_notice_restarted_after_stop = "एजेंट फिर से शुर�
 agent_notice_goal_stopped_failed = "विफल टर्न के बाद लक्ष्य रोका गया"
 agent_notice_empty_cut_off_retry = "उत्तर बिना किसी उपयोगी परिणाम के आउटपुट सीमा तक पहुँच गया; मॉडल से छोटा कदम उठाने को कहा गया है"
 agent_notice_empty_cut_off_stopped = "उत्तर फिर से बिना उपयोगी परिणाम के आउटपुट सीमा तक पहुँचा और रोक दिया गया। मॉडल को बताएँ कि आगे कैसे बढ़ना है।"
+agent_notice_malformed_call_retry = "सर्वर एक टूल कॉल को पार्स नहीं कर सका; उत्तर की कोई कॉल नहीं चलाई गई और मॉडल से उसे फिर से लिखने को कहा गया"
 agent_notice_reasoning_budget_retry = "तर्क अपने बजट से आगे निकल गया; मॉडल से बिना तर्क के फिर पूछा गया है"
 agent_notice_reasoning_budget_stopped = "तर्क फिर से अपने बजट से आगे निकल गया और रोक दिया गया। मॉडल को बताएँ कि आगे कैसे बढ़ना है।"
 agent_notice_compacting = "बातचीत संक्षिप्त की जा रही है…"
