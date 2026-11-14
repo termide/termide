@@ -81,7 +81,7 @@ under it that starts with the other panels' directories.
 freedesktop.org trash on Linux, the Recycle Bin on Windows — after a prompt
 that starts on **Yes**; take items back with the system's own tools.
 `Shift+Delete` deletes them for good, and its prompt starts on **No**. Remote
-locations (SFTP, FTP, SMB) have no trash: there `Delete` deletes for good too,
+locations (SFTP, FTP) have no trash: there `Delete` deletes for good too,
 and the prompt says so. A file system the system cannot trash on, such as
 some network mounts, reports an error; `Shift+Delete` deletes there. The keys
 are `delete` and `delete_permanently` under `[file_manager.keybindings]`.

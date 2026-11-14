@@ -67,7 +67,7 @@ URL 语法和认证配置请参见[远程文件系统](vfs.md)。ZIP 和 tar 压
 
 `Delete` 将选中的项目移到系统回收站（macOS 的废纸篓、Linux 的 freedesktop.org
 回收站、Windows 的回收站），确认提示默认选中 **是**；可用系统自带工具恢复。
-`Shift+Delete` 永久删除，其提示默认选中 **否**。远程位置（SFTP、FTP、SMB）没有回收站：
+`Shift+Delete` 永久删除，其提示默认选中 **否**。远程位置（SFTP、FTP）没有回收站：
 在那里 `Delete` 也会永久删除，提示中会说明。系统无法使用回收站的文件系统（如某些网络挂载）
 会报错；在那里请用 `Shift+Delete`。对应的键为 `[file_manager.keybindings]` 中的
 `delete` 和 `delete_permanently`。
