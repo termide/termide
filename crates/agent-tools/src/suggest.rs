@@ -200,6 +200,7 @@ mod tests {
             tool: Default::default(),
             resume: None,
             running: None,
+            inherited: None,
         }
     }
 
@@ -223,6 +224,7 @@ mod tests {
             tool: Default::default(),
             resume: None,
             running: None,
+            inherited: None,
         }
     }
 
@@ -283,6 +285,7 @@ mod tests {
             tool: Default::default(),
             resume: None,
             running: None,
+            inherited: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -376,6 +379,7 @@ mod tests {
             tool: Default::default(),
             resume: None,
             running: None,
+            inherited: None,
         };
         let answerer = std::thread::spawn(move || {
             let envelope = rx.recv().unwrap();
@@ -422,6 +426,7 @@ mod tests {
             tool: Default::default(),
             resume: None,
             running: None,
+            inherited: None,
         };
         let result = SuggestCommandTool.execute(
             &call(json!({ "command": "gh issue comment 59" })),
@@ -456,6 +461,7 @@ mod tests {
             tool: Default::default(),
             resume: None,
             running: None,
+            inherited: None,
         };
         let result = SuggestCommandTool.execute(
             &call(json!({ "command": "ls" })),

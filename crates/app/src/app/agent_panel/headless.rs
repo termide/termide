@@ -154,7 +154,7 @@ pub fn run_agent_headless(
     super::publish_shell(shell);
     let web = shared_web(&settings.web, &dirs);
     let recall = recall_tool(settings, &dirs, project_root, cwd);
-    let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
+    let mut tools = base_tools(&dirs, Some(&web), Some(&recall), false);
     restrict_tools(&mut tools, &definition.spec.tools, name);
     let skills = dirs.model_skills();
     if !skills.is_empty() {
@@ -201,7 +201,7 @@ pub fn run_agent_headless(
         .with_compaction_prompts(dirs.compaction_prompts());
     let cancel = CancelToken::new();
     let refusals = dirs.refusals();
-    let mut hooks = PermissionHooks::new(
+    let permissions = PermissionHooks::new(
         rules,
         Box::new(AutoDenyPrompter::new(refusals.unattended_headless.clone())),
     )
@@ -209,6 +209,17 @@ pub fn run_agent_headless(
         reviewer_setup(settings, &dirs, name).classifier(cancel.clone()),
     ))
     .with_refusals(refusals);
+    // The approved command hooks run around the calls as in a panel; a
+    // project's hook never approved there does not run here either.
+    let approvals = termide_agent_core::approvals::Approvals::new(
+        termide_project::approvals_path(project_root).ok(),
+    );
+    let mut chain: Vec<Box<dyn termide_agent_core::Hooks>> = Vec::new();
+    if let Some(factory) = super::command_hooks(&dirs, &approvals, cwd) {
+        chain.push(factory());
+    }
+    chain.push(Box::new(permissions));
+    let mut hooks = termide_agent_core::ChainedHooks::new(chain);
     let stdout = std::io::stdout();
     let mut wrote_text = false;
     // Tool calls in call order: (id, name, subject, is_error), for the JSON

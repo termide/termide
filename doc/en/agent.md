@@ -91,10 +91,12 @@ name, so two connections to one server keep separate counts, and two termide
 processes do not share it. A CLI agent sends its requests itself, so it has
 none.
 `reasoning_budget` bounds how many tokens one model call may spend reasoning,
-counted from the streamed reasoning at four characters a token. A model that
+counted from the streamed reasoning at four characters a token. A Claude model
+that takes a thinking budget is also asked for no more. A model that
 reasons past it is cut there and asked again at once without reasoning, to act
-on what it knows, as after a [loop](#service-prompts); a second cut in the same
-step stops the run. Some local models now and then reason until the output
+on what it knows, as after a [loop](#service-prompts); a model that cannot stop
+reasoning is asked at its least, still under the budget. A second cut in the
+same step stops the run. Some local models now and then reason until the output
 limit stops them, which at a local server's speed is minutes with nothing to
 show; a budget of about a third of the output limit caps that waste and leaves
 ordinary reasoning alone. The default, 0, sets no limit. It applies to
@@ -1232,8 +1234,9 @@ with **jobs**, which lists and stops what the agent set going (see
 [What the agent set going](#what-the-agent-set-going)).
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
-`fetch`, `web_search`, `skill`, a look-only `shell` command such as `rg` or
-`git log` — and `task` delegations run side by side; each ends in the
+`fetch`, `web_search`, `skill`, `agents`, `jobs` listing, `debug` reading the
+session's state, `terminals` looking at a session, a look-only `shell` command
+such as `rg` or `git log` — and `task` delegations run side by side; each ends in the
 transcript as it finishes, and the model gets their results in the order it
 asked. Their permission decisions still take turns, before any of them runs.
 Any other call runs alone: those before it have ended when it starts, and
@@ -1966,7 +1969,9 @@ A rule's `deny` refuses as in every mode. The broad `allow` rules — a
 whole tool (`"*" = "allow"`), a wildcard after an interpreter, a script
 runner or a wrapper (`python3*`, `npm run *`, `make*`, `env *`), an `allow`
 for `task` — are set aside, since they would let any program run past the
-reviewer; narrow ones such as `"cargo test*"` still pass without it.
+reviewer; narrow ones such as `"cargo test*"` still pass without it. So a
+card in `auto` does not offer "allow always" for what such a rule would
+say: allowing it there lasts for the session.
 
 What the reviewer is told is `system/classify.md` in the configuration's
 agent directory: what to allow, what to block, and the shape of the verdict.
@@ -2947,7 +2952,7 @@ An MCP tool asks for permission like a command: it runs in `all`, goes to
 the reviewer in `auto`, and asks elsewhere unless a rule covers it in
 `configured`. In `plan` the configured rules count in full for it, and a
 tool its server marks `readOnlyHint` runs without asking (see
-[Plan mode](#plan-mode)). "Allow
+[Plan mode](#plan-mode)). The card shows all the arguments of the call. "Allow
 always" writes a rule for the tool name:
 
 ```toml
@@ -2980,7 +2985,10 @@ also carries `"result": {"text", "is_error"}`, and `{"text": "…"}` rewrites
 what the model sees; exit code 2 turns the result into an error with
 standard error as its text. Hooks run in name order before the permission
 rules; a hook that fails in any other way, or exceeds its timeout, is logged
-and ignored, so a broken hook never stops the agent.
+and ignored, so a broken hook never stops the agent. Arguments a hook
+rewrites go back through plan mode and the tools switched off in the
+session, so a rewrite gets no call past them. Hooks run around the calls of
+the panel's subagents and of `termide --prompt` too.
 
 A project's hook waits for approval as a project's MCP server does: the panel
 says so when it opens, it does not run until `/trust <name>`, and the approval
@@ -3090,7 +3098,8 @@ what the rules leave open, and a call it cannot decide is refused; in
 `configured`, add `allow` rules for the exact commands and paths the task
 needs, or set `mode = "all"` for unattended work. Plan mode has no meaning
 without the panel and is treated as `auto`, and an external (`command`) agent cannot be run this
-way.
+way. There are no terminal sessions either: `shell` runs each command on its
+own, without `session` and `background`, and `terminals` is not offered.
 
 `termide --recall "<query>"` runs the [recall](#recall) search without the UI
 and prints the results — the text the agent would read — or, with

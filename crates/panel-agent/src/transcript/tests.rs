@@ -1895,6 +1895,10 @@ fn terminal_calls_head_with_their_action() {
         format!("$ {} py · Ctrl+C", t.agent_tool_terminals_send())
     );
     assert_eq!(
+        text(json!({ "action": "send", "session": "py", "keys": "Ctrl+C" })),
+        format!("$ {} py · Ctrl+C", t.agent_tool_terminals_send())
+    );
+    assert_eq!(
         text(json!({ "action": "interrupt", "session": "build" })),
         format!("$ {} build", t.agent_tool_terminals_interrupt())
     );

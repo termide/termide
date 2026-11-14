@@ -1,0 +1,1 @@
+- **A refused, filtered or overflowing answer says so.** When a Claude model declined to answer or ran out of its context window, or an OpenAI-compatible provider's content filter cut the answer short, the turn ended as if the model had simply finished, often with nothing to show. It now ends as an error that names the reason.

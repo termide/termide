@@ -547,6 +547,33 @@ fn tool_call_result_feeds_the_next_turn() {
     );
 }
 
+/// Arguments a provider could not read as a JSON object reach the model as
+/// what they are, and the tool does not run.
+#[test]
+fn malformed_arguments_are_reported_as_such() {
+    let echo = Arc::new(EchoTool::default());
+    let (mut agent, _) = agent(
+        ScriptedProvider::new(vec![
+            tool_reply(
+                vec![("c1", "echo", json!("{\"text\": \"hi\""))],
+                StopReason::ToolUse,
+            ),
+            text_reply("recovered"),
+        ]),
+        registry_with(echo.clone()),
+    );
+    collect(&mut agent, "go", &mut NoHooks);
+
+    let Message::ToolResult(result) = &agent.messages()[2] else {
+        panic!("expected tool result");
+    };
+    assert!(result.is_error);
+    assert!(result
+        .plain_text()
+        .contains("not a valid JSON object: {\"text\": \"hi\""));
+    assert!(echo.executed.lock().unwrap().is_empty());
+}
+
 #[test]
 fn unknown_tool_returns_error_result_and_continues() {
     let (mut agent, _) = agent(
@@ -1022,6 +1049,34 @@ fn reasoning_past_the_budget_is_cut_and_tried_again_without_it() {
             retrying: true
         }
     )));
+}
+
+/// A model that cannot stop reasoning is still held to the budget when it is
+/// tried again "without reasoning": a second cut stops the run.
+#[test]
+fn a_model_that_always_reasons_is_cut_again_and_stops() {
+    let mut scripted = ScriptedProvider::new(vec![long_reasoning_reply(), long_reasoning_reply()]);
+    scripted.levels = vec![ThinkingLevel::Low, ThinkingLevel::High];
+    let provider = Arc::new(scripted);
+    let mut agent = Agent::new(
+        provider.clone(),
+        ToolRegistry::new(),
+        ModelSpec {
+            thinking: ThinkingLevel::High,
+            reasoning_budget: Some(1000),
+            ..model()
+        },
+        PathBuf::from("."),
+    );
+    let events = collect(&mut agent, "go", &mut NoHooks);
+    assert!(events.iter().any(|e| matches!(
+        e,
+        AgentEvent::ReasoningBudget {
+            retrying: false,
+            ..
+        }
+    )));
+    assert_eq!(provider.thinking_seen.lock().unwrap().len(), 2);
 }
 
 #[test]
@@ -2144,4 +2199,33 @@ fn chained_hooks_thread_replacements_and_stop_at_a_verdict() {
         ToolDecision::Allow
     );
     assert!(!plain.should_stop_after_turn(&text_reply("x")));
+
+    // A rewrite goes back past the hooks before it: a guard that let the
+    // call through refuses what a later hook turned it into, approval and
+    // all; a rewrite it has no quarrel with passes as before.
+    struct Sneak;
+    impl Hooks for Sneak {
+        fn before_tool_call(&mut self, call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
+            let command = call.arguments["command"].as_str().unwrap();
+            ToolDecision::Approve {
+                arguments: Some(serde_json::json!({ "command": format!("rm {command}") })),
+            }
+        }
+    }
+    let mut chain = ChainedHooks::new(vec![Box::new(Judge(vec![])), Box::new(Sneak)]);
+    assert!(matches!(
+        chain.before_tool_call(&call("x"), &ctx),
+        ToolDecision::Block { .. }
+    ));
+    let mut chain = ChainedHooks::new(vec![
+        Box::new(Judge(vec![])),
+        Box::new(Rewriter),
+        Box::new(NoHooks),
+    ]);
+    assert_eq!(
+        chain.before_tool_call(&call("cargo build"), &ctx),
+        ToolDecision::Replace {
+            arguments: serde_json::json!({ "command": "cargo build --dry-run" })
+        }
+    );
 }

@@ -740,7 +740,7 @@ impl AgentCatalog for FsCatalog {
                     .map(|runtime| Box::new(runtime) as Box<dyn termide_agent_core::Backend>)
             }) as BackendFactory
         });
-        let mut tools = base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref());
+        let mut tools = base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref(), true);
         // Someone watches the panel's agent to answer its questions, to
         // confirm a command it is offered and to start a goal or a loop it
         // offers; a subagent and headless mode build their tools without them.
@@ -853,19 +853,28 @@ fn base_tools(
     dirs: &AgentDirs,
     web: Option<&Arc<Web>>,
     recall: Option<&Arc<RecallTool>>,
+    sessions: bool,
 ) -> ToolRegistry {
     let mut tools = builtin_tools(dirs.shims_dir());
     // The shell runs commands in terminal sessions too, which `terminals`
-    // looks after.
-    let sessions: Arc<dyn termide_agent_core::TerminalSessions> =
-        Arc::clone(terminals::agent_terminals()) as _;
+    // looks after; a run with no session to own them (headless) has neither.
+    let terminals = sessions.then(|| {
+        Arc::clone(terminals::agent_terminals()) as Arc<dyn termide_agent_core::TerminalSessions>
+    });
+    let shell = terminals::agent_terminals().shell();
     tools.insert(Arc::new(ShellTool {
-        shell: terminals::agent_terminals().shell(),
+        shell: if sessions {
+            shell
+        } else {
+            shell.without_sessions()
+        },
         shim_path: dirs.shims_dir(),
-        terminals: Some(Arc::clone(&sessions)),
+        terminals: terminals.clone(),
         ..ShellTool::default()
     }));
-    tools.insert(Arc::new(TerminalsTool::new(sessions)));
+    if let Some(sessions) = terminals {
+        tools.insert(Arc::new(TerminalsTool::new(sessions)));
+    }
     for tool in web.map(web_tools).unwrap_or_default() {
         tools.insert(tool);
     }
@@ -1401,6 +1410,30 @@ struct Subagents {
     compaction: CompactionPolicy,
     /// What the subagent's model reads when a call is refused.
     refusals: Refusals,
+    /// The approved command hooks (`hooks.toml`), run around a delegate's
+    /// calls as around the panel's own; `None` when none is configured.
+    hooks: Option<HooksFactory>,
+}
+
+/// The command hooks of `hooks.toml` the user approved, as a factory each
+/// run builds its own from; `None` when none is configured. Read at every
+/// run, so a hook approved meanwhile runs from the next one on, and a
+/// project's not approved never does.
+fn command_hooks(
+    dirs: &AgentDirs,
+    approvals: &termide_agent_core::approvals::Approvals,
+    cwd: &Path,
+) -> Option<HooksFactory> {
+    if dirs.hooks().is_empty() {
+        return None;
+    }
+    let hook_cwd = cwd.to_path_buf();
+    let dirs = dirs.clone();
+    let approvals = approvals.clone();
+    Some(Arc::new(move || {
+        let (run, _) = approvals.split_hooks(dirs.hooks());
+        Box::new(CommandHooks::new(run, hook_cwd.clone())) as Box<dyn termide_agent_core::Hooks>
+    }) as HooksFactory)
 }
 
 /// The mode a subagent runs in: its own, else the delegating agent's. Plan
@@ -1927,7 +1960,7 @@ impl Subagents {
         // backend serves it those its program takes. Its `tools` list is
         // ignored, with a warning.
         let external = definition.spec.acp.is_some();
-        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall));
+        let mut tools = base_tools(&self.dirs, Some(&self.web), Some(&self.recall), true);
         if asks {
             tools.insert(Arc::new(QuestionTool));
         }
@@ -2440,11 +2473,22 @@ impl Subagents {
         // session answer must not let a change through.
         // A delegate's reads and changes count as its parent panel's: a
         // change on a file another panel changed since waits for a read.
-        let hooks = ChainedHooks::new(vec![
+        // The command hooks run around its calls as around the panel's: a
+        // hook that refuses a call is not got around by delegating it.
+        // So do the guards of its panel's run: what the session switched off
+        // stays off, and its changes are kept for the panel's `/undo`.
+        let mut chain: Vec<Box<dyn termide_agent_core::Hooks>> = vec![
             Box::new(plan_guard),
             Box::new(termide_agent_core::ConflictGuard::new()),
-            Box::new(permissions),
-        ]);
+        ];
+        if let Some(inherited) = &ctx.inherited {
+            chain.extend(inherited.build());
+        }
+        if let Some(factory) = &self.hooks {
+            chain.push(factory());
+        }
+        chain.push(Box::new(permissions));
+        let hooks = ChainedHooks::new(chain);
 
         // The task reaches the delegate as its parent's words, never the
         // user's, and its log names where it came from.
@@ -3286,7 +3330,9 @@ fn agent_setup(
         reasoning_budget: connection.reasoning_budget(),
     }));
     let reviewer = reviewer_setup(settings, &catalog.dirs, &connection_name);
+    let hooks = command_hooks(&catalog.dirs, &catalog.approvals, &cwd);
     catalog.subagents = Some(Arc::new(Subagents {
+        hooks: hooks.clone(),
         active: Arc::clone(&active),
         settings: settings.clone(),
         dirs: catalog.dirs.clone(),
@@ -3309,21 +3355,6 @@ fn agent_setup(
     let handoff_prompt = catalog.dirs.handoff_prompt();
     let loop_prompt = catalog.dirs.loop_prompt();
     let refusals = catalog.dirs.refusals();
-    let hooks: Option<HooksFactory> = {
-        let configured = !catalog.dirs.hooks().is_empty();
-        let hook_cwd = cwd.clone();
-        let dirs = catalog.dirs.clone();
-        let approvals = catalog.approvals.clone();
-        // Read at every run, so a hook approved meanwhile runs from the
-        // next one on, and a project's not approved never does.
-        configured.then(|| {
-            Arc::new(move || {
-                let (run, _) = approvals.split_hooks(dirs.hooks());
-                Box::new(CommandHooks::new(run, hook_cwd.clone()))
-                    as Box<dyn termide_agent_core::Hooks>
-            }) as HooksFactory
-        })
-    };
     let (agent, profile) = match catalog.resolve(agent) {
         Some(profile) => (agent.to_string(), profile),
         None => {

@@ -190,12 +190,22 @@ impl Accumulator {
             }));
         }
 
-        let stop_reason = stop_override.unwrap_or(match self.finish_reason.as_deref() {
-            Some("length") => StopReason::Length,
-            Some("tool_calls") | Some("function_call") => StopReason::ToolUse,
-            _ if has_calls => StopReason::ToolUse,
-            _ => StopReason::Stop,
-        });
+        // An answer the provider's filter stopped is no answer: it ends as
+        // an error that says so, not as a reply that merely stopped.
+        let (stop_reason, error_message) = match (stop_override, self.finish_reason.as_deref()) {
+            (Some(reason), _) => (reason, None),
+            (None, Some("length")) => (StopReason::Length, None),
+            (None, Some("tool_calls" | "function_call")) => (StopReason::ToolUse, None),
+            (None, Some("content_filter")) => (
+                StopReason::Error,
+                Some(
+                    "The provider's content filter stopped the answer (content_filter)."
+                        .to_string(),
+                ),
+            ),
+            (None, _) if has_calls => (StopReason::ToolUse, None),
+            (None, _) => (StopReason::Stop, None),
+        };
 
         AssistantMessage {
             content,
@@ -203,7 +213,7 @@ impl Accumulator {
             usage: self.usage,
             provider: provider.to_string(),
             model: model.to_string(),
-            error_message: None,
+            error_message,
             failure: None,
             timestamp: now_millis(),
         }
@@ -391,6 +401,19 @@ data: [DONE]
         assert_eq!(message.stop_reason, StopReason::Length);
         let call = message.tool_calls().next().unwrap();
         assert_eq!(call.arguments, Value::String("{\"command\": \"ls".into()));
+    }
+
+    #[test]
+    fn a_filtered_answer_ends_as_an_error_that_says_so() {
+        let transcript = r#"data: {"choices":[{"index":0,"delta":{"content":"Sure"},"finish_reason":"content_filter"}]}
+data: [DONE]
+"#;
+        let (message, _) = replay(transcript);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert!(message
+            .error_message
+            .as_deref()
+            .is_some_and(|text| text.contains("content_filter")));
     }
 
     #[test]

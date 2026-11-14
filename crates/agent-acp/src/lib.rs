@@ -2599,6 +2599,15 @@ impl Shared {
             .map_err(|error| format!("cannot write to the agent: {error}"))
     }
 
+    /// Answer a request of the agent's. Nothing else can be done when the
+    /// write fails — the agent's input is gone — but the log says so, since
+    /// the agent may wait on the answer that never came.
+    fn reply(&self, message: &Value) {
+        if let Err(error) = self.write(message) {
+            log::warn!("acp {}: an answer was lost: {error}", self.name);
+        }
+    }
+
     fn read_loop(self: Arc<Self>, reader: impl Read) {
         for line in BufReader::new(reader).lines() {
             let Ok(line) = line else { break };
@@ -2690,7 +2699,7 @@ impl Shared {
                     Some(option) => json!({ "outcome": "selected", "optionId": option }),
                     None => json!({ "outcome": "cancelled" }),
                 };
-                let _ = self.write(
+                self.reply(
                     &json!({ "jsonrpc": "2.0", "id": id, "result": { "outcome": outcome } }),
                 );
             }
@@ -2704,7 +2713,7 @@ impl Shared {
             }
             "fs/read_text_file" => {
                 let reply = read_text_file(&self.cwd, params);
-                let _ = self.write(&rpc_reply(id, reply));
+                self.reply(&rpc_reply(id, reply));
             }
             "fs/write_text_file" => {
                 let reply = write_text_file(&self.cwd, params);
@@ -2726,10 +2735,10 @@ impl Shared {
                         });
                     }
                 }
-                let _ = self.write(&rpc_reply(id, reply));
+                self.reply(&rpc_reply(id, reply));
             }
             _ => {
-                let _ = self.write(&json!({
+                self.reply(&json!({
                     "jsonrpc": "2.0", "id": id,
                     "error": { "code": -32601, "message": format!("{method} is not supported by termide") }
                 }));

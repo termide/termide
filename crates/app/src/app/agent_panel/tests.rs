@@ -227,7 +227,7 @@ fn every_built_in_tool_has_its_shipped_text() {
         profile: tmp.path().join("browser"),
     });
     let recall = recall_tool(&AiSettings::default(), &dirs, tmp.path(), tmp.path());
-    let mut tools = base_tools(&dirs, Some(&web), Some(&recall));
+    let mut tools = base_tools(&dirs, Some(&web), Some(&recall), true);
     // Offered only with a search engine, which this test leaves out.
     tools.insert(Arc::new(termide_agent_web::WebSearchTool::new(web)));
     tools.insert(Arc::new(QuestionTool));
@@ -1394,6 +1394,7 @@ fn a_stopped_parent_stops_its_subagent_at_once() {
         reasoning: ThinkingLevel::Off,
         compaction: settings.compaction,
         refusals: Refusals::default(),
+        hooks: None,
     };
     let cancel = CancelToken::new();
     let stopper = {
@@ -1451,6 +1452,163 @@ fn a_stopped_parent_stops_its_subagent_at_once() {
     assert_eq!(kinds, vec!["start", "end"]);
 }
 
+/// A model that reads a file, then says what it was told.
+struct ReadsThenTells(std::sync::Mutex<Vec<String>>);
+
+impl Provider for ReadsThenTells {
+    fn name(&self) -> &str {
+        "reads"
+    }
+
+    fn stream(
+        &self,
+        request: &termide_agent_core::Request<'_>,
+        _: &mut dyn FnMut(termide_agent_core::StreamEvent),
+        _: &CancelToken,
+    ) -> AssistantMessage {
+        use termide_agent_core::{AssistantContent, StopReason};
+        let results: Vec<String> = request
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::ToolResult(result) => Some(result.plain_text()),
+                _ => None,
+            })
+            .collect();
+        let first = results.is_empty();
+        self.0.lock().unwrap().extend(results);
+        let content = if first {
+            AssistantContent::ToolCall(ToolCall {
+                id: "r1".into(),
+                name: "read".into(),
+                arguments: serde_json::json!({ "path": "notes.txt" }),
+                extra_content: None,
+            })
+        } else {
+            AssistantContent::Text {
+                text: "done".into(),
+            }
+        };
+        AssistantMessage {
+            content: vec![content],
+            stop_reason: if first {
+                StopReason::ToolUse
+            } else {
+                StopReason::Stop
+            },
+            usage: termide_agent_core::Usage::default(),
+            provider: "reads".into(),
+            model: request.model.id.clone(),
+            error_message: None,
+            failure: None,
+            timestamp: 0,
+        }
+    }
+}
+
+/// A hook that refuses every call.
+struct Refuses;
+
+impl termide_agent_core::Hooks for Refuses {
+    fn before_tool_call(
+        &mut self,
+        _: &ToolCall,
+        _: &ToolContext,
+    ) -> termide_agent_core::ToolDecision {
+        termide_agent_core::ToolDecision::Block {
+            reason: "held by a hook".into(),
+        }
+    }
+}
+
+/// The command hooks run around a delegate's calls as around the panel's:
+/// a call a hook refuses is not got through by delegating it.
+#[test]
+fn a_subagents_calls_go_through_the_command_hooks() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("notes.txt"), "the notes").unwrap();
+    let dirs = AgentDirs::new(tmp.path(), Some(tmp.path()), None);
+    let settings = with_cloud();
+    let provider = Arc::new(ReadsThenTells(std::sync::Mutex::new(Vec::new())));
+    let mut active = active_on(&settings, "local");
+    active.provider = provider.clone();
+    let subagents = Subagents {
+        active: Arc::new(std::sync::RwLock::new(active)),
+        settings: settings.clone(),
+        recall: recall_tool(&settings, &dirs, tmp.path(), tmp.path()),
+        web: shared_web(&settings.web, &dirs),
+        dirs,
+        mcp: Connections::new(std::collections::BTreeMap::new()),
+        cwd: tmp.path().to_path_buf(),
+        project_root: tmp.path().to_path_buf(),
+        session_dir: None,
+        rules: settings.permissions.clone(),
+        mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
+        max_tokens: settings.output_limit(),
+        reasoning: ThinkingLevel::Off,
+        compaction: settings.compaction,
+        refusals: Refusals::default(),
+        hooks: Some(Arc::new(|| {
+            Box::new(Refuses) as Box<dyn termide_agent_core::Hooks>
+        })),
+    };
+    let result = subagents.run(
+        "lead",
+        &SubagentTask {
+            agent: DEFAULT_AGENT,
+            prompt: "read the notes",
+            call: "c1",
+            background: false,
+        },
+        &ToolContext::new(tmp.path().to_path_buf()),
+        &CancelToken::new(),
+        &mut |_| {},
+    );
+    assert_eq!(result.answer, Ok("done".to_string()));
+    {
+        let seen = provider.0.lock().unwrap();
+        assert!(
+            seen.iter().any(|text| text.contains("held by a hook")),
+            "{seen:?}"
+        );
+        assert!(
+            !seen.iter().any(|text| text.contains("the notes")),
+            "{seen:?}"
+        );
+    }
+
+    // The guards the delegating panel's run hands down hold its calls too.
+    provider.0.lock().unwrap().clear();
+    let subagents = Subagents {
+        hooks: None,
+        ..subagents
+    };
+    let ctx = ToolContext {
+        inherited: Some(termide_agent_core::InheritedHooks(Arc::new(|| {
+            vec![Box::new(Refuses) as Box<dyn termide_agent_core::Hooks>]
+        }))),
+        ..ToolContext::new(tmp.path().to_path_buf())
+    };
+    let result = subagents.run(
+        "lead",
+        &SubagentTask {
+            agent: DEFAULT_AGENT,
+            prompt: "read the notes",
+            call: "c2",
+            background: false,
+        },
+        &ctx,
+        &CancelToken::new(),
+        &mut |_| {},
+    );
+    assert_eq!(result.answer, Ok("done".to_string()));
+    let seen = provider.0.lock().unwrap();
+    assert!(
+        seen.iter().any(|text| text.contains("held by a hook")),
+        "{seen:?}"
+    );
+}
+
 /// Subagents whose model says nothing until stopped.
 fn silent_subagents(root: &Path) -> Arc<Subagents> {
     let dirs = AgentDirs::new(root, Some(root), None);
@@ -1473,6 +1631,7 @@ fn silent_subagents(root: &Path) -> Arc<Subagents> {
         reasoning: ThinkingLevel::Off,
         compaction: settings.compaction,
         refusals: Refusals::default(),
+        hooks: None,
     })
 }
 
@@ -1911,6 +2070,7 @@ done"#;
         reasoning: ThinkingLevel::Off,
         compaction: settings.compaction,
         refusals: Refusals::default(),
+        hooks: None,
     };
     let definition = catalog.dirs.agent("search");
     let (tools, _, prompt) = subagents.toolset("search", &definition, false);
@@ -1987,6 +2147,7 @@ fn an_agent_tools_list_governs_the_task_tool() {
         reasoning: ThinkingLevel::Off,
         compaction: settings.compaction,
         refusals: Refusals::default(),
+        hooks: None,
     }));
 
     assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);

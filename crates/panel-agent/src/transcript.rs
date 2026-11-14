@@ -2243,6 +2243,8 @@ fn tool_headline(
                             .filter_map(|key| key.as_str())
                             .collect::<Vec<_>>()
                             .join("+"),
+                        // The tool takes one key name as a plain string too.
+                        Value::String(key) => key.clone(),
                         _ => String::new(),
                     };
                     let subject = match (typed.trim(), keys.as_str()) {
