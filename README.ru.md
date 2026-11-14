@@ -615,7 +615,7 @@ Issues и pull requests приветствуются. Один раз на кл�
 ## Благодарности
 
 Построено на:
-- [ratatui](https://github.com/ratatui-org/ratatui) - Фреймворк терминального UI
+- [ratatui](https://github.com/ratatui/ratatui) - Фреймворк терминального UI
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Кроссплатформенная работа с терминалом
 - [portable-pty](https://github.com/wez/wezterm/tree/main/pty) - Реализация PTY
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - Подсветка синтаксиса

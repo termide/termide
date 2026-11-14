@@ -598,7 +598,7 @@ command = "./run.py"
 ## 致谢
 
 使用以下技术构建：
-- [ratatui](https://github.com/ratatui-org/ratatui) - 终端 UI 框架
+- [ratatui](https://github.com/ratatui/ratatui) - 终端 UI 框架
 - [crossterm](https://github.com/crossterm-rs/crossterm) - 跨平台终端控制
 - [portable-pty](https://github.com/wez/wezterm/tree/main/pty) - PTY 实现
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - 语法高亮

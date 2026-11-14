@@ -544,11 +544,13 @@ model, §4b) and `all` (everything passes). A rule's `deny` and
 `ask` hold in every mode, so a stricter mode never protects less; answers
 given for the session count everywhere but in `all`, and "allow always" is
 offered only in `configured` and `auto`, the modes the configured rules count
-in. `auto` is the default, as it is Claude Code's starting mode: a
+in, and in `plan` for an MCP tool, which plan mode would otherwise ask about
+every time. `auto` is the default, as it is Claude Code's starting mode: a
 session starts without card after card, and the reviewer, not a prompt,
 stands between the agent and what the rules leave open.
 Prompt answers: allow once, allow for the session, allow always in the project
-or everywhere (a rule in the project `.termide` or the global config), deny,
+or everywhere (a rule in termide's data directory under the project,
+`trust/<project>/permissions.toml`, or in the global config), deny,
 deny for the session. This is the Claude Code / OpenCode shape with ACP's
 answer set; it stays small and is data-driven, so the panel and a future ACP
 client render the same prompt.
@@ -1543,12 +1545,14 @@ without the panel, the way the subagent runner is. Streaming: text deltas to
 stdout so the answer pipes cleanly, tool activity and errors to stderr, one
 tool line per call. Permissions: no one to prompt, so `AutoDenyPrompter` as in
 a subagent — the run does only what the rules and mode already allow, and
-`mode = "all"` or `allow` rules opt into more; plan mode collapses to ask,
+`mode = "all"` or `allow` rules opt into more; plan mode becomes `auto`,
 and an ACP agent is refused (no headless permission surface, as for
 subagents). `-` reads the prompt from stdin. Exit code: 0, 1 on a failed
 message, 130 on abort. `--output json` prints one object instead of streaming
 — answer, stop reason, model, provider, usage and the tool calls — for a
 consumer that parses rather than reads, and `--output stream-json` prints one
 object per line as the run unfolds (`tool_use`/`tool_result`/`message`, then a
-`result`), for one that follows it live. Not done yet: `--agent` delegation to
-the `task` tool (headless carries the built-in tools and skills only).
+`result`), for one that follows it live. `--agent` picks the agent
+definition the run uses. Not done yet: delegation through the `task` tool, and
+terminal sessions (headless carries the built-in tools and skills only, and
+`shell` without `session` and `background`).

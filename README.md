@@ -610,7 +610,7 @@ This project is licensed under the MIT License.
 ## Acknowledgments
 
 Built with:
-- [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
+- [ratatui](https://github.com/ratatui/ratatui) - Terminal UI framework
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Cross-platform terminal manipulation
 - [portable-pty](https://github.com/wez/wezterm/tree/main/pty) - PTY implementation
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - Syntax highlighting

@@ -94,7 +94,9 @@ the mock model's edit result, for a file no editor has, and the new ones
 alone for one an editor has; both need rust-analyzer on `PATH`), `delegate` (a background subagent's row and report, on the model
 `[ai.subagents]` names), `agent-message-limit` (past
 `max_agent_messages` the card asking whether to allow more, and the task
-going on once allowed), `goal` (`/goal` with its judge on the model
+going on once allowed), `agent-send-message` (a message to another
+agent asking every time, its card showing whom it goes to and all it says),
+`goal` (`/goal` with its judge on the model
 `[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
 to the mode worked in, past the ones `Shift+Tab` passes through) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in
@@ -106,7 +108,9 @@ limit and the bell on the AI page) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
 a session opened from its list), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its
-layout, a copy opened beside it) and `project-move-agent` (a moved
+layout, a copy opened beside it), `project-button-menu` (a project's button in the
+menu bar opening its menu: the current project's root path, another's
+switch) and `project-move-agent` (a moved
 project's agent session found again at the new path, and its git worktree
 still linked) and `viewer` (the HTML and Markdown previews from `F3`: a
 search with its match count, a same-page link followed, `G` to the last
@@ -127,9 +131,10 @@ manager at the project root).
   run is under way: `wait-gone "[■]"` before `quit`, or quitting asks to
   confirm.
 - **Keys are legacy xterm sequences.** The harness leaves termide's kitty
-  keyboard query unanswered, so chords that need the kitty protocol
-  (`Ctrl+Shift+…`, `Ctrl+.`) cannot be sent; `key` refuses `Ctrl` with a
-  key that has no legacy encoding.
+  keyboard query unanswered. Modifiers on a special key (`Ctrl+Shift+Up`,
+  `Alt+F11`) go as xterm's modifier codes, but a printable key with `Ctrl`
+  needs a legacy control code: `Ctrl+Shift+A` arrives as `Ctrl+A`, and
+  `key` refuses a chord with none, such as `Ctrl+.`.
 
 ## Limits
 

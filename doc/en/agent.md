@@ -1661,7 +1661,7 @@ through on its own.
 
 Every call keeps who decided it, in the session log and so across a resume:
 the rules, plan mode, a hook, the auto mode reviewer with its reason, no one
-(a headless run, or a subagent of one, with no one to ask), or you — with the
+(a headless run, or a subagent with no one to put a card to), or you — with the
 answer you gave and how long it holds. An unfolded call shows it on a line
 of its own (`✓ you allowed it for this session`, `✗ the auto mode reviewer
 blocked it: …`); a call the rules allowed without asking, the common case,
