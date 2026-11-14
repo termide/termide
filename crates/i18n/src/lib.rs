@@ -2139,7 +2139,6 @@ pub trait Translation: Send + Sync {
     fn op_file_uploaded(&self) -> &str;
     fn op_partial_deleted(&self) -> &str;
     fn op_directory_deleted(&self) -> &str;
-    fn op_file_deleted(&self) -> &str;
     fn lsp_code_action_no_changes(&self) -> &str;
     fn git_file_staged(&self) -> &str;
     fn git_file_unstaged(&self) -> &str;

@@ -1276,7 +1276,6 @@ op_cancelled = "ยกเลิกการดำเนินการแล้�
 op_file_uploaded = "อัปโหลดไฟล์แล้ว"
 op_partial_deleted = "ลบไฟล์ที่ไม่สมบูรณ์แล้ว"
 op_directory_deleted = "ลบไดเรกทอรีแล้ว"
-op_file_deleted = "ลบไฟล์แล้ว"
 lsp_code_action_no_changes = "การดำเนินการโค้ดไม่ได้เปลี่ยนแปลงอะไร"
 git_file_staged = "Stage ไฟล์แล้ว"
 git_file_unstaged = "Unstage ไฟล์แล้ว"

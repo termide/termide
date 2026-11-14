@@ -19,3 +19,4 @@ mod select_handler;
 mod unpack_handler;
 
 pub(in crate::app) use path_suggestions::PathSuggestions;
+pub(in crate::app) use select_handler::cancel_copy_buttons;

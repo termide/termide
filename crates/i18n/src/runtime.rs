@@ -1405,7 +1405,6 @@ impl Translation for RuntimeTranslation {
         op_file_uploaded,
         op_partial_deleted,
         op_directory_deleted,
-        op_file_deleted,
         lsp_code_action_no_changes,
         git_file_staged,
         git_file_unstaged,

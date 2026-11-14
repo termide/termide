@@ -545,17 +545,11 @@ impl App {
                                 {
                                     // Show cleanup modal similar to check_local_copy_progress
                                     let all_dest_paths = operation.completed_destinations.clone();
-                                    let t = termide_i18n::t();
-                                    let buttons = if all_dest_paths.is_empty() {
-                                        vec![t.ui_ok().to_string()]
-                                    } else {
-                                        vec![
-                                            t.op_delete_copied().to_string(),
-                                            t.op_keep_copied().to_string(),
-                                        ]
-                                    };
+                                    let buttons = super::modal::cancel_copy_buttons(
+                                        !all_dest_paths.is_empty(),
+                                    );
                                     let modal = termide_modal::ChoiceModal::buttons_only(
-                                        t.op_cancelled_title(),
+                                        termide_i18n::t().op_cancelled_title(),
                                         buttons,
                                     );
                                     self.state.active_modal =
