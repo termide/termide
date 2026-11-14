@@ -486,15 +486,22 @@ fn serve_connection(instance: Arc<Instance>, stream: UnixStream) -> Result<()> {
 
             // One line the hosted process parses on reattach: the terminal it
             // is now being looked at through.
-            let _ = std::fs::write(
-                paths::term_path(&instance.id)?,
+            // Without it the process goes on drawing for the old terminal.
+            let term_path = paths::term_path(&instance.id)?;
+            if let Err(e) = std::fs::write(
+                &term_path,
                 format!(
                     "{term}\nkitty={}\nssh={}\nvs16={}\n",
                     u8::from(caps.kitty),
                     u8::from(caps.via_ssh),
                     u8::from(caps.vs16_wide)
                 ),
-            );
+            ) {
+                log::warn!(
+                    "Failed to tell the hosted process the new terminal ({}): {e}",
+                    term_path.display()
+                );
+            }
             let _ = registry::set_attached(&instance.id, true);
 
             instance.send(&ServerFrame::Attached);

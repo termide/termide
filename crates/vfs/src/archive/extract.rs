@@ -352,12 +352,19 @@ fn check_size(read: u64, declared: u64) -> VfsResult<()> {
 /// Applied through the open handle, so it reaches the file just written.
 fn apply_metadata(file: &File, meta: &VfsMetadata) {
     if let Some(modified) = meta.modified {
-        let _ = file.set_modified(modified);
+        if let Err(error) = file.set_modified(modified) {
+            log::debug!("extract: cannot set the modification time: {error}");
+        }
     }
     #[cfg(unix)]
     if let Some(mode) = meta.permissions {
         use std::os::unix::fs::PermissionsExt;
-        let _ = file.set_permissions(fs::Permissions::from_mode(mode & 0o777));
+        if let Err(error) = file.set_permissions(fs::Permissions::from_mode(mode & 0o777)) {
+            log::warn!(
+                "extract: cannot set the permissions {:o}: {error}",
+                mode & 0o777
+            );
+        }
     }
 }
 
