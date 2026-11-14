@@ -140,7 +140,7 @@ nix profile install github:termide/termide
 
 ### 前置条件
 
-- **Rust 1.70+**（stable 工具链）
+- **Rust**：`rust-toolchain.toml` 中固定的版本
 - **Git**
 
 ### 使用 Cargo

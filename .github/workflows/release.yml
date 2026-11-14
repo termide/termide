@@ -29,8 +29,9 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      # The same gates as ci.yml, over the whole workspace; clippy covers
-      # `cargo check`.
+      # fmt, clippy and the tests over the whole workspace, on Linux only;
+      # ci.yml runs the full set (machete, nextest, docs, macOS) on every
+      # push. clippy covers `cargo check`.
       - name: Run clippy (strict mode)
         run: cargo clippy --workspace --all-targets -- -D warnings
 

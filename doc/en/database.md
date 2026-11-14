@@ -169,8 +169,10 @@ so there is no error loop.
 
 ## Limitations (current)
 
-- Read-only — no editing, no arbitrary SQL.
+- No arbitrary SQL: values are edited one cell at a time.
 - Exotic column types (JSON, arrays, UUID, timestamps, unsigned integers) are
-  shown as empty/`NULL` in this version; common scalar types render fully.
+  shown as empty/`NULL` in this version, in a row's copies too; common scalar
+  types render fully. A row whose primary key has such a type cannot be edited:
+  the edit finds no row.
 - Database selection is supported when the URL omits it; schema selection
   (PostgreSQL) still defaults to the current schema.

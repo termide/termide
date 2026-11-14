@@ -142,7 +142,7 @@ nix profile install github:termide/termide
 
 ### Prerequisites
 
-- **Rust 1.70+** (stable toolchain)
+- **Rust**: the version pinned in `rust-toolchain.toml`
 - **Git**
 
 ### Using Cargo
