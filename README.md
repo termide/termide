@@ -22,7 +22,7 @@ Terminal editors cover the code; everything around it — files on remote hosts,
 | Move files between hosts | mc, ranger, scp | Dual-pane file manager with SFTP / FTP |
 | Edit code and configs | vim, nano | Editor with LSP |
 | Review and commit | lazygit, tig | Git status, log and diff panels |
-| Find what is eating the box | htop, ss | Resource monitor |
+| See what is hogging the machine | htop, ss | Resource monitor |
 | Look into a database | sqlite3, psql | Database viewer |
 | Ask a model to change code | aider, Claude Code | Agent panel, or those agents inside it |
 
