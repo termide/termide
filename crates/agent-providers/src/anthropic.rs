@@ -819,7 +819,7 @@ fn parse_arguments(raw: &str) -> Value {
 }
 
 fn build_agent(connect: Duration, read: Duration) -> ureq::Agent {
-    ureq::AgentBuilder::new()
+    termide_http::agent_builder()
         .timeout_connect(connect)
         .timeout_read(read)
         .user_agent(concat!("termide-agent/", env!("CARGO_PKG_VERSION")))

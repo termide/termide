@@ -557,7 +557,7 @@ impl Connections {
     ) {
         let url = config.url.clone().unwrap_or_default();
         let timeout = Duration::from_secs(config.timeout_secs);
-        let agent = ureq::AgentBuilder::new()
+        let agent = termide_http::agent_builder()
             .timeout_connect(timeout)
             .timeout_read(timeout)
             .user_agent(concat!("termide-agent/", env!("CARGO_PKG_VERSION")))

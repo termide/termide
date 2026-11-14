@@ -13,6 +13,7 @@ serde_json.workspace = true
 ureq.workspace = true
 
 termide-agent-core = { path = "../agent-core" }
+termide-http = { path = "../http" }
 
 [dev-dependencies]
 termide-agent-tools = { path = "../agent-tools" }

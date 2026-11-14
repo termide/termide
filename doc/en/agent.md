@@ -120,6 +120,13 @@ service is the one everyone sending that address shares and its usage shows in
 the open; turn the switch off to stay unattributed. The headers come from the
 endpoint's own entry, so an endpoint changed under a switch left on sends
 nothing — the switch alone never names termide anywhere.
+TLS is verified against both the certificates bundled with termide and the
+system's trust store, so an endpoint behind a corporate proxy or with its own
+certificate authority works once that authority is trusted on the machine.
+`SSL_CERT_FILE` (a PEM file) or `SSL_CERT_DIR` set in termide's environment
+replaces the system store with that file or directory; the bundled set still
+applies. Verification cannot be switched off. The same holds for MCP servers
+over HTTP and for `fetch`.
 Everything else in `[ai]` — the output limit, reasoning,
 permissions, compaction and the rest — applies whichever connection a session
 runs on.

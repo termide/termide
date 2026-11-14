@@ -154,7 +154,7 @@ impl HttpClient {
                 url,
                 headers,
                 timeout,
-                agent: ureq::AgentBuilder::new()
+                agent: termide_http::agent_builder()
                     .timeout_connect(timeout)
                     .timeout_read(timeout)
                     .timeout_write(timeout)
@@ -379,7 +379,7 @@ impl Inner {
     /// again when it drops, resuming from the last event seen, until `stop`.
     /// A server that offers none answers `405`, and that is the end of it.
     fn push_stream(&self, stop: &AtomicBool) {
-        let agent = ureq::AgentBuilder::new()
+        let agent = termide_http::agent_builder()
             .timeout_connect(self.timeout)
             .timeout_read(STREAM_IDLE)
             .user_agent(concat!("termide-agent/", env!("CARGO_PKG_VERSION")))
@@ -532,7 +532,7 @@ impl Drop for HttpClient {
         let spawned = std::thread::Builder::new()
             .name(format!("termide-mcp-{}-close", inner.name))
             .spawn(move || {
-                let agent = ureq::AgentBuilder::new()
+                let agent = termide_http::agent_builder()
                     .timeout_connect(Duration::from_secs(2))
                     .timeout_read(Duration::from_secs(2))
                     .build();

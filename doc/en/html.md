@@ -103,7 +103,8 @@ the image preview, other text → shown verbatim). A failed fetch shows its erro
 in that viewer; closing the viewer drops the fetch. The fetch is deliberately
 bounded — this is a reader, not a browser engine:
 
-- `http` and `https` only; TLS is verified (no opt-out).
+- `http` and `https` only; TLS is verified against the bundled and the system's
+  trusted certificates (no opt-out).
 - 15-second timeout; at most 5 redirects, and an `https` origin is never
   downgraded to `http`.
 - Responses over 8 MiB are rejected.

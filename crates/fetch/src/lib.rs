@@ -8,8 +8,8 @@
 //! - **Redirects:** at most [`MAX_REDIRECTS`], followed manually so an
 //!   `https` origin is never downgraded to `http`.
 //! - **Body cap:** [`MAX_BODY`] bytes; larger responses are rejected.
-//! - **TLS:** verified via the platform/webpki roots (ureq + rustls); there is
-//!   no switch to disable verification.
+//! - **TLS:** verified against the bundled and the system roots (see
+//!   `termide_http`); there is no switch to disable verification.
 //!
 //! Embedded resources (e.g. `<img>`) are *not* fetched — the viewer renders
 //! images as a pictogram, so a page cannot phone home through this client.
@@ -73,7 +73,7 @@ pub fn fetch(raw_url: &str) -> Result<Fetched, String> {
     }
 
     // Manual redirect handling (redirects(0)) so each hop's scheme is checked.
-    let agent = ureq::AgentBuilder::new()
+    let agent = termide_http::agent_builder()
         .timeout(TIMEOUT)
         .redirects(0)
         .user_agent(USER_AGENT)

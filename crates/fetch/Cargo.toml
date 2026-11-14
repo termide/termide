@@ -8,5 +8,6 @@ repository.workspace = true
 description = "Minimal, security-bounded HTTP(S) GET for termide's viewer panels"
 
 [dependencies]
+termide-http = { path = "../http" }
 ureq.workspace = true
 url.workspace = true
