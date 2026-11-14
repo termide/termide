@@ -1,8 +1,8 @@
 //! Dynamic help text generator from keybindings configuration.
 //!
 //! Generates localized help text based on actual keybindings from config,
-//! formatted as pseudo-graphic tables that span the full width. The help
-//! window and the help panel both show it.
+//! formatted as pseudo-graphic tables that span the full width, for the
+//! help window.
 
 use ratatui::{
     style::Style,

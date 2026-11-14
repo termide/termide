@@ -86,7 +86,7 @@ impl HotkeyTable {
         None
     }
 
-    /// Get display string for an action (for help panel).
+    /// Get display string for an action (for the help window).
     /// Returns empty string if action has no bindings.
     pub fn display(&self, action: &str) -> String {
         if let Some(bindings) = self.bindings.get(action) {

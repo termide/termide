@@ -661,7 +661,7 @@ pub fn menu_shortcut(kb: &termide_config::GlobalKeybindings, key: &str) -> Optio
     };
     // Only the primary key: a menu row is a reminder, and "Alt+H, F1" costs
     // width while saying no more than "Alt+H" does. The full list stays
-    // visible in Settings and in the Help panel.
+    // visible in Settings and in the help window.
     binding
         .as_ref()
         .map(|b| b.display().to_string())
