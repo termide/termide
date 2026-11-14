@@ -98,26 +98,11 @@ fn test_handle_command_reload() {
 }
 
 #[test]
-fn test_handle_command_close_without_saving() {
-    let (mut editor, _file) = create_editor_with_content("hello");
-    editor.file_state.external_change_detected = true;
-
-    let result = editor.handle_command(PanelCommand::CloseWithoutSaving);
-    assert!(matches!(result, CommandResult::None));
-
-    // External change flag should be cleared
-    assert!(!editor.file_state.external_change_detected);
-}
-
-#[test]
 fn test_handle_command_not_applicable() {
     let mut editor = Editor::new();
 
     // Commands not applicable to Editor should return None
     let result = editor.handle_command(PanelCommand::Resize { rows: 24, cols: 80 });
-    assert!(matches!(result, CommandResult::None));
-
-    let result = editor.handle_command(PanelCommand::RefreshDirectory);
     assert!(matches!(result, CommandResult::None));
 
     let result = editor.handle_command(PanelCommand::SetFsWatchRoot {
@@ -187,7 +172,8 @@ fn test_large_file_viewport_navigation() {
     assert!(!editor.viewport().is_line_visible(30));
 
     // Navigate to middle of file
-    editor.set_cursor_line(4999);
+    editor.cursor.line = 4999;
+    editor.cursor.column = 0;
     editor
         .viewport
         .ensure_cursor_visible(&editor.cursor, editor.buffer.line_count());
@@ -195,7 +181,8 @@ fn test_large_file_viewport_navigation() {
     assert_eq!(editor.cursor.line, 4999);
 
     // Navigate to end
-    editor.set_cursor_line(9999);
+    editor.cursor.line = 9999;
+    editor.cursor.column = 0;
     editor
         .viewport
         .ensure_cursor_visible(&editor.cursor, editor.buffer.line_count());
@@ -235,12 +222,14 @@ fn test_large_file_edit_at_various_positions() {
     assert_eq!(editor.buffer.line(0).unwrap().chars().next().unwrap(), 'A');
 
     // Edit at middle
-    editor.set_cursor_line(499);
+    editor.cursor.line = 499;
+    editor.cursor.column = 0;
     let _ = editor.insert_char('M');
     assert!(editor.buffer.line(499).unwrap().starts_with('M'));
 
     // Edit at end
-    editor.set_cursor_line(999);
+    editor.cursor.line = 999;
+    editor.cursor.column = 0;
     let _ = editor.insert_char('Z');
     assert!(editor.buffer.line(999).unwrap().starts_with('Z'));
 
@@ -254,9 +243,11 @@ fn test_large_file_undo_redo() {
 
     // Make several edits
     let _ = editor.insert_char('X');
-    editor.set_cursor_line(499);
+    editor.cursor.line = 499;
+    editor.cursor.column = 0;
     let _ = editor.insert_char('Y');
-    editor.set_cursor_line(999);
+    editor.cursor.line = 999;
+    editor.cursor.column = 0;
     let _ = editor.insert_char('Z');
 
     // Undo all

@@ -2178,7 +2178,6 @@ pub trait Translation: Send + Sync {
     fn fv_invalid_remote_url_fmt(&self, error: &str) -> String;
     fn fv_temp_dir_failed_fmt(&self, error: &str) -> String;
     fn fv_download_failed_fmt(&self, error: &str) -> String;
-    fn nav_cannot_navigate_fmt(&self, path: &str) -> String;
     fn nav_no_such_path_fmt(&self, path: &str) -> String;
     fn plugin_stopped_fmt(&self, name: &str) -> String;
     fn plugin_gave_up_fmt(&self, name: &str, reason: &str) -> String;

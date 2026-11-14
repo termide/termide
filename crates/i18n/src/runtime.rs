@@ -3218,10 +3218,6 @@ impl Translation for RuntimeTranslation {
         self.format("fv_download_failed_fmt", &[("error", error)])
     }
 
-    fn nav_cannot_navigate_fmt(&self, path: &str) -> String {
-        self.format("nav_cannot_navigate_fmt", &[("path", path)])
-    }
-
     fn nav_no_such_path_fmt(&self, path: &str) -> String {
         self.format("nav_no_such_path_fmt", &[("path", path)])
     }

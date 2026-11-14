@@ -588,10 +588,6 @@ impl Panel for Editor {
                 let needs_redraw = self.check_git_diff_receiver();
                 CommandResult::NeedsRedraw(needs_redraw)
             }
-            PanelCommand::CheckExternalModification => {
-                self.check_external_modification();
-                CommandResult::NeedsRedraw(self.follow_disk_permissions())
-            }
             PanelCommand::GetFsWatchInfo => {
                 // For Editor, return file path info for watcher registration
                 let file_path = self.file_path().map(|p| p.to_path_buf());
@@ -661,12 +657,6 @@ impl Panel for Editor {
                     error: Some(e.to_string()),
                 },
             },
-            PanelCommand::CloseWithoutSaving => {
-                // Clear external change flag - the panel is being closed without saving
-                self.file_state.external_change_detected = false;
-                // Note: buffer.modified stays true but caller handles closing directly
-                CommandResult::None
-            }
             PanelCommand::MarkStale => {
                 self.is_stale = true;
                 CommandResult::None
@@ -743,7 +733,6 @@ impl Panel for Editor {
             PanelCommand::SetFsWatchRoot { .. }
             | PanelCommand::Resize { .. }
             | PanelCommand::SetHostFocus { .. }
-            | PanelCommand::RefreshDirectory
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }

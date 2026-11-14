@@ -1741,15 +1741,12 @@ impl Panel for Terminal {
             | PanelCommand::OnGitUpdate { .. }
             | PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
-            | PanelCommand::CheckExternalModification
             | PanelCommand::GetFsWatchInfo
             | PanelCommand::SetFsWatchRoot { .. }
             | PanelCommand::OnFsUpdate { .. }
             | PanelCommand::Reload
             | PanelCommand::GetModificationStatus
             | PanelCommand::Save
-            | PanelCommand::CloseWithoutSaving
-            | PanelCommand::RefreshDirectory
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }

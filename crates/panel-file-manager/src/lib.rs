@@ -533,15 +533,6 @@ impl FileManager {
         }
     }
 
-    /// Select an entry by name in the current directory
-    pub fn select_by_name(&mut self, name: &std::ffi::OsStr) {
-        let name_str = name.to_string_lossy();
-        if let Some(idx) = self.find_entry_index(&name_str) {
-            self.selected = idx;
-            self.adjust_scroll_offset(self.visible_height);
-        }
-    }
-
     /// Reload directory preserving selection (with debounce to prevent rapid reloads)
     pub fn reload_directory(&mut self) -> Result<()> {
         const RELOAD_DEBOUNCE_MS: u128 = 300;
@@ -795,7 +786,7 @@ impl Panel for FileManager {
                 }
                 CommandResult::NeedsRedraw(false)
             }
-            PanelCommand::Reload | PanelCommand::RefreshDirectory => {
+            PanelCommand::Reload => {
                 if self.reload_directory().is_ok() {
                     CommandResult::NeedsRedraw(true)
                 } else {
@@ -895,12 +886,10 @@ impl Panel for FileManager {
             // Commands not applicable to FileManager
             PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
-            | PanelCommand::CheckExternalModification
             | PanelCommand::Resize { .. }
             | PanelCommand::SetHostFocus { .. }
             | PanelCommand::GetModificationStatus
             | PanelCommand::Save
-            | PanelCommand::CloseWithoutSaving
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::UpdateRepoPaths { .. }
             | PanelCommand::ShowGitLog { .. }
@@ -2076,14 +2065,6 @@ mod tests {
             assert_eq!(watched_root, Some(root));
             assert!(is_git_repo);
         }
-    }
-
-    #[test]
-    fn test_handle_command_refresh_directory() {
-        let (mut fm, _temp_dir) = create_file_manager_in_temp();
-
-        let result = fm.handle_command(PanelCommand::RefreshDirectory);
-        assert!(result.needs_redraw());
     }
 
     #[test]

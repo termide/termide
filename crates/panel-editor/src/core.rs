@@ -450,12 +450,6 @@ impl Editor {
         &self.viewport
     }
 
-    /// Set cursor to specific line (for log viewer scroll-to-end).
-    pub fn set_cursor_line(&mut self, line: usize) {
-        self.cursor.line = line.min(self.buffer.line_count().saturating_sub(1));
-        self.cursor.column = 0;
-    }
-
     /// Scroll to end of document (word-wrap aware).
     /// Used by JournalPanel for auto-scroll functionality.
     pub fn scroll_to_document_end(&mut self) {

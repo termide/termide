@@ -1610,7 +1610,6 @@ terminal_create_failed_fmt = "สร้างเทอร์มินัลไ�
 fv_invalid_remote_url_fmt = "URL ระยะไกลไม่ถูกต้อง: {error}"
 fv_temp_dir_failed_fmt = "สร้างไดเรกทอรีชั่วคราวไม่สำเร็จ: {error}"
 fv_download_failed_fmt = "เริ่มดาวน์โหลดไม่สำเร็จ: {error}"
-nav_cannot_navigate_fmt = "ไปยังตำแหน่งนี้ไม่ได้: {path}"
 nav_no_such_path_fmt = "ไม่มีพาธนี้: {path}"
 plugin_stopped_fmt = "ปลั๊กอิน {name} หยุดทำงานแล้ว"
 plugin_gave_up_fmt = "ปลั๊กอิน {name} หยุดทำงานและจะไม่เริ่มใหม่: {reason}"

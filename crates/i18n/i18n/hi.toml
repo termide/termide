@@ -1610,7 +1610,6 @@ terminal_create_failed_fmt = "टर्मिनल बनाना विफल
 fv_invalid_remote_url_fmt = "अमान्य दूरस्थ URL: {error}"
 fv_temp_dir_failed_fmt = "अस्थायी डायरेक्टरी बनाना विफल: {error}"
 fv_download_failed_fmt = "डाउनलोड शुरू करना विफल: {error}"
-nav_cannot_navigate_fmt = "यहाँ नहीं जा सकते: {path}"
 nav_no_such_path_fmt = "ऐसा कोई पथ नहीं: {path}"
 plugin_stopped_fmt = "प्लगइन {name} रुक गया।"
 plugin_gave_up_fmt = "प्लगइन {name} रुक गया और दोबारा शुरू नहीं होगा: {reason}"

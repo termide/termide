@@ -611,9 +611,6 @@ pub enum PanelEvent {
     /// Request a UI redraw
     NeedsRedraw,
 
-    /// Request application quit
-    Quit,
-
     /// The panel's working directory changed on its own — a `cd` inside a
     /// terminal shell, which no navigation event covers. The app re-collects
     /// panel paths so watched roots and the git panels' repository list follow.
@@ -635,12 +632,6 @@ pub enum PanelEvent {
 
     /// Execute file in a new terminal
     ExecuteFile(PathBuf),
-
-    /// Run command in a new terminal
-    RunCommand {
-        command: String,
-        cwd: Option<PathBuf>,
-    },
 
     /// Start a debugger with the breakpoints set; `file` is the file the
     /// request came from, for a launch that needs no configuration.
@@ -745,27 +736,8 @@ pub enum PanelEvent {
     /// Open a remote file via VFS (URL format: "sftp://user@host/path")
     OpenRemoteFile(String),
 
-    /// Save file to disk
-    SaveFile(PathBuf),
-
-    /// Close current file/panel
-    CloseFile,
-
     /// Request close panel (with confirmation if needed)
     ClosePanel,
-
-    // === Navigation ===
-    /// Navigate file manager to path
-    NavigateTo(PathBuf),
-
-    /// Open path in new file manager panel, optionally selecting a file
-    OpenPath {
-        path: PathBuf,
-        select_file: Option<std::ffi::OsString>,
-    },
-
-    /// Go to specific line in editor
-    GotoLine(usize),
 
     // === Modal dialogs ===
     /// Show informational message
@@ -831,13 +803,6 @@ pub enum PanelEvent {
     /// `action` is open, so a panel may raise it whenever it notices.
     RefreshChecklist(ChecklistRefresh),
 
-    /// Show file conflict resolution modal
-    ShowConflict {
-        source: PathBuf,
-        destination: PathBuf,
-        remaining: usize,
-    },
-
     // === Status bar ===
     /// Set status bar message
     SetStatusMessage { message: String, is_error: bool },
@@ -859,9 +824,6 @@ pub enum PanelEvent {
     FileChangedOnDisk(PathBuf),
 
     // === Git integration ===
-    /// Request git status refresh for path
-    RefreshGitStatus(PathBuf),
-
     /// Execute git operation (push/pull) in background
     GitOperation {
         operation: GitOperationType,
@@ -894,24 +856,12 @@ pub enum PanelEvent {
     /// Copy text to clipboard
     CopyToClipboard(String),
 
-    /// Request paste from clipboard
-    RequestPaste,
-
     // === Panel management ===
-    /// Request focus on specific panel by name
-    FocusPanel(String),
-
     /// Request panel split
     SplitPanel {
         direction: SplitDirection,
         panel_name: String,
     },
-
-    /// Request next panel focus
-    NextPanel,
-
-    /// Request previous panel focus
-    PrevPanel,
 
     /// Open diagnostics panel (e.g., when clicking on diagnostic virtual line)
     OpenDiagnosticsPanel,
@@ -936,12 +886,6 @@ pub enum PanelEvent {
         anchor_x: u16,
         anchor_y: u16,
     },
-
-    /// Open or focus the operations panel
-    OpenOperationsPanel,
-
-    /// Open or focus the outline panel
-    OpenOutlinePanel,
 
     /// Open stash dropdown at button position
     OpenStashDropdown {

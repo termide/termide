@@ -112,18 +112,6 @@ impl App {
         Ok(())
     }
 
-    /// Handle RunCommand event - run command in a new terminal
-    pub(in crate::app) fn event_run_command(
-        &mut self,
-        command: String,
-        cwd: Option<PathBuf>,
-    ) -> Result<()> {
-        if let Err(e) = self.run_in_new_terminal(&command, cwd) {
-            log::error!("Failed to run command '{}' in a terminal: {}", command, e);
-        }
-        Ok(())
-    }
-
     /// Open a terminal panel in `cwd` and type `command` in it; the error
     /// when no terminal opened or the command could not be typed.
     pub(in crate::app) fn run_in_new_terminal(
@@ -550,42 +538,6 @@ impl App {
                 let error_msg = termide_i18n::t().fv_download_failed_fmt(&e.to_string());
                 log::error!("{}", error_msg);
                 self.show_error_modal(error_msg);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle SaveFile event - save file at given path
-    pub(super) fn event_save_file(&mut self, path: PathBuf) -> Result<()> {
-        // Store info needed for LSP notification (before mutable borrow)
-        let mut lsp_info: Option<(String, std::path::PathBuf)> = None;
-
-        if let Some(panel) = self.layout_manager.active_panel_mut() {
-            if let Some(editor) = panel.as_editor_mut() {
-                match editor.save_file_as(path.clone()) {
-                    Ok(()) => {
-                        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                        self.state
-                            .set_info(termide_i18n::t().status_file_saved(filename));
-
-                        // Collect LSP info for didSave notification
-                        if let Some(lang) = editor.lsp_language() {
-                            lsp_info = Some((lang.to_string(), path.clone()));
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Save failed: {}", e);
-                        self.show_error_modal(termide_i18n::t().status_error_save(&e.to_string()));
-                    }
-                }
-            }
-        }
-
-        // Send LSP didSave notification (triggers full analysis for semantic errors)
-        if let Some((lang, file_path)) = lsp_info {
-            if let Some(ref lsp_manager) = self.state.lsp_manager {
-                lsp_manager.did_save(&lang, &file_path, None);
             }
         }
 
