@@ -58,6 +58,7 @@ within a verifier's 15 minutes.
 
 ```sh
 tools/bench/run.sh debug8-qwen debug8            # the 8-task smoke set
+tools/bench/run.sh sub18-qwen sub18              # 18 tasks for measuring a change
 tools/bench/run.sh tb21-qwen all                 # the whole dataset
 MODEL=other-model tools/bench/run.sh name debug8 --agent-timeout-multiplier 3
 AGENT=opencode tools/bench/run.sh debug8-opencode debug8   # another harness, same model

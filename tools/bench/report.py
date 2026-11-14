@@ -326,6 +326,8 @@ def trace(job: Path, task: str) -> None:
         elif kind == "reasoning_budget":
             what = "retrying without reasoning" if e.get("retrying") else "run stopped"
             print(f"{stamp}  ✂ reasoning ran past its budget of {e.get('budget')} tokens: {what}")
+        elif kind == "malformed_call":
+            print(f"{stamp}  ✂ the server could not parse a tool call: nothing run, retrying")
         elif kind == "tool_use":
             subject = e.get("subject", "").replace("\n", " ⏎ ")
             print(f"{stamp}  {e.get('name', ''):<6} {subject[:160]}")

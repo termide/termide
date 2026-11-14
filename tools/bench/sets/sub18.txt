@@ -1,0 +1,27 @@
+# Eighteen Terminal-Bench 2.1 tasks for measuring harness changes: five the
+# baseline passed (a check nothing broke), and the rest grouped by how the
+# baseline failed: output-limit cut-offs, malformed tool calls (oMLX), many
+# tool errors or timeouts, and early give-ups.
+# Controls
+fix-git
+prove-plus-comm
+extract-elf
+build-cython-ext
+git-multibranch
+# Cut off at the output limit
+regex-log
+write-compressor
+distribution-search
+winning-avg-corewars
+chess-best-move
+# Malformed tool calls
+large-scale-text-editing
+sam-cell-seg
+# Tool errors and timeouts
+bn-fit-modify
+overfull-hbox
+cobol-modernization
+sqlite-db-truncate
+# Early give-ups
+cancel-async-tasks
+gcode-to-text
