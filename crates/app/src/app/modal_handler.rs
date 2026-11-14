@@ -919,11 +919,15 @@ impl App {
                         if !new_message.is_empty() {
                             match termide_git::stash_rename(&repo_path, index, new_message) {
                                 Ok(()) => {
-                                    self.state.set_info("Stash renamed".to_string());
+                                    self.state.set_info(
+                                        termide_i18n::t().git_stash_renamed().to_string(),
+                                    );
                                     self.send_git_update(&repo_path);
                                 }
                                 Err(e) => {
-                                    self.show_error_modal(format!("Stash rename error: {}", e));
+                                    self.show_error_modal(
+                                        termide_i18n::t().git_stash_failed_fmt(&e.to_string()),
+                                    );
                                 }
                             }
                         }

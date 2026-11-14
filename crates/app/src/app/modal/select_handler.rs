@@ -101,7 +101,7 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to start upload: {}", e);
-                self.show_error_modal(format!("Upload failed: {}", e));
+                self.show_error_modal(termide_i18n::t().op_upload_failed_fmt(&e.to_string()));
                 if let Some(panel) = self.layout_manager.active_panel_mut() {
                     if let Some(editor) = panel.as_editor_mut() {
                         editor.set_uploading(false);
@@ -132,7 +132,9 @@ impl App {
                             .and_then(|p| p.downcast_mut::<termide_panel_binary::BinaryPanel>())
                         {
                             if let Err(e) = bin.save() {
-                                self.show_error_modal(format!("Save failed: {e}"));
+                                self.show_error_modal(
+                                    termide_i18n::t().status_error_save(&e.to_string()),
+                                );
                                 return Ok(());
                             }
                         }
@@ -339,9 +341,12 @@ impl App {
                         // Delete only the interrupted file
                         if partial_path.exists() {
                             if let Err(e) = std::fs::remove_file(&partial_path) {
-                                self.show_error_modal(format!("Failed to delete: {}", e));
+                                self.show_error_modal(
+                                    termide_i18n::t().status_delete_failed(&e.to_string()),
+                                );
                             } else {
-                                self.state.set_info("Partial file deleted".to_string());
+                                self.state
+                                    .set_info(termide_i18n::t().op_partial_deleted().to_string());
                             }
                         }
                     }
@@ -350,9 +355,13 @@ impl App {
                         if let Some(dest_dir) = all_dest_paths.first() {
                             if dest_dir.exists() {
                                 if let Err(e) = std::fs::remove_dir_all(dest_dir) {
-                                    self.show_error_modal(format!("Failed to delete: {}", e));
+                                    self.show_error_modal(
+                                        termide_i18n::t().status_delete_failed(&e.to_string()),
+                                    );
                                 } else {
-                                    self.state.set_info("Directory deleted".to_string());
+                                    self.state.set_info(
+                                        termide_i18n::t().op_directory_deleted().to_string(),
+                                    );
                                 }
                             }
                         }
@@ -370,9 +379,12 @@ impl App {
                         // Delete partial file only
                         if partial_path.exists() {
                             if let Err(e) = std::fs::remove_file(&partial_path) {
-                                self.show_error_modal(format!("Failed to delete: {}", e));
+                                self.show_error_modal(
+                                    termide_i18n::t().status_delete_failed(&e.to_string()),
+                                );
                             } else {
-                                self.state.set_info("File deleted".to_string());
+                                self.state
+                                    .set_info(termide_i18n::t().op_file_deleted().to_string());
                             }
                         }
                     }
@@ -407,12 +419,12 @@ impl App {
                         }
 
                         if errors > 0 {
-                            self.show_error_modal(format!(
-                                "Deleted {} items, {} errors",
-                                deleted, errors
-                            ));
+                            self.show_error_modal(
+                                termide_i18n::t().op_deleted_items_errors_fmt(deleted, errors),
+                            );
                         } else {
-                            self.state.set_info(format!("Deleted {} items", deleted));
+                            self.state
+                                .set_info(termide_i18n::t().op_deleted_items_fmt(deleted));
                         }
                     }
                     _ => {

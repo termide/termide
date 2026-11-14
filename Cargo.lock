@@ -5964,6 +5964,7 @@ dependencies = [
  "ratatui",
  "termide-core",
  "termide-html",
+ "termide-i18n",
  "termide-richtext",
  "termide-viewer",
  "unicode-width",

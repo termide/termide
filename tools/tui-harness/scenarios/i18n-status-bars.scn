@@ -1,0 +1,28 @@
+# The status bars and the find bar follow the interface language: in
+# Russian the editor's fields, the find bar's title and buttons, and the
+# Markdown preview's fields read in Russian and still fit an 80-column bar.
+config i18n-status-bars.toml
+start
+wait "README.md"
+key End F4
+wait "A small stock-keeping service"
+wait "Поз: 1:1"
+expect "Вид: Текст"
+expect "Правка: Да"
+expect "Кодировка:"
+expect-not "Pos:"
+snapshot editor
+key Ctrl+F
+wait "Поиск"
+expect "◄ Назад"
+expect "Далее ►"
+snapshot find
+key Esc
+wait-gone "Далее ►"
+# The toggle-view hotkey swaps the Markdown source for its preview.
+key Ctrl+E
+wait "Вид: Отрисовка"
+expect "Правка: Нет"
+expect "Строка:"
+snapshot preview
+quit

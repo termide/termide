@@ -582,7 +582,7 @@ impl App {
     fn toggle_panel_stacking(&mut self) {
         let terminal_width = self.state.terminal.width;
         let result = self.layout_manager.toggle_panel_stacking(terminal_width);
-        self.handle_layout_op("Cannot toggle stacking", result);
+        self.handle_layout_op(termide_i18n::t().layout_cannot_toggle_stacking(), result);
     }
 
     /// Move panel to first group
@@ -591,14 +591,14 @@ impl App {
         let result = self
             .layout_manager
             .move_panel_to_first_group(terminal_width);
-        self.handle_layout_op("Cannot move panel", result);
+        self.handle_layout_op(termide_i18n::t().layout_cannot_move_panel(), result);
     }
 
     /// Move panel to last group
     fn move_panel_to_last(&mut self) {
         let terminal_width = self.state.terminal.width;
         let result = self.layout_manager.move_panel_to_last_group(terminal_width);
-        self.handle_layout_op("Cannot move panel", result);
+        self.handle_layout_op(termide_i18n::t().layout_cannot_move_panel(), result);
     }
 
     /// Toggle the fullscreen-current-panel preset for the active group.

@@ -173,11 +173,12 @@ impl FileManager {
                     let mut bar = FindBar::new(FindBarConfig { fields, buttons });
                     // The glob field reads as "Find:" (matching the name
                     // search), the content query as "Text:".
-                    bar.set_label(FindField::Mask, "Find: ");
-                    bar.set_label(FindField::Find, "Text: ");
+                    let t = termide_i18n::t();
+                    bar.set_label(FindField::Mask, t.find_bar_label_find());
+                    bar.set_label(FindField::Find, t.find_bar_label_text());
                     // The replace-all button acts on selected files → "Replace".
                     if replace {
-                        bar.set_button_label(FindBarBtn::ReplaceAll, "Replace");
+                        bar.set_button_label(FindBarBtn::ReplaceAll, t.find_bar_replace());
                     }
                     bar.set_text(
                         FindField::Mask,

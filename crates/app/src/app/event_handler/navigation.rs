@@ -50,7 +50,9 @@ impl App {
             if let Some(fm) = panel.as_file_manager_mut() {
                 if let Err(e) = fm.navigate_to(path.clone()) {
                     log::error!("Navigation failed: {}", e);
-                    self.show_error_modal(format!("Cannot navigate to: {}", path.display()));
+                    self.show_error_modal(
+                        termide_i18n::t().nav_cannot_navigate_fmt(&path.display().to_string()),
+                    );
                 } else {
                     // Navigation resets watched_root; trigger watcher re-registration
                     self.state.needs_watcher_registration = true;
@@ -76,7 +78,9 @@ impl App {
             }
             LinkTarget::Path(path) => {
                 if !path.exists() {
-                    self.show_error_modal(format!("No such path: {}", path.display()));
+                    self.show_error_modal(
+                        termide_i18n::t().nav_no_such_path_fmt(&path.display().to_string()),
+                    );
                     return Ok(());
                 }
                 self.open_local_path(path)?;
@@ -96,7 +100,9 @@ impl App {
             LinkTarget::Url(url) => self.open_external_detached(&url),
             LinkTarget::Path(path) => {
                 if !path.exists() {
-                    self.show_error_modal(format!("No such path: {}", path.display()));
+                    self.show_error_modal(
+                        termide_i18n::t().nav_no_such_path_fmt(&path.display().to_string()),
+                    );
                     return Ok(());
                 }
                 self.open_external_detached(&path.to_string_lossy());

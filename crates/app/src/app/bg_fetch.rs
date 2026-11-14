@@ -264,7 +264,9 @@ fn image_into_placeholder(
     }
     match open::that(&path) {
         Ok(()) => FollowUp::Done,
-        Err(e) => FollowUp::ErrorModal(format!("Failed to open {}: {e}", path.display())),
+        Err(e) => FollowUp::ErrorModal(
+            termide_i18n::t().status_error_open_file(&path.display().to_string(), &e.to_string()),
+        ),
     }
 }
 

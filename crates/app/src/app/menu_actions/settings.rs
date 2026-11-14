@@ -107,7 +107,7 @@ impl App {
     ) -> Result<()> {
         if let Err(e) = i18n::set_language(lang_code) {
             log::warn!("Failed to set language: {}", e);
-            self.show_error_modal(format!("Failed to set language: {}", e));
+            self.show_error_modal(termide_i18n::t().settings_language_failed_fmt(&e.to_string()));
             return Ok(());
         }
 

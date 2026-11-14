@@ -698,11 +698,7 @@ impl EditorCommand {
             Self::ReplaceNext => editor.replace_current(),
             Self::ReplaceAll => match editor.replace_all() {
                 Ok(count) => {
-                    editor.status_message = Some(format!(
-                        "Replaced {} occurrence{}",
-                        count,
-                        if count == 1 { "" } else { "s" }
-                    ));
+                    editor.status_message = Some(termide_i18n::t().editor_replaced_fmt(count));
                     Ok(())
                 }
                 Err(e) => Err(e),

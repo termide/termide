@@ -431,45 +431,60 @@ impl Panel for BinaryPanel {
         let sep = || StatusSegment::new(" │ ", SegmentKind::Label);
         let clickable = |label: &str, value: String, action: &'static str| {
             [
-                StatusSegment::clickable(format!("{label}: "), SegmentKind::Label, action),
+                StatusSegment::clickable(format!("{label} "), SegmentKind::Label, action),
                 StatusSegment::clickable(value, SegmentKind::Active, action),
             ]
         };
         let info_field = |label: &str, value: String| {
             [
-                StatusSegment::new(format!("{label}: "), SegmentKind::Label),
+                StatusSegment::new(format!("{label} "), SegmentKind::Label),
                 StatusSegment::new(value, SegmentKind::Value),
             ]
         };
 
+        let t = termide_i18n::t();
+        let width = termide_ui::str_display_width;
+        // Pad `value` to the widest of `choices` so toggling never shifts the
+        // fields to its right.
+        let padded = |value: &str, choices: &[&str]| {
+            let widest = choices.iter().map(|c| width(c)).max().unwrap_or(0);
+            format!("{value}{}", " ".repeat(widest.saturating_sub(width(value))))
+        };
         let mut segs = vec![StatusSegment::new(" ", SegmentKind::Label)];
         // View: Hex/Text — clicking toggles the representation.
+        let text = t.status_view_text();
         let view = match self.mode {
-            ViewMode::Hex => "Hex ",
-            ViewMode::Text => "Text",
+            ViewMode::Hex => "Hex",
+            ViewMode::Text => text,
         };
-        segs.extend(clickable("View", view.to_string(), "toggle"));
+        segs.extend(clickable(
+            t.status_view(),
+            padded(view, &["Hex", text]),
+            "toggle",
+        ));
         segs.push(sep());
         // Edit: Yes/No — clicking flips editability; `*` marks unsaved edits.
-        let edit = if self.editable {
-            if self.is_modified() {
-                "Yes*"
-            } else {
-                "Yes "
-            }
-        } else {
-            "No  "
+        let (yes, no) = (t.ui_yes(), t.ui_no());
+        let yes_modified = format!("{yes}*");
+        let edit = match (self.editable, self.is_modified()) {
+            (true, true) => yes_modified.as_str(),
+            (true, false) => yes,
+            (false, _) => no,
         };
-        segs.extend(clickable("Edit", edit.to_string(), "toggle_edit"));
+        segs.extend(clickable(
+            t.status_edit(),
+            padded(edit, &[&yes_modified, no]),
+            "toggle_edit",
+        ));
         segs.push(sep());
         segs.extend(info_field(
-            "Off",
+            t.status_offset(),
             format!("{:#X} / {:#X}", self.cursor, self.len),
         ));
         if let Some(a) = self.anchor {
             let n = a.max(self.cursor) - a.min(self.cursor) + 1;
             segs.push(sep());
-            segs.extend(info_field("Sel", n.to_string()));
+            segs.extend(info_field(t.status_sel(), n.to_string()));
         }
         segs
     }

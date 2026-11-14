@@ -324,42 +324,59 @@ impl Panel for Editor {
         // bold (Active) and carry the action on both segments so the whole
         // field is a click target, info values are plain (Value).
         let sep = || StatusSegment::new(" │ ", SegmentKind::Label);
+        // Labels come translated with their colon ("View:", "Vue :").
         let clickable = |label: &str, value: String, action: &'static str| {
             [
-                StatusSegment::clickable(format!("{label}: "), SegmentKind::Label, action),
+                StatusSegment::clickable(format!("{label} "), SegmentKind::Label, action),
                 StatusSegment::clickable(value, SegmentKind::Active, action),
             ]
         };
         let info_field = |label: &str, value: String| {
             [
-                StatusSegment::new(format!("{label}: "), SegmentKind::Label),
+                StatusSegment::new(format!("{label} "), SegmentKind::Label),
                 StatusSegment::new(value, SegmentKind::Value),
             ]
         };
 
         let mut s = vec![StatusSegment::new(" ", SegmentKind::Label)];
         // View: Text — clicking swaps to the hex viewer.
-        s.extend(clickable("View", "Text".to_string(), "to_hex"));
+        s.extend(clickable(
+            t.status_view(),
+            t.status_view_text().to_string(),
+            "to_hex",
+        ));
         s.push(sep());
-        // Edit: Yes/No — read-only toggle; pad "No " so the width stays stable.
-        let edit = if info.read_only { "No " } else { "Yes" };
-        s.extend(clickable("Edit", edit.to_string(), "toggle_edit"));
+        // Edit: Yes/No — read-only toggle; the shorter word is padded to the
+        // longer one so the width stays stable.
+        let (yes, no) = (t.ui_yes(), t.ui_no());
+        let width = termide_ui::str_display_width(yes).max(termide_ui::str_display_width(no));
+        let edit = if info.read_only { no } else { yes };
+        let pad = width - termide_ui::str_display_width(edit);
+        s.extend(clickable(
+            t.status_edit(),
+            format!("{edit}{}", " ".repeat(pad)),
+            "toggle_edit",
+        ));
         s.push(sep());
         let ftype = if info.syntax_highlighting {
             info.file_type.clone()
         } else {
             t.status_plain_text().to_string()
         };
-        s.extend(clickable("Highlight", ftype, "pick_syntax"));
-        s.push(sep());
-        s.extend(clickable("Tab", info.tab_size.to_string(), "tab_size"));
-        s.push(sep());
-        s.extend(info_field("EOL", info.line_ending.clone()));
-        s.push(sep());
-        s.extend(info_field("Encoding", info.encoding.clone()));
+        s.extend(clickable(t.status_highlight(), ftype, "pick_syntax"));
         s.push(sep());
         s.extend(clickable(
-            "Pos",
+            t.status_tab(),
+            info.tab_size.to_string(),
+            "tab_size",
+        ));
+        s.push(sep());
+        s.extend(info_field(t.status_eol(), info.line_ending.clone()));
+        s.push(sep());
+        s.extend(info_field(t.status_encoding(), info.encoding.clone()));
+        s.push(sep());
+        s.extend(clickable(
+            t.status_pos(),
             format!("{}:{}", info.line, info.column),
             "goto_line",
         ));
@@ -437,7 +454,8 @@ impl Panel for Editor {
     fn handle_status_action(&mut self, action: &str) -> Vec<PanelEvent> {
         match action {
             "goto_line" => {
-                let modal = InputModal::with_default("Go to line", "", String::new());
+                let modal =
+                    InputModal::with_default(t().editor_goto_line_title(), "", String::new());
                 self.modal_request =
                     Some((PendingAction::GotoLine, ActiveModal::Input(Box::new(modal))));
                 vec![]
@@ -463,7 +481,7 @@ impl Panel for Editor {
                 if let Some(ev) = self.preview_swap_event() {
                     if self.buffer_is_modified() {
                         return vec![PanelEvent::ShowMessage(
-                            "Save the file before switching to preview".to_string(),
+                            t().editor_save_before_preview().to_string(),
                         )];
                     }
                     return vec![ev];
@@ -474,7 +492,7 @@ impl Panel for Editor {
                 if let Some(path) = self.file_path().map(|p| p.to_path_buf()) {
                     if self.buffer_is_modified() {
                         vec![PanelEvent::ShowMessage(
-                            "Save the file before switching to hex view".to_string(),
+                            t().editor_save_before_hex().to_string(),
                         )]
                     } else {
                         vec![PanelEvent::SwapActiveToHex(path)]
@@ -742,7 +760,11 @@ impl Panel for Editor {
         if self.buffer.is_modified() {
             Some(termide_i18n::t().panel_close_unsaved_question().to_string())
         } else if self.file_state.external_change_detected {
-            Some("File changed on disk. Close anyway?".to_string())
+            Some(
+                termide_i18n::t()
+                    .editor_close_external_question()
+                    .to_string(),
+            )
         } else {
             None
         }
@@ -880,7 +902,7 @@ impl Editor {
             if let Some(path) = self.file_path().map(|p| p.to_path_buf()) {
                 if self.buffer_is_modified() {
                     return vec![PanelEvent::ShowMessage(
-                        "Save the file before switching to hex view".to_string(),
+                        t().editor_save_before_hex().to_string(),
                     )];
                 }
                 return vec![PanelEvent::SwapActiveToHex(path)];
@@ -894,7 +916,7 @@ impl Editor {
             if let Some(ev) = self.preview_swap_event() {
                 if self.buffer_is_modified() {
                     return vec![PanelEvent::ShowMessage(
-                        "Save the file before switching to preview".to_string(),
+                        t().editor_save_before_preview().to_string(),
                     )];
                 }
                 return vec![ev];

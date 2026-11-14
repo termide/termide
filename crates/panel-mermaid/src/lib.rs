@@ -407,19 +407,24 @@ impl Panel for MermaidPanel {
     }
 
     fn status_segments(&self) -> Vec<StatusSegment> {
+        let t = termide_i18n::t();
         if self.error.is_some() {
             return vec![];
         }
         let sep = || StatusSegment::new(" │ ", SegmentKind::Label);
         vec![
             StatusSegment::new(" ", SegmentKind::Label),
-            StatusSegment::new("View: ", SegmentKind::Label),
-            StatusSegment::new("Rendered", SegmentKind::Value),
+            StatusSegment::new(format!("{} ", t.status_view()), SegmentKind::Label),
+            StatusSegment::new(t.status_view_rendered(), SegmentKind::Value),
             sep(),
-            StatusSegment::clickable("Edit: ", SegmentKind::Label, "edit_source"),
-            StatusSegment::clickable("No", SegmentKind::Active, "edit_source"),
+            StatusSegment::clickable(
+                format!("{} ", t.status_edit()),
+                SegmentKind::Label,
+                "edit_source",
+            ),
+            StatusSegment::clickable(t.ui_no(), SegmentKind::Active, "edit_source"),
             sep(),
-            StatusSegment::new("Type: ", SegmentKind::Label),
+            StatusSegment::new(format!("{} ", t.status_type()), SegmentKind::Label),
             StatusSegment::new(self.type_label(), SegmentKind::Value),
         ]
     }

@@ -116,7 +116,9 @@ still linked) and `viewer` (the HTML and Markdown previews from `F3`: a
 search with its match count, a same-page link followed, `G` to the last
 line, the toggle to the source) and `help` (`F1`'s window on the focused
 panel's section, filtered by typing; closing the last panel leaves a file
-manager at the project root).
+manager at the project root) and `i18n-status-bars` (in Russian, the
+editor's status bar, the find bar and the Markdown preview's status bar
+read in the interface language).
 
 ## Writing one
 

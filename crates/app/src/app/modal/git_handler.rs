@@ -18,11 +18,15 @@ impl App {
             if confirmed {
                 match termide_git::stash_drop(&repo_path, index) {
                     Ok(()) => {
-                        self.state.set_info(format!("Dropped stash@{{{}}}", index));
+                        self.state.set_info(
+                            termide_i18n::t().git_stash_dropped_fmt(&format!("stash@{{{index}}}")),
+                        );
                         self.send_git_update(&repo_path);
                     }
                     Err(e) => {
-                        self.show_error_modal(format!("Stash drop error: {}", e));
+                        self.show_error_modal(
+                            termide_i18n::t().git_stash_failed_fmt(&e.to_string()),
+                        );
                     }
                 }
             }
@@ -51,20 +55,24 @@ impl App {
         match action_id {
             "pop" => match termide_git::stash_pop(&repo_path, index) {
                 Ok(()) => {
-                    self.state.set_info(format!("Popped stash@{{{}}}", index));
+                    self.state.set_info(
+                        termide_i18n::t().git_stash_popped_fmt(&format!("stash@{{{index}}}")),
+                    );
                     self.send_git_update(&repo_path);
                 }
                 Err(e) => {
-                    self.show_error_modal(format!("Stash pop error: {}", e));
+                    self.show_error_modal(termide_i18n::t().git_stash_failed_fmt(&e.to_string()));
                 }
             },
             "apply" => match termide_git::stash_apply(&repo_path, index) {
                 Ok(()) => {
-                    self.state.set_info(format!("Applied stash@{{{}}}", index));
+                    self.state.set_info(
+                        termide_i18n::t().git_stash_applied_fmt(&format!("stash@{{{index}}}")),
+                    );
                     self.send_git_update(&repo_path);
                 }
                 Err(e) => {
-                    self.show_error_modal(format!("Stash apply error: {}", e));
+                    self.show_error_modal(termide_i18n::t().git_stash_failed_fmt(&e.to_string()));
                 }
             },
             "drop" => {
@@ -126,16 +134,22 @@ impl App {
                     }
                     "stage" => {
                         if let Err(e) = termide_git::stage_file(repo_path, file_path) {
-                            self.show_error_modal(format!("Stage error: {}", e));
+                            self.show_error_modal(
+                                termide_i18n::t().editor_stage_failed_fmt(&e.to_string()),
+                            );
                         } else {
-                            self.state.set_info("File staged".to_string());
+                            self.state
+                                .set_info(termide_i18n::t().git_file_staged().to_string());
                         }
                     }
                     "unstage" => {
                         if let Err(e) = termide_git::unstage_file(repo_path, file_path) {
-                            self.show_error_modal(format!("Unstage error: {}", e));
+                            self.show_error_modal(
+                                termide_i18n::t().editor_unstage_failed_fmt(&e.to_string()),
+                            );
                         } else {
-                            self.state.set_info("File unstaged".to_string());
+                            self.state
+                                .set_info(termide_i18n::t().git_file_unstaged().to_string());
                         }
                     }
                     "edit" => {
@@ -192,15 +206,14 @@ impl App {
         if let Some(message) = value.get::<String>() {
             match termide_git::commit(repo_path, message) {
                 Ok(commit_id) => {
-                    self.state.set_info(format!(
-                        "Committed: {}",
-                        &commit_id[..8.min(commit_id.len())]
-                    ));
+                    self.state.set_info(
+                        termide_i18n::t().git_committed_fmt(&commit_id[..8.min(commit_id.len())]),
+                    );
                     // Trigger git update event to refresh panels
                     self.send_git_update(repo_path);
                 }
                 Err(e) => {
-                    self.show_error_modal(format!("Commit failed: {}", e));
+                    self.show_error_modal(termide_i18n::t().git_commit_failed_fmt(&e.to_string()));
                 }
             }
         }
@@ -221,15 +234,18 @@ impl App {
                 // If file is staged, unstage it first
                 if is_staged {
                     if let Err(e) = termide_git::unstage_file(repo_path, file_path) {
-                        self.show_error_modal(format!("Unstage error: {}", e));
+                        self.show_error_modal(
+                            termide_i18n::t().editor_unstage_failed_fmt(&e.to_string()),
+                        );
                         return Ok(());
                     }
                 }
                 // Now revert the file
                 if let Err(e) = termide_git::revert_file(repo_path, file_path) {
-                    self.show_error_modal(format!("Revert error: {}", e));
+                    self.show_error_modal(termide_i18n::t().git_revert_failed_fmt(&e.to_string()));
                 } else {
-                    self.state.set_info("File reverted".to_string());
+                    self.state
+                        .set_info(termide_i18n::t().git_file_reverted().to_string());
                     // Trigger git update event to refresh panels
                     self.send_git_update(repo_path);
                 }
@@ -248,13 +264,15 @@ impl App {
             if confirmed {
                 // Unstage everything first
                 if let Err(e) = termide_git::unstage_all(repo_path) {
-                    self.show_error_modal(format!("Unstage error: {}", e));
+                    self.show_error_modal(
+                        termide_i18n::t().editor_unstage_failed_fmt(&e.to_string()),
+                    );
                     return Ok(());
                 }
                 // Revert all unstaged files (those that were originally modified, not untracked)
                 // git checkout -- . reverts tracked files; clean -fd removes untracked
                 if let Err(e) = termide_git::revert_all(repo_path) {
-                    self.show_error_modal(format!("Revert error: {}", e));
+                    self.show_error_modal(termide_i18n::t().git_revert_failed_fmt(&e.to_string()));
                 } else {
                     let t = termide_i18n::t();
                     self.state.set_info(t.git_refreshed().to_string());

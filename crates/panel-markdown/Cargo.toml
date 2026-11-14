@@ -18,3 +18,4 @@ termide-core = { path = "../core" }
 termide-richtext = { path = "../richtext" }
 termide-viewer = { path = "../viewer" }
 termide-html = { path = "../html" }
+termide-i18n = { path = "../i18n" }

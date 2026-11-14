@@ -168,12 +168,18 @@ impl Modal for RenamePatternModal {
         if !preview.is_empty() {
             let preview_line = if is_valid {
                 Line::from(vec![
-                    Span::styled("New name: ", Style::default().fg(theme.accented_fg)),
+                    Span::styled(
+                        i18n::t().rename_pattern_new_name(),
+                        Style::default().fg(theme.accented_fg),
+                    ),
                     Span::styled(preview, Style::default().fg(theme.accented_fg)),
                 ])
             } else {
                 Line::from(vec![
-                    Span::styled("New name: ", Style::default().fg(theme.error)),
+                    Span::styled(
+                        i18n::t().rename_pattern_new_name(),
+                        Style::default().fg(theme.error),
+                    ),
                     Span::styled(preview, Style::default().fg(theme.error)),
                 ])
             };

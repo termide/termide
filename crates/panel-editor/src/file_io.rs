@@ -24,11 +24,11 @@ pub(crate) fn check_file_metadata(path: &Path) -> Result<FileMetadata> {
     match std::fs::metadata(path) {
         Ok(metadata) => {
             if metadata.is_file() && metadata.len() > constants::MAX_EDITOR_FILE_SIZE {
-                return Err(anyhow::anyhow!(
-                    "File is too large to open ({:.1} MB). Maximum allowed size is {} MB.",
-                    metadata.len() as f64 / constants::MEGABYTE as f64,
-                    constants::MAX_EDITOR_FILE_SIZE / constants::MEGABYTE
-                ));
+                return Err(anyhow::anyhow!(termide_i18n::t()
+                    .editor_file_too_large_fmt(
+                        &format!("{:.1}", metadata.len() as f64 / constants::MEGABYTE as f64),
+                        &(constants::MAX_EDITOR_FILE_SIZE / constants::MEGABYTE).to_string(),
+                    )));
             }
             Ok(FileMetadata {
                 size: metadata.len(),

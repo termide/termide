@@ -188,6 +188,7 @@ impl Panel for MarkdownPanel {
     }
 
     fn status_segments(&self) -> Vec<StatusSegment> {
+        let t = termide_i18n::t();
         if self.view.error.is_some() {
             return vec![];
         }
@@ -196,20 +197,24 @@ impl Panel for MarkdownPanel {
         if self.plugin_panel.is_some() {
             return vec![
                 StatusSegment::new(" ", SegmentKind::Label),
-                StatusSegment::new("Line: ", SegmentKind::Label),
+                StatusSegment::new(format!("{} ", t.status_line()), SegmentKind::Label),
                 line,
             ];
         }
         // Same field order as the editor: View first, then Edit.
         vec![
             StatusSegment::new(" ", SegmentKind::Label),
-            StatusSegment::new("View: ", SegmentKind::Label),
-            StatusSegment::new("Rendered", SegmentKind::Value),
+            StatusSegment::new(format!("{} ", t.status_view()), SegmentKind::Label),
+            StatusSegment::new(t.status_view_rendered(), SegmentKind::Value),
             sep(),
-            StatusSegment::clickable("Edit: ", SegmentKind::Label, "edit_source"),
-            StatusSegment::clickable("No", SegmentKind::Active, "edit_source"),
+            StatusSegment::clickable(
+                format!("{} ", t.status_edit()),
+                SegmentKind::Label,
+                "edit_source",
+            ),
+            StatusSegment::clickable(t.ui_no(), SegmentKind::Active, "edit_source"),
             sep(),
-            StatusSegment::new("Line: ", SegmentKind::Label),
+            StatusSegment::new(format!("{} ", t.status_line()), SegmentKind::Label),
             line,
         ]
     }

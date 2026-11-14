@@ -163,17 +163,20 @@ impl App {
                                             let filename = pending_download
                                                 .remote_path
                                                 .file_name()
-                                                .and_then(|n| n.to_str())
-                                                .unwrap_or("remote file");
-                                            self.state
-                                                .set_info(format!("File {} opened", filename));
+                                                .map(|n| n.to_string_lossy().into_owned())
+                                                .unwrap_or_else(|| {
+                                                    pending_download.remote_path.to_string()
+                                                });
+                                            self.state.set_info(
+                                                termide_i18n::t().op_file_opened_fmt(&filename),
+                                            );
                                         }
                                         Err(e) => {
                                             log::error!("Failed to open downloaded file: {}", e);
-                                            self.show_error_modal(format!(
-                                                "Failed to open downloaded file: {}",
-                                                e
-                                            ));
+                                            self.show_error_modal(
+                                                termide_i18n::t()
+                                                    .binary_open_failed_fmt(&e.to_string()),
+                                            );
                                             if let Err(e) =
                                                 std::fs::remove_file(&pending_download.temp_path)
                                             {
@@ -292,10 +295,11 @@ impl App {
                                     // All files uploaded!
                                     self.state.close_modal();
                                     let total = batch_upload.all_sources.len();
+                                    let t = termide_i18n::t();
                                     if total == 1 {
-                                        self.state.set_info("File uploaded".to_string());
+                                        self.state.set_info(t.op_file_uploaded().to_string());
                                     } else {
-                                        self.state.set_info(format!("{} files uploaded", total));
+                                        self.state.set_info(t.op_files_uploaded_fmt(total));
                                     }
                                 }
                             }
@@ -400,10 +404,9 @@ impl App {
                                     self.process_batch_operation(operation);
                                 }
                             } else if skipped > 0 || failed > 0 {
-                                self.state.set_info(format!(
-                                    "Operation completed: {} done, {} skipped, {} failed",
-                                    completed, skipped, failed
-                                ));
+                                self.state.set_info(
+                                    termide_i18n::t().op_completed_fmt(completed, skipped, failed),
+                                );
                             }
 
                             // Untrack partially completed operation from operations panel
@@ -542,13 +545,17 @@ impl App {
                                 {
                                     // Show cleanup modal similar to check_local_copy_progress
                                     let all_dest_paths = operation.completed_destinations.clone();
+                                    let t = termide_i18n::t();
                                     let buttons = if all_dest_paths.is_empty() {
-                                        vec!["OK".to_string()]
+                                        vec![t.ui_ok().to_string()]
                                     } else {
-                                        vec!["Delete copied".to_string(), "Keep copied".to_string()]
+                                        vec![
+                                            t.op_delete_copied().to_string(),
+                                            t.op_keep_copied().to_string(),
+                                        ]
                                     };
                                     let modal = termide_modal::ChoiceModal::buttons_only(
-                                        "Operation Cancelled",
+                                        t.op_cancelled_title(),
                                         buttons,
                                     );
                                     self.state.active_modal =
@@ -568,12 +575,13 @@ impl App {
                                 // currently-in-flight file is partial; the modal
                                 // names it explicitly so the user knows what they
                                 // are agreeing to delete.
+                                let t = termide_i18n::t();
                                 let modal = termide_modal::ConfirmModal::new(
-                                    "Upload was cancelled",
+                                    t.op_upload_cancelled_title(),
                                     // Leading blank line creates a one-row
                                     // gap between the title bar and the
                                     // question itself.
-                                    format!("\nDelete partial upload '{filename}'?"),
+                                    format!("\n{}", t.op_delete_partial_upload_fmt(&filename)),
                                 );
                                 self.state.set_pending_action(
                                     PendingAction::CleanupPartialRemote {
@@ -583,7 +591,8 @@ impl App {
                                     ActiveModal::Confirm(Box::new(modal)),
                                 );
                             } else {
-                                self.state.set_info("Operation cancelled".to_string());
+                                self.state
+                                    .set_info(termide_i18n::t().op_cancelled().to_string());
                             }
 
                             // Untrack cancelled operation from operations panel

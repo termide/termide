@@ -352,7 +352,7 @@ impl App {
         for id in orphaned {
             self.plugins.panels.remove(&id);
             if let Some(mut panel) = self.plugin_panel_mut(id) {
-                panel.set_stopped(format!("The plugin {} stopped.", key.name));
+                panel.set_stopped(termide_i18n::t().plugin_stopped_fmt(&key.name));
             }
         }
         self.state.needs_redraw = true;
@@ -382,10 +382,8 @@ impl App {
                     // Marked in its project's status bar for as long as it
                     // stays off; the message only where the user is.
                     if key.project == self.open_projects.current() {
-                        self.state.set_error(format!(
-                            "Plugin {} stopped and will not be restarted: {reason}",
-                            key.name
-                        ));
+                        self.state
+                            .set_error(termide_i18n::t().plugin_gave_up_fmt(&key.name, &reason));
                     }
                     self.plugins.gave_up.insert(key);
                     self.refresh_plugin_ui();
@@ -807,7 +805,7 @@ impl App {
         };
         let Some(peer) = self.plugins.host.peer(&key) else {
             self.state
-                .set_error(format!("Plugin {name} is not running"));
+                .set_error(termide_i18n::t().plugin_not_running_fmt(name));
             return;
         };
         let (name, id) = (name.to_string(), id.to_string());

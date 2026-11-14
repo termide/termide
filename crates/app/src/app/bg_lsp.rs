@@ -96,8 +96,10 @@ impl App {
                 Ok(0) => {}
                 Ok(count) => self
                     .state
-                    .set_info(format!("Code action applied to {count} file(s)")),
-                Err(e) => self.state.set_error(format!("Code action failed: {e}")),
+                    .set_info(termide_i18n::t().lsp_code_action_applied_fmt(count)),
+                Err(e) => self
+                    .state
+                    .set_error(termide_i18n::t().lsp_code_action_failed_fmt(&e.to_string())),
             }
             self.state.needs_redraw = true;
         }
@@ -252,11 +254,13 @@ impl App {
             match self.apply_workspace_edit(edit) {
                 Ok(0) => self
                     .state
-                    .set_info("Code action made no changes".to_string()),
+                    .set_info(termide_i18n::t().lsp_code_action_no_changes().to_string()),
                 Ok(count) => self
                     .state
-                    .set_info(format!("Code action applied to {count} file(s)")),
-                Err(e) => self.state.set_error(format!("Code action failed: {e}")),
+                    .set_info(termide_i18n::t().lsp_code_action_applied_fmt(count)),
+                Err(e) => self
+                    .state
+                    .set_error(termide_i18n::t().lsp_code_action_failed_fmt(&e.to_string())),
             }
         }
 
@@ -272,7 +276,7 @@ impl App {
                 Ok(n) => self.state.set_info(t.lsp_rename_result(n)),
                 Err(e) => {
                     log::error!("Rename failed: {}", e);
-                    self.show_error_modal(format!("Rename failed: {}", e));
+                    self.show_error_modal(termide_i18n::t().lsp_rename_failed_fmt(&e.to_string()));
                 }
             }
         }

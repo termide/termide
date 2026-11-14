@@ -128,7 +128,7 @@ impl App {
                     .layout_manager
                     .move_panel_to(src.group_idx, src.panel_idx, target, available_width)
                     .map(|_| ());
-                self.handle_layout_op("Cannot move panel", result);
+                self.handle_layout_op(termide_i18n::t().layout_cannot_move_panel(), result);
 
                 if let Some((
                     target_gid,
