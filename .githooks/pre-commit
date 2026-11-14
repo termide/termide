@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 #
-# Repository-wide pre-commit gate: the fmt / machete / clippy / test sequence
-# that .github/workflows/ci.yml runs on every pull request, so a commit that
-# would fail CI fails here first.
+# Repository-wide pre-commit gate: the docs-headings / version / fmt /
+# machete / clippy / test sequence that .github/workflows/ci.yml runs on every
+# pull request, so a commit that would fail CI fails here first. CI also runs
+# `cargo deny check` (the supply-chain job) and a release-mode test of the
+# grammars on Linux, which take too long for a commit.
 #
 # Versioned in the repository and activated with:
 #
@@ -58,7 +60,22 @@ while IFS= read -r -d '' path; do
     staged_paths=$((staged_paths + 1))
     is_doc "$path" || docs_only=0
 done < <(git diff --cached --name-only -z)
+# The textual checks CI runs besides the build: doc/ru headings follow
+# doc/en, and every copy of the version matches Cargo.toml. Neither builds
+# anything, so a docs-only commit runs them too (on the working tree).
+text_checks() {
+    if ! tools/docs/headings.sh; then
+        echo "pre-commit: tools/docs/headings.sh failed — commit aborted." >&2
+        exit 1
+    fi
+    if ! tools/release/version.sh --check; then
+        echo "pre-commit: tools/release/version.sh --check failed — commit aborted." >&2
+        exit 1
+    fi
+}
+
 if [ "$staged_paths" -gt 0 ] && [ "$docs_only" -eq 1 ]; then
+    (cd "$REPO_ROOT" && text_checks)
     printf 'pre-commit: documentation only (%d files) — no build or tests needed.\n' "$staged_paths"
     exit 0
 fi
@@ -150,6 +167,7 @@ run_step() {
     fi
 }
 
+text_checks
 run_step "cargo fmt --all -- --check" cargo fmt --all -- --check
 
 # Manifest hygiene: a textual scan, no build, so it runs before the slow steps.
