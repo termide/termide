@@ -2,8 +2,10 @@
 name = "termide-ui-render"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "UI rendering components for termide"
-license = "MIT"
 
 [dependencies]
 # External

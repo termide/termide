@@ -17,7 +17,7 @@ crossterm.workspace = true
 termide-core = { path = "../core" }
 portable-pty.workspace = true
 libc.workspace = true
-nix = { version = "0.29", features = ["signal", "process"] }
+nix = { workspace = true, features = ["signal", "process"] }
 
 [dev-dependencies]
 tempfile.workspace = true

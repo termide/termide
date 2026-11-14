@@ -17,9 +17,9 @@ sqlx = { version = "0.8", default-features = false, features = [
     "postgres",
     "mysql",
 ] }
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
-thiserror = "2.0"
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "macros"] }
+thiserror.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
