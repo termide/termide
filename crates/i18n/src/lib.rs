@@ -602,8 +602,6 @@ pub trait Translation: Send + Sync {
     fn agent_delete_session(&self) -> &str;
     /// Prompt shown when renaming an agent conversation
     fn agent_rename_prompt(&self) -> &str;
-    /// Agent panel context menu: start a new session
-    fn agent_new_session(&self) -> &str;
     /// Agent panel context menu: open an earlier session
     fn agent_resume(&self) -> &str;
     /// Status message when the project has no saved agent sessions
@@ -663,8 +661,6 @@ pub trait Translation: Send + Sync {
     fn agent_perm_note_user_denied_session(&self) -> &str;
     /// Transcript: who decided a tool call (user denied reason)
     fn agent_perm_note_user_denied_reason_fmt(&self, reason: &str) -> String;
-    /// Agent panel context menu: open the assembled system prompt
-    fn agent_show_prompt(&self) -> &str;
     /// Agent panel context menu and `/usage`: the session-info modal title
     fn agent_session_info(&self) -> &str;
     /// Buttons under the view of a delegate shown over the layout.
@@ -1287,8 +1283,6 @@ pub trait Translation: Send + Sync {
     fn agent_prompts(&self) -> &str;
     /// Status message when no prompt templates exist
     fn agent_no_prompts(&self) -> &str;
-    /// Agent panel: undo the last request (its files and messages).
-    fn agent_undo(&self) -> &str;
     /// Agent transcript: the action word after a reasoning block's `@`.
     fn agent_thinking(&self) -> &str;
     /// Agent transcript: hidden lines above a folded tool's tail preview.

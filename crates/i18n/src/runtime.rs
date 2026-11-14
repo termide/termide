@@ -148,7 +148,7 @@ impl Translation for RuntimeTranslation {
         }
     }
 
-    // Generate 417 trivial `fn name(&self) -> &str` wrappers over get_string("name").
+    // Generate the trivial `fn name(&self) -> &str` wrappers over get_string("name").
     i18n_get_string_methods! {
         agent_input_placeholder,
         agent_input_placeholder_shell,
@@ -639,7 +639,6 @@ impl Translation for RuntimeTranslation {
         agent_delete_session,
         agent_fork_session,
         agent_rename_prompt,
-        agent_new_session,
         agent_resume,
         agent_no_sessions,
         agent_not_configured,
@@ -668,7 +667,6 @@ impl Translation for RuntimeTranslation {
         agent_perm_note_user_global,
         agent_perm_note_user_denied,
         agent_perm_note_user_denied_session,
-        agent_show_prompt,
         agent_session_info,
         agent_view_dock,
         agent_view_take_over,
@@ -835,7 +833,6 @@ impl Translation for RuntimeTranslation {
         agent_change_agent,
         agent_prompts,
         agent_no_prompts,
-        agent_undo,
         agent_thinking,
         time_unit_secs,
         time_unit_mins,
