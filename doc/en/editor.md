@@ -53,7 +53,7 @@ its new column.
 | `Ctrl+A`          | Select all                                 |
 | `Backspace`       | Delete character to the left of cursor     |
 | `Delete`          | Delete character to the right of cursor    |
-| `Ctrl+Backspace`  | Delete word to the left (Alt+Backspace also)|
+| `Ctrl+Backspace`  | Delete word to the left (`Alt+Backspace` too once unbound from the global `toggle_stack`) |
 | `Ctrl+Delete`     | Delete word to the right                   |
 | `Enter`           | Insert new line (with auto-indentation)    |
 | `Tab`             | Insert indent (configurable, default 4)    |
@@ -431,6 +431,7 @@ refused.
 Enable or disable git diff visualization in your configuration file (`~/.config/termide/config.toml`):
 
 ```toml
+[editor]
 # Show git diff colors on line numbers (default: true)
 show_git_diff = true
 ```
@@ -645,6 +646,7 @@ Termide includes an optional Vim-style editing mode with full Cyrillic keyboard 
 Enable Vim mode in your configuration file (`~/.config/termide/config.toml`):
 
 ```toml
+[general]
 vim_mode = true
 ```
 

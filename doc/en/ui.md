@@ -65,8 +65,8 @@ permission mode. Stored in the project, these fields show their value with
 they are ignored, with a line in the log.
 
 **Sidebar sections:**
-- General, Editor, File Manager, Terminal, LSP, Logging, VFS — plain leaves
-- **Keybindings** — expandable group (▶/▼) with 7 sub-sections (Global, Editor, FileManager, GitStatus, GitDiff, GitLog, Terminal)
+- General, Editor, File Manager, Terminal, LSP, Debug, Logging, VFS, AI, Plugins — plain leaves
+- **Keybindings** — expandable group (▶/▼), last in the list, with 9 sub-sections (Global, Editor, FileManager, GitStatus, GitDiff, GitLog, Terminal, Database, Viewer)
 
 **Navigation:**
 
@@ -328,7 +328,7 @@ toggle_hex = "Ctrl+L"
 
 **Features of closeable panels:**
 - Have `[≡]` action button in panel title (click to open context menu with Close / Split / Merge / Move)
-- Can be closed with Escape, Alt+W, Alt+X, or F10; closing the last one opens a file manager at the project root in its place
+- Can be closed with Alt+W, Alt+X, or F10, and with Escape when the panel has nothing of its own to leave (a search bar, a selection, vim insert mode); a running terminal passes Escape to its program and the agent panel never closes on it; closing the last panel opens a file manager at the project root in its place
 - Column width adjustable with `Alt+=` / `Alt+-`
 - Per-panel height adjustable inside a stacked column with `Alt+Shift+=` / `Alt+Shift+-` (1-row step), by dragging the panel's bottom border with the mouse, or by dragging the panel header up/down within the column
 - `Alt+F11` toggles the "fullscreen current panel" preset (one panel fills the column, others collapse to one row); pressing it again restores the previous heights
@@ -420,7 +420,7 @@ The disk window lists one row per storage pool, with the filesystem type as a se
 | `Alt+H` / `F1`    | Open help window                           |
 | `Alt+Q`           | Close application                          |
 | `Alt+D`           | Detach the instance (when it can detach)   |
-| `Escape`          | Close panel / Close modal                  |
+| `Escape`          | Close panel (not a running terminal or the agent) / Close modal |
 | `Alt+W` / `Alt+X` / `F10` | Close panel                        |
 | `Alt+Left`        | Go to previous panel group (horizontal)    |
 | `Alt+Right`       | Go to next panel group (horizontal)        |

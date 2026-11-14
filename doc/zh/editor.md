@@ -51,7 +51,7 @@
 | `Ctrl+A`          | 全选                                       |
 | `Backspace`       | 删除光标左侧的字符                         |
 | `Delete`          | 删除光标右侧的字符                         |
-| `Ctrl+Backspace`  | 删除左侧单词（也可用 Alt+Backspace）       |
+| `Ctrl+Backspace`  | 删除左侧单词（将 `Alt+Backspace` 从全局 `toggle_stack` 解绑后它也可用） |
 | `Ctrl+Delete`     | 删除右侧单词                               |
 | `Enter`           | 插入新行（带自动缩进）                     |
 | `Tab`             | 插入缩进（可配置，默认为 4）               |
@@ -349,6 +349,7 @@ auto_close_brackets = true  # 或 false（默认：true）
 在配置文件（`~/.config/termide/config.toml`）中启用或禁用 Git 差异可视化：
 
 ```toml
+[editor]
 # 在行号上显示 git diff 颜色（默认：true）
 show_git_diff = true
 ```
@@ -557,6 +558,7 @@ Termide 包含可选的 Vim 风格编辑模式，完整支持西里尔文键盘�
 在配置文件（`~/.config/termide/config.toml`）中启用 Vim 模式：
 
 ```toml
+[general]
 vim_mode = true
 ```
 

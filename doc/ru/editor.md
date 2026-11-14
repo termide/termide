@@ -53,7 +53,7 @@
 | `Ctrl+A`          | Выделить всё                               |
 | `Backspace`       | Удалить символ слева от курсора            |
 | `Delete`          | Удалить символ справа от курсора           |
-| `Ctrl+Backspace`  | Удалить слово слева (также Alt+Backspace)  |
+| `Ctrl+Backspace`  | Удалить слово слева (и `Alt+Backspace`, если снять с него глобальное `toggle_stack`) |
 | `Ctrl+Delete`     | Удалить слово справа                       |
 | `Enter`           | Вставить новую строку (с авто-отступом)    |
 | `Tab`             | Вставить отступ (настраиваемый, по умолчанию 4) |
@@ -437,6 +437,7 @@ auto_close_brackets = true  # или false (по умолчанию: true)
 Включить или отключить визуализацию git diff в конфигурационном файле (`~/.config/termide/config.toml`):
 
 ```toml
+[editor]
 # Показывать цвета git diff на номерах строк (по умолчанию: true)
 show_git_diff = true
 ```
@@ -653,6 +654,7 @@ Termide включает опциональный режим редактиро�
 Включите режим Vim в файле конфигурации (`~/.config/termide/config.toml`):
 
 ```toml
+[general]
 vim_mode = true
 ```
 

@@ -1,7 +1,7 @@
 # Termide
 
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
-[![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
+[![CI](https://github.com/termide/termide/actions/workflows/ci.yml/badge.svg)](https://github.com/termide/termide/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 [English](README.md) | **中文** | [Русский](README.ru.md)
@@ -435,11 +435,14 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 ### 快速开始
 
 启动 Termide 后，您将看到自适应宽度的布局：
-- **宽终端（>= 160 列）：** 侧边栏（Git 状态与 Operations 同列堆叠）+ 两个文件管理器面板
-- **普通终端（< 160 列）：** 侧边栏（Git 状态、文件管理器与 Operations 同列堆叠）+ 文件管理器面板
+- **少于 100 列：** 一个文件管理器面板
+- **100–139 列：** 文件管理器 + 40 列宽的堆叠列（第二个文件管理器与 Git 状态）
+- **140–199 列：** 文件管理器 + 40 列宽的文件管理器 + 40 列宽的堆叠列（Git 状态与 Outline）
+- **200 列及以上：** 两个平分宽度的文件管理器 + 40 列宽的堆叠列（Git 状态与 Outline）
+- Git 状态仅在 git 仓库中出现
 - 顶部为菜单栏，底部为状态栏
 
-同列堆叠的面板高度可独立调整。`Alt+F11` 切换"全屏当前面板"预设（聚焦面板占满整列，其余仅显示标题行）；`Ctrl+Alt+=` / `Ctrl+Alt+-` 让聚焦面板增高/减小 3 行。
+同列堆叠的面板高度可独立调整。`Alt+F11` 切换"全屏当前面板"预设（聚焦面板占满整列，其余仅显示标题行）；`Alt+Shift+=` / `Alt+Shift+-` 让聚焦面板增高/减小 1 行。
 
 使用 `Alt+←/→` 在面板组之间切换，`Alt+↑/↓` 在组内导航，`Alt+M` 打开菜单。
 
