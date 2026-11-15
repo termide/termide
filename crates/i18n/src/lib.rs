@@ -1555,6 +1555,7 @@ pub trait Translation: Send + Sync {
 
     // Git operation progress messages
     fn git_push_in_progress(&self) -> String;
+    fn git_commit_in_progress(&self) -> String;
     fn git_pull_in_progress(&self) -> String;
     fn git_fetch_in_progress(&self) -> String;
 

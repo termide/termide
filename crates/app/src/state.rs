@@ -40,6 +40,15 @@ pub use crate::state_types::{
     ScrollBarDrag, StashState,
 };
 
+/// A `git commit` from the commit window in flight: its hooks may run for
+/// minutes, so it runs on a worker thread that answers with the new commit's
+/// short hash or git's message.
+#[derive(Debug)]
+pub struct GitCommitJob {
+    pub repo_path: std::path::PathBuf,
+    pub receiver: mpsc::Receiver<Result<String, String>>,
+}
+
 /// A viewer URL fetch in flight: the id its viewer waits under and the channel
 /// the worker thread answers on, with the document or a readable error.
 #[derive(Debug)]
@@ -84,6 +93,8 @@ pub struct AppState {
     pub next_view_fetch_id: u64,
     /// Handle for background git operation (allows cancellation)
     pub git_operation_handle: Option<GitOperationHandle>,
+    /// Commits from the commit window still running their hooks.
+    pub git_commits: Vec<GitCommitJob>,
     /// SSH key passphrase entered for git network operations, cached in memory
     /// for the session so repeated push/fetch don't re-prompt. Never persisted.
     pub git_ssh_passphrase: Option<String>,
@@ -264,6 +275,7 @@ impl AppState {
             view_fetches: Vec::new(),
             next_view_fetch_id: 0,
             git_operation_handle: None,
+            git_commits: Vec::new(),
             git_ssh_passphrase: None,
             command_operation_handles: Vec::new(),
             bg_command_handles: Vec::new(),

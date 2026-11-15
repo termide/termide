@@ -2691,6 +2691,10 @@ impl Translation for RuntimeTranslation {
         self.get_string("git_push_in_progress").to_string()
     }
 
+    fn git_commit_in_progress(&self) -> String {
+        self.get_string("git_commit_in_progress").to_string()
+    }
+
     fn git_pull_in_progress(&self) -> String {
         self.get_string("git_pull_in_progress").to_string()
     }
@@ -3665,6 +3669,7 @@ mod tests {
                     t.op_activity_copying().to_string(),
                     t.op_activity_trashing().to_string(),
                     t.git_push_in_progress(),
+                    t.git_commit_in_progress(),
                     t.git_pull_in_progress(),
                     t.git_fetch_in_progress(),
                     t.op_status_queued_fmt(3),

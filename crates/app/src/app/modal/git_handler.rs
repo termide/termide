@@ -204,20 +204,61 @@ impl App {
     ) -> Result<()> {
         // value is the commit message (String)
         if let Some(message) = value.get::<String>() {
-            match termide_git::commit(repo_path, message) {
-                Ok(commit_id) => {
-                    self.state.set_info(
-                        termide_i18n::t().git_committed_fmt(&commit_id[..8.min(commit_id.len())]),
-                    );
-                    // Trigger git update event to refresh panels
-                    self.send_git_update(repo_path);
-                }
-                Err(e) => {
-                    self.show_error_modal(termide_i18n::t().git_commit_failed_fmt(&e.to_string()));
-                }
-            }
+            // Hooks may run for minutes: commit on a worker thread, picked up
+            // by `check_git_commits`.
+            let (tx, receiver) = std::sync::mpsc::channel();
+            let repo = repo_path.to_path_buf();
+            let message = message.clone();
+            std::thread::spawn(move || {
+                let _ = tx.send(termide_git::commit(&repo, &message));
+            });
+            self.state.git_commits.push(crate::state::GitCommitJob {
+                repo_path: repo_path.to_path_buf(),
+                receiver,
+            });
+            self.state
+                .set_info(termide_i18n::t().git_commit_in_progress());
         }
         Ok(())
+    }
+
+    /// Report the commits that finished and refresh the panels on their
+    /// repositories.
+    pub(in crate::app) fn check_git_commits(&mut self) {
+        use std::sync::mpsc::TryRecvError;
+        if self.state.git_commits.is_empty() {
+            return;
+        }
+        let mut finished = Vec::new();
+        self.state
+            .git_commits
+            .retain(|job| match job.receiver.try_recv() {
+                Ok(result) => {
+                    finished.push((job.repo_path.clone(), result));
+                    false
+                }
+                Err(TryRecvError::Empty) => true,
+                Err(TryRecvError::Disconnected) => {
+                    finished.push((job.repo_path.clone(), Err(String::new())));
+                    false
+                }
+            });
+        for (repo_path, result) in finished {
+            let t = termide_i18n::t();
+            match result {
+                Ok(hash) => {
+                    self.state.set_info(t.git_committed_fmt(&hash));
+                }
+                Err(e) => {
+                    self.state.clear_status();
+                    self.show_error_modal(t.git_commit_failed_fmt(&e));
+                }
+            }
+            // A failed commit may still have changed the index (a hook that
+            // formats and stages), so refresh either way.
+            self.send_git_update(&repo_path);
+            self.state.needs_redraw = true;
+        }
     }
 
     /// Handle git revert file action (after confirmation)
