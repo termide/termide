@@ -62,11 +62,25 @@ cannot deliver any of the configured Enhanced-tier chords.
   `Alt+Shift+...` binding cannot match.
 - `Super` / `Meta` / `Hyper` modifiers.
 
-Enhanced-tier defaults that termide ships (`Ctrl+Alt+R` for
-`replace_all`, `Ctrl+.` for `toggle_comment`) are kept because they are
-de-facto standards across editors, each with a Universal alternative
-(`Alt+R`, `Ctrl+/`). On a terminal without Kitty proto, termide logs a
-startup warning listing the affected bindings; the user can rebind them
+Enhanced-tier defaults that termide ships are kept because they are
+de-facto standards across editors:
+
+| Binding | Action | Section | Universal alternative |
+|---|---|---|---|
+| `Ctrl+Alt+R` | `replace_all` | `editor` | `Alt+R` |
+| `Ctrl+.` | `toggle_comment` | `editor` | `Ctrl+/` |
+| `Ctrl+Shift+Z` | `redo` | `editor` | `Ctrl+Y` |
+| `Ctrl+Shift+S` | `save_as` | `editor` | — |
+| `Ctrl+Shift+R` | `reload` | `editor` | — |
+| `Ctrl+Shift+F` | `search_content` | `file_manager` | — |
+| `Ctrl+Shift+H` | `search_replace` | `file_manager` | — |
+
+A terminal without Kitty proto sends `Ctrl+Shift+<letter>` as plain
+`Ctrl+<letter>`, so such a key reaches the action bound to that one
+instead: `Ctrl+Shift+S` saves in place, `Ctrl+Shift+Z` undoes,
+`Ctrl+Shift+R` replaces the current match while a replace is active, and
+`Ctrl+Shift+F` opens the file manager's name search. On such a terminal,
+termide logs a startup warning listing the affected bindings; rebind them
 through Settings → Keybindings.
 
 ## macOS: Option is not Alt
@@ -75,8 +89,9 @@ On macOS every terminal treats `Option` as a **text-composition**
 modifier by default — Ghostty `macos-option-as-alt=false`, kitty
 `macos_option_as_alt no`, iTerm2 Option=Normal, Terminal.app "Use Option
 as Meta key" off. `Option+F` therefore arrives as the composed glyph `ƒ`
-with no ALT bit, and every `Alt+<letter>` default (18 global
-actions) is unreachable. How far that reaches depends on the terminal: on
+with no ALT bit, and every `Alt+<character>` default is unreachable: the
+`Alt+<letter>` global actions, `Alt+1`…`Alt+9` (go to project), `Alt+\`,
+`Alt+-` and `Alt+=`, and the editor's `Alt+,`, `Alt+.` and `Alt+R`. How far that reaches depends on the terminal: on
 Ghostty the keys that produce no text keep their ALT bit, so `Option+F9`,
 `Option+Up/Down` and `Option+Backspace` still work, while Terminal.app
 strips the modifier from those too and delivers a bare `Up`.
@@ -249,6 +264,12 @@ turned on:
 | Edit file | `F4` | `git_status` |
 | Clear the filter | `Shift+F3` | `database` |
 
+The agent panel's own `F2`–`F8` are fixed keys and go the same way; other
+ways in stand for them: `/rename` for `F2`, `/usage` for `F3`, `Esc` in the
+empty prompt for `F4`, `/fork` for `F5`, the list of sessions on a fresh
+session's banner for `F6`, `/new` for `F7` and `/clear` for `F8` (see
+[Agent](agent.md)).
+
 Termide logs a startup warning listing them when it starts on macOS.
 Either enable the setting, or rebind these actions through
 Settings → Keybindings.
@@ -322,8 +343,7 @@ control bytes, which crossterm parses as `Ctrl+7` / `Ctrl+4` and the
 normalizer rewrites back to the slash / backslash chord.
 
 Multiple alternatives are supported for any action: list them in an
-array. The first form is the canonical display string shown in the help
-window.
+array. The help window shows them all; a menu shows the first.
 
 The same shape is editable without touching the file: in Settings →
 Keybindings each row lists every key its action accepts, `Left`/`Right`
