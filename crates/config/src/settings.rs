@@ -730,7 +730,7 @@ impl AiSettings {
     }
 
     /// The permission mode new sessions start in, as configuration spells it
-    /// (`ask`, `plan`, `edit`, `configured`, `all`).
+    /// (`ask`, `plan`, `edit`, `configured`, `auto`, `all`).
     #[must_use]
     pub fn permission_mode(&self) -> &'static str {
         self.permissions.mode.label()
@@ -840,7 +840,7 @@ pub struct GeneralSettings {
     #[serde(default = "default_theme_name")]
     pub theme: String,
 
-    /// Interface language (en, de, es, fr, hi, pt, ru, th, zh, or auto)
+    /// Interface language: a code of `termide_i18n::SUPPORTED_LANGUAGES`, or `auto`
     #[serde(default = "default_language")]
     pub language: String,
 
