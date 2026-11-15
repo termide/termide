@@ -294,12 +294,15 @@ crossterm 解析为 `Ctrl+7` / `Ctrl+4`,规范化器将其重写回斜杠 / 反�
 `Ctrl+Alt+Right` 在多个 Linux 桌面中用于切换工作区，而 `Alt+.` 在 bash 中插入
 上一条命令的最后一个参数。`goto_panel_1` … `goto_panel_9` 已将 `Alt+1` …
 `Alt+9` 让给 `goto_project_1` … `goto_project_9`，后者切换到对应编号的已打开
-项目。请将它们绑定到您系统上空闲的组合键：
+项目。请将它们绑定到您系统上空闲的组合键。表中编辑器和终端的操作同样没有默认按键；面板菜单（`Alt+K`）会在适用时提供它们：
 
 | 操作 | 作用 |
 |------|------|
 | `prev_project` / `next_project` | 按 `项目` 菜单中的排列顺序切换到上一个 / 下一个已打开的项目 |
 | `goto_panel_1` … `goto_panel_9` | 将焦点移到对应编号的面板组（列） |
+| `fold_all` / `unfold_all`（`[editor.keybindings]`） | 折叠 / 展开文件中的所有块 |
+| `stage_change` / `unstage_change` / `revert_change`（`[editor.keybindings]`） | 暂存、取消暂存或还原光标处或所选行上的更改 |
+| `send_to_agent`（`[editor.keybindings]`、`[terminal.keybindings]`） | 将所选内容（在终端中也可以是上一条命令或最后几行）放入代理的提示词 |
 
 ```toml
 [general.keybindings]

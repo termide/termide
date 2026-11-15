@@ -33,6 +33,19 @@ impl Editor {
         }
     }
 
+    /// Forget the language server: LSP was turned off in the settings. The
+    /// editor is left as one opened with LSP off; [`Self::init_lsp`] attaches
+    /// it again. Diagnostics stay with whoever publishes them.
+    pub fn detach_lsp(&mut self) {
+        self.lsp.enabled = false;
+        self.lsp.server_loading = false;
+        self.lsp.server_start_failed = false;
+        self.lsp.server_status_text = None;
+        self.lsp.server_generation = None;
+        self.lsp.pending_change = false;
+        let _ = self.buffer.take_lsp_changes();
+    }
+
     /// Open the document again if its server was restarted since it was
     /// opened: the new process knows nothing of it. The diagnostics of the
     /// old one were cleared when it went down. `true` if `didOpen` was sent.
@@ -240,6 +253,28 @@ mod tests {
             events.as_slice(),
             [PanelEvent::RestartLanguageServer { file: f }] if *f == file
         ));
+    }
+
+    /// An editor detached from its server, LSP being turned off, shows no
+    /// server state and offers no restart, as one opened with LSP off.
+    #[test]
+    fn a_detached_editor_shows_no_server() {
+        use termide_core::Panel;
+
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("main.rs");
+        std::fs::write(&file, "fn main() {}\n").unwrap();
+        let mut editor = Editor::open_file_with_config(file, EditorConfig::default()).unwrap();
+        editor.lsp.enabled = true;
+        editor.lsp.server_loading = true;
+        editor.lsp.server_status_text = Some("indexing".into());
+
+        editor.detach_lsp();
+        assert!(!editor.is_lsp_loading());
+        assert_eq!(editor.lsp.server_status_text, None);
+        assert!(!Panel::context_menu_items(&editor)
+            .iter()
+            .any(|(_, action)| action == crate::RESTART_LANGUAGE_SERVER_ACTION));
     }
 
     /// When the file's server cannot start, the menu still offers its

@@ -73,6 +73,12 @@ nix = "0.29"
 image = { version = "0.25", default-features = false }
 zeroize = "1"
 zip = { version = "9.1", default-features = false }
+sqlx = { version = "0.8", default-features = false }
+open = "5"
+percent-encoding = "2"
+webpki-roots = "1"
+bzip2 = "0.6"
+lzma-rust2 = { version = "0.16", default-features = false }
 tree-sitter-bash = "0.23"
 tree-sitter-c = "0.23"
 tree-sitter-cpp = "0.23"
@@ -163,6 +169,7 @@ log.workspace = true
 ratatui.workspace = true
 
 # Workspace crates referenced directly from main.rs / ui.rs
+termide-agent-core = { path = "crates/agent-core" }
 termide-app = { path = "crates/app" }
 termide-config = { path = "crates/config" }
 termide-core = { path = "crates/core" }

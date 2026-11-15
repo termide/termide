@@ -81,7 +81,7 @@ impl App {
             Some(pp) => match write_askpass_secret(pp) {
                 Ok(path) => Some(path),
                 Err(e) => {
-                    self.show_error_modal(format!("Failed to prepare SSH askpass: {e}"));
+                    self.show_error_modal(termide_i18n::t().git_askpass_failed_fmt(&e.to_string()));
                     return Ok(());
                 }
             },
@@ -104,7 +104,7 @@ impl App {
                 if let Some(sf) = &secret_file {
                     let _ = std::fs::remove_file(sf);
                 }
-                self.show_error_modal(format!("Failed to spawn git: {}", e));
+                self.show_error_modal(termide_i18n::t().git_spawn_failed_fmt(&e.to_string()));
                 return Ok(());
             }
         };

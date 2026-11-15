@@ -550,7 +550,7 @@ session starts without card after card, and the reviewer, not a prompt,
 stands between the agent and what the rules leave open.
 Prompt answers: allow once, allow for the session, allow always in the project
 or everywhere (a rule in termide's data directory under the project,
-`trust/<project>/permissions.toml`, or in the global config), deny,
+`projects/<name>-<hash>/trust.toml`, or in the global config), deny,
 deny for the session. This is the Claude Code / OpenCode shape with ACP's
 answer set; it stays small and is data-driven, so the panel and a future ACP
 client render the same prompt.

@@ -258,12 +258,15 @@ impl Shared {
             None
         };
         if flavor == AcpFlavor::Codex {
-            // It asks before anything but reading, and is refused.
-            let _ = self.request(
+            // It asks before anything but reading, and is refused. A side
+            // session left in another mode would ask, or act, unseen.
+            if let Err(error) = self.request(
                 "session/set_config_option",
                 json!({ "sessionId": session_id, "configId": "mode", "value": "read-only" }),
                 Duration::from_secs(30),
-            );
+            ) {
+                log::warn!("cannot make Codex side session {session_id} read-only: {error}");
+            }
         }
         let (answer, usage) = self.side_prompt(&session_id, &text, ANSWER_TIMEOUT);
         if self.can_close.load(Ordering::Acquire) {

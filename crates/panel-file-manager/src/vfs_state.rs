@@ -508,7 +508,7 @@ impl VfsState {
             VfsProtocol::Smb => self.manager.connect_smb(&path, ConnectOptions::default()),
             VfsProtocol::Nfs => {
                 return Err(VfsError::NotSupported(
-                    "NFS connections not yet fully implemented".to_string(),
+                    termide_i18n::t().vfs_protocol_unsupported_fmt("NFS"),
                 ));
             }
             VfsProtocol::Archive => self

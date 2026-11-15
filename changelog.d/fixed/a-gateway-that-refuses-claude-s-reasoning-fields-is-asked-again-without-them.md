@@ -1,0 +1,1 @@
+- **A gateway that refuses Claude's reasoning fields is asked again without them.** An Anthropic-compatible endpoint that rejected `thinking` or `output_config` failed every request, where one rejecting `cache_control` was already asked again without it. Any of the three it names is now left out from then on, as the OpenAI-compatible connection does with the fields it adds.

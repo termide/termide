@@ -41,7 +41,7 @@ pub use event::{
     AgentSnippet, ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome,
     ChecklistRefresh, ChecklistSwitch, ConfirmAction, ConflictResolution, DelegateRestart, Event,
     EventHandler, GitOperationType, InputAction, PanelEvent, ReferenceLocation, SelectAction,
-    SnippetSource, SnippetWanted, SplitDirection, TerminalPart, VimPanelDirection,
+    SnippetSource, SnippetWanted, TerminalPart, VimPanelDirection,
 };
 pub use graphics_cells::GraphicsCells;
 pub use hotkey_table::HotkeyTable;
@@ -54,7 +54,7 @@ pub use panel::{
 };
 pub use scrollbar::{ScrollAxis, ScrollBarGeometry, ScrollBars};
 pub use terminal_caps::{
-    attention_mark, get_terminal_caps, init_icon_mode, init_terminal_caps, refresh_terminal_caps,
+    attention_mark, get_terminal_caps, init_terminal_caps, refresh_terminal_caps, set_icon_mode,
     use_emoji_icons, ColorDepth, TerminalCaps,
 };
 pub use terminal_modes::{

@@ -671,6 +671,21 @@ impl termide_agent_core::CallsBeside for CallsBeside {
     }
 }
 
+/// Takes the call under `key` out of `running` when dropped.
+struct Forget<'a> {
+    running: &'a Mutex<HashMap<String, Running>>,
+    key: &'a str,
+}
+
+impl Drop for Forget<'_> {
+    fn drop(&mut self) {
+        self.running
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(self.key);
+    }
+}
+
 /// Run a `tools/call` the way the built-in loop runs a call; `cancel` stops
 /// it, and is cancelled too by a `notifications/cancelled` for its id.
 fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -> Value {
@@ -715,6 +730,12 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
             },
         );
     }
+    // Leaves `running` however the call ends, a panic in a hook included:
+    // a call left in it would be listed, and stoppable, for ever.
+    let forget = Forget {
+        running: &shared.running,
+        key: &key,
+    };
     let ctx = ToolContext {
         withdrawn: Some(cancel.clone()),
         // The agent may have moved its other calls to the background and
@@ -738,11 +759,7 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
         Judgment::Done(result) => result,
     };
     let result = hooks().after_tool_call(&call, result);
-    shared
-        .running
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .remove(&key);
+    drop(forget);
     let finished = Finished {
         details: result.details.clone(),
         images: result
@@ -958,6 +975,85 @@ mod tests {
                 images: vec![("image/png".into(), "AAAA".into())],
             })
         );
+    }
+
+    /// Panics when run.
+    struct Panics;
+
+    impl Tool for Panics {
+        fn name(&self) -> &str {
+            "panics"
+        }
+        fn description(&self) -> &str {
+            "Panic"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            _call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            panic!("tool broke");
+        }
+    }
+
+    /// Panics after an `echo` call.
+    struct PanicsAfter;
+
+    impl Hooks for PanicsAfter {
+        fn after_tool_call(
+            &mut self,
+            call: &ToolCall,
+            result: ToolResultMessage,
+        ) -> ToolResultMessage {
+            assert_ne!(call.name, "echo", "hook broke");
+            result
+        }
+    }
+
+    /// A panicking tool fails its call with an error result; a panicking
+    /// hook leaves no call behind as running.
+    #[test]
+    fn a_panic_fails_its_call_and_leaves_nothing_running() {
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(Panics));
+        tools.insert(Arc::new(Echo));
+        let server =
+            McpServer::start(tools, Box::new(PanicsAfter), ToolContext::new("/tmp")).unwrap();
+        let token = server.token().to_string();
+        let (_, body) = post(
+            &server,
+            &token,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "panics", "arguments": {} } }),
+        );
+        let reply: Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(reply["result"]["isError"], true, "{body}");
+        assert!(body.contains("tool broke"), "{body}");
+        assert!(!server.is_running());
+
+        // The hook's panic takes the connection down with no reply.
+        let addr = server
+            .url()
+            .trim_start_matches("http://")
+            .trim_end_matches("/mcp")
+            .to_string();
+        let mut stream = TcpStream::connect(addr).unwrap();
+        let body = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                           "params": { "name": "echo", "arguments": { "text": "hi" } } })
+        .to_string();
+        write!(
+            stream,
+            "POST /mcp HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        let _ = stream.read_to_string(&mut String::new());
+        assert!(!server.is_running(), "{:?}", server.running_calls());
     }
 
     /// A call the agent stopped waiting on still shows as running, and the

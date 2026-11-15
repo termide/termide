@@ -84,7 +84,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 ### Files and data
 
 - **Dual-pane file manager** - Tree with nested git status, glob and regex search, batch operations; zip, tar and ISO archives open like folders and `P` packs the selection; files copy and paste to and from other apps through the system clipboard
-- **Remote filesystems** - SFTP, FTP and FTPS in pure Rust, with copying between local and remote panels; `smb://` and `nfs://` through the OS mount
+- **Remote filesystems** - SFTP, FTP and FTPS in pure Rust, with copying between local and remote panels; SMB and NFS shares are not built in — mount them with the OS and open the mount point
 - **Background operations** - Copy, move, upload and download with progress, pause, resume and cancel
 - **Database viewer** - SQLite, PostgreSQL and MySQL from a bookmark URL: server-side sort, per-column filters, cell editing, rows as TSV, JSON or INSERT
 - **CSV and TSV tables** - Delimited files as a sortable table with the delimiter and header guessed; read from disk in windows, so a file of any size opens at once
@@ -468,7 +468,7 @@ All shortcuts are customizable in `config.toml` (see [Configuration](#configurat
 - **Open:** `Alt+F` Files · `Alt+T` Terminal · `Alt+E` Editor · `Alt+G` Git · `Alt+P` Settings
 - **Files & viewers:** `F3` preview (markdown / diagram / hex / image) · `Ctrl+E` toggle preview ↔ source · `Ctrl+F` find · `Ctrl+R` reload from disk · `Ctrl+S` save
 
-📖 Full per-panel reference (file manager, editor, git, viewers): **[doc/en/keybindings.md](doc/en/keybindings.md)**.
+📖 Each panel's keys are on its page: [file manager](doc/en/file-manager.md), [editor](doc/en/editor.md), [terminal](doc/en/terminal.md), [git panels and window-wide keys](doc/en/ui.md), [markdown](doc/en/markdown.md) and [HTML](doc/en/html.md) viewers, [agent](doc/en/agent.md); remapping and terminal compatibility: [doc/en/keybindings.md](doc/en/keybindings.md).
 
 ## Configuration
 

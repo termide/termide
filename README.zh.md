@@ -84,7 +84,7 @@
 ### 文件与数据
 
 - **双栏文件管理器** - 带嵌套 Git 状态的树形视图、glob 和正则搜索、批量操作；zip、tar 和 ISO 压缩包可像文件夹一样打开，按 `P` 打包所选内容；文件可通过系统剪贴板与其他应用互相复制粘贴
-- **远程文件系统** - 纯 Rust 实现的 SFTP、FTP 和 FTPS，可在本地与远程面板之间复制；`smb://` 和 `nfs://` 通过系统挂载访问
+- **远程文件系统** - 纯 Rust 实现的 SFTP、FTP 和 FTPS，可在本地与远程面板之间复制；SMB 和 NFS 不内置支持——请用操作系统挂载后打开挂载点
 - **后台操作** - 复制、移动、上传和下载，带进度显示，支持暂停、恢复和取消
 - **数据库查看器** - 通过书签 URL 打开 SQLite、PostgreSQL 和 MySQL：服务端排序、按列过滤、单元格编辑，整行导出为 TSV、JSON 或 INSERT
 - **CSV 与 TSV 表格** - 以可排序表格显示分隔符文件，自动猜测分隔符和标题行；按窗口从磁盘读取，任意大小的文件都能立即打开
@@ -463,7 +463,7 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 - **打开：** `Alt+F` 文件 · `Alt+T` 终端 · `Alt+E` 编辑器 · `Alt+G` Git · `Alt+P` 设置
 - **文件与查看器：** `F3` 预览（Markdown / 图表 / 十六进制 / 图片）· `Ctrl+E` 预览↔源码切换 · `Ctrl+F` 查找 · `Ctrl+R` 从磁盘重载 · `Ctrl+S` 保存
 
-📖 完整的分面板参考（文件管理器、编辑器、git、查看器）：**[doc/zh/keybindings.md](doc/zh/keybindings.md)**。
+📖 各面板的按键见其页面：[文件管理器](doc/zh/file-manager.md)、[编辑器](doc/zh/editor.md)、[终端](doc/zh/terminal.md)、[git 面板与窗口通用按键](doc/zh/ui.md)、[markdown](doc/zh/markdown.md) 与 [HTML](doc/zh/html.md) 查看器、[代理](doc/zh/agent.md)；重新绑定与终端兼容性：[doc/zh/keybindings.md](doc/zh/keybindings.md)。
 
 ## 配置
 

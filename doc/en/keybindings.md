@@ -339,12 +339,16 @@ every chord still free collides with a desktop or shell shortcut somewhere:
 desktops, and `Alt+.` inserts the last argument in bash. `goto_panel_1` …
 `goto_panel_9` gave `Alt+1` … `Alt+9` to `goto_project_1` …
 `goto_project_9`, which switch to the open project with that number. Bind them
-to what is free on your system:
+to what is free on your system. The editor and terminal actions in the
+table have no key either; the panel menu (`Alt+K`) offers them where they apply:
 
 | Action | Does |
 |--------|------|
 | `prev_project` / `next_project` | Switch to the previous / next open project, in the order the `Projects` menu lists them |
 | `goto_panel_1` … `goto_panel_9` | Move the focus to the panel group (column) with that number |
+| `fold_all` / `unfold_all` (`[editor.keybindings]`) | Fold / unfold every block of the file |
+| `stage_change` / `unstage_change` / `revert_change` (`[editor.keybindings]`) | Stage, unstage or revert the change at the cursor or on the selected lines |
+| `send_to_agent` (`[editor.keybindings]`, `[terminal.keybindings]`) | Put the selection (in a terminal also the last command or the last lines) into the agent's prompt |
 
 ```toml
 [general.keybindings]

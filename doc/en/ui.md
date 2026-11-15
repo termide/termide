@@ -35,7 +35,7 @@ The application uses interactive modal windows for various operations:
 
 ### Settings Modal
 
-Opened with `Alt+P` or menu **Options → Edit preferences**. The previous horizontal-tab layout has been replaced by a **sidebar layout**:
+Opened with `Alt+P` or menu **Options → Settings**. The previous horizontal-tab layout has been replaced by a **sidebar layout**:
 
 **Three zones:**
 - **Left sidebar** (18 columns wide) — section list, navigated with Up/Down
@@ -67,6 +67,11 @@ they are ignored, with a line in the log.
 **Sidebar sections:**
 - General, Editor, File Manager, Terminal, LSP, Debug, Logging, VFS, AI, Plugins — plain leaves
 - **Keybindings** — expandable group (▶/▼), last in the list, with 9 sub-sections (Global, Editor, FileManager, GitStatus, GitDiff, GitLog, Terminal, Database, Viewer)
+
+**Layout and icons** (General section, `[general]` in `config.toml`):
+- **Icon mode** (`icon_mode`) — icons in panel titles: `auto` (default) shows emoji when the terminal draws them, `emoji` always, `unicode` none
+- **Auto stack threshold** (`auto_stack_threshold`, default `80`) — a new panel goes under the active one instead of into a new column when a column would be narrower than this many characters
+- **Min panel width** (`min_panel_width`, default `20`) — resizing a panel stops at this width
 
 **Navigation:**
 

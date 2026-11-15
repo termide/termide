@@ -10,7 +10,7 @@ description = "Database access core for termide (SQLite / PostgreSQL / MySQL vie
 [dependencies]
 # Pure-Rust SQL access. SQLite is bundled (static); Postgres/MySQL speak the
 # wire protocol in Rust; TLS via rustls so static-musl builds keep working.
-sqlx = { version = "0.8", default-features = false, features = [
+sqlx = { workspace = true, features = [
     "runtime-tokio",
     "tls-rustls-ring",
     "sqlite",

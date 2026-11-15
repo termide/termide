@@ -72,20 +72,4 @@ impl App {
         }
         Ok(())
     }
-
-    /// Handle SplitPanel event - toggle panel stacking/splitting
-    pub(super) fn event_split_panel(&mut self, direction: termide_core::SplitDirection) {
-        let terminal_width = self.state.terminal.width;
-
-        match direction {
-            termide_core::SplitDirection::Horizontal => {
-                // Horizontal split: create new column (unstack if multiple panels in group)
-                let _ = self.layout_manager.toggle_panel_stacking(terminal_width);
-            }
-            termide_core::SplitDirection::Vertical => {
-                // Vertical split: stack in same column (merge if single panel)
-                let _ = self.layout_manager.toggle_panel_stacking(terminal_width);
-            }
-        }
-    }
 }

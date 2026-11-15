@@ -106,7 +106,10 @@ its system prompt, and a clean-context carry-out in a new session),
 `acp-agent-file` (Claude Code started by an `AGENT.md` `command` and served
 termide's tools as on a connection), `settings-fields` (the settings
 window's Option as Alt and git graph fields on General, the terminal session
-limit and the bell on the AI page) and
+limit and the bell on the AI page), `settings-live` (settings applying at
+once: LSP turned on and off for an open Rust file, emoji icons in the
+panel headers, the log going on in a newly named file; needs
+rust-analyzer) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
 a session opened from its list), `project-store` (layouts in the old tree folded into flat project directories at startup, ✗ on a project whose directory is gone, `F8` deleting a project with or without its agent sessions), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its

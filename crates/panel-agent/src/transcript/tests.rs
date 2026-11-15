@@ -1869,6 +1869,8 @@ fn debug_calls_head_with_their_action() {
         format!("→ {} 2", t.agent_tool_debug_frame())
     );
     assert!(!text(json!({ "action": "state" })).contains('{'));
+    // An action the tool does not know is not headed as a start.
+    assert_eq!(text(json!({ "action": "rewind" })), "→ debug rewind");
     assert_eq!(
         headline_href(&call(
             "debug",

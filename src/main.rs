@@ -11,7 +11,7 @@ use std::io;
 
 use termide_app::App;
 use termide_config::Config;
-use termide_core::{init_icon_mode, init_terminal_caps};
+use termide_core::{init_terminal_caps, set_icon_mode};
 use termide_git::is_available as check_git_available;
 use termide_i18n::init_with_language;
 use termide_theme::{set_ansi16_mode, set_themes_dir};
@@ -498,6 +498,12 @@ fn main() -> Result<()> {
     // which looks like a frozen blank screen (especially over SSH).
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A tool's panic is caught and fails only its call; the screen
+        // stays as it is and the panic goes to the journal, not to stderr.
+        if termide_agent_core::panic_is_contained() {
+            log::error!("contained panic: {info}");
+            return;
+        }
         restore_terminal();
         default_hook(info);
     }));
@@ -611,7 +617,7 @@ fn main() -> Result<()> {
     }
 
     // Initialize icon mode based on config + terminal capabilities
-    init_icon_mode(config.general.icon_mode);
+    set_icon_mode(config.general.icon_mode);
 
     // Initialize theme system with themes directory from config
     if let Ok(themes_dir) = Config::get_themes_dir() {

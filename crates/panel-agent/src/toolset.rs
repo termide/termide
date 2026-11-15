@@ -94,8 +94,6 @@ impl AgentPanel {
         Ok(path)
     }
 
-    /// The prompt the worker runs on: the agent's, plus the plan-mode
-    /// instructions while that mode is on.
     /// The tools an external agent on its own tools is served: termide's it
     /// has no counterpart of and the MCP servers' beside them, save those
     /// its context was built without.
@@ -117,6 +115,8 @@ impl AgentPanel {
         served
     }
 
+    /// The prompt the worker runs on: the agent's, plus the plan-mode
+    /// instructions while that mode is on.
     pub(crate) fn effective_system_prompt(&self) -> String {
         if self.mode.get() == Mode::Plan {
             self.plan_prompt.apply(&self.system_prompt)

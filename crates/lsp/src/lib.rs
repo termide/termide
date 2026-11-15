@@ -22,7 +22,7 @@ pub use lsp_types::CompletionTriggerKind;
 pub use protocol::{JsonRpcMessage, JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 pub use server::{CrashNotice, LspServer, LspServerConfig, ServerStatus};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -42,7 +42,7 @@ pub fn path_to_uri(path: &Path) -> Option<Uri> {
 }
 
 /// Configuration for LSP servers
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LspConfig {
     /// Per-language server configurations
     pub servers: HashMap<String, LspServerConfig>,
@@ -426,12 +426,17 @@ impl LspManager {
     pub fn poll_restarts(&mut self) -> bool {
         let mut went_live = false;
         while let Ok(restarted) = self.restarted_rx.try_recv() {
-            let Some(slot) = self.servers.get_mut(&restarted.key) else {
+            let wanted = self.servers.get(&restarted.key).is_some_and(|slot| {
+                slot.id == restarted.id && matches!(slot.state, SlotState::Restarting)
+            });
+            // Its slot went away meanwhile (its language was reconfigured):
+            // the process must not outlive it.
+            let Some(slot) = self.servers.get_mut(&restarted.key).filter(|_| wanted) else {
+                if let Ok(server) = restarted.result {
+                    self.retire(server);
+                }
                 continue;
             };
-            if slot.id != restarted.id || !matches!(slot.state, SlotState::Restarting) {
-                continue;
-            }
             match restarted.result {
                 Ok(server) => {
                     log::info!("LSP server for {:?} restarted", restarted.key);
@@ -516,6 +521,69 @@ impl LspManager {
             self.spawn_restart(key, Duration::ZERO);
         }
         true
+    }
+
+    /// Run the servers `config` describes from now on. The servers of every
+    /// language whose entry was added, edited or removed are shut down off
+    /// this thread and their diagnostics cleared; the others run on. Returns
+    /// those languages: their editors start over with [`Self::ensure_server`],
+    /// which starts the new server.
+    pub fn set_config(&mut self, config: LspConfig) -> HashSet<String> {
+        let changed: HashSet<String> = self
+            .config
+            .servers
+            .keys()
+            .chain(config.servers.keys())
+            .filter(|lang| self.config.servers.get(*lang) != config.servers.get(*lang))
+            .cloned()
+            .collect();
+        self.config = config;
+        if changed.is_empty() {
+            return changed;
+        }
+        // Roots were found with the old root markers.
+        self.workspace_roots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|(lang, _), _| !changed.contains(lang));
+        self.last_roots
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .retain(|lang, _| !changed.contains(lang));
+        let keys: Vec<ServerKey> = self
+            .servers
+            .keys()
+            .filter(|(lang, _)| changed.contains(lang))
+            .cloned()
+            .collect();
+        for key in keys {
+            // A restart in flight hands its server over to `poll_restarts`,
+            // which finds no slot for it and retires it.
+            if let Some(ServerSlot {
+                state: SlotState::Live(server),
+                ..
+            }) = self.servers.remove(&key)
+            {
+                log::info!("Shutting down LSP server for {key:?}: its settings changed");
+                self.retire(server);
+            }
+        }
+        changed
+    }
+
+    /// Shut a server no slot holds down, off this thread, and clear the
+    /// diagnostics it published.
+    fn retire(&self, server: LspServer) {
+        let diagnostics_tx = self.diagnostics_tx.clone();
+        std::thread::spawn(move || {
+            for uri in server.shutdown() {
+                let _ = diagnostics_tx.send(PublishDiagnosticsParams {
+                    uri,
+                    diagnostics: Vec::new(),
+                    version: None,
+                });
+            }
+        });
     }
 
     /// Replace the slot's process off the UI thread: shut the old one down,
@@ -1155,6 +1223,90 @@ mod tests {
             manager.ensure_server("test", &file).unwrap();
             assert!(manager.server_generation("test", &file).is_some());
             assert!(!manager.server_start_failed("test", &file));
+        }
+
+        /// A new config shuts down only the servers whose entry changed;
+        /// opening a file of that language again starts the new server.
+        #[test]
+        fn a_changed_server_entry_replaces_only_that_server() {
+            let dir = tempfile::tempdir().unwrap();
+            let entry = |script: &str| LspServerConfig {
+                command: "sh".into(),
+                args: vec!["-c".into(), script.into()],
+                root_markers: Vec::new(),
+            };
+            let mut config = LspConfig::default();
+            config
+                .servers
+                .insert("test".into(), entry("echo >> starts; exec sleep 60"));
+            config
+                .servers
+                .insert("other".into(), entry("exec sleep 60"));
+            let mut manager = LspManager::new(config.clone());
+            let file = dir.path().join("a.rs");
+            std::fs::write(&file, "").unwrap();
+            manager.ensure_server("test", &file).unwrap();
+            manager.ensure_server("other", &file).unwrap();
+            let test_before = manager.server_generation("test", &file).unwrap();
+            let other_before = manager.server_generation("other", &file).unwrap();
+
+            assert!(manager.set_config(config.clone()).is_empty(), "same config");
+            assert_eq!(manager.server_generation("test", &file), Some(test_before));
+
+            config.servers.insert(
+                "test".into(),
+                entry("echo >> starts; echo >> second; exec sleep 60"),
+            );
+            config
+                .servers
+                .insert("added".into(), entry("exec sleep 60"));
+            let changed = manager.set_config(config);
+            assert_eq!(
+                changed,
+                HashSet::from(["test".to_string(), "added".to_string()])
+            );
+            assert_eq!(manager.server_generation("test", &file), None);
+            assert_eq!(
+                manager.server_generation("other", &file),
+                Some(other_before)
+            );
+
+            manager.ensure_server("test", &file).unwrap();
+            let test_after = manager.server_generation("test", &file).unwrap();
+            assert_ne!(test_after, test_before);
+            poll_until(&mut manager, |_| dir.path().join("second").exists());
+        }
+
+        /// A restart still under way when its language is reconfigured does
+        /// not bring its server back into the manager, and that server is
+        /// shut down rather than left running.
+        #[test]
+        fn a_restart_in_flight_for_a_reconfigured_language_is_shut_down() {
+            let dir = tempfile::tempdir().unwrap();
+            let (mut manager, file) = manager(dir.path(), "echo $$ >> pids; exec sleep 60");
+            assert!(manager.restart_server("test", &file));
+            manager.set_config(LspConfig::default());
+            let pids = || {
+                std::fs::read_to_string(dir.path().join("pids"))
+                    .unwrap_or_default()
+                    .lines()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            };
+            // The restart started its process and handed it over.
+            poll_until(&mut manager, |_| pids().len() == 2);
+            let alive = |pid: &str| {
+                std::process::Command::new("kill")
+                    .args(["-0", pid])
+                    .status()
+                    .is_ok_and(|s| s.success())
+            };
+            let second = pids()[1].clone();
+            poll_until(&mut manager, |m| {
+                assert!(!m.poll_restarts(), "no server went live");
+                !alive(&second)
+            });
+            assert!(manager.servers.is_empty());
         }
 
         /// Restarting a file no server was started for does nothing.

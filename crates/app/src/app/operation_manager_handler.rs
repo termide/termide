@@ -277,10 +277,10 @@ impl App {
                                                         e
                                                     );
                                                     self.state.close_modal();
-                                                    self.show_error_modal(format!(
-                                                        "Upload failed: {}",
-                                                        e
-                                                    ));
+                                                    self.show_error_modal(
+                                                        termide_i18n::t()
+                                                            .op_upload_failed_fmt(&e.to_string()),
+                                                    );
                                                 }
                                             }
                                         }
@@ -471,7 +471,9 @@ impl App {
                                     self.process_batch_operation(operation);
                                 }
                             } else {
-                                self.show_error_modal(format!("Operation failed: {}", err));
+                                self.show_error_modal(
+                                    termide_i18n::t().op_failed_fmt(&err.to_string()),
+                                );
                             }
 
                             // Untrack failed operation from operations panel

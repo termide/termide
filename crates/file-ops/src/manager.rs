@@ -274,7 +274,7 @@ impl OperationManager {
                     .map(|p| match p {
                         OperationPath::Local(path) => Ok(path.clone()),
                         OperationPath::Remote(_) => Err(OperationError::Invalid(
-                            "Only local files go to the trash".to_string(),
+                            termide_i18n::t().fm_trash_local_only().to_string(),
                         )),
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -395,7 +395,7 @@ impl OperationManager {
                     .map(|p| match p {
                         OperationPath::Local(path) => Ok(path.clone()),
                         OperationPath::Remote(_) => Err(OperationError::Invalid(
-                            "Pack requires local sources".to_string(),
+                            termide_i18n::t().fm_pack_local_only().to_string(),
                         )),
                     })
                     .collect::<Result<_, _>>()?;
@@ -421,7 +421,7 @@ impl OperationManager {
                     .map(|p| match p {
                         OperationPath::Local(path) => Ok(path.clone()),
                         OperationPath::Remote(_) => Err(OperationError::Invalid(
-                            "Unpack requires local archives".to_string(),
+                            termide_i18n::t().fm_unpack_local_only().to_string(),
                         )),
                     })
                     .collect::<Result<_, _>>()?;
@@ -502,7 +502,9 @@ impl OperationManager {
                         Err(_) => {
                             events.push(OperationEvent::Completed(
                                 *id,
-                                OperationResult::Failed("Thread panicked".to_string()),
+                                OperationResult::Failed(
+                                    termide_i18n::t().op_worker_panicked().to_string(),
+                                ),
                             ));
                             completed.push(*id);
                         }
@@ -600,16 +602,20 @@ impl OperationManager {
 
             // Use the first active operation's current item as activity description
             if summary.current_activity.is_none() {
-                summary.current_activity = match op.info.op_type {
-                    OperationType::Copy => Some("Copying".to_string()),
-                    OperationType::Move => Some("Moving".to_string()),
-                    OperationType::Delete => Some("Deleting".to_string()),
-                    OperationType::Trash => Some("Moving to trash".to_string()),
-                    OperationType::Download => Some("Downloading".to_string()),
-                    OperationType::Upload => Some("Uploading".to_string()),
-                    OperationType::Pack => Some("Packing".to_string()),
-                    OperationType::Unpack => Some("Unpacking".to_string()),
-                };
+                let t = termide_i18n::t();
+                summary.current_activity = Some(
+                    match op.info.op_type {
+                        OperationType::Copy => t.op_activity_copying(),
+                        OperationType::Move => t.op_activity_moving(),
+                        OperationType::Delete => t.op_activity_deleting(),
+                        OperationType::Trash => t.op_activity_trashing(),
+                        OperationType::Download => t.op_activity_downloading(),
+                        OperationType::Upload => t.op_activity_uploading(),
+                        OperationType::Pack => t.op_activity_packing(),
+                        OperationType::Unpack => t.op_activity_unpacking(),
+                    }
+                    .to_string(),
+                );
             }
         }
 

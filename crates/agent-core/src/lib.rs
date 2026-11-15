@@ -61,9 +61,9 @@ pub mod usage;
 
 pub use acp::{companion_tools, AcpConfig, AcpFlavor, ACP_PROVIDER, COMPANION_TOOLS, MODEL_OPTION};
 pub use agent::{
-    execute_tool, judge_tool_call, run_judged_call, unanswered_calls, Agent, AgentConfig,
-    AgentEvent, ChainedHooks, ContextNote, Hooks, JudgedCall, Judgment, NoHooks, QueueHandle,
-    QueueMode, ToolDecision,
+    execute_tool, judge_tool_call, panic_is_contained, run_judged_call, unanswered_calls, Agent,
+    AgentConfig, AgentEvent, ChainedHooks, ContextNote, Hooks, JudgedCall, Judgment, NoHooks,
+    QueueHandle, QueueMode, ToolDecision,
 };
 pub use ask::{
     question_channel, Question, QuestionAnswer, QuestionEnvelope, QuestionOption, QuestionReply,

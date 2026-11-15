@@ -1867,20 +1867,9 @@ impl Shared {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner) = None;
         }
-        let stop = match &result {
-            Ok(value) => match value["stopReason"].as_str() {
-                Some("cancelled") => StopReason::Aborted,
-                Some("max_tokens") => StopReason::Length,
-                Some("refusal") => StopReason::Error,
-                _ => StopReason::Stop,
-            },
-            Err(_) => StopReason::Error,
-        };
-        // A cancelled turn reads as the built-in loop's: an aborted message.
-        let error = match &result {
-            Err(failure) => Some(failure.text.clone()),
-            Ok(_) if stop == StopReason::Aborted => Some("aborted".to_string()),
-            Ok(_) => None,
+        let (stop, error) = match &result {
+            Ok(value) => turn_stop(value["stopReason"].as_str()),
+            Err(failure) => (StopReason::Error, Some(failure.text.clone())),
         };
         let failure = result.as_ref().err().map(|failure| {
             let mut class = failure.class;
@@ -3683,6 +3672,30 @@ fn mcp_result_text(result: &Value) -> String {
         .filter_map(|block| block["text"].as_str())
         .collect();
     texts.join("\n")
+}
+
+/// How a turn the agent ended with `stop_reason` closes, and the error it
+/// shows. A cancelled turn reads as the built-in loop's: an aborted message.
+/// A refusal or a turn the agent's own request limit cut off is no finished
+/// answer: it ends as an error that says so, even with no text before it.
+fn turn_stop(stop_reason: Option<&str>) -> (StopReason, Option<String>) {
+    match stop_reason {
+        Some("cancelled") => (StopReason::Aborted, Some("aborted".to_string())),
+        Some("max_tokens") => (StopReason::Length, None),
+        Some("refusal") => (
+            StopReason::Error,
+            Some("The model declined to answer (refusal).".to_string()),
+        ),
+        Some("max_turn_requests") => (
+            StopReason::Error,
+            Some(
+                "The agent stopped the turn at its limit of model requests \
+                 (max_turn_requests)."
+                    .to_string(),
+            ),
+        ),
+        _ => (StopReason::Stop, None),
+    }
 }
 
 /// The token usage a `session/prompt` result reports, when it does.

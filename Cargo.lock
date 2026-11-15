@@ -5173,6 +5173,7 @@ dependencies = [
  "nix 0.29.0",
  "ratatui",
  "tempfile",
+ "termide-agent-core",
  "termide-app",
  "termide-config",
  "termide-core",

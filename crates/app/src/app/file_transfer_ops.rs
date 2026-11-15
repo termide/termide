@@ -48,7 +48,7 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to start upload operation: {}", e);
-                self.show_error_modal(format!("Upload failed: {}", e));
+                self.show_error_modal(termide_i18n::t().op_upload_failed_fmt(&e.to_string()));
                 // Clear uploading flag
                 if let Some(panel) = self.layout_manager.active_panel_mut() {
                     if let Some(editor) = panel.as_editor_mut() {

@@ -130,7 +130,7 @@ pub struct AiSettings {
     )]
     pub reasoning: termide_agent_core::ThinkingLevel,
 
-    /// Permission rules: a mode (`configured` unless the file names another)
+    /// Permission rules: a mode (`auto` unless the file names another)
     /// plus one `pattern = decision` table per tool.
     #[serde(default)]
     pub permissions: termide_agent_core::PermissionRules,

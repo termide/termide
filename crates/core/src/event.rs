@@ -743,13 +743,6 @@ pub enum PanelEvent {
     /// Show informational message
     ShowMessage(String),
 
-    /// Show a read-only info modal: a title and key/value rows, rendered as a
-    /// table (used for the agent panel's session summary).
-    ShowInfo {
-        title: String,
-        rows: Vec<(String, String)>,
-    },
-
     /// Open the usage window on the panel's session: its summary as
     /// key/value rows, beside what the project and every project spent.
     ShowSessionUsage { rows: Vec<(String, String)> },
@@ -810,13 +803,7 @@ pub enum PanelEvent {
     /// Clear status bar message
     ClearStatus,
 
-    // === File watcher registration ===
-    /// Register path for watching
-    WatchPath(PathBuf),
-
-    /// Unregister path from watching
-    UnwatchPath(PathBuf),
-
+    // === File watcher ===
     /// `path` was changed on disk by a panel acting for the user (the
     /// agent's `edit` and `write`). Delivered to panels as a filesystem
     /// update at once, without waiting for the watcher, which may also drop
@@ -857,12 +844,6 @@ pub enum PanelEvent {
     CopyToClipboard(String),
 
     // === Panel management ===
-    /// Request panel split
-    SplitPanel {
-        direction: SplitDirection,
-        panel_name: String,
-    },
-
     /// Open diagnostics panel (e.g., when clicking on diagnostic virtual line)
     OpenDiagnosticsPanel,
 
@@ -1146,11 +1127,4 @@ pub enum ConflictResolution {
 
     /// Cancel the entire operation
     Cancel,
-}
-
-/// Direction for panel splits.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SplitDirection {
-    Horizontal,
-    Vertical,
 }

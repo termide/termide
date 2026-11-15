@@ -136,7 +136,9 @@ impl App {
             Ok(path) => {
                 let _ = self.event_preview_media(path);
             }
-            Err(e) => self.show_error_modal(format!("Failed to cache image: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().image_cache_failed_fmt(&e.to_string()))
+            }
         }
     }
 }
@@ -180,7 +182,7 @@ fn deliver(
     let Some(kind) = classify(&fetched) else {
         return fail(
             slot,
-            format!("Unsupported content type: {}", fetched.content_type),
+            termide_i18n::t().fetch_unsupported_type_fmt(&fetched.content_type),
         );
     };
     let html = slot.downcast_ref::<HtmlPanel>();
@@ -246,7 +248,12 @@ fn image_into_placeholder(
     let title = fetch_title(&url);
     let path = match cache_image(bytes, ext, &url) {
         Ok(path) => path,
-        Err(e) => return fail(slot, format!("Failed to cache image: {e}")),
+        Err(e) => {
+            return fail(
+                slot,
+                termide_i18n::t().image_cache_failed_fmt(&e.to_string()),
+            )
+        }
     };
     if ImagePanel::graphics_available() {
         if let Ok(panel) = ImagePanel::new(path.clone()) {

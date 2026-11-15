@@ -29,7 +29,7 @@ use crate::protocol::RequestId;
 mod transport;
 
 /// Configuration for a specific LSP server
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LspServerConfig {
     /// Command to start the server
     pub command: String,

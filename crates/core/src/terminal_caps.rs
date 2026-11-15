@@ -3,7 +3,8 @@
 //! This module detects the color depth and other capabilities of the
 //! current terminal to adapt theme rendering appropriately.
 
-use std::sync::{OnceLock, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::RwLock;
 use termide_config::IconMode;
 
 /// Global terminal capabilities.
@@ -14,8 +15,10 @@ use termide_config::IconMode;
 /// the whole remaining life of the process.
 static TERMINAL_CAPS: RwLock<Option<TerminalCaps>> = RwLock::new(None);
 
-/// Resolved "use emoji icons" flag (set after config is loaded).
-static USE_EMOJI: OnceLock<bool> = OnceLock::new();
+/// Resolved "use emoji icons" flag: set once the config is loaded, and again
+/// whenever `general.icon_mode` changes. Read at render time, so a change
+/// shows on the next frame.
+static USE_EMOJI: AtomicBool = AtomicBool::new(false);
 
 /// Initialize global terminal capabilities.
 ///
@@ -204,21 +207,21 @@ fn emoji_likely() -> bool {
     !is_linux_console && has_utf8_locale() && !is_inside_multiplexer()
 }
 
-/// Initialize icon mode after config is loaded.
+/// Set the icon mode: once the config is loaded, and again when it changes.
 ///
 /// Resolves the final "use emoji" decision based on config + terminal heuristics.
-pub fn init_icon_mode(mode: IconMode) {
+pub fn set_icon_mode(mode: IconMode) {
     let use_emoji = match mode {
         IconMode::Emoji => true,
         IconMode::Unicode => false,
         IconMode::Auto => emoji_likely(),
     };
-    let _ = USE_EMOJI.set(use_emoji);
+    USE_EMOJI.store(use_emoji, Ordering::Relaxed);
 }
 
 /// Check if emoji icons should be used in panel titles.
 pub fn use_emoji_icons() -> bool {
-    USE_EMOJI.get().copied().unwrap_or(false)
+    USE_EMOJI.load(Ordering::Relaxed)
 }
 
 /// Mark of something that waits for the user: a panel header, the Projects
@@ -241,6 +244,19 @@ mod tests {
         let caps = TerminalCaps::detect();
         // Verify we got a valid struct (term may be empty in some CI environments)
         let _ = caps.term_for_child();
+    }
+
+    #[test]
+    fn the_icon_mode_can_be_changed_after_it_was_set() {
+        set_icon_mode(IconMode::Emoji);
+        assert!(use_emoji_icons());
+        set_icon_mode(IconMode::Unicode);
+        assert!(!use_emoji_icons());
+        assert_eq!(attention_mark(), "!");
+        set_icon_mode(IconMode::Emoji);
+        assert_eq!(attention_mark(), "🔔");
+        // Back to the default, for the other tests of this process.
+        set_icon_mode(IconMode::Unicode);
     }
 
     #[test]

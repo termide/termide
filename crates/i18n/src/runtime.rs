@@ -1418,6 +1418,18 @@ impl Translation for RuntimeTranslation {
         layout_cannot_move_panel,
         fv_no_active_panel,
         fv_no_fm_for_remote,
+        op_activity_copying,
+        op_activity_moving,
+        op_activity_deleting,
+        op_activity_trashing,
+        op_activity_downloading,
+        op_activity_uploading,
+        op_activity_packing,
+        op_activity_unpacking,
+        op_activity_renaming,
+        op_worker_panicked,
+        fm_trash_local_only,
+        remote_no_connection,
     }
 
     fn agent_permission_run_fmt(&self, tool: &str) -> String {
@@ -3248,6 +3260,105 @@ impl Translation for RuntimeTranslation {
     fn settings_language_failed_fmt(&self, error: &str) -> String {
         self.format("settings_language_failed_fmt", &[("error", error)])
     }
+
+    fn op_status_activity_fmt(&self, activity: &str, percent: usize) -> String {
+        self.format(
+            "op_status_activity_fmt",
+            &[("activity", activity), ("percent", &percent.to_string())],
+        )
+    }
+
+    fn op_status_generic_fmt(&self, percent: usize) -> String {
+        self.format(
+            "op_status_generic_fmt",
+            &[("percent", &percent.to_string())],
+        )
+    }
+
+    fn op_status_queued_fmt(&self, count: usize) -> String {
+        self.format("op_status_queued_fmt", &[("count", &count.to_string())])
+    }
+
+    fn op_status_activity_queued_fmt(
+        &self,
+        activity: &str,
+        percent: usize,
+        count: usize,
+    ) -> String {
+        self.format(
+            "op_status_activity_queued_fmt",
+            &[
+                ("activity", activity),
+                ("percent", &percent.to_string()),
+                ("count", &count.to_string()),
+            ],
+        )
+    }
+
+    fn op_status_active_queued_fmt(&self, active: usize, percent: usize, count: usize) -> String {
+        self.format(
+            "op_status_active_queued_fmt",
+            &[
+                ("active", &active.to_string()),
+                ("percent", &percent.to_string()),
+                ("count", &count.to_string()),
+            ],
+        )
+    }
+
+    fn op_status_ops_fmt(&self, count: usize, percent: usize) -> String {
+        self.format(
+            "op_status_ops_fmt",
+            &[
+                ("count", &count.to_string()),
+                ("percent", &percent.to_string()),
+            ],
+        )
+    }
+
+    fn op_move_source_not_deleted_fmt(&self, error: &str) -> String {
+        self.format("op_move_source_not_deleted_fmt", &[("error", error)])
+    }
+
+    fn op_temp_dir_failed_fmt(&self, error: &str) -> String {
+        self.format("op_temp_dir_failed_fmt", &[("error", error)])
+    }
+
+    fn op_failed_fmt(&self, error: &str) -> String {
+        self.format("op_failed_fmt", &[("error", error)])
+    }
+
+    fn remote_copy_failed_fmt(&self, error: &str) -> String {
+        self.format("remote_copy_failed_fmt", &[("error", error)])
+    }
+
+    fn status_saved_backup_fmt(&self, name: &str) -> String {
+        self.format("status_saved_backup_fmt", &[("name", name)])
+    }
+
+    fn ssh_open_failed_fmt(&self, error: &str) -> String {
+        self.format("ssh_open_failed_fmt", &[("error", error)])
+    }
+
+    fn git_askpass_failed_fmt(&self, error: &str) -> String {
+        self.format("git_askpass_failed_fmt", &[("error", error)])
+    }
+
+    fn git_spawn_failed_fmt(&self, error: &str) -> String {
+        self.format("git_spawn_failed_fmt", &[("error", error)])
+    }
+
+    fn image_cache_failed_fmt(&self, error: &str) -> String {
+        self.format("image_cache_failed_fmt", &[("error", error)])
+    }
+
+    fn fetch_unsupported_type_fmt(&self, content_type: &str) -> String {
+        self.format("fetch_unsupported_type_fmt", &[("type", content_type)])
+    }
+
+    fn vfs_protocol_unsupported_fmt(&self, protocol: &str) -> String {
+        self.format("vfs_protocol_unsupported_fmt", &[("protocol", protocol)])
+    }
     // Calendar
 }
 
@@ -3535,6 +3646,35 @@ mod tests {
                 assert_ne!(t.agent_banner_model(), "model", "{code}");
                 assert_ne!(t.agent_banner_tools(), "tools", "{code}");
                 assert_ne!(t.agent_banner_sessions(), "sessions", "{code}");
+            }
+        }
+    }
+
+    /// The background-operations indicator and the git progress notices
+    /// were English in every language; none may fall back to it again.
+    #[test]
+    fn operation_and_git_progress_texts_are_translated_everywhere() {
+        let en = RuntimeTranslation::new("en").unwrap();
+        for (code, _) in crate::SUPPORTED_LANGUAGES {
+            if *code == "en" {
+                continue;
+            }
+            let t = RuntimeTranslation::new(code).unwrap();
+            let texts = |t: &RuntimeTranslation| {
+                [
+                    t.op_activity_copying().to_string(),
+                    t.op_activity_trashing().to_string(),
+                    t.git_push_in_progress(),
+                    t.git_pull_in_progress(),
+                    t.git_fetch_in_progress(),
+                    t.op_status_queued_fmt(3),
+                    t.op_status_ops_fmt(2, 40),
+                ]
+            };
+            let pairs = texts(&t).into_iter().zip(texts(&en));
+            for (local, english) in pairs {
+                assert!(!local.is_empty(), "{code}: empty");
+                assert_ne!(local, english, "{code}: left in English");
             }
         }
     }

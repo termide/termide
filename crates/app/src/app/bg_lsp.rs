@@ -342,4 +342,75 @@ impl App {
             self.state.all_diagnostics.insert(path, diagnostics);
         }
     }
+
+    /// Carry out a change of `lsp.enabled` or of the server list in the
+    /// running config. Turned off, the servers are shut
+    /// down and the editors detached; turned on, the editors open their
+    /// documents in new servers; with a server list changed, only the
+    /// servers of the languages whose entry changed are replaced, and only
+    /// their editors open their documents again. Shutting servers down
+    /// waits on them a bounded while, so it is done off this thread.
+    pub(super) fn reconfigure_lsp(&mut self) {
+        let config = std::sync::Arc::clone(&self.state.config);
+        let servers = crate::state::AppState::create_lsp_config(&config);
+        let retired = match (self.state.lsp_manager.is_some(), config.lsp.enabled) {
+            (true, true) => {
+                let Some(manager) = self.state.lsp_manager.as_mut() else {
+                    return;
+                };
+                // Their servers clear their diagnostics as they go.
+                Some(manager.set_config(servers))
+            }
+            (true, false) => {
+                if let Some(manager) = self.state.lsp_manager.take() {
+                    std::thread::spawn(move || drop(manager));
+                }
+                // The servers clear nothing when the manager goes.
+                let paths: Vec<_> = self.state.lsp_diagnostics.drain().map(|(p, _)| p).collect();
+                for path in paths {
+                    self.publish_diagnostics(path);
+                }
+                None
+            }
+            (false, true) => {
+                self.state.lsp_manager = Some(termide_lsp::LspManager::new(servers));
+                None
+            }
+            (false, false) => return,
+        };
+        if retired.as_ref().is_some_and(|langs| langs.is_empty()) {
+            return;
+        }
+        self.forget_lsp_checks(retired.as_ref());
+
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, project)| project.panels_mut());
+        for panel in self.layout_manager.iter_all_panels_mut().chain(parked) {
+            let Some(editor) = panel.as_editor_mut() else {
+                continue;
+            };
+            let affected = retired.as_ref().is_none_or(|langs| {
+                editor
+                    .file_path()
+                    .and_then(termide_lsp::LspManager::detect_language)
+                    .is_some_and(|lang| langs.contains(&lang))
+            });
+            if !affected {
+                continue;
+            }
+            editor.detach_lsp();
+            if let Some(manager) = self.state.lsp_manager.as_mut() {
+                editor.init_lsp(manager);
+            } else if let Some(path) = editor.file_path() {
+                // A parked project's editors take diagnostics only from
+                // `all_diagnostics` when it comes back, which has no entry
+                // for a file left without any.
+                let left = self.state.all_diagnostics.get(path).cloned();
+                editor.update_diagnostics(left.unwrap_or_default());
+            }
+        }
+        self.state.needs_redraw = true;
+    }
 }

@@ -177,6 +177,33 @@ fn project_log_path(project_root: &std::path::Path) -> std::path::PathBuf {
         })
 }
 
+/// Start the log: in the file the config names, else in a new file of the
+/// project this run starts in (which a cleared `logging.file_path` goes
+/// back to).
+fn init_logger(config: &Config, project_root: &std::path::Path) {
+    termide_logger::init(
+        project_log_path(project_root),
+        log_file_override(config),
+        termide_config::constants::MAX_LOG_ENTRIES,
+        log_min_level(config),
+    );
+}
+
+/// The log file `logging.file_path` names, if any.
+fn log_file_override(config: &Config) -> Option<std::path::PathBuf> {
+    config
+        .logging
+        .file_path
+        .as_ref()
+        .map(std::path::PathBuf::from)
+}
+
+/// The minimum level `logging.min_level` names; `info` when it names none.
+fn log_min_level(config: &Config) -> termide_logger::LogLevel {
+    termide_logger::LogLevel::from_str(&config.logging.min_level)
+        .unwrap_or(termide_logger::LogLevel::Info)
+}
+
 /// Keep the windows external agents report in `<config>/ai/acp-windows.json`,
 /// for sizing what a new session of one is told of a conversation it joins.
 fn remember_agent_windows() {
@@ -208,20 +235,7 @@ impl App {
         state.project_bookmarks = termide_config::BookmarksConfig::load_from_project(&project_root);
 
         // Initialize logger in the project directory (before other initializations that log)
-        // Use config override if specified, otherwise use the project directory with unique filename
-        let log_file_path = if let Some(ref path) = state.config.logging.file_path {
-            std::path::PathBuf::from(path)
-        } else {
-            project_log_path(&project_root)
-        };
-        let min_log_level = termide_logger::LogLevel::from_str(&state.config.logging.min_level)
-            .ok()
-            .unwrap_or(termide_logger::LogLevel::Info);
-        termide_logger::init(
-            log_file_path,
-            termide_config::constants::MAX_LOG_ENTRIES,
-            min_log_level,
-        );
+        init_logger(&state.config, &project_root);
         log::info!("Application started");
         remember_agent_windows();
 
@@ -305,19 +319,7 @@ impl App {
             .unwrap_or_else(|_| dirs::home_dir().unwrap_or_else(|| std::path::PathBuf::from("/")));
 
         // Initialize logger in the project directory
-        let log_file_path = if let Some(ref path) = state.config.logging.file_path {
-            std::path::PathBuf::from(path)
-        } else {
-            project_log_path(&project_root)
-        };
-        let min_log_level = termide_logger::LogLevel::from_str(&state.config.logging.min_level)
-            .ok()
-            .unwrap_or(termide_logger::LogLevel::Info);
-        termide_logger::init(
-            log_file_path,
-            termide_config::constants::MAX_LOG_ENTRIES,
-            min_log_level,
-        );
+        init_logger(&state.config, &project_root);
         log::info!("Application started");
         remember_agent_windows();
 
@@ -724,12 +726,27 @@ impl App {
     }
 
     /// Make `config` the running config, carrying out what changed in it:
-    /// theme, language, AI settings and the hotkey table.
+    /// theme, language, icons, logging, language servers, AI settings and
+    /// the hotkey table.
     pub(super) fn adopt_config(&mut self, config: Config) {
         let old = std::sync::Arc::clone(&self.state.config);
         if config.general.theme != old.general.theme {
             self.state.set_theme(&config.general.theme);
         }
+        if config.general.icon_mode != old.general.icon_mode {
+            termide_core::set_icon_mode(config.general.icon_mode);
+            self.state.needs_redraw = true;
+        }
+        if config.logging.min_level != old.logging.min_level {
+            termide_logger::set_min_level(log_min_level(&config));
+        }
+        if config.logging.file_path != old.logging.file_path {
+            termide_logger::set_file_path(log_file_override(&config));
+        }
+        // Only what the servers are run with: the completion and hover
+        // settings are read where they are used.
+        let lsp_changed = config.lsp.enabled != old.lsp.enabled
+            || AppState::create_lsp_config(&config) != AppState::create_lsp_config(&old);
         if config.general.language != old.general.language {
             if let Err(e) = termide_i18n::set_language(&config.general.language) {
                 log::warn!("Failed to set language: {e}");
@@ -762,6 +779,9 @@ impl App {
         // The table is built from the keybindings in the config.
         self.state.cache.hotkey_table = None;
         self.state.config = std::sync::Arc::new(config);
+        if lsp_changed {
+            self.reconfigure_lsp();
+        }
     }
 
     /// Log git availability status to journal
