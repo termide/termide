@@ -322,6 +322,10 @@ pub struct LoopRecord {
     /// interval, so a reopen waits only what is left of it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub due_ms: Option<u64>,
+    /// The condition a judge checks after each run, the loop ending once it
+    /// is met; `None` for a loop that runs until it is stopped.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<String>,
 }
 
 /// A run the branch left unfinished, see [`Session::unfinished_run`].

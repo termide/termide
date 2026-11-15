@@ -77,6 +77,38 @@ pub fn parse_interval(token: &str) -> Option<Duration> {
     (n > 0).then(|| Duration::from_secs(n * unit))
 }
 
+/// What sets a `/loop`'s stop condition apart from its prompt: the last
+/// `until:` that opens a word, the condition after it.
+const UNTIL: &str = "until:";
+
+/// Split a `/loop` prompt into the prompt and its stop condition: what
+/// follows the last `until:` (in any case) that opens a word, when there is
+/// something after it. The colon keeps a plain "until" in the prompt its own.
+#[must_use]
+pub fn split_until(text: &str) -> (&str, Option<&str>) {
+    let lower = text.to_ascii_lowercase();
+    let found = lower
+        .rmatch_indices(UNTIL)
+        .map(|(at, _)| at)
+        .find(|&at| at == 0 || text[..at].ends_with(char::is_whitespace));
+    if let Some(at) = found {
+        let condition = text[at + UNTIL.len()..].trim();
+        if !condition.is_empty() {
+            return (text[..at].trim(), Some(condition));
+        }
+    }
+    (text.trim(), None)
+}
+
+/// A loop's prompt with its stop condition, as `/loop` reads it back.
+#[must_use]
+pub fn join_until(prompt: &str, until: Option<&str>) -> String {
+    match until.map(str::trim).filter(|c| !c.is_empty()) {
+        Some(condition) => format!("{} {UNTIL} {condition}", prompt.trim()),
+        None => prompt.trim().to_string(),
+    }
+}
+
 /// An interval in the largest unit [`parse_interval`] reads back exactly.
 #[must_use]
 pub fn format_interval(every: Duration) -> String {
@@ -212,6 +244,37 @@ mod tests {
         assert_eq!(parse_interval("90"), Some(Duration::from_secs(90)));
         assert_eq!(parse_interval("0m"), None);
         assert_eq!(parse_interval("soon"), None);
+    }
+
+    /// The stop condition is what follows the last `until:` opening a word;
+    /// a plain "until", or one with nothing after it, stays in the prompt.
+    #[test]
+    fn a_loop_prompt_splits_from_its_stop_condition() {
+        assert_eq!(
+            split_until("check CI until: CI is green"),
+            ("check CI", Some("CI is green"))
+        );
+        assert_eq!(
+            split_until("poll UNTIL:  the deploy is live "),
+            ("poll", Some("the deploy is live"))
+        );
+        assert_eq!(
+            split_until("wait until it builds"),
+            ("wait until it builds", None)
+        );
+        assert_eq!(split_until("poll until:"), ("poll until:", None));
+        assert_eq!(split_until("a notuntil: b"), ("a notuntil: b", None));
+        assert_eq!(
+            split_until("a until: b until: c"),
+            ("a until: b", Some("c"))
+        );
+        assert_eq!(
+            join_until("check CI", Some("green")),
+            "check CI until: green"
+        );
+        assert_eq!(join_until("check CI", None), "check CI");
+        let joined = join_until("check CI", Some("CI is green"));
+        assert_eq!(split_until(&joined), ("check CI", Some("CI is green")));
     }
 
     #[test]

@@ -130,7 +130,7 @@ Codex 和 Gemini CLI 也会获得 termide 的 MCP 服务器的工具：它们通
 | `Ctrl+F` | 在新会话的横幅上，于输入框中按标题搜索会话列表；`Esc` 结束搜索 |
 | `F7` | 开始新会话（用过的会话保留在列表中） |
 | `F8` | 删除此会话（确认后）并开始新会话；在横幅的会话列表中，删除光标处的会话 |
-| `/name args` + `Enter` | 发送填入 `args` 的提示词模板 `name`、运行命令脚本 `name` 或发送技能 `name`（名称被占用时用 `/skill:name`）；`/compact [focus]` 总结会话，`/undo` 撤回上一个请求，`/changes` 在 diff 面板中审查代理的更改，`/new` 开始新会话，`/fork` 把当前会话复制到新面板中，`/clear` 丢弃当前会话后开始新会话，`/rename [name]`（或 `/name`）重命名会话；`/pause` 在当前步骤后停止运行，`/continue` 恢复运行（或在步骤结束前取消暂停，运行失败后重试其请求）；`/loop [interval] <prompt>` 按间隔（或连续）重复运行一个提示，单独的 `/loop` 显示当前循环，`/loop stop`（或 `Esc`）结束循环；`/goal <what to achieve>` 自主朝目标工作，直到评审判定已达成，单独的 `/goal` 显示当前目标，`/goal stop`（或 `Esc`）结束它；`/handoff` 整理未完成工作的简报，然后提供将其保存到 `HANDOFF.md` 或以它开始新会话的选项；`/usage` 打开会话信息模态窗口，`/prompt` 打开组装后的系统提示词；`/mcp` 列出 MCP 服务器，`/mcp reload [server]` 重新读取它们的配置（单个服务器或全部），`/mcp login <server>` 和 `/mcp logout <server>` 登录或退出某个服务器，`/trust` 列出项目带来的、等待你批准的服务器，`/trust <name>` 批准其中一个（见 [MCP 服务器](#mcp-服务器)） |
+| `/name args` + `Enter` | 发送填入 `args` 的提示词模板 `name`、运行命令脚本 `name` 或发送技能 `name`（名称被占用时用 `/skill:name`）；`/compact [focus]` 总结会话，`/undo` 撤回上一个请求，`/changes` 在 diff 面板中审查代理的更改，`/new` 开始新会话，`/fork` 把当前会话复制到新面板中，`/clear` 丢弃当前会话后开始新会话，`/rename [name]`（或 `/name`）重命名会话；`/pause` 在当前步骤后停止运行，`/continue` 恢复运行（或在步骤结束前取消暂停，运行失败后重试其请求）；`/loop [interval] <prompt> [until: <condition>]` 按间隔（或连续）重复运行一个提示（带 `until:` 时，直到评审判定条件已满足；代理也可以用 `jobs` 停止循环），单独的 `/loop` 显示当前循环，`/loop stop`（或 `Esc`）结束循环；`/goal <what to achieve>` 自主朝目标工作，直到评审判定已达成，单独的 `/goal` 显示当前目标，`/goal stop`（或 `Esc`）结束它；`/handoff` 整理未完成工作的简报，然后提供将其保存到 `HANDOFF.md` 或以它开始新会话的选项；`/usage` 打开会话信息模态窗口，`/prompt` 打开组装后的系统提示词；`/mcp` 列出 MCP 服务器，`/mcp reload [server]` 重新读取它们的配置（单个服务器或全部），`/mcp login <server>` 和 `/mcp logout <server>` 登录或退出某个服务器，`/trust` 列出项目带来的、等待你批准的服务器，`/trust <name>` 批准其中一个（见 [MCP 服务器](#mcp-服务器)） |
 | `↑` / `↓` | 按屏幕显示的行（包括自动换行的行）在输入框内移动；在第一行或最后一行：取回仍在排队的消息（`↑`，有消息等待时），否则调出本会话较早的请求，或回到你正在输入的内容。调出的请求中光标位于箭头进入的一侧，因此连续按键会继续浏览历史 |
 | `Tab` | 列表打开时补全高亮的 `/command` 或 `@file` |
 | `Ctrl+↑` / `Ctrl+↓`、`PageUp` / `PageDown` | 滚动会话 |
@@ -589,7 +589,7 @@ front matter 由 `键: 值` 行组成；以 `#` 开头的行是注释，值可�
 | 转到后台的调用 | 外部代理，为了接收运行期间输入的消息 | `$ 正在运行  cargo test` | `✕`、`jobs`、`Esc` | 它的结果，交给代理，代理自行继续 | — |
 | 终端 | 带 `session` 或 `background` 的 `shell` | `$ 终端 · 名称` | `✕`、`terminals close` | 它的输出，在代理读取时 | 内存中 2 MiB，日志 256 MiB |
 | `/goal` | 你 | `◎ 正在朝目标前进` | `✕`、`/goal stop`、`Esc` | 评审的判定 | 评审；代理只说话不行动时会暂停 |
-| `/loop` | 你 | `↺ 每 5m 重复一次 · 3/100` | `✕`、`/loop stop`、`Esc` | 每次运行，显示在对话记录中 | 100 次运行 |
+| `/loop` | 你 | `↺ 每 5m 重复一次 · 3/100` | `✕`、`/loop stop`、`Esc`、`jobs` | 每次运行，显示在对话记录中 | 100 次运行；带 `until:` 时由评审决定 |
 | 分叉 | 代理的 `fork` | 无：它有自己的面板 | 关闭它的面板 | 无 | 代理之间在没有你参与时传递的消息（`max_agent_messages`） |
 | 发给另一个面板的消息 | 代理的 `send_message` | 无 | — | 提问时，一条作为消息的回答 | 代理之间在没有你参与时传递的消息（`max_agent_messages`） |
 

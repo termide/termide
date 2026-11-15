@@ -2363,3 +2363,37 @@ fn the_catalog_turns_definitions_into_profiles() {
     let default = catalog.resolve(DEFAULT_AGENT).unwrap();
     assert_eq!(default.system_prompt, "- deploy: Ship it\n");
 }
+
+/// The panel's loop is listed to its agent under `loop` and stopped by that
+/// id; another panel's loop is not its to see or stop.
+#[test]
+fn jobs_lists_and_stops_the_panels_loop() {
+    use termide_panel_agent::live::{self, LoopInfo};
+    let ctx = |panel| ToolContext {
+        panel: Some(panel),
+        ..ToolContext::new("/tmp")
+    };
+    live::publish_loop(
+        7401,
+        Some(LoopInfo {
+            prompt: "check CI\nand report".into(),
+            interval: Some(std::time::Duration::from_secs(300)),
+            until: Some("CI is green".into()),
+            iterations: 2,
+            max: 100,
+        }),
+    );
+    assert_eq!(
+        PanelTasks.list(&ctx(7401)),
+        ["- loop · the user's /loop every 5m · check CI · until: CI is green · run 2 of at most 100"]
+    );
+    assert!(PanelTasks.list(&ctx(7402)).is_empty());
+    assert_eq!(PanelTasks.stop("loop", &ctx(7402)), None);
+    let stopped = PanelTasks.stop("loop", &ctx(7401)).unwrap();
+    assert!(
+        stopped.starts_with("Stopped the loop (check CI)"),
+        "{stopped}"
+    );
+    live::publish_loop(7401, None);
+    assert_eq!(PanelTasks.stop("loop", &ctx(7401)), None);
+}

@@ -1,0 +1,21 @@
+# /loop with a stop condition: the mock model's task runs once, then the
+# goal judge (on its side model) checks the condition, finds it met, and the
+# loop ends before its next run.
+config side-models.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "/loop 1h flag critical low-stock items in the reorder report until: tests green"
+key Enter
+wait "looping every 1h" 15
+wait "Agent wants to run shell" 30
+type "1"
+wait "Want me to highlight critical rows" 30
+mock-llm-asked qwen3-coder-judge 30
+wait "loop's condition met; loop ended" 15
+expect-not "looping every 1h"
+snapshot ended
+quit

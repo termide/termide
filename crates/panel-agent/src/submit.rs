@@ -226,6 +226,7 @@ impl AgentPanel {
                     return vec![PanelEvent::NeedsRedraw];
                 }
                 let (interval, prompt) = parse_loop_args(args);
+                let (prompt, until) = termide_agent_core::split_until(prompt);
                 if prompt.is_empty() {
                     self.notice(
                         termide_i18n::t().agent_notice_loop_usage(),
@@ -233,7 +234,7 @@ impl AgentPanel {
                     );
                     return vec![PanelEvent::NeedsRedraw];
                 }
-                return self.start_loop(prompt.to_string(), interval);
+                return self.start_loop(prompt.to_string(), interval, until.map(str::to_string));
             }
             Some((GOAL_COMMAND, args)) => {
                 self.clear_input();
@@ -625,12 +626,14 @@ impl AgentPanel {
     }
 
     /// Start a `/loop`: send `prompt` now, then again every `interval`, or
-    /// back to back without one. While the agent works, the first run joins
-    /// it as a steering message.
+    /// back to back without one; with `until`, a judge checks that condition
+    /// after each run and the loop ends once it is met. While the agent
+    /// works, the first run joins it as a steering message.
     pub(crate) fn start_loop(
         &mut self,
         prompt: String,
         interval: Option<Duration>,
+        until: Option<String>,
     ) -> Vec<PanelEvent> {
         let t = termide_i18n::t();
         self.notice(
@@ -647,8 +650,139 @@ impl AgentPanel {
             due_ms: None,
             iterations: 0,
             started: Instant::now(),
+            until,
+            judge_at: None,
         });
         self.loop_step()
+    }
+
+    /// Ask the judge whether the loop's stop condition is met; the verdict
+    /// arrives as a `GoalJudged` event, applied in [`Self::on_loop_verdict`].
+    pub(crate) fn run_loop_judge(&mut self) -> Vec<PanelEvent> {
+        let Some(condition) = self.loop_task.as_mut().and_then(|task| {
+            task.judge_at = None;
+            task.until.clone()
+        }) else {
+            return vec![PanelEvent::NeedsRedraw];
+        };
+        match self.runtime.judge(condition) {
+            Ok(()) => {
+                self.loop_judging = true;
+                self.activity = Some(Activity {
+                    prompt_tokens: (self.context_tokens > 0).then_some(self.context_tokens),
+                    ..Activity::new(Phase::Judge)
+                });
+                self.notice(
+                    termide_i18n::t().agent_notice_loop_checking(),
+                    NoticeKind::Info,
+                );
+            }
+            Err(PromptError::Busy) => {
+                if let Some(task) = self.loop_task.as_mut() {
+                    task.judge_at = Some(Instant::now() + GOAL_JUDGE_BUSY_DELAY);
+                }
+            }
+            Err(error) => self.on_loop_judge_failed(&error.to_string()),
+        }
+        vec![PanelEvent::NeedsRedraw]
+    }
+
+    /// Apply the judge's verdict on the loop's stop condition: met, or out
+    /// of reach, ends the loop; otherwise — not yet, or waiting on something
+    /// outside, which is what a loop waits for anyway — its next run is
+    /// scheduled as usual.
+    pub(crate) fn on_loop_verdict(&mut self, outcome: GoalOutcome, reason: &str) {
+        if self.loop_task.is_none() {
+            return;
+        }
+        let t = termide_i18n::t();
+        let reason = reason.trim();
+        let ending = match (outcome, reason.is_empty()) {
+            (GoalOutcome::Done, true) => {
+                Some((t.agent_notice_loop_met().to_string(), NoticeKind::Info))
+            }
+            (GoalOutcome::Done, false) => {
+                Some((t.agent_notice_loop_met_reason_fmt(reason), NoticeKind::Info))
+            }
+            (GoalOutcome::Impossible, true) => Some((
+                t.agent_notice_loop_unreachable().to_string(),
+                NoticeKind::Warn,
+            )),
+            (GoalOutcome::Impossible, false) => Some((
+                t.agent_notice_loop_unreachable_reason_fmt(reason),
+                NoticeKind::Warn,
+            )),
+            (GoalOutcome::Continue | GoalOutcome::Waiting, _) => None,
+        };
+        if let Some((msg, kind)) = ending {
+            self.end_loop();
+            self.notice(msg, kind);
+            self.raise_attention(true);
+            return;
+        }
+        self.schedule_loop_run();
+    }
+
+    /// A check of the loop's stop condition failed: the loop is not given up
+    /// over it — the next run goes as scheduled, and is checked again.
+    pub(crate) fn on_loop_judge_failed(&mut self, error: &str) {
+        if self.loop_task.is_none() {
+            return;
+        }
+        self.notice(
+            termide_i18n::t().agent_notice_loop_check_failed_fmt(error),
+            NoticeKind::Warn,
+        );
+        self.schedule_loop_run();
+    }
+
+    /// Schedule the loop's next run: after its interval, or at once.
+    pub(crate) fn schedule_loop_run(&mut self) {
+        if let Some(task) = self.loop_task.as_mut() {
+            task.judge_at = None;
+            task.next_at = Some(Instant::now() + task.interval.unwrap_or(Duration::ZERO));
+            task.due_ms = task.interval.map(|wait| {
+                termide_agent_core::now_millis()
+                    .saturating_add(u64::try_from(wait.as_millis()).unwrap_or(u64::MAX))
+            });
+        }
+    }
+
+    /// End the loop and withdraw what it still has waiting in the queue, so
+    /// it does not reach the model later as a plain message.
+    fn end_loop(&mut self) {
+        if let Some(task) = self.loop_task.take() {
+            self.withdraw_queued(|message| message.typed() == task.prompt);
+        }
+    }
+
+    /// Tell [`crate::live`] of the loop when it changed, for the `jobs` tool
+    /// to list it to the panel's agent.
+    pub(crate) fn publish_loop(&mut self) {
+        let info = self.loop_task.as_ref().map(|task| crate::live::LoopInfo {
+            prompt: task.prompt.clone(),
+            interval: task.interval,
+            until: task.until.clone(),
+            iterations: task.iterations,
+            max: LOOP_MAX_ITERATIONS,
+        });
+        if info != self.published_loop {
+            crate::live::publish_loop(self.panel_id, info.clone());
+            self.published_loop = info;
+        }
+    }
+
+    /// The panel's agent stopped the loop through `jobs`: it ends as if
+    /// the user had stopped it, and the user is told who did.
+    pub(crate) fn stop_loop_by_agent(&mut self) {
+        if self.loop_task.is_none() {
+            return;
+        }
+        self.end_loop();
+        self.notice(
+            termide_i18n::t().agent_notice_loop_stopped_by_agent(),
+            NoticeKind::Info,
+        );
     }
 
     /// Start a `/goal`: work autonomously toward `goal`, a judge deciding after
@@ -706,8 +840,8 @@ impl AgentPanel {
     /// still has waiting in the queue; without one, show the usage.
     pub(crate) fn stop_loop(&mut self) {
         let t = termide_i18n::t();
-        if let Some(task) = self.loop_task.take() {
-            self.withdraw_queued(|message| message.typed() == task.prompt);
+        if self.loop_task.is_some() {
+            self.end_loop();
             self.notice(t.agent_notice_loop_stopped(), NoticeKind::Info);
         } else {
             self.notice(t.agent_notice_loop_usage(), NoticeKind::Info);

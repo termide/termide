@@ -222,6 +222,146 @@ fn a_loop_run_with_another_to_come_rings_no_bell() {
     assert!(!panel.rung);
 }
 
+/// `/loop … until: <condition>` takes the condition apart from the prompt,
+/// and a bare `/loop` shows it.
+#[test]
+fn a_loop_takes_its_stop_condition() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/loop 5m check CI until: CI is green");
+    panel.submit();
+    let task = panel.loop_task.as_ref().unwrap();
+    assert_eq!(task.prompt, "check CI");
+    assert_eq!(task.until.as_deref(), Some("CI is green"));
+    let status = panel.loop_status().unwrap();
+    assert!(
+        status.contains(&termide_i18n::t().agent_unfinished_loop_until_fmt("CI is green")),
+        "{status}"
+    );
+    // Its finished run goes to the judge before the next one is scheduled,
+    // and rings no bell.
+    panel.busy = false;
+    end_run_of(&mut panel, 60);
+    let task = panel.loop_task.as_ref().unwrap();
+    assert!(task.judge_at.is_some() && task.next_at.is_none());
+    assert!(!panel.rung);
+}
+
+/// After each run the judge checks the condition: not yet met, the loop
+/// runs again; met, it ends with the reason.
+#[test]
+fn a_loop_runs_until_the_judge_finds_its_condition_met() {
+    let mut panel = panel(vec![
+        reply("CI is still running"),
+        reply("CONTINUE\nthe run is not finished"),
+        reply("CI passed"),
+        reply("DONE\nthe run on main is green"),
+    ]);
+    type_text(&mut panel, "/loop check CI until: CI is green");
+    panel.submit();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while panel.loop_task.is_some() {
+        panel.tick();
+        assert!(Instant::now() < deadline, "the loop did not end");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let items = panel.transcript().items();
+    let runs = items
+        .iter()
+        .filter(|i| matches!(i, Item::User { text, .. } if text == "check CI"))
+        .count();
+    assert_eq!(runs, 2, "{items:?}");
+    let met = termide_i18n::t().agent_notice_loop_met_reason_fmt("the run on main is green");
+    assert!(items
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if *text == met)));
+    assert!(!panel.loop_judging);
+    assert!(panel.rung);
+}
+
+/// A condition out of reach ends the loop; one the agent waits on, or a
+/// failed check, sends the next run as scheduled.
+#[test]
+fn a_loop_verdict_ends_it_or_lets_it_run_on() {
+    use termide_agent_core::GoalOutcome;
+    let looping = |panel: &mut AgentPanel| {
+        panel.busy = true;
+        type_text(panel, "/loop 5m check CI until: CI is green");
+        panel.submit();
+        panel.busy = false;
+        end_run_of(panel, 1);
+        panel.loop_judging = true;
+    };
+    let verdict = |outcome, reason: &str| AgentEvent::GoalJudged {
+        outcome,
+        reason: reason.into(),
+        reply: String::new(),
+    };
+
+    let mut panel = panel(vec![]);
+    looping(&mut panel);
+    panel.apply(verdict(GoalOutcome::Waiting, "CI is queued"));
+    let task = panel.loop_task.as_ref().unwrap();
+    assert!(task.next_at.is_some() && task.judge_at.is_none());
+
+    looping(&mut panel);
+    panel.apply(AgentEvent::GoalJudgeFailed {
+        error: "no answer".into(),
+        reply: String::new(),
+    });
+    assert!(panel.loop_task.as_ref().unwrap().next_at.is_some());
+
+    looping(&mut panel);
+    panel.apply(verdict(GoalOutcome::Impossible, "the workflow was deleted"));
+    assert!(panel.loop_task.is_none());
+    let wanted =
+        termide_i18n::t().agent_notice_loop_unreachable_reason_fmt("the workflow was deleted");
+    assert!(panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|i| matches!(i, Item::Notice { text, .. } if *text == wanted)));
+}
+
+/// A goal running beside the loop does not take the loop's verdict.
+#[test]
+fn a_loop_verdict_does_not_reach_the_goal() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/goal finish the refactor");
+    panel.submit();
+    type_text(&mut panel, "/loop 5m check CI until: CI is green");
+    panel.submit();
+    panel.busy = false;
+    panel.loop_judging = true;
+    panel.apply(AgentEvent::GoalJudged {
+        outcome: termide_agent_core::GoalOutcome::Done,
+        reason: "green".into(),
+        reply: String::new(),
+    });
+    assert!(panel.loop_task.is_none(), "the loop ended");
+    assert!(panel.goal_task.is_some(), "the goal goes on");
+}
+
+/// The panel's agent stops the loop through `jobs`: the panel takes the ask
+/// on its next tick, before another run could go, and says who stopped it.
+#[test]
+fn the_agent_stops_the_loop_through_jobs() {
+    let mut panel = looping_panel();
+    let id = panel.panel_id;
+    let listed = crate::live::loop_of(id).expect("the loop is listed");
+    assert_eq!(listed.prompt, "check the build");
+    assert!(crate::live::ask_loop_stop(id).is_some());
+    panel.tick();
+    assert!(panel.loop_task.is_none());
+    assert!(panel.transcript().items().iter().any(|i| matches!(
+        i,
+        Item::Notice { text, .. } if text == termide_i18n::t().agent_notice_loop_stopped_by_agent()
+    )));
+    assert_eq!(crate::live::loop_of(id), None, "no longer listed");
+    assert_eq!(crate::live::ask_loop_stop(id), None);
+}
+
 /// While the judge decides, its call shows the ticking live line; the
 /// verdict takes it away.
 #[test]

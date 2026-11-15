@@ -211,6 +211,10 @@ impl AgentPanel {
             task.iterations,
             LOOP_MAX_ITERATIONS,
         );
+        if let Some(until) = &task.until {
+            line.push_str(", ");
+            line.push_str(&t.agent_unfinished_loop_until_fmt(&single_line(until)));
+        }
         if let Some(wait) = self.loop_wait() {
             line.push_str(", ");
             line.push_str(&t.agent_unfinished_loop_due_fmt(&wait));

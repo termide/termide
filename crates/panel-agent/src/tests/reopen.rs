@@ -390,12 +390,18 @@ fn a_loop_waits_only_what_is_left_of_its_interval() {
                     interval_ms: Some(3_600_000),
                     iterations: 2,
                     due_ms: Some(due),
+                    until: Some("the deploy is live".into()),
                 }),
             })
             .unwrap();
     });
     let mut panel = reopen(&path, dir.path(), vec![]);
     assert!(carry_on_card(&panel).contains("1h"));
+    // Its stop condition comes back with it.
+    assert_eq!(
+        panel.loop_task.as_ref().and_then(|t| t.until.as_deref()),
+        Some("the deploy is live")
+    );
     panel.apply_form_action(ChoiceAction::Chosen(0));
     let next = panel.loop_task.as_ref().and_then(|t| t.next_at).unwrap();
     let wait = next.saturating_duration_since(Instant::now());
@@ -418,6 +424,7 @@ fn dropping_restored_work_takes_it_out_of_the_log() {
                     interval_ms: Some(60_000),
                     iterations: 2,
                     due_ms: None,
+                    until: None,
                 }),
             })
             .unwrap();

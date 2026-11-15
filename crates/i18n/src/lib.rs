@@ -851,6 +851,14 @@ pub trait Translation: Send + Sync {
     fn agent_run_cancelled(&self) -> &str;
     fn agent_close_confirm_working(&self) -> &str;
     fn agent_notice_loop_stopped(&self) -> &str;
+    /// The panel's agent stopped the loop through its `jobs` tool.
+    fn agent_notice_loop_stopped_by_agent(&self) -> &str;
+    /// A judge checks whether the loop's stop condition (`until:`) is met.
+    fn agent_notice_loop_checking(&self) -> &str;
+    /// The judge found the loop's stop condition met: the loop ends.
+    fn agent_notice_loop_met(&self) -> &str;
+    /// The judge found the loop's stop condition out of reach: the loop ends.
+    fn agent_notice_loop_unreachable(&self) -> &str;
     fn agent_notice_loop_usage(&self) -> &str;
     fn agent_notice_goal_stopped(&self) -> &str;
     fn agent_notice_goal_usage(&self) -> &str;
@@ -1272,6 +1280,12 @@ pub trait Translation: Send + Sync {
         max: usize,
     ) -> String;
     fn agent_unfinished_loop_due_fmt(&self, wait: &str) -> String;
+    /// A loop's stop condition, after its status (`stops when: …`).
+    fn agent_unfinished_loop_until_fmt(&self, condition: &str) -> String;
+    fn agent_notice_loop_met_reason_fmt(&self, reason: &str) -> String;
+    fn agent_notice_loop_unreachable_reason_fmt(&self, reason: &str) -> String;
+    /// The check of a loop's stop condition failed; the next run goes on.
+    fn agent_notice_loop_check_failed_fmt(&self, error: &str) -> String;
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String;
     fn agent_notice_goal_impossible_reason_fmt(&self, reason: &str) -> String;
     fn agent_autorun_loop_every_fmt(&self, interval: &str) -> String;

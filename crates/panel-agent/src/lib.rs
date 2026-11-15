@@ -815,6 +815,12 @@ struct LoopTask {
     /// When the loop was started (or taken up again from the log), for the
     /// elapsed time in the state strip.
     started: Instant,
+    /// The stop condition (`/loop … until: <condition>`): after each run a
+    /// judge checks it, and the loop ends once it is met.
+    until: Option<String>,
+    /// When the judge call on the finished run is due; `None` without a
+    /// condition, or while a run or the judge call is in flight.
+    judge_at: Option<Instant>,
 }
 
 /// A running `/goal`: work autonomously toward `goal`. After each work turn a
@@ -1119,6 +1125,12 @@ pub struct AgentPanel {
     paused: bool,
     /// An active `/loop`: re-runs its prompt after each turn until stopped.
     loop_task: Option<LoopTask>,
+    /// The judge call in flight checks the loop's stop condition, not the
+    /// goal: its verdict goes to the loop, or nowhere if it has stopped.
+    loop_judging: bool,
+    /// What the panel last told [`live`] of its loop, for the `jobs` tool;
+    /// told again only when it changes.
+    published_loop: Option<live::LoopInfo>,
     /// A running `/goal`: autonomous work toward a goal with a judge; `None`
     /// when no goal is active.
     goal_task: Option<GoalTask>,
@@ -1580,6 +1592,8 @@ impl AgentPanel {
             busy: false,
             paused: false,
             loop_task: None,
+            loop_judging: false,
+            published_loop: None,
             goal_task: None,
             goal_errored: false,
             run_start: None,
@@ -1768,6 +1782,7 @@ impl Drop for AgentPanel {
     fn drop(&mut self) {
         self.log_cut_off_calls();
         self.sync_autorun();
+        live::publish_loop(self.panel_id, None);
         if let Some(session) = self.session.take() {
             self.release_terminals(&session);
             discard_if_empty(session);

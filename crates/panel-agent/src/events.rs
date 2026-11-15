@@ -208,15 +208,15 @@ impl AgentPanel {
                 self.offer_plan();
                 // A loop schedules its next iteration once the run ends, unless
                 // it was paused (then it waits for `/continue`), a card is up
-                // or a failed request waits to be tried again.
+                // or a failed request waits to be tried again. A loop with a
+                // stop condition has the judge check it first.
                 if !self.paused && self.pending.is_none() && self.retry_wait.is_none() {
-                    if let Some(task) = self.loop_task.as_mut() {
-                        task.next_at =
-                            Some(Instant::now() + task.interval.unwrap_or(Duration::ZERO));
-                        task.due_ms = task.interval.map(|wait| {
-                            termide_agent_core::now_millis()
-                                .saturating_add(u64::try_from(wait.as_millis()).unwrap_or(u64::MAX))
-                        });
+                    match self.loop_task.as_mut() {
+                        Some(task) if task.until.is_some() => {
+                            task.judge_at = Some(Instant::now());
+                        }
+                        Some(_) => self.schedule_loop_run(),
+                        None => {}
                     }
                 }
                 // A goal judges the finished work turn next, unless it was
@@ -253,7 +253,10 @@ impl AgentPanel {
                     .goal_task
                     .as_ref()
                     .is_some_and(|t| t.judge_at.is_some())
-                    || self.loop_task.as_ref().is_some_and(|t| t.next_at.is_some());
+                    || self
+                        .loop_task
+                        .as_ref()
+                        .is_some_and(|t| t.next_at.is_some() || t.judge_at.is_some());
                 if !goes_on {
                     self.raise_attention(ring);
                 }
@@ -635,13 +638,22 @@ impl AgentPanel {
                 reply,
             } => {
                 self.end_judging();
-                self.log_goal_verdict(Ok((outcome, &reason)), &reply);
-                self.on_goal_verdict(outcome, &reason);
+                // A loop's stop condition was checked, not the goal.
+                if std::mem::take(&mut self.loop_judging) {
+                    self.on_loop_verdict(outcome, &reason);
+                } else {
+                    self.log_goal_verdict(Ok((outcome, &reason)), &reply);
+                    self.on_goal_verdict(outcome, &reason);
+                }
             }
             AgentEvent::GoalJudgeFailed { error, reply } => {
                 self.end_judging();
-                self.log_goal_verdict(Err(&error), &reply);
-                self.on_goal_judge_failed(&error);
+                if std::mem::take(&mut self.loop_judging) {
+                    self.on_loop_judge_failed(&error);
+                } else {
+                    self.log_goal_verdict(Err(&error), &reply);
+                    self.on_goal_judge_failed(&error);
+                }
             }
             AgentEvent::Handoff { brief } => match brief {
                 Ok(text) => {
@@ -862,6 +874,12 @@ impl AgentPanel {
                 }
             }
         }
+        // The panel's agent stopped the loop through `jobs`: before anything
+        // could start its next run.
+        if crate::live::take_loop_stop(self.panel_id) {
+            self.stop_loop_by_agent();
+            changed = true;
+        }
         // A loop whose wait has elapsed starts its next iteration once the
         // panel is free (no run in flight, no card waiting for an answer).
         // The wall clock decides as well, so a sleep does not put it off.
@@ -886,10 +904,27 @@ impl AgentPanel {
             .goal_task
             .as_ref()
             .is_some_and(|t| !t.judging && t.judge_at.is_some_and(|at| at <= Instant::now()));
-        if judge_due && !self.is_busy() && self.pending.is_none() {
+        if judge_due && !self.loop_judging && !self.is_busy() && self.pending.is_none() {
             events.extend(self.run_goal_judge());
             changed = true;
         }
+        // A loop with a stop condition has its finished run checked the
+        // same way, one judge call at a time.
+        let goal_judging = self.goal_task.as_ref().is_some_and(|t| t.judging);
+        let loop_judge_due = self
+            .loop_task
+            .as_ref()
+            .is_some_and(|t| t.judge_at.is_some_and(|at| at <= Instant::now()));
+        if loop_judge_due
+            && !self.loop_judging
+            && !goal_judging
+            && !self.is_busy()
+            && self.pending.is_none()
+        {
+            events.extend(self.run_loop_judge());
+            changed = true;
+        }
+        self.publish_loop();
         // While the agent works, keep the ticking timer and the block's
         // spinner moving without waiting for an event (throttled to ~10 fps).
         // A `/compact` between runs leaves the runtime idle but still works;
