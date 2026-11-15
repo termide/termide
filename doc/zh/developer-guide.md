@@ -193,7 +193,7 @@ termide/
 │   ├── ui/                   # UI 组件与路径格式化
 │   ├── ui-render/            # UI 渲染（菜单、状态栏、面板）
 │   ├── unicode-width-fix/    # 修补版 unicode-width（东亚字符宽度修正）
-│   ├── vfs/                  # 虚拟文件系统（SFTP、FTP、SMB）
+│   ├── vfs/                  # 虚拟文件系统（SFTP、FTP、FTPS）
 │   ├── viewer/               # HTML 与 Markdown 面板共用的查看器核心
 │   ├── walk/                 # 遵循 .gitignore 的项目树遍历
 │   └── watcher/              # 文件系统与 git 监视器

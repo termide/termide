@@ -205,7 +205,7 @@ termide/
 │   ├── ui/                   # UI components and path formatting
 │   ├── ui-render/            # UI rendering (menu, status bar, panels)
 │   ├── unicode-width-fix/    # Patched unicode-width (East Asian width corrections)
-│   ├── vfs/                  # Virtual filesystem (SFTP, FTP, SMB)
+│   ├── vfs/                  # Virtual filesystem (SFTP, FTP, FTPS)
 │   ├── viewer/               # Viewer core shared by the HTML and Markdown panels
 │   ├── walk/                 # Project tree walking that honours .gitignore
 │   └── watcher/              # Filesystem and git watcher

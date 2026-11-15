@@ -35,7 +35,7 @@
 
 ### 设置模态框（Settings）
 
-通过 `Alt+P` 或菜单 **选项 → 编辑偏好设置** 打开。与之前的横向标签布局不同，现已改为 **侧边栏布局**：
+通过 `Alt+P` 或菜单 **选项 → 设置** 打开。与之前的横向标签布局不同，现已改为 **侧边栏布局**：
 
 **三个区域：**
 - **左侧边栏**（宽 18 列）— 区块列表，使用 Up/Down 浏览
@@ -58,6 +58,11 @@
 **侧边栏区块：**
 - General、Editor、File Manager、Terminal、LSP、Debug、Logging、VFS、AI、Plugins — 普通叶节点
 - **Keybindings** — 可展开分组（▶/▼），位于列表末尾，包含 9 个子区块（Global、Editor、FileManager、GitStatus、GitDiff、GitLog、Terminal、Database、Viewer）
+
+**布局与图标**（General 区块，`config.toml` 中的 `[general]`）：
+- **图标模式**（`icon_mode`）— 面板标题中的图标：`auto`（默认）在终端能绘制时显示 emoji，`emoji` 始终显示，`unicode` 不显示
+- **自动堆叠阈值**（`auto_stack_threshold`，默认 `80`）— 若新建一列会窄于该字符数，新面板放在活动面板下方而不是新的一列
+- **面板最小宽度**（`min_panel_width`，默认 `20`）— 调整面板大小时最窄到此宽度
 
 **导航：**
 
@@ -115,7 +120,7 @@
 - `选项` — 设置子菜单：
   - 主题 — 主题选择（实时预览）
   - 语言 — 界面语言（实时预览）
-  - 编辑偏好设置 — 打开设置模态框
+  - 设置 — 打开设置模态框
   - 帮助 — 打开帮助窗口
   - 分离实例 — 让本实例在后台继续运行（仅在可分离时显示；参见[可分离实例](detached-instances.md)）
   - 退出 — 退出应用
