@@ -336,6 +336,12 @@ pub fn render_operations_panel_snapshots(
 
     let visible_cards = card_areas.len();
 
+    // The indicators sit three columns in from the right edge: a panel
+    // narrower than that, or with no rows, has no room for them.
+    if area.width < 3 || area.height == 0 {
+        return card_areas;
+    }
+
     // Render scroll indicators if needed
     if scroll_offset > 0 {
         // Show "↑" indicator at top
