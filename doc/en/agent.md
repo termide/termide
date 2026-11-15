@@ -415,7 +415,8 @@ connection, model and agent picked stay, while the project agents, skills,
 hooks and the list of sessions below are now that directory's. What the panel
 reports before your first message — an MCP server connected, a `/name`
 defined twice — follows the fields, past a dashed rule. Further down, under
-the sessions heading, the list of this directory's other sessions, newest
+the sessions heading with their count in brackets (during a `Ctrl+F` search,
+matched/all), the list of this directory's other sessions, newest
 first, each with the local date and time of its last change, starting from
 the logo's column so the titles get the panel's width. The banner scrolls as
 one page with the wheel or its scrollbar, so on a short panel the fields make

@@ -601,8 +601,14 @@ impl AgentPanel {
             if !searching {
                 doc.push((Line::from(""), list_x, list_w, None));
             }
+            // How many there are, and while searching how many of them match.
+            let count = if searching {
+                format!("{}/{}", self.recent_sessions.len(), self.recent_all.len())
+            } else {
+                self.recent_all.len().to_string()
+            };
             doc.push((
-                Line::styled(t.agent_banner_sessions().to_string(), dim),
+                Line::styled(format!("{} ({count})", t.agent_banner_sessions()), dim),
                 list_x,
                 list_w,
                 None,

@@ -539,6 +539,8 @@ fn a_fresh_banner_offers_recent_sessions_to_open() {
     panel.handle_status_action(NEW_SESSION_ACTION);
     let all = render_text(&mut panel, 80, 24).join("\n");
     assert!(all.contains(sessions), "{all}");
+    // The heading counts the sessions offered.
+    assert!(all.contains(&format!("{sessions} (1)")), "{all}");
     // Each session is dated to the minute of its last change, local time.
     let stamp = crate::runtime::local_minute(panel.recent_sessions[0].modified);
     assert_eq!(stamp.len(), "YYYY-MM-DD HH:MM".len(), "{stamp}");
