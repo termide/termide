@@ -21,13 +21,25 @@ struct PartialCall {
     event_id: Option<String>,
 }
 
+/// The most tool calls one answer may carry. The index of a call comes from
+/// the network, so it bounds what a broken or hostile server can make the
+/// accumulator allocate; calls beyond it are dropped.
+const MAX_TOOL_CALLS: usize = 256;
+
+/// The error of a stream that ended without saying the answer was complete.
+pub const UNFINISHED_STREAM: &str = "the stream ended before the answer finished";
+
 /// Builds the assistant message from a chunk stream.
 #[derive(Debug, Default)]
 pub struct Accumulator {
     text: String,
     reasoning: String,
+    /// Whether the model refused (`delta.refusal`); its text is in `text`.
+    refused: bool,
     calls: Vec<PartialCall>,
     finish_reason: Option<String>,
+    /// Whether the `[DONE]` sentinel arrived.
+    done: bool,
     usage: Usage,
     /// Whether any content delta has been delivered; a failed request can
     /// only be retried transparently before this flips.
@@ -35,6 +47,17 @@ pub struct Accumulator {
 }
 
 impl Accumulator {
+    /// Note the `[DONE]` sentinel: the stream ended where it meant to.
+    pub fn mark_done(&mut self) {
+        self.done = true;
+    }
+
+    /// Whether the stream said the answer was complete, with a finish reason
+    /// or `[DONE]`. A connection that closes before either cut it short.
+    pub fn ended(&self) -> bool {
+        self.done || self.finish_reason.is_some()
+    }
+
     /// Strip the SSE framing from one line. `None` for comments, blank lines
     /// and other fields; `Some(None)` for the `[DONE]` sentinel.
     pub fn payload(line: &str) -> Option<Option<&str>> {
@@ -85,6 +108,16 @@ impl Accumulator {
                 on_event(StreamEvent::TextDelta(text.to_string()));
             }
         }
+        // OpenAI's structured refusal: its text is shown as the answer's,
+        // and the answer ends as a refusal.
+        if let Some(text) = delta.get("refusal").and_then(Value::as_str) {
+            if !text.is_empty() {
+                self.received_content = true;
+                self.refused = true;
+                self.text.push_str(text);
+                on_event(StreamEvent::TextDelta(text.to_string()));
+            }
+        }
         for key in ["reasoning_content", "reasoning"] {
             if let Some(text) = delta.get(key).and_then(Value::as_str) {
                 if !text.is_empty() {
@@ -103,7 +136,14 @@ impl Accumulator {
 
     fn feed_tool_call(&mut self, call: &Value, on_event: &mut dyn FnMut(StreamEvent)) {
         self.received_content = true;
-        let index = call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let index = call
+            .get("index")
+            .and_then(Value::as_u64)
+            .map_or(0, |index| usize::try_from(index).unwrap_or(usize::MAX));
+        if index >= MAX_TOOL_CALLS {
+            log::warn!("dropping a tool call with index {index}, past {MAX_TOOL_CALLS}");
+            return;
+        }
         while self.calls.len() <= index {
             self.calls.push(PartialCall::default());
         }
@@ -159,6 +199,7 @@ impl Accumulator {
         stop_override: Option<StopReason>,
         on_event: &mut dyn FnMut(StreamEvent),
     ) -> AssistantMessage {
+        let ended = self.ended();
         let mut content = Vec::new();
         if !self.reasoning.is_empty() {
             content.push(AssistantContent::thinking(self.reasoning));
@@ -192,8 +233,16 @@ impl Accumulator {
 
         // An answer the provider's filter stopped is no answer: it ends as
         // an error that says so, not as a reply that merely stopped.
+        // So is a refusal, and a stream that closed before it said the answer
+        // was complete: what came may be cut anywhere, a call's arguments
+        // included.
         let (stop_reason, error_message) = match (stop_override, self.finish_reason.as_deref()) {
             (Some(reason), _) => (reason, None),
+            (None, _) if self.refused => (
+                StopReason::Error,
+                Some("The model declined to answer (refusal).".to_string()),
+            ),
+            (None, _) if !ended => (StopReason::Error, Some(UNFINISHED_STREAM.to_string())),
             (None, Some("length")) => (StopReason::Length, None),
             (None, Some("tool_calls" | "function_call")) => (StopReason::ToolUse, None),
             (None, Some("content_filter")) => (
@@ -287,7 +336,10 @@ data: [DONE]
         for line in transcript.lines() {
             match Accumulator::payload(line) {
                 None => {}
-                Some(None) => break,
+                Some(None) => {
+                    acc.mark_done();
+                    break;
+                }
                 Some(Some(data)) => {
                     let chunk: Value = serde_json::from_str(data).unwrap();
                     acc.feed(&chunk, &mut |e| events.push(e));
@@ -417,6 +469,54 @@ data: [DONE]
     }
 
     #[test]
+    fn a_refusal_ends_as_an_error_that_says_so_and_keeps_its_text() {
+        let transcript = r#"data: {"choices":[{"index":0,"delta":{"refusal":"I can't"}}]}
+data: {"choices":[{"index":0,"delta":{"refusal":" help with that."},"finish_reason":"stop"}]}
+data: [DONE]
+"#;
+        let (message, events) = replay(transcript);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert!(message
+            .error_message
+            .as_deref()
+            .is_some_and(|text| text.contains("refusal")));
+        assert_eq!(message.plain_text(), "I can't help with that.");
+        assert!(events.contains(&StreamEvent::TextDelta("I can't".into())));
+    }
+
+    #[test]
+    fn a_stream_that_closes_before_its_end_is_unfinished() {
+        // Neither a finish reason nor `[DONE]`: the connection just closed.
+        let cut = r#"data: {"choices":[{"index":0,"delta":{"content":"Half an ans"}}]}
+"#;
+        let (message, _) = replay(cut);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert_eq!(message.error_message.as_deref(), Some(UNFINISHED_STREAM));
+        assert_eq!(message.plain_text(), "Half an ans");
+
+        // Either marker alone is a complete answer.
+        let reason_only = r#"data: {"choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}
+"#;
+        assert_eq!(replay(reason_only).0.stop_reason, StopReason::Stop);
+        let done_only = r#"data: {"choices":[{"index":0,"delta":{"content":"ok"}}]}
+data: [DONE]
+"#;
+        assert_eq!(replay(done_only).0.stop_reason, StopReason::Stop);
+    }
+
+    #[test]
+    fn a_tool_call_index_past_the_cap_is_dropped() {
+        let transcript = r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":18446744073709551615,"id":"x","function":{"name":"read","arguments":"{}"}}]}}]}
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":256,"id":"y","function":{"name":"read","arguments":"{}"}}]}}]}
+data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":255,"id":"z","function":{"name":"read","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+data: [DONE]
+"#;
+        let (message, _) = replay(transcript);
+        let ids: Vec<_> = message.tool_calls().map(|call| call.id.as_str()).collect();
+        assert_eq!(ids, ["z"]);
+    }
+
+    #[test]
     fn plain_text_answer_and_missing_ids() {
         let transcript = r#"data: {"choices":[{"index":0,"delta":{"content":"Hello"}}]}
 data: {"choices":[{"index":0,"delta":{"content":" world"},"finish_reason":"stop"}]}
@@ -427,6 +527,7 @@ data: [DONE]
         assert_eq!(message.plain_text(), "Hello world");
 
         let no_id = r#"data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"function":{"name":"read","arguments":"{}"}}]}}]}
+data: [DONE]
 "#;
         let (message, events) = replay(no_id);
         let call = message.tool_calls().next().unwrap();

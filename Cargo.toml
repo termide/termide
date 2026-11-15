@@ -169,6 +169,7 @@ log.workspace = true
 ratatui.workspace = true
 
 # Workspace crates referenced directly from main.rs / ui.rs
+termide-agent-core = { path = "crates/agent-core" }
 termide-app = { path = "crates/app" }
 termide-config = { path = "crates/config" }
 termide-core = { path = "crates/core" }

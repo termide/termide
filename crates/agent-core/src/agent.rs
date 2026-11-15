@@ -293,9 +293,60 @@ pub fn run_judged_call(
     let Some(tool) = tools.get(&judged.call.name) else {
         return ToolResultMessage::error(&judged.call, "The tool is gone.");
     };
-    let mut result = tool.execute(&judged.call, ctx, on_update, cancel);
+    // A tool that panics fails its own call, not the run or the host: the
+    // model hears of it as of any failed call.
+    let run = std::panic::AssertUnwindSafe(|| tool.execute(&judged.call, ctx, on_update, cancel));
+    let caught = {
+        let _contained = ContainedPanics::enter();
+        std::panic::catch_unwind(run)
+    };
+    let mut result = caught.unwrap_or_else(|panic| {
+        let reason = panic_text(panic.as_ref());
+        log::error!("tool `{}` panicked: {reason}", judged.call.name);
+        ToolResultMessage::error(
+            &judged.call,
+            format!("The tool failed with an internal error: {reason}"),
+        )
+    });
     result.permission = judged.permission;
     result
+}
+
+thread_local! {
+    static CONTAINED_DEPTH: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// Marks this thread as running code whose panics [`run_judged_call`]
+/// catches, for as long as the guard lives.
+struct ContainedPanics;
+
+impl ContainedPanics {
+    fn enter() -> Self {
+        CONTAINED_DEPTH.with(|depth| depth.set(depth.get() + 1));
+        ContainedPanics
+    }
+}
+
+impl Drop for ContainedPanics {
+    fn drop(&mut self) {
+        CONTAINED_DEPTH.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+/// Whether a panic raised on this thread now will be caught and turned
+/// into a failed tool call. A process-wide panic hook asks this to leave
+/// the terminal alone for such a panic: the host carries on.
+pub fn panic_is_contained() -> bool {
+    CONTAINED_DEPTH.with(|depth| depth.get() > 0)
+}
+
+/// The message a panic carried, as far as it is text.
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|text| (*text).to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "unknown panic".to_string())
 }
 
 /// Whether a call may run side by side with its neighbours of the same

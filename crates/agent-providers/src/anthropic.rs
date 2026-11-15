@@ -17,8 +17,9 @@ use termide_agent_core::{
 };
 
 use crate::attribution;
-use crate::openai::{names_field, refusals_of, Refusals};
+use crate::openai::{learn_refusals, refusals_of, Refusals};
 use crate::retry::{with_retries, Failure, RetryPolicy};
+use crate::sse::UNFINISHED_STREAM;
 
 /// The Messages API version pinned in the request header.
 const API_VERSION: &str = "2023-06-01";
@@ -131,7 +132,17 @@ impl AnthropicProvider {
         }
         let style = thinking_style(&request.model.id);
         let level = request.thinking.nearest(&style_levels(style));
-        let thinking = thinking_param(style, level, max_tokens, request.model.reasoning_budget);
+        // A field the endpoint refused stays out; without `thinking` the
+        // model does not reason, and its earlier reasoning is not replayed.
+        let thinking = thinking_param(style, level, max_tokens, request.model.reasoning_budget)
+            .and_then(|(on, param)| {
+                let param: Vec<_> = param
+                    .into_iter()
+                    .filter(|(key, _)| !self.refuses(key))
+                    .collect();
+                let on = on && param.iter().any(|(key, _)| key == "thinking");
+                (!param.is_empty()).then_some((on, param))
+            });
         let replay = replay_thinking && thinking.as_ref().is_some_and(|(on, _)| *on);
         let replay_model = replay.then_some(request.model.id.as_str());
         body.insert(
@@ -241,6 +252,11 @@ impl AnthropicProvider {
                 Err(error) => log::warn!("skipping malformed SSE event ({error}): {data}"),
             }
         }
+        // A stream that closed before its end broke off: asked again while
+        // nothing came, an error after that.
+        if !acc.ended() && !acc.received_content {
+            return Err(Failure::transport(UNFINISHED_STREAM.to_string()));
+        }
         Ok(acc.finish(&self.name, model, None, on_event))
     }
 }
@@ -299,7 +315,7 @@ impl Provider for AnthropicProvider {
     ) -> AssistantMessage {
         let model = request.model.id.as_str();
         let mut replay = true;
-        let mut current = self.body(request, replay).to_string();
+        let mut current = self.body(request, replay);
         with_retries(
             &self.name,
             model,
@@ -307,7 +323,7 @@ impl Provider for AnthropicProvider {
             cancel,
             on_event,
             |on_event| loop {
-                match self.attempt(&current, model, on_event, cancel) {
+                match self.attempt(&current.to_string(), model, on_event, cancel) {
                     // A replayed block is refused when the conversation
                     // before it changed (a compaction, a rebuilt system
                     // prompt): the documented recovery is to send the
@@ -316,24 +332,23 @@ impl Provider for AnthropicProvider {
                         log::warn!("{model} refused the replayed reasoning; retrying without it");
                         replay = false;
                     }
-                    // A gateway that takes no `cache_control` is asked again
-                    // without it, and never again after.
-                    Err(failure)
-                        if !self.refuses(CACHE_CONTROL)
-                            && names_refused(&failure, CACHE_CONTROL) =>
-                    {
-                        log::warn!(
-                            "{} refused {CACHE_CONTROL}; retrying without it",
-                            self.base_url
-                        );
-                        self.refused
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner)
-                            .insert(CACHE_CONTROL);
+                    // A gateway that refuses an optional field (no
+                    // `cache_control`, an older thinking shape) is asked
+                    // again without it, and never again after.
+                    Err(failure) => {
+                        if !learn_refusals(
+                            &self.refused,
+                            &failure,
+                            &current,
+                            &OPTIONAL_FIELDS,
+                            model,
+                        ) {
+                            return Err(failure);
+                        }
                     }
-                    other => return other,
+                    reply => return reply,
                 }
-                current = self.body(request, replay).to_string();
+                current = self.body(request, replay);
             },
         )
     }
@@ -559,9 +574,13 @@ fn thinking_param(
     }
 }
 
-/// Whether an error is the API refusing a replayed reasoning block.
 /// The request field that asks for prompt caching.
 const CACHE_CONTROL: &str = "cache_control";
+
+/// The fields termide adds to a request beyond what the Messages API
+/// requires, any of which a gateway may refuse. One that names it in a 400
+/// or 422 gets the request again without it, and never again after.
+const OPTIONAL_FIELDS: [&str; 3] = [CACHE_CONTROL, "thinking", "output_config"];
 
 impl AnthropicProvider {
     fn refuses(&self, field: &str) -> bool {
@@ -572,14 +591,7 @@ impl AnthropicProvider {
     }
 }
 
-/// Whether `failure` is a 400 or 422 that names `field` as a word of its own.
-fn names_refused(failure: &Failure, field: &str) -> bool {
-    ["HTTP 400", "HTTP 422"]
-        .iter()
-        .any(|status| failure.message.starts_with(status))
-        && (names_field(&failure.message, field) || names_field(&failure.detail, field))
-}
-
+/// Whether an error is the API refusing a replayed reasoning block.
 fn is_signature_rejection(message: &str) -> bool {
     message.starts_with("HTTP 400") && message.contains("signature")
 }
@@ -631,11 +643,20 @@ struct Accumulator {
     blocks: HashMap<usize, PartialBlock>,
     order: Vec<usize>,
     stop_reason: Option<String>,
+    /// Whether `message_stop` arrived.
+    stopped: bool,
     usage: Usage,
     received_content: bool,
 }
 
 impl Accumulator {
+    /// Whether the stream said the answer was complete, with `message_stop`
+    /// or the stop reason before it. A connection that closes before either
+    /// cut it short.
+    fn ended(&self) -> bool {
+        self.stopped || self.stop_reason.is_some()
+    }
+
     fn feed(&mut self, event: &Value, on_event: &mut dyn FnMut(StreamEvent)) {
         match event.get("type").and_then(Value::as_str) {
             Some("message_start") => {
@@ -747,6 +768,7 @@ impl Accumulator {
                     }
                 }
             }
+            Some("message_stop") => self.stopped = true,
             _ => {}
         }
     }
@@ -800,8 +822,11 @@ impl Accumulator {
         // A refusal, or a context the model could not take, is no answer: it
         // ends as an error that says so — the latter one the loop compacts
         // the context after — not as a reply that merely stopped.
+        // So is a stream that closed before its end: what came may be cut
+        // anywhere, a call's arguments included.
         let (stop_reason, error_message) = match (stop_override, self.stop_reason.as_deref()) {
             (Some(reason), _) => (reason, None),
+            (None, _) if !self.ended() => (StopReason::Error, Some(UNFINISHED_STREAM.to_string())),
             (None, Some("max_tokens")) => (StopReason::Length, None),
             (None, Some("tool_use")) => (StopReason::ToolUse, None),
             (None, Some("refusal")) => (
@@ -1268,6 +1293,7 @@ mod tests {
             json!({ "type": "content_block_stop", "index": 0 }),
             json!({ "type": "content_block_start", "index": 1, "content_block": { "type": "redacted_thinking", "data": "xyz" } }),
             json!({ "type": "content_block_stop", "index": 1 }),
+            json!({ "type": "message_stop" }),
         ];
         let (message, _) = feed_all(&events);
         assert_eq!(
@@ -1330,6 +1356,98 @@ mod tests {
             assert_eq!(message.stop_reason, StopReason::Error, "{reason}");
             let error = message.error_message.unwrap_or_default();
             assert!(error.contains(says), "{reason}: {error}");
+        }
+    }
+
+    #[test]
+    fn a_stream_that_closes_before_its_end_is_unfinished() {
+        let cut = vec![
+            json!({ "type": "message_start", "message": { "usage": { "input_tokens": 1 } } }),
+            json!({ "type": "content_block_start", "index": 0, "content_block": { "type": "text", "text": "" } }),
+            json!({ "type": "content_block_delta", "index": 0, "delta": { "type": "text_delta", "text": "Half" } }),
+        ];
+        let (message, _) = feed_all(&cut);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert_eq!(message.error_message.as_deref(), Some(UNFINISHED_STREAM));
+        assert_eq!(message.plain_text(), "Half");
+    }
+
+    /// Over HTTP: a stream that brought nothing is asked again, one cut
+    /// after its first content ends as an error.
+    #[test]
+    fn an_unfinished_stream_is_retried_until_content_came() {
+        use crate::openai::tests::{serve, sse};
+        let empty = sse(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
+        );
+        let partial = sse(concat!(
+            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+            "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Half\"}}\n\n",
+        ));
+        let (url, bodies) = serve(vec![empty, partial]);
+        let model = model("claude-sonnet-5");
+        let messages = vec![Message::User(UserMessage::text("hi"))];
+        let request = Request {
+            model: &model,
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::Off,
+        };
+        let provider = AnthropicProvider::with_base_url("gw", url).with_retry(RetryPolicy {
+            max_attempts: 3,
+            base_delay: Duration::from_millis(1),
+        });
+        let message = provider.stream(&request, &mut |_| {}, &CancelToken::new());
+        assert_eq!(bodies.lock().unwrap().len(), 2);
+        assert_eq!(message.stop_reason, StopReason::Error);
+        assert_eq!(message.error_message.as_deref(), Some(UNFINISHED_STREAM));
+        assert_eq!(message.plain_text(), "Half");
+    }
+
+    /// A gateway that refuses the adaptive thinking fields gets the request
+    /// again without them, as one refusing `cache_control` does.
+    #[test]
+    fn a_refused_thinking_field_is_dropped_and_stays_dropped() {
+        use crate::openai::tests::{serve, sse, status};
+        let done = sse(concat!(
+            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n",
+            "data: {\"type\":\"message_stop\"}\n\n",
+        ));
+        let refusal = status(
+            400,
+            r#"{"type":"error","error":{"type":"invalid_request_error","message":"output_config: Extra inputs are not permitted"}}"#,
+        );
+        let (url, bodies) = serve(vec![refusal, done.clone(), done]);
+        let model = model("claude-sonnet-5");
+        let messages = vec![Message::User(UserMessage::text("hi"))];
+        let request = Request {
+            model: &model,
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::High,
+        };
+        let gateway = AnthropicProvider::with_base_url("gateway", url.clone());
+        let message = gateway.stream(&request, &mut |_| {}, &CancelToken::new());
+        assert!(message.error_message.is_none(), "{message:?}");
+        AnthropicProvider::with_base_url("gateway", url).stream(
+            &request,
+            &mut |_| {},
+            &CancelToken::new(),
+        );
+        let bodies: Vec<Value> = bodies
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|b| serde_json::from_str(b).unwrap())
+            .collect();
+        assert_eq!(bodies.len(), 3);
+        assert!(bodies[0].get("output_config").is_some());
+        for body in &bodies[1..] {
+            assert!(body.get("output_config").is_none(), "{body}");
+            // The thinking itself was not refused and keeps going.
+            assert_eq!(body["thinking"]["type"], "adaptive", "{body}");
         }
     }
 

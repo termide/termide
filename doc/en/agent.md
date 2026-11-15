@@ -268,7 +268,9 @@ OpenRouter connection for Anthropic's models (`anthropic/…`): each step of a
 run reads the conversation before it from the cache, at a fraction of the input
 price, and the status bar counts those tokens under `↻`. The other hosted
 models cache by themselves. A gateway that refuses the field is asked again
-without it, and not again until termide restarts.
+without it, and not again until termide restarts; so is one that refuses the
+reasoning fields (`thinking`, `output_config`); without `thinking` its models
+answer without reasoning.
 
 `provider = "claude_code"`, `provider = "codex"` and `provider = "gemini_cli"`
 are different in kind: instead of the built-in loop talking to a model

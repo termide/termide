@@ -498,6 +498,12 @@ fn main() -> Result<()> {
     // which looks like a frozen blank screen (especially over SSH).
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
+        // A tool's panic is caught and fails only its call; the screen
+        // stays as it is and the panic goes to the journal, not to stderr.
+        if termide_agent_core::panic_is_contained() {
+            log::error!("contained panic: {info}");
+            return;
+        }
         restore_terminal();
         default_hook(info);
     }));

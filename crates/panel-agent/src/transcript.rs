@@ -2315,8 +2315,10 @@ fn tool_headline(
                         .unwrap_or_default(),
                 ),
                 "state" => action("→", t.agent_tool_debug_state(), String::new()),
-                // An action the tool will refuse, named as it was asked.
-                other => action("→", t.agent_tool_debug_start(), other.to_string()),
+                // An action the tool will refuse, named as it was asked under
+                // the tool's own name, as an unknown tool is: no verb of an
+                // action that did not happen.
+                other => action("→", &call.name, other.to_string()),
             }
         }
         // Another agent's message to this one: from whom, what it is, and

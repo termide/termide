@@ -1564,6 +1564,74 @@ fn calls_that_change_nothing_run_side_by_side() {
     )));
 }
 
+/// A tool that panics fails its own call, alone or beside others: the run
+/// goes on, and the model reads an error in the call's place.
+#[test]
+fn a_panicking_tool_fails_only_its_own_call() {
+    struct Brittle;
+    impl crate::Tool for Brittle {
+        fn name(&self) -> &str {
+            "read"
+        }
+        fn description(&self) -> &str {
+            "brittle"
+        }
+        fn parameters(&self) -> Value {
+            json!({ "type": "object" })
+        }
+        fn execute(
+            &self,
+            call: &ToolCall,
+            _ctx: &ToolContext,
+            _on_update: &mut dyn FnMut(ToolUpdate),
+            _cancel: &CancelToken,
+        ) -> ToolResultMessage {
+            if !crate::panic_is_contained() {
+                return ToolResultMessage::text(call, "not contained");
+            }
+            assert_ne!(call.arguments["path"], "boom", "broke on boom");
+            ToolResultMessage::text(call, "ok")
+        }
+    }
+    let mut registry = ToolRegistry::new();
+    registry.insert(Arc::new(Brittle));
+    let (mut agent, _) = agent(
+        ScriptedProvider::new(vec![
+            // Side by side.
+            tool_reply(
+                vec![
+                    ("r1", "read", json!({ "path": "boom" })),
+                    ("r2", "read", json!({ "path": "fine" })),
+                ],
+                StopReason::ToolUse,
+            ),
+            // Alone.
+            tool_reply(
+                vec![("r3", "read", json!({ "path": "boom" }))],
+                StopReason::ToolUse,
+            ),
+            text_reply("done"),
+        ]),
+        registry,
+    );
+    collect(&mut agent, "go", &mut NoHooks);
+    let results = results(&agent);
+    let ids: Vec<&str> = results.iter().map(|(id, _)| id.as_str()).collect();
+    assert_eq!(ids, ["r1", "r2", "r3"]);
+    assert!(results[0].1.contains("broke on boom"), "{results:?}");
+    assert_eq!(results[1].1, "ok");
+    assert!(results[2].1.contains("broke on boom"), "{results:?}");
+    assert!(!crate::panic_is_contained(), "the mark ends with the call");
+    assert!(agent.messages().iter().any(|m| matches!(
+        m,
+        Message::ToolResult(r) if r.tool_call_id == "r1" && r.is_error
+    )));
+    assert!(matches!(
+        agent.messages().last(),
+        Some(Message::Assistant(reply)) if reply.plain_text() == "done"
+    ));
+}
+
 /// A call that may change something runs alone: what comes before it
 /// has ended when it starts, and what comes after starts once it ended.
 #[test]

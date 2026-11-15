@@ -313,6 +313,7 @@ fn kind_of_text(message: &str) -> FailureKind {
         "transport error",
         "stream error",
         "stream interrupted",
+        "stream ended before",
         "connection",
         "network",
         "dns",
@@ -624,6 +625,10 @@ mod tests {
             FailureKind::Transient
         );
         assert_eq!(kind("HTTP 529: Overloaded"), FailureKind::Transient);
+        assert_eq!(
+            kind("the stream ended before the answer finished"),
+            FailureKind::Transient
+        );
         assert_eq!(
             kind("Invalid API key · Please run /login"),
             FailureKind::Auth

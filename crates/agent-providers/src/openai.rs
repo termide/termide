@@ -13,7 +13,7 @@ use termide_agent_core::{
 
 use crate::attribution;
 use crate::retry::{with_retries, Failure, RetryPolicy};
-use crate::sse::Accumulator;
+use crate::sse::{Accumulator, UNFINISHED_STREAM};
 
 /// The fields termide adds to a request beyond the plain chat completion, any
 /// of which a server may refuse: the top-level ones and, on assistant
@@ -430,6 +430,7 @@ impl OpenAiCompatProvider {
                 continue;
             };
             let Some(data) = payload else {
+                acc.mark_done();
                 break;
             };
             match serde_json::from_str::<Value>(data) {
@@ -447,6 +448,11 @@ impl OpenAiCompatProvider {
                 }
                 Err(error) => log::warn!("skipping malformed SSE chunk ({error}): {data}"),
             }
+        }
+        // A stream that closed before it said the answer was complete broke
+        // off: asked again while nothing came, an error after that.
+        if !acc.ended() && !acc.received_content {
+            return Err(Failure::transport(UNFINISHED_STREAM.to_string()));
         }
         Ok(acc.finish(&self.name, model, None, on_event))
     }
@@ -517,21 +523,12 @@ impl Provider for OpenAiCompatProvider {
             |on_event| loop {
                 match self.attempt(&body.to_string(), model, on_event, cancel) {
                     Err(failure) => {
-                        let fields = refused_in(&failure, &body);
                         // Only a field not refused before is news: one that
                         // `extra_body` puts back would otherwise go round.
-                        let added = {
-                            let mut refused =
-                                self.refused.lock().unwrap_or_else(PoisonError::into_inner);
-                            fields.iter().filter(|f| refused.insert(**f)).count()
-                        };
-                        if added == 0 {
+                        if !learn_refusals(&self.refused, &failure, &body, &OPTIONAL_FIELDS, model)
+                        {
                             return Err(failure);
                         }
-                        log::warn!(
-                            "{model} refused {}; leaving it out from now on",
-                            fields.join(", ")
-                        );
                         body = self.build_body(request);
                     }
                     reply => return reply,
@@ -568,11 +565,35 @@ pub(crate) fn refusals_of(base_url: &str) -> Refusals {
     )
 }
 
-/// The optional fields of `body` that `failure` refuses: a 400 or 422 whose
-/// error names them. Only fields the body carries count, so a rejection can
-/// not loop, and a name counts only as a whole word (`reasoning` is not
-/// named by `reasoning_effort`).
-fn refused_in(failure: &Failure, body: &Value) -> Vec<&'static str> {
+/// Note in `refused` the fields among `optional` that `failure` refuses in
+/// `body`, for the request to go again without them; `false` when it names
+/// none not refused before, and the failure stands.
+pub(crate) fn learn_refusals(
+    refused: &Refusals,
+    failure: &Failure,
+    body: &Value,
+    optional: &[&'static str],
+    model: &str,
+) -> bool {
+    let fields = refused_in(failure, body, optional);
+    let added = {
+        let mut refused = refused.lock().unwrap_or_else(PoisonError::into_inner);
+        fields.iter().filter(|f| refused.insert(**f)).count()
+    };
+    if added > 0 {
+        log::warn!(
+            "{model} refused {}; leaving it out from now on",
+            fields.join(", ")
+        );
+    }
+    added > 0
+}
+
+/// The fields among `optional` of `body` that `failure` refuses: a 400 or
+/// 422 whose error names them. Only fields the body carries count, so a
+/// rejection can not loop, and a name counts only as a whole word
+/// (`reasoning` is not named by `reasoning_effort`).
+fn refused_in(failure: &Failure, body: &Value, optional: &[&'static str]) -> Vec<&'static str> {
     let rejected = ["HTTP 400", "HTTP 422"]
         .iter()
         .any(|status| failure.message.starts_with(status));
@@ -585,8 +606,9 @@ fn refused_in(failure: &Failure, body: &Value) -> Vec<&'static str> {
                 .as_array()
                 .is_some_and(|messages| messages.iter().any(|m| m.get(field).is_some()))
     };
-    OPTIONAL_FIELDS
-        .into_iter()
+    optional
+        .iter()
+        .copied()
         .filter(|field| carries(field))
         .filter(|field| names_field(&failure.message, field) || names_field(&failure.detail, field))
         .collect()
@@ -1435,6 +1457,37 @@ data: [DONE]\n";
             e,
             StreamEvent::Retry { attempt: 1, max_attempts: 3, error, .. } if error.contains("overloaded")
         )));
+    }
+
+    /// A stream that closes before its end is asked again while it brought
+    /// nothing, and ends as an error once it brought part of an answer.
+    #[test]
+    fn a_stream_that_closes_before_its_end_is_retried_or_fails() {
+        let empty =
+            sse("data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n");
+        let partial =
+            sse("data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Half\"}}]}\n\n");
+        let (url, bodies) = serve(vec![empty, partial]);
+        let provider = provider(&url);
+        let messages = vec![Message::User(UserMessage::text("hi"))];
+        let request = Request {
+            model: &model(),
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::Off,
+        };
+        let mut events = Vec::new();
+        let message = provider.stream(&request, &mut |e| events.push(e), &CancelToken::new());
+
+        assert_eq!(bodies.lock().unwrap().len(), 2);
+        assert!(events.iter().any(|e| matches!(
+            e,
+            StreamEvent::Retry { error, .. } if error == UNFINISHED_STREAM
+        )));
+        assert_eq!(message.stop_reason, StopReason::Error, "{message:?}");
+        assert_eq!(message.error_message.as_deref(), Some(UNFINISHED_STREAM));
+        assert_eq!(message.plain_text(), "Half");
     }
 
     /// A server that refuses a field termide adds gets the request again

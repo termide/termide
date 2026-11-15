@@ -1,0 +1,1 @@
+- **A turn an external agent stops at its request limit says so.** When an agent over ACP ended a turn because it reached its own limit of model requests (`max_turn_requests`), the turn read as a finished answer; it now ends as an error that names the limit.

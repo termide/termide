@@ -348,6 +348,13 @@ fn recording_agent_with(
                     "agentCapabilities": { "mcpCapabilities": { "http": http } },
                 }),
                 Some("session/new") => json!({ "sessionId": "s1" }),
+                // A prompt `stop:<reason>` ends its turn with that reason.
+                Some("session/prompt") => message["params"]["prompt"]
+                    .as_array()
+                    .and_then(|blocks| blocks.last())
+                    .and_then(|block| block["text"].as_str())
+                    .and_then(|text| text.strip_prefix("stop:"))
+                    .map_or_else(|| json!({}), |reason| json!({ "stopReason": reason })),
                 Some(_) => json!({}),
                 None => continue,
             };
@@ -1005,6 +1012,46 @@ fn prompt_blocks(runtime: &AcpRuntime, seen: &Arc<Mutex<Vec<Value>>>, text: &str
         .iter()
         .map(|block| block["text"].as_str().unwrap().to_string())
         .collect()
+}
+
+/// A refusal with no text before it, and a turn the agent's request limit
+/// cut off, each end as an error that says so; an ordinary end does not.
+#[test]
+fn a_refused_or_request_limited_turn_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let (runtime, _seen) = recording_agent(
+        dir.path().to_path_buf(),
+        AcpFlavor::Generic,
+        None,
+        ModeHandle::new(Mode::default()),
+    );
+    let ending = |text: &str| -> Option<AssistantMessage> {
+        runtime.prompt(UserMessage::text(text)).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut events = Vec::new();
+        while !events.iter().any(|e| matches!(e, AgentEvent::AgentEnd)) {
+            assert!(Instant::now() < deadline, "the turn never ended");
+            events.extend(runtime.drain());
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        events.into_iter().find_map(|event| match event {
+            AgentEvent::MessageEnd(Message::Assistant(message)) => Some(message),
+            _ => None,
+        })
+    };
+    let refused = ending("stop:refusal").expect("a refusal leaves a message");
+    assert_eq!(refused.stop_reason, StopReason::Error);
+    assert!(refused
+        .error_message
+        .as_deref()
+        .is_some_and(|text| text.contains("declined")));
+    let limited = ending("stop:max_turn_requests").expect("the limit leaves a message");
+    assert_eq!(limited.stop_reason, StopReason::Error);
+    assert!(limited
+        .error_message
+        .as_deref()
+        .is_some_and(|text| text.contains("max_turn_requests")));
+    assert!(ending("stop:end_turn").is_none());
 }
 
 #[test]
