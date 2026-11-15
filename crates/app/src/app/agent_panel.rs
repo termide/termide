@@ -60,22 +60,27 @@ impl App {
     /// one, so several agents can work in a project at once. Reports an
     /// error instead of opening when there is no connection to run on.
     pub(in crate::app) fn handle_open_agent(&mut self) -> Result<()> {
+        // Like a new terminal, the agent works where the focused panel is
+        // (a file manager's directory, an editor's file); the project root
+        // when the panel has no directory of its own.
+        let cwd = self
+            .layout_manager
+            .active_panel_mut()
+            .and_then(|p| p.get_working_directory())
+            .unwrap_or_else(|| self.state.project_root.clone());
+        self.open_agent_in(cwd)
+    }
+
+    /// Open a new agent panel working in `cwd`, its banner listing the
+    /// sessions filed for that directory.
+    pub(in crate::app) fn open_agent_in(&mut self, cwd: PathBuf) -> Result<()> {
         let settings = self.state.config.ai.clone();
         if usable_connection(&settings).is_none() {
             let t = termide_i18n::t();
             self.show_error_modal(t.agent_not_configured().to_string());
             return Ok(());
         }
-
-        // Like a new terminal, the agent works where the focused panel is
-        // (a file manager's directory, an editor's file); the project root
-        // when the panel has no directory of its own.
         let project_root = self.state.project_root.clone();
-        let cwd = self
-            .layout_manager
-            .active_panel_mut()
-            .and_then(|p| p.get_working_directory())
-            .unwrap_or_else(|| project_root.clone());
         let panel = AgentPanel::new(agent_setup(
             &settings,
             cwd,

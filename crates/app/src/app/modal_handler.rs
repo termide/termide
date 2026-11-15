@@ -168,6 +168,11 @@ impl App {
                                 self.return_to_projects(from)?;
                                 return Ok(());
                             }
+                            PendingAction::RelinkSessions { .. } => {
+                                self.state.close_modal();
+                                self.reopen_ai_menu(termide_state::AiSection::Sessions);
+                                return Ok(());
+                            }
                             PendingAction::Vault => {
                                 self.state.close_modal();
                                 self.vault_prompt_cancelled();
@@ -810,6 +815,12 @@ impl App {
                     match value.get::<std::path::PathBuf>().cloned() {
                         Some(target) => self.relink_project(root, target, from)?,
                         None => self.return_to_projects(from)?,
+                    }
+                }
+                PendingAction::RelinkSessions { dir, cwd } => {
+                    match value.get::<std::path::PathBuf>().cloned() {
+                        Some(target) => self.relink_sessions(dir, cwd, target)?,
+                        None => self.reopen_ai_menu(termide_state::AiSection::Sessions),
                     }
                 }
                 // Navigation actions are handled in key_handler, should not get here

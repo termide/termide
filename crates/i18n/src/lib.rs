@@ -550,7 +550,8 @@ pub trait Translation: Send + Sync {
     fn ai_name_invalid(&self) -> &str;
     fn ai_name_exists(&self) -> &str;
     fn ai_empty(&self) -> &str;
-    fn ai_delete_session_title(&self) -> &str;
+    fn ai_delete_location_title(&self) -> &str;
+    fn ai_sessions_open(&self) -> &str;
     fn ai_session_untitled(&self) -> &str;
 
     // Diagram (Mermaid / editor "view as diagram") menu + status
@@ -1724,6 +1725,9 @@ pub trait Translation: Send + Sync {
     fn projects_relink_title_fmt(&self, name: &str) -> String;
     fn projects_relink_has_state_fmt(&self, path: &str) -> String;
     fn project_relinked_fmt(&self, path: &str) -> String;
+    fn ai_delete_location_fmt(&self, count: usize, path: &str) -> String;
+    fn ai_sessions_kept_open_fmt(&self, count: usize) -> String;
+    fn ai_sessions_relinked_fmt(&self, path: &str) -> String;
     fn project_copied_to_fmt(&self, path: &str) -> String;
     fn projects_move_failed_fmt(&self, path: &str, error: &str) -> String;
     fn projects_copy_failed_fmt(&self, path: &str, error: &str) -> String;

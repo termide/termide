@@ -604,7 +604,8 @@ impl Translation for RuntimeTranslation {
         ai_name_invalid,
         ai_name_exists,
         ai_empty,
-        ai_delete_session_title,
+        ai_delete_location_title,
+        ai_sessions_open,
         ai_session_untitled,
         bookmarks_add_bookmark,
         bookmarks_no_bookmarks,
@@ -3035,6 +3036,24 @@ impl Translation for RuntimeTranslation {
 
     fn project_relinked_fmt(&self, path: &str) -> String {
         self.format("project_relinked_fmt", &[("path", path)])
+    }
+
+    fn ai_delete_location_fmt(&self, count: usize, path: &str) -> String {
+        self.format(
+            "ai_delete_location_fmt",
+            &[("count", &count.to_string()), ("path", path)],
+        )
+    }
+
+    fn ai_sessions_kept_open_fmt(&self, count: usize) -> String {
+        self.format(
+            "ai_sessions_kept_open_fmt",
+            &[("count", &count.to_string())],
+        )
+    }
+
+    fn ai_sessions_relinked_fmt(&self, path: &str) -> String {
+        self.format("ai_sessions_relinked_fmt", &[("path", path)])
     }
 
     fn project_copied_to_fmt(&self, path: &str) -> String {

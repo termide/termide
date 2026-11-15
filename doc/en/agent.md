@@ -2040,22 +2040,32 @@ Items merged from the project (bold) and the global configuration are shown
 together (see [The agent directory](#the-agent-directory)).
 
 - `Enter` (or `F4`) edits: it opens a skill's `SKILL.md` or a prompt's `.md`
-  in an editor, and an agent's `AGENT.md` the same way; a session resumes —
-  focusing the panel that already shows it, or opening a new agent panel when none does.
-- `Delete` removes the item (with a confirmation); `F2` renames it (for a
-  session this sets its display name). The session confirmation names the
-  session (its display name, first prompt, or "untitled") and its id.
+  in an editor, and an agent's `AGENT.md` the same way.
+- `Delete` removes the item (with a confirmation); `F2` renames it.
 - The first two rows of Agents, Skills and Prompts create a new item — **New
   (in project)** under `.termide/ai/`, or **New (global)** under the
   configuration directory — asking for a name and opening the new file.
-  Sessions are created by running an agent, so they have no create rows.
-- Each session row shows, dim before its title, the local date and time it
-  was last worked on (`2026-10-08 14:22`), as the panel's welcome banner
-  dates its sessions.
 - An agent, skill or prompt with a description is listed as `name ·
   description` (the `description` front matter of an `AGENT.md`, a
   `SKILL.md` or a prompt); a row too long for the menu ends
   in `…`.
+
+**Sessions** lists where sessions are, not the sessions themselves: one row
+for each directory agents worked in, whatever project it belongs to or none,
+newest first. A session belongs to the directory its panel worked in, so a
+directory inside a project has a row of its own. Before the path, dim like
+the dates of the Projects menu, a row shows when the directory's newest
+session was last worked on and how many sessions it has
+(`2026-11-16 14:22  519  ~/src/app`); `✗` marks a directory that is gone.
+
+- `Enter` opens a new agent panel working in that directory; its welcome
+  banner lists the directory's sessions to resume, rename (`F2`) or delete
+  (`F8`). On a directory that is gone it asks where the directory is now,
+  and files its sessions there, rewriting the paths they name, as moving a
+  project carries its sessions along; refused while one of them is open.
+- `Delete` deletes all the directory's sessions after a confirmation giving
+  their number. Sessions open in a panel stay and are reported; the
+  sessions of directories inside it are not touched.
 
 Below the sections, once an agent panel has been opened, **Show browser
 window** puts the agents' web browser on screen to watch it work (see

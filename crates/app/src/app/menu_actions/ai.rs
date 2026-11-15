@@ -4,15 +4,18 @@
 //! The section item lists are built by [`crate::state::AppState::ai_section_items`]
 //! (shared with the renderer), so keys are addressed by index here. Item keys:
 //! `new:project` / `new:global` (create rows), `item:<name>` (an agent, skill or
-//! prompt) and `session:<path>` (a session log).
+//! prompt) and `location:<dir>` (a directory sessions worked in, by where
+//! they are filed).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use termide_agent_core::relocate::SessionLocation;
 use termide_state::AiSection;
 
-use super::super::App;
+use super::super::{parked_projects, App};
 use super::{navigate_submenu, SubmenuNavAction};
+use crate::state::SESSION_LOCATION_KEY;
 
 /// What a section key points at on disk, plus its display name.
 struct AiTarget {
@@ -21,40 +24,6 @@ struct AiTarget {
     path: PathBuf,
     /// The item's name, for the confirm/rename dialogs and the default value.
     name: String,
-    /// Whether renaming means setting a display name (sessions) rather than
-    /// moving the path.
-    is_session: bool,
-}
-
-/// Truncate `s` to `max` display characters, appending an ellipsis when cut.
-fn truncate_label(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(max.saturating_sub(1)).collect();
-    out.push('…');
-    out
-}
-
-/// The body for the "delete session?" confirmation: the session's display
-/// name, else its first prompt, else `untitled`, followed by its id.
-fn session_delete_message(
-    name: Option<&str>,
-    first_prompt: Option<&str>,
-    id: &str,
-    untitled: &str,
-) -> String {
-    let label = name
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .or_else(|| first_prompt.map(str::trim).filter(|s| !s.is_empty()))
-        .unwrap_or(untitled);
-    let label = truncate_label(label, 60);
-    if id.is_empty() {
-        label
-    } else {
-        format!("{label} · {id}")
-    }
 }
 
 impl App {
@@ -206,9 +175,94 @@ impl App {
             }
             return Ok(());
         }
-        if let Some(path) = key.strip_prefix("session:") {
-            self.ai_open_session(PathBuf::from(path))?;
+        if let Some(dir) = key.strip_prefix(SESSION_LOCATION_KEY) {
+            self.ai_open_location(Path::new(dir))?;
         }
+        Ok(())
+    }
+
+    /// The listed session location filed in `dir`.
+    fn ai_location(&self, dir: &Path) -> Option<SessionLocation> {
+        self.state
+            .cache
+            .session_locations
+            .iter()
+            .find(|location| location.dir == dir)
+            .cloned()
+    }
+
+    /// Enter on a Sessions row: an agent panel in that directory, whose
+    /// banner lists its sessions to open, rename or delete; for a directory
+    /// gone, ask where it is now.
+    fn ai_open_location(&mut self, dir: &Path) -> Result<()> {
+        let Some(location) = self.ai_location(dir) else {
+            return Ok(());
+        };
+        self.state.close_menu();
+        if location.cwd.is_dir() {
+            return self.open_agent_in(location.cwd);
+        }
+        let name = parked_projects::display_root(&location.cwd);
+        let start = location
+            .cwd
+            .ancestors()
+            .find(|dir| dir.is_dir())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.project_root.clone());
+        let t = termide_i18n::t();
+        let modal = termide_modal::DirectoryPickerModal::new(
+            start,
+            t.projects_relink_title_fmt(&name),
+            t.directory_picker_select().to_string(),
+        )
+        .with_keybindings(&self.state.config.file_manager.keybindings);
+        self.state.set_pending_action(
+            termide_state::PendingAction::RelinkSessions {
+                dir: location.dir,
+                cwd: location.cwd,
+            },
+            crate::state::ActiveModal::DirectoryPicker(Box::new(modal)),
+        );
+        Ok(())
+    }
+
+    /// The sessions filed in `dir`, worked in `cwd` now gone, worked in
+    /// `target`: file them there, their paths rewritten, as a project's
+    /// follow it. Refused while one of them is open.
+    pub(in crate::app) fn relink_sessions(
+        &mut self,
+        dir: PathBuf,
+        cwd: PathBuf,
+        target: PathBuf,
+    ) -> Result<()> {
+        let t = termide_i18n::t();
+        let to_dir = super::super::agent_panel::session_dir_of(&target);
+        if let Some(to_dir) = to_dir.filter(|_| target != cwd) {
+            let open = std::fs::read_dir(&dir).is_ok_and(|entries| {
+                entries
+                    .flatten()
+                    .any(|entry| termide_agent_core::Session::is_open(&entry.path()))
+            });
+            if open {
+                self.show_error_modal(t.ai_sessions_open().to_string());
+                return Ok(());
+            }
+            let relocation = termide_agent_core::relocate::SessionsRelocation {
+                from_dir: &dir,
+                to_dir: &to_dir,
+                from_root: &cwd,
+                to_root: &target,
+                copy: false,
+            };
+            if let Err(e) = termide_agent_core::relocate::relocate_sessions(relocation) {
+                log::error!("cannot move the sessions of {}: {e}", cwd.display());
+                self.show_error_modal(e.to_string());
+                return Ok(());
+            }
+            self.state
+                .set_info(t.ai_sessions_relinked_fmt(&parked_projects::display_root(&target)));
+        }
+        self.reopen_ai_menu(AiSection::Sessions);
         Ok(())
     }
 
@@ -269,18 +323,6 @@ impl App {
     /// Resolve the on-disk target of the selected row.
     fn ai_target(&self, section: AiSection) -> Option<AiTarget> {
         let key = self.ai_selected_key(section)?;
-        if let Some(path) = key.strip_prefix("session:") {
-            let path = PathBuf::from(path);
-            let name = path
-                .file_stem()
-                .map(|s| s.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            return Some(AiTarget {
-                path,
-                name,
-                is_session: true,
-            });
-        }
         let name = key.strip_prefix("item:")?.to_string();
         let dirs = self.state.ai_dirs();
         let path = match section {
@@ -296,67 +338,63 @@ impl App {
             AiSection::Prompts => dirs.prompt_path(&name)?,
             AiSection::Sessions => return None,
         };
-        Some(AiTarget {
-            path,
-            name,
-            is_session: false,
-        })
+        Some(AiTarget { path, name })
     }
 
-    /// Delete the selected item, after confirmation.
+    /// Delete the selected item, after confirmation; on a Sessions row, all
+    /// the sessions of that directory.
     fn delete_ai_selected(&mut self, section: AiSection) -> Result<()> {
-        let Some(target) = self.ai_target(section) else {
-            return Ok(());
+        let t = termide_i18n::t();
+        let (path, title, message) = if section == AiSection::Sessions {
+            let Some(location) = self
+                .ai_selected_key(section)
+                .as_deref()
+                .and_then(|key| key.strip_prefix(SESSION_LOCATION_KEY))
+                .and_then(|dir| self.ai_location(Path::new(dir)))
+            else {
+                return Ok(());
+            };
+            let message = t.ai_delete_location_fmt(
+                location.count,
+                &parked_projects::display_root(&location.cwd),
+            );
+            (
+                location.dir,
+                t.ai_delete_location_title().to_string(),
+                message,
+            )
+        } else {
+            let Some(target) = self.ai_target(section) else {
+                return Ok(());
+            };
+            let message = format!("{} \"{}\"", t.ai_delete_title(), target.name);
+            (target.path, t.ai_delete_title().to_string(), message)
         };
         self.state.close_menu();
-        let t = termide_i18n::t();
-        let (title, message) = if section == AiSection::Sessions {
-            let summary = self
-                .state
-                .ai_sessions_dir()
-                .and_then(|dir| termide_agent_core::Session::list(&dir).ok())
-                .and_then(|list| list.into_iter().find(|s| s.path == target.path));
-            let message = match summary {
-                Some(s) => session_delete_message(
-                    s.name.as_deref(),
-                    s.first_prompt.as_deref(),
-                    &s.id,
-                    t.ai_session_untitled(),
-                ),
-                None => t.ai_session_untitled().to_string(),
-            };
-            (t.ai_delete_session_title().to_string(), message)
-        } else {
-            (
-                t.ai_delete_title().to_string(),
-                format!("{} \"{}\"", t.ai_delete_title(), target.name),
-            )
-        };
         let modal = termide_modal::ConfirmModal::new(title, message);
         self.state.set_pending_action(
             termide_state::PendingAction::AiDelete {
                 section,
-                path: target.path.to_string_lossy().into_owned(),
+                path: path.to_string_lossy().into_owned(),
             },
             crate::state::ActiveModal::Confirm(Box::new(modal)),
         );
         Ok(())
     }
 
-    /// Rename the selected item (a display name for sessions, a path otherwise).
+    /// Rename the selected agent, skill or prompt; a Sessions row has no name
+    /// to change.
     fn rename_ai_selected(&mut self, section: AiSection) -> Result<()> {
         let Some(target) = self.ai_target(section) else {
             return Ok(());
         };
         self.state.close_menu();
         let t = termide_i18n::t();
-        // A session takes a free-form display name; the rest are identifiers.
-        let (default, hint) = if target.is_session {
-            ("", "")
-        } else {
-            (target.name.as_str(), t.ai_name_hint())
-        };
-        let modal = termide_modal::InputModal::with_default(t.ai_rename_title(), hint, default);
+        let modal = termide_modal::InputModal::with_default(
+            t.ai_rename_title(),
+            t.ai_name_hint(),
+            &target.name,
+        );
         self.state.set_pending_action(
             termide_state::PendingAction::AiRename {
                 section,
@@ -455,9 +493,25 @@ impl App {
         Ok(())
     }
 
-    /// Delete a resource's file or directory.
+    /// Delete a resource's file or directory; for Sessions, the sessions
+    /// filed in the directory `path` but those open in a panel, which stay
+    /// and are reported.
     pub(in crate::app) fn ai_delete_item(&mut self, section: AiSection, path: &str) -> Result<()> {
         let path = PathBuf::from(path);
+        if section == AiSection::Sessions {
+            match termide_agent_core::relocate::delete_closed_sessions(&path) {
+                Ok(0) => {}
+                Ok(kept) => self
+                    .state
+                    .set_info(termide_i18n::t().ai_sessions_kept_open_fmt(kept)),
+                Err(error) => {
+                    log::error!("cannot delete the sessions in {}: {error}", path.display());
+                    self.state.set_error(error.to_string());
+                }
+            }
+            self.state.needs_redraw = true;
+            return Ok(());
+        }
         let result = if section.item_is_file() {
             std::fs::remove_file(&path)
         } else {
@@ -470,7 +524,7 @@ impl App {
         Ok(())
     }
 
-    /// Rename a resource: a session's display name, or a file/directory move.
+    /// Rename a resource: its file or directory moves.
     pub(in crate::app) fn ai_rename_item(
         &mut self,
         section: AiSection,
@@ -479,15 +533,6 @@ impl App {
     ) -> Result<()> {
         let new_name = new_name.trim();
         let path = PathBuf::from(path);
-        if section == AiSection::Sessions {
-            if !new_name.is_empty() {
-                if let Ok(mut session) = termide_agent_core::Session::open_exclusive(&path) {
-                    let _ = session.set_name(new_name);
-                }
-            }
-            self.state.needs_redraw = true;
-            return Ok(());
-        }
         if !Self::valid_ai_name(new_name) {
             self.show_error_modal(termide_i18n::t().ai_name_invalid().to_string());
             return Ok(());
@@ -525,7 +570,7 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::{session_delete_message, truncate_label, AiSection};
+    use super::AiSection;
 
     /// The renderer names the sections by key; each row must name the
     /// section at its index, which is how the handlers address it.
@@ -552,37 +597,5 @@ mod tests {
             AiSection::Prompts.index(),
             termide_ui_render::AI_SUBMENU_PROMPTS
         );
-    }
-
-    #[test]
-    fn session_delete_message_names_the_session() {
-        // Display name wins and carries the id.
-        assert_eq!(
-            session_delete_message(Some("Refactor"), Some("do x"), "abc123", "untitled"),
-            "Refactor · abc123"
-        );
-        // Falls back to the first prompt, then to "untitled".
-        assert_eq!(
-            session_delete_message(None, Some("fix the bug"), "id1", "untitled"),
-            "fix the bug · id1"
-        );
-        assert_eq!(
-            session_delete_message(Some("  "), None, "id2", "untitled"),
-            "untitled · id2"
-        );
-        // A missing id drops the separator.
-        assert_eq!(
-            session_delete_message(Some("Solo"), None, "", "untitled"),
-            "Solo"
-        );
-    }
-
-    #[test]
-    fn truncate_label_cuts_with_an_ellipsis() {
-        assert_eq!(truncate_label("short", 60), "short");
-        let long = "x".repeat(80);
-        let cut = truncate_label(&long, 60);
-        assert_eq!(cut.chars().count(), 60);
-        assert!(cut.ends_with('…'));
     }
 }

@@ -1,5 +1,6 @@
 //! Carrying a project's session logs along when the project's directory is
-//! moved or copied, and deleting them with the project.
+//! moved or copied, deleting them with the project, and listing the
+//! directories sessions are filed for.
 //!
 //! The logs of a project are filed under its path (see
 //! `termide_project::project_key`), those of directories inside it nested
@@ -12,10 +13,11 @@
 use std::collections::HashMap;
 use std::io;
 use std::path::{Component, Path, PathBuf};
+use std::time::SystemTime;
 
 use serde_json::Value;
 
-use crate::session::new_id;
+use crate::session::{new_id, Session};
 
 /// The directory a session's checkpoints live under, beside its log.
 const CHECKPOINTS_DIR: &str = "checkpoints";
@@ -130,6 +132,127 @@ pub fn delete_sessions(dir: &Path) -> io::Result<()> {
     // Left non-empty by nested sessions, it stays.
     let _ = std::fs::remove_dir(dir);
     Ok(())
+}
+
+/// A directory agent sessions worked in, as the session store files it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionLocation {
+    /// The directory the sessions worked in.
+    pub cwd: PathBuf,
+    /// Where their logs are filed.
+    pub dir: PathBuf,
+    /// How many logs are filed there, not counting nested directories'.
+    pub count: usize,
+    /// When the newest of them last changed.
+    pub modified: Option<SystemTime>,
+}
+
+/// Every directory with sessions filed under the session store `root`,
+/// newest first. Only the file list and times are read, and the first line
+/// of each directory's newest log for the directory it names, so listing
+/// stays cheap with thousands of logs.
+#[must_use]
+pub fn session_locations(root: &Path) -> Vec<SessionLocation> {
+    let mut found = Vec::new();
+    collect_locations(root, root, &mut found);
+    found.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| a.cwd.cmp(&b.cwd)));
+    found
+}
+
+fn collect_locations(root: &Path, dir: &Path, found: &mut Vec<SessionLocation>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut count = 0;
+    let mut newest: Option<(Option<SystemTime>, PathBuf)> = None;
+    let mut nested = Vec::new();
+    for entry in entries.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            if entry.file_name() != CHECKPOINTS_DIR {
+                nested.push(path);
+            }
+        } else if file_type.is_file() && path.extension().is_some_and(|ext| ext == "jsonl") {
+            count += 1;
+            let modified = entry.metadata().and_then(|m| m.modified()).ok();
+            if newest.as_ref().is_none_or(|(time, _)| modified > *time) {
+                newest = Some((modified, path));
+            }
+        }
+    }
+    if let Some((modified, log)) = newest {
+        // The header names the directory exactly; the filing path is the
+        // fallback, losing a Windows drive.
+        let cwd = log_cwd(&log).unwrap_or_else(|| {
+            Path::new("/").join(dir.strip_prefix(root).unwrap_or(Path::new("")))
+        });
+        found.push(SessionLocation {
+            cwd,
+            dir: dir.to_path_buf(),
+            count,
+            modified,
+        });
+    }
+    for dir in nested {
+        collect_locations(root, &dir, found);
+    }
+}
+
+/// The directory the log at `path` worked in, from its header line.
+fn log_cwd(path: &Path) -> Option<PathBuf> {
+    use std::io::BufRead;
+    let mut line = String::new();
+    std::io::BufReader::new(std::fs::File::open(path).ok()?)
+        .read_line(&mut line)
+        .ok()?;
+    let header: Value = serde_json::from_str(&line).ok()?;
+    header.get("cwd")?.as_str().map(PathBuf::from)
+}
+
+/// Delete the sessions filed in `dir` but those open in a panel here or in
+/// another termide, as [`delete_sessions`] does; returns how many were kept
+/// for being open.
+///
+/// # Errors
+///
+/// When an entry cannot be deleted.
+pub fn delete_closed_sessions(dir: &Path) -> io::Result<usize> {
+    let logs: Vec<PathBuf> = match std::fs::read_dir(dir) {
+        Ok(entries) => entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "jsonl"))
+            .collect(),
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(e),
+    };
+    let (open, closed): (Vec<_>, Vec<_>) = logs.into_iter().partition(|log| Session::is_open(log));
+    if open.is_empty() {
+        delete_sessions(dir)?;
+        return Ok(0);
+    }
+    let ignore_missing = |result: io::Result<()>| match result {
+        Err(e) if e.kind() != io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    };
+    for log in closed {
+        std::fs::remove_file(&log)?;
+        let mut lease = log.as_os_str().to_os_string();
+        lease.push(".lock");
+        ignore_missing(std::fs::remove_file(lease))?;
+        if let Some(id) = log
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .and_then(|stem| stem.rsplit_once('_'))
+            .map(|(_, id)| id)
+        {
+            ignore_missing(std::fs::remove_dir_all(dir.join(CHECKPOINTS_DIR).join(id)))?;
+        }
+    }
+    Ok(open.len())
 }
 
 /// Whether `rel`, relative to a session directory, lies among checkpoints.
@@ -375,6 +498,58 @@ mod tests {
         assert!(!nested_dir.exists());
         // Nothing left to delete is no error.
         delete_sessions(&nested_dir).unwrap();
+    }
+
+    /// Each directory with logs of its own is a location, named by the
+    /// directory its logs worked in and counted without its nested ones;
+    /// checkpoints and directories with no logs are not locations.
+    #[test]
+    fn the_locations_are_the_directories_with_logs() {
+        let fx = Fixture::new();
+        let store = fx
+            .from_dir
+            .parent()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_path_buf();
+        fx.log(&fx.from_dir, &fx.from_root);
+        fx.log(&fx.from_dir, &fx.from_root);
+        fx.log(&fx.from_dir.join("sub"), &fx.from_root.join("sub"));
+
+        let mut found = session_locations(&store);
+        found.sort_by(|a, b| a.cwd.cmp(&b.cwd));
+
+        let listed: Vec<(PathBuf, PathBuf, usize)> =
+            found.into_iter().map(|l| (l.cwd, l.dir, l.count)).collect();
+        assert_eq!(
+            listed,
+            [
+                (fx.from_root.clone(), fx.from_dir.clone(), 2),
+                (fx.from_root.join("sub"), fx.from_dir.join("sub"), 1),
+            ]
+        );
+        assert!(session_locations(&fx.to_dir).is_empty());
+    }
+
+    /// Deleting a location's sessions leaves the one a panel has open, with
+    /// its checkpoints, and reports it kept.
+    #[test]
+    fn deleting_closed_sessions_keeps_the_open_one() {
+        let fx = Fixture::new();
+        let (closed, closed_id) = fx.log(&fx.from_dir, &fx.from_root);
+        let open = Session::create_exclusive(&fx.from_dir, &fx.from_root).unwrap();
+        let open_path = open.path().to_path_buf();
+
+        assert_eq!(delete_closed_sessions(&fx.from_dir).unwrap(), 1);
+
+        assert!(!closed.exists());
+        assert!(!fx.from_dir.join(CHECKPOINTS_DIR).join(closed_id).exists());
+        assert!(open_path.exists());
+
+        drop(open);
+        assert_eq!(delete_closed_sessions(&fx.from_dir).unwrap(), 0);
+        assert!(!fx.from_dir.exists());
     }
 
     /// A move keeps the logs' names and ids, points their headers and

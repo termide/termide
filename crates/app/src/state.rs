@@ -40,6 +40,18 @@ pub use crate::state_types::{
     ScrollBarDrag, StashState,
 };
 
+/// The key prefix of a Sessions row in the AI menu, before the directory
+/// its sessions are filed in.
+pub(crate) const SESSION_LOCATION_KEY: &str = "location:";
+
+/// Where agent session logs are filed, `<config>/ai/sessions`.
+pub(crate) fn ai_sessions_root() -> Option<PathBuf> {
+    termide_config::get_config_dir().ok().map(|dir| {
+        dir.join(termide_agent_core::GLOBAL_AGENT_DIR)
+            .join(termide_agent_core::SESSIONS_DIR)
+    })
+}
+
 /// A `git commit` from the commit window in flight: its hooks may run for
 /// minutes, so it runs on a worker thread that answers with the new commit's
 /// short hash or git's message.
@@ -454,6 +466,16 @@ impl AppState {
     pub fn open_ai_nested_submenu(&mut self, section: termide_state::AiSection) {
         self.ui.ai_nested.open();
         self.ui.current_ai_section = Some(section);
+        if section == termide_state::AiSection::Sessions {
+            self.load_session_locations();
+        }
+    }
+
+    /// Read the directories agent sessions are filed for.
+    pub(crate) fn load_session_locations(&mut self) {
+        self.cache.session_locations = ai_sessions_root()
+            .map(|root| termide_agent_core::relocate::session_locations(&root))
+            .unwrap_or_default();
     }
 
     /// Close the AI nested submenu.
@@ -476,42 +498,45 @@ impl AppState {
         .with_home(dirs::home_dir().as_deref())
     }
 
-    /// The session-log directory for this project (`<config>/ai/sessions/<key>`).
-    pub(crate) fn ai_sessions_dir(&self) -> Option<PathBuf> {
-        let dir = termide_config::get_config_dir().ok()?;
-        Some(
-            dir.join(termide_agent_core::GLOBAL_AGENT_DIR)
-                .join(termide_agent_core::SESSIONS_DIR)
-                .join(termide_project::project_key(&self.project_root)),
-        )
-    }
-
-    /// The Sessions section's rows: the project's session logs, newest first.
-    /// Each carries its last change as a dimmed date and time before the
-    /// title, the way the panel's welcome banner dates them.
+    /// The Sessions section's rows: the directories sessions worked in,
+    /// newest first, each led like a Projects menu row — a mark (✗ for a
+    /// directory gone), then dimmed the time of its newest session and how
+    /// many it has — and named by its path, losing its start when too long.
     fn ai_session_items(&self) -> Vec<termide_ui_render::DropdownItem> {
         use termide_ui_render::DropdownItem;
-        let sessions = self
-            .ai_sessions_dir()
-            .and_then(|dir| termide_agent_core::Session::list(&dir).ok())
-            .unwrap_or_default();
-        if sessions.is_empty() {
+        let locations = &self.cache.session_locations;
+        if locations.is_empty() {
             return vec![DropdownItem::new(
                 termide_i18n::t().ai_empty(),
                 String::new(),
             )];
         }
-        sessions
-            .into_iter()
-            .map(|s| {
+        let width = locations
+            .iter()
+            .map(|location| location.count.to_string().len())
+            .max()
+            .unwrap_or(1);
+        locations
+            .iter()
+            .map(|location| {
+                let mark = if location.cwd.is_dir() {
+                    " "
+                } else {
+                    crate::projects_menu::MISSING_MARK
+                };
+                let time = location
+                    .modified
+                    .map(termide_project::format_local_minute)
+                    .unwrap_or_default();
                 DropdownItem::new(
-                    s.display_label(),
-                    format!("session:{}", s.path.to_string_lossy()),
+                    termide_core::util::shorten_home_path(&location.cwd.display().to_string()),
+                    format!("{SESSION_LOCATION_KEY}{}", location.dir.to_string_lossy()),
                 )
                 .with_prefix(
-                    "",
-                    format!("{}  ", termide_panel_agent::local_minute(s.modified)),
+                    format!("{mark} "),
+                    format!("{time} {:>width$}  ", location.count),
                 )
+                .cut_at_start()
             })
             .collect()
     }
@@ -519,7 +544,8 @@ impl AppState {
     /// Build one AI section's dropdown rows. Called by both the renderer and the
     /// action handler so they address the same rows by index. Agents, skills and prompts get
     /// two "New …" rows and a separator before the merged, source-marked items
-    /// (project-local first, in bold); sessions list the project's logs only.
+    /// (project-local first, in bold); sessions list the directories sessions
+    /// worked in, project or not.
     pub fn ai_section_items(
         &self,
         section: termide_state::AiSection,
@@ -993,5 +1019,68 @@ mod message_queue_tests {
         s.show_message_modal(report("build"));
 
         assert!(s.resource_modal_kind.is_none());
+    }
+}
+
+#[cfg(test)]
+mod session_location_tests {
+    use super::{AppState, SESSION_LOCATION_KEY};
+    use std::path::PathBuf;
+    use std::time::{Duration, SystemTime};
+    use termide_agent_core::relocate::SessionLocation;
+    use termide_state::AiSection;
+
+    fn state() -> AppState {
+        let mut config = termide_config::Config::default();
+        config.normalize();
+        let theme = termide_theme::Theme::get_by_name(&config.general.theme);
+        AppState::with_config_and_theme(config.clone(), config, theme)
+    }
+
+    fn location(cwd: PathBuf, count: usize) -> SessionLocation {
+        SessionLocation {
+            dir: PathBuf::from("/store").join(cwd.strip_prefix("/").unwrap_or(&cwd)),
+            cwd,
+            count,
+            modified: Some(SystemTime::UNIX_EPOCH + Duration::from_secs(60)),
+        }
+    }
+
+    /// A Sessions row leads with a mark — ✗ for a directory gone — then
+    /// dims the time and the count, right-aligned to the widest, before
+    /// the path; its key names where the sessions are filed.
+    #[test]
+    fn a_location_row_dims_its_time_and_count_before_the_path() {
+        let here = tempfile::tempdir().unwrap();
+        let gone = PathBuf::from("/nonexistent/termide/gone");
+        let mut state = state();
+        state.cache.session_locations = vec![
+            location(here.path().to_path_buf(), 519),
+            location(gone.clone(), 5),
+        ];
+
+        let items = state.ai_section_items(AiSection::Sessions);
+
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].lead, "  ");
+        assert!(items[0].muted.ends_with(" 519  "), "{:?}", items[0].muted);
+        assert_eq!(
+            items[1].lead,
+            format!("{} ", crate::projects_menu::MISSING_MARK)
+        );
+        assert!(items[1].muted.ends_with("   5  "), "{:?}", items[1].muted);
+        assert_eq!(items[1].label, gone.display().to_string());
+        assert_eq!(
+            items[1].key,
+            format!("{SESSION_LOCATION_KEY}/store/nonexistent/termide/gone")
+        );
+    }
+
+    /// With no sessions anywhere the section says it is empty.
+    #[test]
+    fn no_locations_is_an_empty_section() {
+        let items = state().ai_section_items(AiSection::Sessions);
+        assert_eq!(items.len(), 1);
+        assert!(items[0].key.is_empty());
     }
 }

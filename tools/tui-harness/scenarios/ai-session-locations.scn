@@ -1,0 +1,42 @@
+# AI → Sessions lists the directories sessions worked in, not the sessions
+# (doc/en/agent.md, The AI menu): each row dims the time of its newest
+# session and their count before the path, ✗ marks a directory gone.
+# Delete deletes a directory's sessions after a confirmation giving their
+# number; Enter opens an agent panel there, whose banner lists them.
+size 160x36
+mock-llm
+# Two sessions of the project's directory, newest, and one of a directory
+# that is gone. A log is its header line and one request.
+setup "log() { d=\"$TERMIDE_CONFIG/ai/sessions$1\"; mkdir -p \"$d\"; printf '{\"type\":\"session\",\"version\":1,\"id\":\"%s\",\"created\":1791801191666,\"cwd\":\"%s\"}\n{\"id\":\"m1\",\"parent_id\":null,\"timestamp\":1791801191666,\"type\":\"message\",\"message\":{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"%s\"}],\"timestamp\":1791801191666}}\n' \"$2\" \"$1\" \"$3\" > \"$d/2026-11-01T10-00-00_$2.jsonl\"; }; log /nonexistent-termide-harness/gone cccc3333 'lost work' && touch -t 202601010000 \"$TERMIDE_CONFIG/ai/sessions/nonexistent-termide-harness/gone/\"*.jsonl && log \"$(pwd -P)\" aaaa1111 'count the stock' && log \"$(pwd -P)\" bbbb2222 'tidy the report'"
+start
+wait "README.md"
+
+key Alt+M
+wait "Projects"
+key Right Right Right Right
+wait "Prompts"
+key Down Down Right
+wait "/demo/inventory"
+expect-re "2  \S*/demo/inventory "
+expect-re "✗ .*1  /nonexistent-termide-harness/gone"
+snapshot locations
+
+# The first row is chosen. Delete on the gone directory, the second: its
+# one session goes.
+key Down Delete
+wait "Delete sessions?"
+expect "Sessions: 1"
+key Enter
+wait-gone "Delete sessions?"
+wait "/demo/inventory"
+expect-not "nonexistent-termide-harness"
+run "test ! -e \"$TERMIDE_CONFIG/ai/sessions/nonexistent-termide-harness/gone/2026-11-01T10-00-00_cccc3333.jsonl\""
+
+# Enter on the project's directory: an agent panel there, listing both.
+key Enter
+wait "Agent: "
+key Alt+Home Alt+F11
+wait "count the stock"
+expect "tidy the report"
+snapshot banner
+quit

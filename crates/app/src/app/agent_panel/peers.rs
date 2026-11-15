@@ -487,11 +487,8 @@ impl App {
     /// open: the project's own sessions are looked through first, then
     /// those of directories outside it that its panels worked in.
     fn leave_in_log(&self, id: &str, message: UserMessage) -> Result<(), String> {
-        let root = termide_config::get_config_dir().ok().map(|dir| {
-            dir.join(termide_agent_core::GLOBAL_AGENT_DIR)
-                .join(termide_agent_core::SESSIONS_DIR)
-        });
-        let dirs = self.state.ai_sessions_dir().into_iter().chain(root);
+        let own = super::session_dir_of(&self.state.project_root);
+        let dirs = own.into_iter().chain(crate::state::ai_sessions_root());
         leave_in_log(dirs, id, message)
     }
 

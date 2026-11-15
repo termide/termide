@@ -111,7 +111,10 @@ once: LSP turned on and off for an open Rust file, emoji icons in the
 panel headers, the log going on in a newly named file; needs
 rust-analyzer) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
-a session opened from its list), `project-store` (layouts in the old tree folded into flat project directories at startup, ✗ on a project whose directory is gone, `F8` deleting a project with or without its agent sessions), `project-move` (`F6` and `F5` on a
+a session opened from its list), `ai-session-locations` (AI → Sessions
+listing the directories sessions worked in with their counts, ✗ on one
+gone, `Delete` taking a directory's sessions, `Enter` opening an agent
+panel there that lists them), `project-store` (layouts in the old tree folded into flat project directories at startup, ✗ on a project whose directory is gone, `F8` deleting a project with or without its agent sessions), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its
 layout, a copy opened beside it), `project-button-menu` (a project's button in the
 menu bar opening its menu: another project's offering a switch, the

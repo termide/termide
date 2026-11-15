@@ -386,12 +386,15 @@ pub enum PendingAction {
         section: crate::AiSection,
         path: String,
     },
-    /// Rename an AI resource; new name comes from the input. For sessions this
-    /// sets the display name; for the rest it renames the file/directory.
+    /// Rename an AI resource's file or directory; the new name comes from the
+    /// input.
     AiRename {
         section: crate::AiSection,
         path: String,
     },
+    /// File the sessions in `dir`, which worked in `cwd`, now gone, under
+    /// the directory the picker is answered with.
+    RelinkSessions { dir: PathBuf, cwd: PathBuf },
     /// Rename a bookmark (change description)
     RenameBookmark {
         path: String,

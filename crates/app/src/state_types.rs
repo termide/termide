@@ -257,6 +257,9 @@ pub struct CacheState {
     /// Projects worked on and when, for the Projects menu (loaded on open,
     /// cleared on close).
     pub projects: Vec<crate::projects_menu::KnownProject>,
+    /// The directories agent sessions are filed for, for the AI menu's
+    /// Sessions section (loaded when it opens).
+    pub session_locations: Vec<termide_agent_core::relocate::SessionLocation>,
 }
 
 /// Active scrollbar thumb drag.
