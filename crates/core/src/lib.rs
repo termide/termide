@@ -41,7 +41,7 @@ pub use event::{
     AgentSnippet, ChecklistButton, ChecklistGroup, ChecklistItem, ChecklistOutcome,
     ChecklistRefresh, ChecklistSwitch, ConfirmAction, ConflictResolution, DelegateRestart, Event,
     EventHandler, GitOperationType, InputAction, PanelEvent, ReferenceLocation, SelectAction,
-    SnippetSource, SnippetWanted, SplitDirection, TerminalPart, VimPanelDirection,
+    SnippetSource, SnippetWanted, TerminalPart, VimPanelDirection,
 };
 pub use graphics_cells::GraphicsCells;
 pub use hotkey_table::HotkeyTable;

@@ -21,7 +21,6 @@ mod git_ops;
 mod navigation;
 mod operations_panel;
 mod prompts;
-mod watch;
 
 impl App {
     /// Process events emitted by a panel.
@@ -170,13 +169,6 @@ impl App {
                 self.state.set_info(message);
             }
 
-            PanelEvent::ShowInfo { title, rows } => {
-                let modal = termide_modal::InfoModal::new(title, rows);
-                self.state
-                    .show_message_modal(crate::state::ActiveModal::Info(Box::new(modal)));
-                self.state.needs_redraw = true;
-            }
-
             PanelEvent::ShowSessionUsage { rows } => {
                 self.open_usage(Some(rows));
             }
@@ -280,20 +272,8 @@ impl App {
                 self.event_refresh_checklist(refresh);
             }
 
-            PanelEvent::WatchPath(path) => {
-                self.event_watch_path(path);
-            }
-
-            PanelEvent::UnwatchPath(path) => {
-                self.event_unwatch_path(path);
-            }
-
             PanelEvent::FileChangedOnDisk(path) => {
                 self.fan_out_fs_changes(&std::collections::HashSet::from([path]));
-            }
-
-            PanelEvent::SplitPanel { direction, .. } => {
-                self.event_split_panel(direction);
             }
 
             PanelEvent::GitOperation {
