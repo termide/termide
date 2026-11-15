@@ -748,7 +748,7 @@ impl App {
         };
         if let Err(e) = result {
             self.state
-                .set_error(format!("Failed to save bookmarks: {e}"));
+                .set_error(termide_i18n::t().bookmarks_save_failed_fmt(&e.to_string()));
         }
     }
 

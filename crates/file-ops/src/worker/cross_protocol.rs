@@ -142,10 +142,9 @@ impl CrossProtocolWorker {
         // If move and successful, delete source
         if self.is_move && result.is_success() {
             if let Err(e) = self.delete_remote_source(&remote_path, control) {
-                return OperationResult::Failed(format!(
-                    "Copy succeeded but failed to delete source: {}",
-                    e
-                ));
+                return OperationResult::Failed(
+                    termide_i18n::t().op_move_source_not_deleted_fmt(&e.to_string()),
+                );
             }
         }
 
@@ -184,10 +183,9 @@ impl CrossProtocolWorker {
         // If move and successful, delete local source
         if self.is_move && result.is_success() {
             if let Err(e) = self.delete_local_source(&local_path) {
-                return OperationResult::Failed(format!(
-                    "Copy succeeded but failed to delete source: {}",
-                    e
-                ));
+                return OperationResult::Failed(
+                    termide_i18n::t().op_move_source_not_deleted_fmt(&e.to_string()),
+                );
             }
         }
 
@@ -223,7 +221,8 @@ impl CrossProtocolWorker {
             let _ = progress_tx.send(OperationProgress {
                 phase: OperationPhase::Transferring,
                 current_item: Some(format!(
-                    "Renaming {}",
+                    "{} {}",
+                    termide_i18n::t().op_activity_renaming(),
                     source_path
                         .path
                         .file_name()
@@ -249,7 +248,9 @@ impl CrossProtocolWorker {
         let temp_dir = match transfer_temp_dir() {
             Ok(dir) => dir,
             Err(e) => {
-                return OperationResult::Failed(format!("Failed to create temp directory: {}", e))
+                return OperationResult::Failed(
+                    termide_i18n::t().op_temp_dir_failed_fmt(&e.to_string()),
+                )
             }
         };
 
@@ -262,7 +263,11 @@ impl CrossProtocolWorker {
         // Phase 1: Download to temp
         let _ = progress_tx.send(OperationProgress {
             phase: OperationPhase::Transferring,
-            current_item: Some(format!("Downloading {} (1/2)", file_name)),
+            current_item: Some(format!(
+                "{} {} (1/2)",
+                termide_i18n::t().op_activity_downloading(),
+                file_name
+            )),
             ..Default::default()
         });
 
@@ -286,7 +291,11 @@ impl CrossProtocolWorker {
         // Phase 2: Upload from temp
         let _ = progress_tx.send(OperationProgress {
             phase: OperationPhase::Transferring,
-            current_item: Some(format!("Uploading {} (2/2)", file_name)),
+            current_item: Some(format!(
+                "{} {} (2/2)",
+                termide_i18n::t().op_activity_uploading(),
+                file_name
+            )),
             ..Default::default()
         });
 
@@ -307,10 +316,9 @@ impl CrossProtocolWorker {
         // If move and successful, delete remote source
         if self.is_move {
             if let Err(e) = self.delete_remote_source(&source_path, control) {
-                return OperationResult::Failed(format!(
-                    "Copy succeeded but failed to delete source: {}",
-                    e
-                ));
+                return OperationResult::Failed(
+                    termide_i18n::t().op_move_source_not_deleted_fmt(&e.to_string()),
+                );
             }
         }
 

@@ -396,9 +396,12 @@ impl App {
                     .file_name()
                     .map(|n| n.to_string_lossy().into_owned())
                     .unwrap_or_default();
-                self.state.set_info(format!("Saved: {name}"));
+                self.state
+                    .set_info(termide_i18n::t().status_file_saved(&name));
             }
-            Err(e) => self.state.set_error(format!("Save failed: {e}")),
+            Err(e) => self
+                .state
+                .set_error(termide_i18n::t().status_error_save(&e.to_string())),
         }
         self.state.needs_redraw = true;
         false
@@ -544,7 +547,8 @@ impl App {
             }
             if job.buffer == Some(UnsavedWork::Discard) {
                 if let Err(e) = editor.reload_from_disk() {
-                    self.state.set_error(format!("Reload failed: {e}"));
+                    self.state
+                        .set_error(termide_i18n::t().status_error_reload(&e.to_string()));
                     return false;
                 }
             }

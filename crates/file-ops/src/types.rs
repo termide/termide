@@ -994,31 +994,29 @@ impl BackgroundOperationSummary {
             return String::new();
         }
 
-        let percent = (self.percentage() * 100.0) as u8;
+        let t = termide_i18n::t();
+        let percent = (self.percentage() * 100.0) as usize;
 
         if self.active_count == 1 && self.queued_count == 0 {
             // Single active operation, no queue
             if let Some(ref activity) = self.current_activity {
-                format!("{} {}%", activity, percent)
+                t.op_status_activity_fmt(activity, percent)
             } else {
-                format!("Operation {}%", percent)
+                t.op_status_generic_fmt(percent)
             }
         } else if self.active_count == 0 && self.queued_count > 0 {
             // Only queued operations (waiting)
-            format!("{} queued", self.queued_count)
+            t.op_status_queued_fmt(self.queued_count)
         } else if self.queued_count > 0 {
             // Active + queued
             if let Some(ref activity) = self.current_activity {
-                format!("{} {}% (+{} queued)", activity, percent, self.queued_count)
+                t.op_status_activity_queued_fmt(activity, percent, self.queued_count)
             } else {
-                format!(
-                    "{} active {}% (+{} queued)",
-                    self.active_count, percent, self.queued_count
-                )
+                t.op_status_active_queued_fmt(self.active_count, percent, self.queued_count)
             }
         } else {
             // Multiple active, no queue
-            format!("{} ops {}%", self.active_count, percent)
+            t.op_status_ops_fmt(self.active_count, percent)
         }
     }
 

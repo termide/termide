@@ -700,7 +700,9 @@ impl App {
                     }
                     Err(e) => {
                         log::error!("Failed to create SSH terminal: {}", e);
-                        self.show_error_modal(format!("Failed to open SSH connection: {}", e));
+                        self.show_error_modal(
+                            termide_i18n::t().ssh_open_failed_fmt(&e.to_string()),
+                        );
                     }
                 }
             }

@@ -2190,6 +2190,40 @@ pub trait Translation: Send + Sync {
     fn plugin_not_running_fmt(&self, name: &str) -> String;
     fn settings_save_failed_fmt(&self, error: &str) -> String;
     fn settings_language_failed_fmt(&self, error: &str) -> String;
+
+    // Background operations in the status bar and the operations panel
+    fn op_activity_copying(&self) -> &str;
+    fn op_activity_moving(&self) -> &str;
+    fn op_activity_deleting(&self) -> &str;
+    fn op_activity_trashing(&self) -> &str;
+    fn op_activity_downloading(&self) -> &str;
+    fn op_activity_uploading(&self) -> &str;
+    fn op_activity_packing(&self) -> &str;
+    fn op_activity_unpacking(&self) -> &str;
+    fn op_activity_renaming(&self) -> &str;
+    fn op_worker_panicked(&self) -> &str;
+    fn fm_trash_local_only(&self) -> &str;
+    fn op_status_activity_fmt(&self, activity: &str, percent: usize) -> String;
+    fn op_status_generic_fmt(&self, percent: usize) -> String;
+    fn op_status_queued_fmt(&self, count: usize) -> String;
+    fn op_status_activity_queued_fmt(&self, activity: &str, percent: usize, count: usize)
+        -> String;
+    fn op_status_active_queued_fmt(&self, active: usize, percent: usize, count: usize) -> String;
+    fn op_status_ops_fmt(&self, count: usize, percent: usize) -> String;
+    fn op_move_source_not_deleted_fmt(&self, error: &str) -> String;
+    fn op_temp_dir_failed_fmt(&self, error: &str) -> String;
+    fn op_failed_fmt(&self, error: &str) -> String;
+    fn remote_no_connection(&self) -> &str;
+    fn remote_copy_failed_fmt(&self, error: &str) -> String;
+
+    // Error and status messages
+    fn status_saved_backup_fmt(&self, name: &str) -> String;
+    fn ssh_open_failed_fmt(&self, error: &str) -> String;
+    fn git_askpass_failed_fmt(&self, error: &str) -> String;
+    fn git_spawn_failed_fmt(&self, error: &str) -> String;
+    fn image_cache_failed_fmt(&self, error: &str) -> String;
+    fn fetch_unsupported_type_fmt(&self, content_type: &str) -> String;
+    fn vfs_protocol_unsupported_fmt(&self, protocol: &str) -> String;
 }
 
 /// Initialize translation system.

@@ -211,7 +211,7 @@ impl App {
                     "No active connection to remote host: {}",
                     remote_path.log_safe_key()
                 );
-                self.show_error_modal("No active connection to remote host".to_string());
+                self.show_error_modal(termide_i18n::t().remote_no_connection().to_string());
                 return Ok(());
             }
         };
@@ -301,7 +301,7 @@ impl App {
             Err(e) => {
                 log::error!("Failed to start upload operation: {}", e);
                 self.state.batch.pending_upload = None;
-                self.show_error_modal(format!("Upload failed: {}", e));
+                self.show_error_modal(termide_i18n::t().op_upload_failed_fmt(&e.to_string()));
             }
         }
 
@@ -446,7 +446,7 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to start remote copy operation: {}", e);
-                self.show_error_modal(format!("Remote copy failed: {}", e));
+                self.show_error_modal(termide_i18n::t().remote_copy_failed_fmt(&e.to_string()));
             }
         }
 
