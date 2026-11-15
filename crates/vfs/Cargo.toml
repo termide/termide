@@ -10,7 +10,7 @@ description = "Virtual File System abstraction for termide with network filesyst
 [dependencies]
 thiserror.workspace = true
 url.workspace = true
-percent-encoding = "2"
+percent-encoding.workspace = true
 log.workspace = true
 
 # SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed). Its
@@ -29,7 +29,7 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync", "io-util", "m
 # `rustls-ring` keeps the TLS stack pure Rust (ring, not aws-lc-rs) so
 # musl-static builds need no cmake/C toolchain.
 suppaftp = { version = "10.0.2", features = ["rustls-ring"] }
-webpki-roots = "1"
+webpki-roots.workspace = true
 
 # SMB support (optional, may require system libraries)
 pavao = { version = "0.2", optional = true }
@@ -40,8 +40,8 @@ pavao = { version = "0.2", optional = true }
 zip = { workspace = true, features = ["deflate-flate2", "deflate64", "bzip2", "lzma", "xz", "aes-crypto"], optional = true }
 tar = { version = "0.4", default-features = false, optional = true }
 flate2 = { version = "1", optional = true }
-bzip2 = { version = "0.6", optional = true }
-lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "xz", "optimization", "encoder"], optional = true }
+bzip2 = { workspace = true, optional = true }
+lzma-rust2 = { workspace = true, features = ["std", "xz", "optimization", "encoder"], optional = true }
 ruzstd = { version = "0.9", optional = true }
 
 # For temp file management
@@ -67,6 +67,6 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 [dev-dependencies]
 tempfile.workspace = true
 # Encoders to build test archives.
-lzma-rust2 = { version = "0.16", default-features = false, features = ["std", "xz", "encoder"] }
-bzip2 = "0.6"
+lzma-rust2 = { workspace = true, features = ["std", "xz", "encoder"] }
+bzip2.workspace = true
 

@@ -25,7 +25,7 @@ termide-ui = { path = "../ui" }
 termide-ui-render = { path = "../ui-render" }
 
 [dev-dependencies]
-sqlx = { version = "0.8", default-features = false, features = [
+sqlx = { workspace = true, features = [
     "runtime-tokio",
     "sqlite",
 ] }
