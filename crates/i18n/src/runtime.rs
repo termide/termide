@@ -1424,6 +1424,10 @@ impl Translation for RuntimeTranslation {
         self.format("agent_permission_run_fmt", &[("tool", tool)])
     }
 
+    fn agent_open_artifact_fmt(&self, kind: &str) -> String {
+        self.format("agent_open_artifact_fmt", &[("kind", kind)])
+    }
+
     fn agent_delete_confirm_fmt(&self, label: &str) -> String {
         self.format("agent_delete_confirm_fmt", &[("label", label)])
     }

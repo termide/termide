@@ -1808,10 +1808,13 @@ pub(crate) fn artifact_path(item: &Item) -> Option<String> {
 }
 
 /// The one-row card under the headline of a call that wrote an artifact,
-/// `↗ HTML report.html`, linked to the file; pushed onto `lines`.
+/// `Open in HTML ↗`, linked to the file; pushed onto `lines`. It stands under
+/// the headline's path, at `indent`, or at the body's indent when it would
+/// not fit there.
 fn push_artifact_card(
     call: &ToolCall,
     result: Option<&ToolResultMessage>,
+    indent: usize,
     width: u16,
     colors: &ThemeColors,
     lines: &mut Vec<Line<'static>>,
@@ -1820,26 +1823,34 @@ fn push_artifact_card(
     let (Some(kind), Some(href)) = (artifact_kind(call, result), headline_href(call)) else {
         return;
     };
-    let name = std::path::Path::new(&href)
-        .file_name()
-        .map_or_else(|| href.clone(), |name| name.to_string_lossy().into_owned());
+    // Dim, as a link reads beside text; the arrow after it, so the card does
+    // not open with a glyph off the blocks' glyph column.
+    let dim = Style::default().fg(colors.disabled);
+    let label = vec![
+        Span::styled(
+            termide_i18n::t().agent_open_artifact_fmt(kind),
+            dim.add_modifier(Modifier::UNDERLINED),
+        ),
+        Span::styled(" ↗", dim),
+    ];
+    let label_width: usize = label.iter().map(|s| width_of(&s.content)).sum();
     // The scrollbar gutter stays free.
-    let label = truncate_spans(
-        vec![Span::styled(
-            format!("↗ {kind} {name}"),
-            Style::default().fg(colors.info),
-        )],
-        usize::from(width).saturating_sub(3),
-    );
-    let end = 2 + label.iter().map(|s| width_of(&s.content)).sum::<usize>();
+    let room = usize::from(width).saturating_sub(1);
+    let indent = if indent + label_width <= room {
+        indent
+    } else {
+        2
+    };
+    let label = truncate_spans(label, room.saturating_sub(indent));
+    let end = indent + label.iter().map(|s| width_of(&s.content)).sum::<usize>();
     marks.links.push(RowLink {
         line: lines.len(),
-        start: 2,
+        start: indent,
         end,
         href,
         id: CARD_LINK,
     });
-    let mut spans = vec![Span::raw("  ")];
+    let mut spans = vec![Span::raw(" ".repeat(indent))];
     spans.extend(label);
     lines.push(Line::from(spans));
 }
@@ -3030,6 +3041,8 @@ fn render_body(
                 // A shell call's command clips to its first line; any other
                 // call's subject wraps, read in full without unfolding.
                 let meta = if finished { stats } else { clock };
+                // Where the headline's subject starts, for the artifact card.
+                let mut subject_at = 2;
                 let mut lines = match shell_command(call) {
                     Some(command) => {
                         let mut head = shell_prefix(call, state);
@@ -3046,13 +3059,23 @@ fn render_body(
                             width,
                             &mut rows,
                         );
+                        subject_at = rows.first().map_or(2, |&(_, start, _)| start);
                         marks.links.extend(headline_links(call, rows));
                         lines
                     }
                 };
-                push_artifact_card(call, result.as_ref(), width, colors, &mut lines, marks);
+                push_artifact_card(
+                    call,
+                    result.as_ref(),
+                    subject_at,
+                    width,
+                    colors,
+                    &mut lines,
+                    marks,
+                );
                 return lines;
             }
+            let mut subject_at = 2;
             let mut lines = match shell_command(call) {
                 Some(command) => command_lines(call, &command, marker, width, state, colors),
                 None => {
@@ -3063,11 +3086,20 @@ fn render_body(
                         width,
                         &mut rows,
                     );
+                    subject_at = rows.first().map_or(2, |&(_, start, _)| start);
                     marks.links.extend(headline_links(call, rows));
                     lines
                 }
             };
-            push_artifact_card(call, result.as_ref(), width, colors, &mut lines, marks);
+            push_artifact_card(
+                call,
+                result.as_ref(),
+                subject_at,
+                width,
+                colors,
+                &mut lines,
+                marks,
+            );
             // An edit's result is a unified diff, painted like the git diff
             // panel paints one.
             let kinds = (call.name == "edit").then(|| diff_kinds(&all));

@@ -1407,6 +1407,7 @@ image_error_fmt = "छवि लोड करने में विफल: {err
 lsp_rename_result_fmt = "{count} फ़ाइल{plural} में नाम बदला गया"
 agent_permission_run_fmt = "एजेंट {tool} चलाना चाहता है"
 agent_delete_confirm_fmt = "{label} हटाएँ? यह पूर्ववत नहीं हो सकता।"
+agent_open_artifact_fmt = "{kind} में खोलें"
 agent_fork_confirm_fmt = "{label} नव्या पैनल मां फ़ोर्क करेन? यह चालू राखे।"
 agent_undo_confirm_fmt = "पिछला अनुरोध पूर्ववत करें? इसने बदला: {changed}"
 agent_undo_changed_files_fmt = "{count} फ़ाइलें: {files}"

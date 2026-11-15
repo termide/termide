@@ -647,7 +647,8 @@ folds it to `▸ PNG 1280×800`; unfold the block to see it again.
 
 A page or document the agent writes is not shown in the transcript: a `write`
 of an HTML, Markdown or Mermaid file (`.html`, `.htm`, `.md`, `.markdown`,
-`.mmd`) adds one row under its headline, `↗ HTML report.html`. A click on it,
+`.mmd`) adds one row under the path in its headline, `Open in HTML ↗` (at the
+block's body indent in a panel too narrow for it there). A click on it,
 or `o` on the block, opens the file in the viewer it opens in from Open… — the
 HTML, Markdown or Mermaid panel; `Alt`+click opens it outside, in the system's
 default application.

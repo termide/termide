@@ -1407,6 +1407,7 @@ image_error_fmt = "โหลดรูปภาพไม่สำเร็จ: {e
 lsp_rename_result_fmt = "เปลี่ยนชื่อใน {count} ไฟล์"
 agent_permission_run_fmt = "เอเจนต์ต้องการรัน {tool}"
 agent_delete_confirm_fmt = "ลบ {label}? ไม่สามารถเลิกทำได้"
+agent_open_artifact_fmt = "เปิดใน {kind}"
 agent_fork_confirm_fmt = "แยก {label} ไปยังแผงใหม้? แผงนี้จะทำต่อ"
 agent_undo_confirm_fmt = "เลิกทำคำขอล่าสุด? คำขอนี้เปลี่ยน {changed}"
 agent_undo_changed_files_fmt = "{count} ไฟล์: {files}"

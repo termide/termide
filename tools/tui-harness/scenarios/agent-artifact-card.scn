@@ -1,0 +1,18 @@
+# A Markdown file the mock model writes: its block gets the card
+# `Open in Markdown ↗` in place of the old `↗ Markdown <name>`. Where it
+# stands, under the headline's path, is checked by the panel's unit tests.
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "write the stock notes"
+key Enter
+wait "Allow once" 20
+type "1"
+wait "The notes are written." 20
+expect "Open in Markdown ↗"
+expect-not "↗ Markdown"
+snapshot card
+quit

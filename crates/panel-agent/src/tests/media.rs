@@ -420,13 +420,18 @@ fn a_written_page_is_a_card_that_opens_the_file() {
     let rows = render_text(&mut panel, 60, 12);
     let y = rows
         .iter()
-        .position(|r| r.contains("↗ HTML report.html"))
-        .unwrap_or_else(|| panic!("{rows:?}")) as u16;
+        .position(|r| r.contains("Open in HTML ↗"))
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    // The card stands under the headline's path, not under its verb.
+    let col = |row: &str, text: &str| row[..row.find(text).unwrap()].chars().count();
+    let x = col(&rows[y], "Open in");
+    assert_eq!(x, col(&rows[y - 1], "out/report.html"), "{rows:?}");
+    let y = y as u16;
     let area = panel.transcript_area;
     let click = |panel: &mut AgentPanel, modifiers| {
         let mouse = |kind| MouseEvent {
             kind,
-            column: area.x + 4,
+            column: area.x + x as u16 + 2,
             row: area.y + y,
             modifiers,
         };
@@ -467,6 +472,18 @@ fn only_a_viewable_file_written_is_a_card() {
         let rows = render_text(&mut panel, 60, 12);
         assert_eq!(rows.iter().any(|r| r.contains('↗')), card, "{rows:?}");
     }
+}
+
+#[test]
+fn a_card_too_wide_under_the_path_takes_the_body_indent() {
+    let mut panel = panel(vec![]);
+    panel.transcript.push(wrote("report.html", true));
+    let rows = render_text(&mut panel, 20, 12);
+    let row = rows
+        .iter()
+        .find(|r| r.contains("Open in HTML"))
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    assert!(row.starts_with("  Open in HTML"), "{rows:?}");
 }
 
 /// The session's terminals show in the strip and the status bar; a row

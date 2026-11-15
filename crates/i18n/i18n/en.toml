@@ -1444,6 +1444,7 @@ lsp_rename_result_fmt = "Renamed in {count} file{plural}"
 # Database viewer
 agent_permission_run_fmt = "Agent wants to run {tool}"
 agent_delete_confirm_fmt = "Delete {label}? This cannot be undone."
+agent_open_artifact_fmt = "Open in {kind}"
 agent_fork_confirm_fmt = "Fork {label} into a new panel? This one keeps working."
 agent_undo_confirm_fmt = "Undo the last request? It changed {changed}"
 agent_undo_changed_files_fmt = "{count} files: {files}"

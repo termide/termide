@@ -185,6 +185,26 @@ MESSAGE_SCRIPT = [
 ]
 
 
+# A fifth, played when the user asks to "write the stock notes" (the TUI
+# harness's agent-artifact-card): the agent writes a Markdown file, whose
+# block gets the card that opens it in the Markdown viewer.
+NOTES = "write the stock notes"
+NOTES_SCRIPT = [
+    {
+        "reasoning": "",
+        "text": "I'll write the notes down.",
+        "tool": (
+            "write",
+            {
+                "path": "notes/stock-notes.md",
+                "content": "# Stock notes\n\nThree items are under their reorder point.\n",
+            },
+        ),
+    },
+    {"reasoning": "", "text": "The notes are written.", "tool": None},
+]
+
+
 def lsp_echo(messages):
     """The final step of BREAK: the first lines of the edit's LSP note."""
     for message in messages:
@@ -269,6 +289,8 @@ class Handler(BaseHTTPRequestHandler):
             main = any(DELEGATE in u for u in users)
             if any(BREAK in u for u in users):
                 step = BREAK_SCRIPT[done] if done < len(BREAK_SCRIPT) else lsp_echo(messages)
+            elif any(NOTES in u for u in users):
+                step = NOTES_SCRIPT[min(done, len(NOTES_SCRIPT) - 1)]
             elif any(MESSAGE in u for u in users):
                 step = MESSAGE_SCRIPT[min(done, len(MESSAGE_SCRIPT) - 1)]
             elif not main and any("SUBTASK" in u for u in users):

@@ -704,6 +704,9 @@ pub trait Translation: Send + Sync {
     // Agent panel — delete-session confirmation
     /// The delete-session card's question (`{label}` is the session)
     fn agent_delete_confirm_fmt(&self, label: &str) -> String;
+    /// The card under a write of an HTML, Markdown or Mermaid file
+    /// (`{kind}` is the viewer: `HTML`, `Markdown`, `Mermaid`)
+    fn agent_open_artifact_fmt(&self, kind: &str) -> String;
     /// Agent delete confirmation: how an unnamed session is named in it.
     fn agent_delete_this_session(&self) -> &str;
 

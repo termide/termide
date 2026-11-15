@@ -1444,6 +1444,7 @@ lsp_rename_result_fmt = "Переименовано в {count} файл{plural}"
 # Просмотр баз данных
 agent_permission_run_fmt = "Агент хочет выполнить {tool}"
 agent_delete_confirm_fmt = "Удалить {label}? Это нельзя отменить."
+agent_open_artifact_fmt = "Открыть в {kind}"
 agent_fork_confirm_fmt = "Ответвить {label} в новую панель? Эта продолжит работу."
 agent_undo_confirm_fmt = "Отменить последний запрос? Он изменил {changed}"
 agent_undo_changed_files_fmt = "файлов: {count} — {files}"

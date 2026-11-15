@@ -1425,6 +1425,7 @@ lsp_rename_result_fmt = "已在 {count} 个文件中重命名"
 # 数据库查看器
 agent_permission_run_fmt = "代理想要运行 {tool}"
 agent_delete_confirm_fmt = "删除 {label}？此操作无法撤销。"
+agent_open_artifact_fmt = "在 {kind} 中打开"
 agent_fork_confirm_fmt = "将 {label} 分叉到新面板？当前面板将继续工作。"
 agent_undo_confirm_fmt = "撤销上一个请求？它更改了 {changed}"
 agent_undo_changed_files_fmt = "{count} 个文件：{files}"
