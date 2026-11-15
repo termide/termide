@@ -499,18 +499,15 @@ impl<'a> Dropdown<'a> {
 pub fn get_projects_items(kb: Option<&termide_config::GlobalKeybindings>) -> Vec<DropdownItem> {
     let t = i18n::t();
     let shortcut = |key: &str| kb.and_then(|kb| menu_shortcut(kb, key));
-    vec![
-        DropdownItem::new(t.projects_new(), "new_project").with_shortcut(shortcut("new_project")),
-        DropdownItem::new(t.projects_change_root(), "change_root"),
-    ]
+    // The current project's root is changed from its own menu (its button).
+    vec![DropdownItem::new(t.projects_new(), "new_project").with_shortcut(shortcut("new_project"))]
 }
 
 /// Number of items in Projects submenu
-pub const PROJECTS_SUBMENU_ITEM_COUNT: usize = 2;
+pub const PROJECTS_SUBMENU_ITEM_COUNT: usize = 1;
 
 /// Index of Projects submenu items
 pub const PROJECTS_SUBMENU_NEW: usize = 0;
-pub const PROJECTS_SUBMENU_CHANGE_ROOT: usize = 1;
 
 /// The AI submenu: four fixed sections, each opening a nested list. The item
 /// keys (`agents`/`sessions`/`skills`/`prompts`) are the contract the app's AI

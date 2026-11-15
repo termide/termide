@@ -11,7 +11,7 @@ wait-re "^.*Options  project "
 
 # Move: the prompt names the project's path; typing extends its name.
 key F9 Right Right
-wait "Change root"
+wait "New project"
 key Up F6
 wait "Move 'project' to"
 snapshot move-prompt
@@ -25,7 +25,7 @@ snapshot moved
 
 # Copy: the original stays current, the copy gets a button of its own.
 key F9 Right Right
-wait "Change root"
+wait "New project"
 key Up F5
 wait "Copy 'projectmoved' to"
 type "2"

@@ -8,7 +8,9 @@ wait-re "^.*Options  project "
 
 # A copy opens in the background beside the current project.
 key F9 Right Right
-wait "Change root"
+wait "New project"
+# The root path is changed from the project's own menu only.
+expect-not "Change root path"
 key Up F5
 wait "Copy 'project' to"
 type "2"

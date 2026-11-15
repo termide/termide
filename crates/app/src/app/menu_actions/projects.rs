@@ -10,7 +10,7 @@ use crate::state::{ActiveModal, PendingAction, ProjectsOrigin};
 use crate::PanelExt;
 use termide_app_core::Panel;
 use termide_i18n as i18n;
-use termide_ui_render::{PROJECTS_SUBMENU_CHANGE_ROOT, PROJECTS_SUBMENU_NEW};
+use termide_ui_render::PROJECTS_SUBMENU_NEW;
 
 impl App {
     /// Open the projects modal to switch between projects. It lists the
@@ -322,10 +322,6 @@ impl App {
             ProjectsTarget::Action(PROJECTS_SUBMENU_NEW) => {
                 self.state.close_menu();
                 self.handle_new_project()?;
-            }
-            ProjectsTarget::Action(PROJECTS_SUBMENU_CHANGE_ROOT) => {
-                self.state.close_menu();
-                self.handle_change_root_path()?;
             }
             ProjectsTarget::Action(_) => {}
         }

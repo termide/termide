@@ -17,7 +17,7 @@ wait "Want me to highlight critical rows" 30
 wait-gone "[■]" 15
 
 key F9 Right Right
-wait "Change root"
+wait "New project"
 key Up F6
 wait "Move 'inventory' to"
 type "2"
