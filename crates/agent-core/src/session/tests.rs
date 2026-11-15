@@ -1017,6 +1017,85 @@ fn list_follows_logs_changed_or_removed_since_the_last_call() {
 }
 
 #[test]
+fn a_new_run_lists_unchanged_logs_from_the_index_without_reading_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("indexed task")))
+        .unwrap();
+    let path = session.path().to_path_buf();
+    drop(session);
+    assert_eq!(Session::list(dir.path()).unwrap().len(), 1);
+    assert!(dir.path().join(index::INDEX_FILE).exists());
+
+    // The log turns to garbage of the same size and time: read, it would
+    // be skipped, so a summary listed is the index's.
+    let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+    let len = std::fs::metadata(&path).unwrap().len();
+    std::fs::write(&path, vec![b'x'; usize::try_from(len).unwrap()]).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(modified)
+        .unwrap();
+    forget_summaries(dir.path());
+    let list = Session::list(dir.path()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].label(), "indexed task");
+    assert_eq!(list[0].path, path);
+}
+
+#[test]
+fn a_new_run_reads_again_the_logs_changed_since_the_index() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut changed = Session::create(dir.path(), Path::new("/w")).unwrap();
+    changed
+        .append_message(&Message::User(UserMessage::text("one")))
+        .unwrap();
+    let mut gone = Session::create(dir.path(), Path::new("/w")).unwrap();
+    gone.append_message(&Message::User(UserMessage::text("gone")))
+        .unwrap();
+    let gone_path = gone.path().to_path_buf();
+    drop(gone);
+    assert_eq!(Session::list(dir.path()).unwrap().len(), 2);
+
+    // Changed and removed while no termide was running.
+    forget_summaries(dir.path());
+    changed.set_name("renamed").unwrap();
+    std::fs::remove_file(&gone_path).unwrap();
+    let list = Session::list(dir.path()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].label(), "renamed");
+
+    // A damaged index is no worse than none.
+    std::fs::write(dir.path().join(index::INDEX_FILE), "{not json").unwrap();
+    forget_summaries(dir.path());
+    let list = Session::list(dir.path()).unwrap();
+    assert_eq!(list.len(), 1);
+    assert_eq!(list[0].label(), "renamed");
+    // And it is written whole again.
+    forget_summaries(dir.path());
+    Session::list(dir.path()).unwrap();
+    let text = std::fs::read_to_string(dir.path().join(index::INDEX_FILE)).unwrap();
+    assert!(text.contains("renamed"), "{text}");
+}
+
+#[test]
+fn a_summary_keeps_only_the_head_of_a_long_first_prompt() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("я".repeat(10_000))))
+        .unwrap();
+    let summary = SessionSummary::from(&session);
+    assert_eq!(
+        summary.first_prompt.unwrap().chars().count(),
+        FIRST_PROMPT_CHARS
+    );
+}
+
+#[test]
 fn a_message_timing_survives_reopen_and_is_optional() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();

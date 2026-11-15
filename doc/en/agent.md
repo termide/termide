@@ -3049,7 +3049,10 @@ template, the default agent's `AGENT.md`, itself. Files over 32 KiB are skipped.
 
 Every session is written to a log in JSON Lines, one file per session, under
 `ai/sessions/<path of the panel's directory>/` in the Termide configuration
-directory, beside the agents. The log records the model and the agent the
+directory, beside the agents. Next to the logs, `summaries.json` keeps what
+the session lists show of each (title, date, the `⏸` mark), so listing
+reads only the logs changed since; it is a cache, safe to delete, and is
+written again. The log records the model and the agent the
 session started with and every switch, so a reopened session continues on
 the model and as the agent it last used. When a session approaches the
 model's context window, the agent replaces the older part with a summary it

@@ -2017,10 +2017,13 @@ impl Session {
     /// Summaries of every session in `dir`, newest first.
     ///
     /// A summary takes reading its whole log, and a project gathers hundreds
-    /// of them, so summaries are kept for the run while their file keeps its
-    /// size and modification time, and the logs not seen yet are read side
-    /// by side. Calls wait for one another: panels restored together then
-    /// read a directory once instead of each on its own.
+    /// of them, so summaries are kept while their file keeps its size and
+    /// modification time: in memory for the run, and in the directory's
+    /// index across runs, read the first time the run lists the directory
+    /// and written again when a summary in it changed. Only the logs changed
+    /// since are read, side by side. Calls wait for one another: panels
+    /// restored together then read a directory once instead of each on its
+    /// own.
     pub fn list(dir: &Path) -> std::io::Result<Vec<SessionSummary>> {
         let Ok(read_dir) = std::fs::read_dir(dir) else {
             return Ok(Vec::new());
@@ -2034,14 +2037,24 @@ impl Session {
                 Some((path, stamp))
             })
             .collect();
-        let mut cache = summary_cache()
+        let mut guard = summary_cache()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let SummaryCache {
+            logs: cache,
+            indexed,
+        } = &mut *guard;
+        if indexed.insert(dir.to_path_buf()) {
+            for (path, kept) in index::load(dir) {
+                cache.entry(path).or_insert(kept);
+            }
+        }
         let unread: Vec<&Path> = logs
             .iter()
             .filter(|(path, stamp)| cache.get(path).is_none_or(|(kept, _)| kept != stamp))
             .map(|(path, _)| path.as_path())
             .collect();
+        let changed = !unread.is_empty();
         for (path, summary) in read_summaries(&unread) {
             match summary {
                 Ok(summary) => {
@@ -2058,7 +2071,11 @@ impl Session {
             }
         }
         // Logs gone from the directory leave the cache with it.
+        let kept_before = cache.len();
         cache.retain(|path, _| path.parent() != Some(dir) || logs.iter().any(|(p, _)| p == path));
+        if changed || cache.len() < kept_before {
+            index::save(dir, cache);
+        }
         let mut summaries: Vec<SessionSummary> = logs
             .iter()
             .filter_map(|(path, stamp)| {
@@ -2068,14 +2085,14 @@ impl Session {
                     .map(|(_, summary)| summary.clone())
             })
             .collect();
-        drop(cache);
+        drop(guard);
         summaries.sort_by(|a, b| b.modified.cmp(&a.modified).then(b.created.cmp(&a.created)));
         Ok(summaries)
     }
 }
 
 /// What tells a session log apart from the one a summary was read from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 struct SummaryStamp {
     len: u64,
     modified: Option<std::time::SystemTime>,
@@ -2091,7 +2108,26 @@ impl SummaryStamp {
     }
 }
 
-type SummaryCache = HashMap<PathBuf, (SummaryStamp, SessionSummary)>;
+type KeptSummaries = HashMap<PathBuf, (SummaryStamp, SessionSummary)>;
+
+/// The summaries kept for the run, and the directories whose index this run
+/// has read into them.
+#[derive(Default)]
+struct SummaryCache {
+    logs: KeptSummaries,
+    indexed: HashSet<PathBuf>,
+}
+
+/// Drop what this run keeps of `dir`, as a new run would start: the next
+/// list reads its index again.
+#[cfg(test)]
+fn forget_summaries(dir: &Path) {
+    let mut cache = summary_cache()
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache.logs.retain(|path, _| path.parent() != Some(dir));
+    cache.indexed.remove(dir);
+}
 
 fn summary_cache() -> &'static Mutex<SummaryCache> {
     static CACHE: OnceLock<Mutex<SummaryCache>> = OnceLock::new();
@@ -2165,15 +2201,20 @@ impl SessionSummary {
 }
 
 /// What a session picker shows.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionSummary {
+    /// Not in the index, which keys summaries by file name: a directory
+    /// moved with its index keeps it.
+    #[serde(skip)]
     pub path: PathBuf,
     pub id: String,
     pub name: Option<String>,
     pub created: u64,
     /// Timestamp of the last entry, or `created` for an empty session.
     pub modified: u64,
-    /// The first user prompt, as a title fallback.
+    /// The first user prompt, as a title fallback: its first
+    /// 500 characters, which is more than a title shows,
+    /// so a large pasted prompt does not stay in memory for every list.
     pub first_prompt: Option<String>,
     pub message_count: usize,
     /// The session was left with work to carry on: a run cut off or
@@ -2215,7 +2256,9 @@ impl From<&Session> for SessionSummary {
             | EntryKind::Fitted { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
-            Message::User(user) => Some(user.plain_text()),
+            Message::User(user) => {
+                Some(user.plain_text().chars().take(FIRST_PROMPT_CHARS).collect())
+            }
             _ => None,
         });
         Self {
@@ -2257,6 +2300,11 @@ fn write_line(file: &mut File, line: &Line) -> std::io::Result<()> {
     file.write_all(text.as_bytes())?;
     file.flush()
 }
+
+/// How much of the first prompt a [`SessionSummary`] keeps.
+const FIRST_PROMPT_CHARS: usize = 500;
+
+mod index;
 
 #[cfg(test)]
 mod tests;
