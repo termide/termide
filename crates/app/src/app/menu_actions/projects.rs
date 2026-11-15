@@ -3,7 +3,7 @@
 use anyhow::Result;
 use std::path::PathBuf;
 
-use super::super::parked_projects::ProjectStep;
+use super::super::parked_projects::{is_gone, ProjectStep};
 use super::super::App;
 use crate::projects_menu::{ProjectRow, ProjectsTarget};
 use crate::state::{ActiveModal, PendingAction, ProjectsOrigin};
@@ -208,7 +208,13 @@ impl App {
                 let selection = menu.selected;
                 drop(menu);
                 self.state.close_menu();
-                self.prompt_project_transfer(project.root, n == 5, ProjectsOrigin::Menu(selection));
+                let from = ProjectsOrigin::Menu(selection);
+                // Its files moved outside termide: only its state follows.
+                if n == 6 && is_gone(&project.root, project.open) {
+                    self.prompt_project_relink(project.root, from);
+                } else {
+                    self.prompt_project_transfer(project.root, n == 5, from);
+                }
             }
             return Ok(());
         }
@@ -310,8 +316,11 @@ impl App {
         match target {
             ProjectsTarget::None => {}
             ProjectsTarget::Project(path) => {
+                let selection = self.state.ui.projects_submenu.selected;
                 self.state.close_menu();
-                if path != self.project_root {
+                if is_gone(&path, self.open_projects.is_open(&path)) {
+                    self.prompt_project_relink(path, ProjectsOrigin::Menu(selection));
+                } else if path != self.project_root {
                     self.switch_to_project(path)?;
                 }
             }
@@ -344,28 +353,6 @@ impl App {
         .with_keybindings(&self.state.config.file_manager.keybindings);
         self.state.set_pending_action(
             PendingAction::NewProject,
-            ActiveModal::DirectoryPicker(Box::new(modal)),
-        );
-
-        Ok(())
-    }
-
-    /// Open directory picker for changing root path of the current project
-    pub(in crate::app) fn handle_change_root_path(&mut self) -> Result<()> {
-        use termide_modal::DirectoryPickerModal;
-
-        let t = i18n::t();
-        // Get current project root as starting directory
-        let initial_dir = self.project_root.clone();
-
-        let modal = DirectoryPickerModal::new(
-            initial_dir,
-            t.projects_change_root().to_string(),
-            t.directory_picker_move().to_string(),
-        )
-        .with_keybindings(&self.state.config.file_manager.keybindings);
-        self.state.set_pending_action(
-            PendingAction::ChangeRootPath,
             ActiveModal::DirectoryPicker(Box::new(modal)),
         );
 

@@ -114,6 +114,13 @@ fn holds_agent_work(root: &Path) -> bool {
         })
 }
 
+/// Whether the project at `root` is one whose directory is gone (marked ✗):
+/// not open here, with nothing at its root any more. It cannot be entered,
+/// only pointed at where its files went.
+pub(super) fn is_gone(root: &Path, open: bool) -> bool {
+    !open && !root.is_dir()
+}
+
 /// `root` as the menus and messages name it.
 pub(super) fn display_root(root: &Path) -> String {
     termide_core::util::shorten_home_path(&root.display().to_string())

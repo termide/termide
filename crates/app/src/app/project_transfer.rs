@@ -9,6 +9,10 @@
 //! in the list. A copy is a project of its own: it opens in the background
 //! beside the original, with its agent sessions under new ids and nothing
 //! granted.
+//!
+//! A project whose directory went away outside termide is pointed at where
+//! its files went: the same state follows them as after a move, with no
+//! file moved.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -258,6 +262,100 @@ impl App {
                     t.projects_move_failed_fmt(&path, &e.to_string())
                 });
             }
+        }
+        Ok(())
+    }
+
+    /// Ask where the project at `root`, whose directory is gone, is now:
+    /// its files moved outside termide. The picker starts at the nearest
+    /// directory of the old path still there; cancelling returns `from`.
+    pub(in crate::app) fn prompt_project_relink(&mut self, root: PathBuf, from: ProjectsOrigin) {
+        if self.in_transfer(&root) {
+            self.state
+                .set_error(i18n::t().projects_transfer_busy().to_string());
+            return;
+        }
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| root.display().to_string());
+        let start = root
+            .ancestors()
+            .find(|dir| dir.is_dir())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| self.project_root.clone());
+        let t = i18n::t();
+        let modal = termide_modal::DirectoryPickerModal::new(
+            start,
+            t.projects_relink_title_fmt(&name),
+            t.directory_picker_select().to_string(),
+        )
+        .with_keybindings(&self.state.config.file_manager.keybindings);
+        self.state.set_pending_action(
+            PendingAction::RelinkProject { root, from },
+            ActiveModal::DirectoryPicker(Box::new(modal)),
+        );
+    }
+
+    /// The project at `root` is at `target` now, its files moved there
+    /// outside termide: carry what termide keeps of it along, as after a
+    /// move. Picking the old path again returns to `from`.
+    pub(in crate::app) fn relink_project(
+        &mut self,
+        root: PathBuf,
+        target: PathBuf,
+        from: ProjectsOrigin,
+    ) -> Result<()> {
+        let target = project_root_of(target);
+        if target == root {
+            return self.return_to_projects(from);
+        }
+        if let Err(message) = self.check_project_relink(&root, &target) {
+            self.show_error_modal(message);
+            return Ok(());
+        }
+        // Held while the state moves, so no instance opens it meanwhile.
+        let claim = match termide_project::claim_project(&target, None) {
+            Ok(claim) => claim,
+            Err(owner) => {
+                self.show_error_modal(open_elsewhere_message(&target, &owner));
+                return Ok(());
+            }
+        };
+        let sessions_dir = session_dir_of(&root);
+        if let Err(e) = relocate_project_data(&root, &target, false, sessions_dir.as_deref()) {
+            log::error!("Could not carry the state of {root:?} to {target:?}: {e:#}");
+            drop(claim);
+            self.show_error_modal(format!("{e:#}"));
+            return Ok(());
+        }
+        relocate_breakpoints(&root, &target);
+        repair_git_worktrees(&target);
+        drop(claim);
+        self.state
+            .set_info(i18n::t().project_relinked_fmt(&display_root(&target)));
+        Ok(())
+    }
+
+    /// Why the project at `root` cannot be pointed at `target`, if it
+    /// cannot: a directory with a project of its own would get two.
+    fn check_project_relink(&self, root: &Path, target: &Path) -> Result<(), String> {
+        let t = i18n::t();
+        if self.in_transfer(root) || self.in_transfer(target) {
+            return Err(t.projects_transfer_busy().to_string());
+        }
+        if let Some(owner) = termide_project::project_owner(root) {
+            return Err(open_elsewhere_message(root, &owner));
+        }
+        // Asked before its owner: one open here is held by this instance.
+        let has_project = self.open_projects.is_open(target)
+            || termide_project::ProjectLayout::get_project_path(target)
+                .is_ok_and(|path| path.exists());
+        if has_project {
+            return Err(t.projects_relink_has_state_fmt(&display_root(target)));
+        }
+        if let Some(owner) = termide_project::project_owner(target) {
+            return Err(open_elsewhere_message(target, &owner));
         }
         Ok(())
     }

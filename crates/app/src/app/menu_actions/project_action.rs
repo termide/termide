@@ -1,11 +1,11 @@
 //! An open project's menu, opened from its button in the menu bar as a menu
-//! title opens its dropdown: switch, move, copy, change root, close.
+//! title opens its dropdown: switch, move, copy, close.
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyEvent};
 use termide_ui_render::{
-    panel_action_dropdown_position, PROJECT_ACTION_CHANGE_ROOT, PROJECT_ACTION_CLOSE,
-    PROJECT_ACTION_COPY, PROJECT_ACTION_MOVE, PROJECT_ACTION_SWITCH,
+    panel_action_dropdown_position, PROJECT_ACTION_CLOSE, PROJECT_ACTION_COPY, PROJECT_ACTION_MOVE,
+    PROJECT_ACTION_SWITCH,
 };
 
 use super::super::App;
@@ -112,7 +112,6 @@ impl App {
             Some(PROJECT_ACTION_SWITCH) => self.switch_to_project(root)?,
             Some(PROJECT_ACTION_MOVE) => self.prompt_project_transfer(root, false, from),
             Some(PROJECT_ACTION_COPY) => self.prompt_project_transfer(root, true, from),
-            Some(PROJECT_ACTION_CHANGE_ROOT) => self.handle_change_root_path()?,
             Some(PROJECT_ACTION_CLOSE) => self.confirm_close_project(root, from),
             _ => {}
         }

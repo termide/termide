@@ -1075,13 +1075,12 @@ pub fn panel_action_dropdown_position(
 pub const PROJECT_ACTION_SWITCH: &str = "__project_action_switch__";
 pub const PROJECT_ACTION_MOVE: &str = "__project_action_move__";
 pub const PROJECT_ACTION_COPY: &str = "__project_action_copy__";
-pub const PROJECT_ACTION_CHANGE_ROOT: &str = "__project_action_change_root__";
 pub const PROJECT_ACTION_CLOSE: &str = "__project_action_close__";
 
 /// The items of an open project's menu, with the keys that do the same on a
-/// project in the Projects menu. Another project is switched to; the root is
-/// changed only for the current one, which closes only while another
-/// project is open: closing it switches to that one.
+/// project in the Projects menu. Another project is switched to; the
+/// current one closes only while another project is open: closing it
+/// switches to that one.
 pub fn get_project_action_menu_items(current: bool, can_close: bool) -> Vec<DropdownItem> {
     let t = termide_i18n::t();
     let mut items = Vec::with_capacity(4);
@@ -1099,12 +1098,6 @@ pub fn get_project_action_menu_items(current: bool, can_close: bool) -> Vec<Drop
         DropdownItem::new(t.projects_copy(), PROJECT_ACTION_COPY)
             .with_shortcut(Some("F5".to_string())),
     );
-    if current {
-        items.push(DropdownItem::new(
-            t.projects_change_root(),
-            PROJECT_ACTION_CHANGE_ROOT,
-        ));
-    }
     if can_close || !current {
         items.push(
             DropdownItem::new(t.panel_action_close(), PROJECT_ACTION_CLOSE)
@@ -1330,15 +1323,11 @@ mod project_menu_tests {
             .collect()
     }
 
-    /// The current project's root can change; it closes only while another
-    /// project is open, to be switched to.
+    /// The current project closes only while another project is open, to
+    /// be switched to.
     #[test]
-    fn the_current_project_changes_its_root() {
-        let base = [
-            PROJECT_ACTION_MOVE,
-            PROJECT_ACTION_COPY,
-            PROJECT_ACTION_CHANGE_ROOT,
-        ];
+    fn the_current_project_closes_while_another_is_open() {
+        let base = [PROJECT_ACTION_MOVE, PROJECT_ACTION_COPY];
         assert_eq!(keys(true, false), base);
         assert_eq!(
             keys(true, true),

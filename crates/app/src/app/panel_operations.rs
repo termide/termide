@@ -335,7 +335,12 @@ impl App {
         if let Some(action) = value.get::<ProjectAction>() {
             match action {
                 ProjectAction::Switch(path) => {
-                    self.switch_to_project(path.clone())?;
+                    let open = self.open_projects.is_open(path);
+                    if super::parked_projects::is_gone(path, open) {
+                        self.prompt_project_relink(path.clone(), ProjectsOrigin::Switcher);
+                    } else {
+                        self.switch_to_project(path.clone())?;
+                    }
                 }
                 ProjectAction::Close(path) => {
                     self.confirm_close_project(path.clone(), ProjectsOrigin::Switcher)
@@ -529,75 +534,6 @@ impl App {
         {
             log::debug!("failed to set terminal title: {e}");
         }
-    }
-
-    /// Handle change root path modal result - move the project to a new directory
-    pub(super) fn handle_change_root_path_result(
-        &mut self,
-        value: termide_modal::ModalOutput,
-    ) -> Result<()> {
-        if let Some(new_path) = value.get::<std::path::PathBuf>() {
-            self.move_project_to(new_path.clone())?;
-        }
-        Ok(())
-    }
-
-    /// Move the current project's stored state to a new directory
-    fn move_project_to(&mut self, new_project_root: std::path::PathBuf) -> Result<()> {
-        let new_project_root = super::parked_projects::project_root_of(new_project_root);
-
-        let old_project_root = self.project_root.clone();
-
-        // Don't do anything if same directory
-        if old_project_root == new_project_root {
-            return Ok(());
-        }
-        // Another open project lives there: two would share one root.
-        if self.open_projects.is_open(&new_project_root) {
-            self.show_error_modal(i18n::t().projects_already_open().to_string());
-            return Ok(());
-        }
-        // Nor may it land on a project another instance has open; the old
-        // root is let go once the move is done.
-        if !self.claim_project(&new_project_root) {
-            return Ok(());
-        }
-
-        // 1. Save the current layout
-        self.auto_save_layout();
-
-        // 2. Carry its layout, buffers and logs to the new root
-        if let Err(e) = termide_project::rehome_project_state(&old_project_root, &new_project_root)
-        {
-            log::error!("Failed to carry the project's state to {new_project_root:?}: {e:#}");
-        }
-        if let (Ok(old), Ok(new)) = (
-            termide_project::project_dir(&old_project_root),
-            termide_project::project_dir(&new_project_root),
-        ) {
-            termide_logger::relocate_file(&old, &new);
-        }
-
-        // 3. Change working directory
-        std::env::set_current_dir(&new_project_root)?;
-        log::info!(
-            "Moved project from {:?} to {:?}",
-            old_project_root,
-            new_project_root
-        );
-
-        // 4. Update project_root
-        self.open_projects.move_current(new_project_root.clone());
-        self.set_project_root(new_project_root);
-        self.sync_open_projects();
-
-        // 5. Save the layout in the new location
-        self.auto_save_layout();
-
-        let t = termide_i18n::t();
-        self.state.set_info(t.project_moved().to_string());
-
-        Ok(())
     }
 
     /// Open a file in a new editor panel with LSP initialization.

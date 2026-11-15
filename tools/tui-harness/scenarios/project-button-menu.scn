@@ -1,6 +1,6 @@
 # A project's button in the menu bar opens its menu, as a menu title does
-# (doc/en/ui.md): walking onto it with the arrows opens it; the current
-# project's offers its root path, another's switching to it.
+# (doc/en/ui.md): walking onto it with the arrows opens it; another
+# project's offers switching to it, the current one's does not.
 size 160x36
 project empty
 start
@@ -9,8 +9,6 @@ wait-re "^.*Projects  project "
 # A copy opens in the background beside the current project.
 key F9 Right Right Right Right Right
 wait "New project"
-# The root path is changed from the project's own menu only.
-expect-not "Change root path"
 key Up F5
 wait "Copy 'project' to"
 type "2"
@@ -21,7 +19,7 @@ wait "project | project2"
 # walks on, the menus opening with no item chosen.
 key F9 Right Right Right Right Right Right
 wait "Copy project…"
-expect "Change root path"
+expect "Close"
 expect-not "Switch to project"
 snapshot current-menu
 # No item is chosen yet: Enter does nothing.
@@ -33,7 +31,6 @@ expect-not "Move 'project' to"
 # The next button is another project's.
 key Right
 wait "Switch to project"
-expect-not "Change root path"
 snapshot other-menu
 
 # Alt+PgUp moves the button, and its menu goes along.
@@ -42,13 +39,13 @@ wait "project2 | project"
 expect "Switch to project"
 
 # Enter on Switch to project: project2 becomes the current one, and its
-# menu, now first, offers its root path. The menu opened with no item
+# menu, now first, offers no switching. The menu opened with no item
 # chosen: Down chooses the first.
 key Down Enter
 wait-gone "Switch to project"
 key F9 Right Right Right Right Right Right
 wait "Copy project…"
-expect "Change root path"
+expect-not "Switch to project"
 key Right
 wait "Switch to project"
 key Esc

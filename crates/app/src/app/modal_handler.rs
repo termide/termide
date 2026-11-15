@@ -162,6 +162,7 @@ impl App {
                             PendingAction::DeleteProject { from, .. }
                             | PendingAction::CloseProject { from, .. }
                             | PendingAction::TransferProject { from, .. }
+                            | PendingAction::RelinkProject { from, .. }
                             | PendingAction::ConfirmProjectMove { from, .. } => {
                                 self.state.close_modal();
                                 self.return_to_projects(from)?;
@@ -805,8 +806,11 @@ impl App {
                     }
                     self.reopen_bookmarks_menu(result_group, result_is_project, selected);
                 }
-                PendingAction::ChangeRootPath => {
-                    self.handle_change_root_path_result(value)?;
+                PendingAction::RelinkProject { root, from } => {
+                    match value.get::<std::path::PathBuf>().cloned() {
+                        Some(target) => self.relink_project(root, target, from)?,
+                        None => self.return_to_projects(from)?,
+                    }
                 }
                 // Navigation actions are handled in key_handler, should not get here
                 PendingAction::NextPanel | PendingAction::PrevPanel => {}

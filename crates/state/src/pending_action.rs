@@ -209,8 +209,14 @@ pub enum PendingAction {
         /// Selected index in parent bookmarks submenu to restore on return
         selected: usize,
     },
-    /// Change root path of the current project
-    ChangeRootPath,
+    /// Point the project at `root`, whose directory is gone, at the
+    /// directory the picker is answered with, its files moved there outside
+    /// termide
+    RelinkProject {
+        root: PathBuf,
+        /// Where to return afterwards.
+        from: ProjectsOrigin,
+    },
     /// Open Git Status panel
     OpenGitStatus,
     /// Open Git Log panel

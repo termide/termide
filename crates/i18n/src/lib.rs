@@ -1700,7 +1700,6 @@ pub trait Translation: Send + Sync {
     // Sessions
     fn projects_title(&self) -> &str;
     fn projects_new(&self) -> &str;
-    fn projects_change_root(&self) -> &str;
     fn projects_delete_title(&self) -> &str;
     fn projects_delete_sessions_question(&self) -> &str;
     fn projects_delete_with_sessions(&self) -> &str;
@@ -1710,7 +1709,6 @@ pub trait Translation: Send + Sync {
     fn projects_open_in_instance_fmt(&self, path: &str, id: &str) -> String;
     fn app_quit_background_fmt(&self, projects: &str) -> String;
     fn project_created(&self) -> &str;
-    fn project_moved(&self) -> &str;
     fn projects_close_title(&self) -> &str;
     fn projects_close_warning(&self) -> &str;
     fn projects_already_open(&self) -> &str;
@@ -1723,6 +1721,9 @@ pub trait Translation: Send + Sync {
     fn projects_transfer_exists_fmt(&self, path: &str) -> String;
     fn projects_move_nested_open_fmt(&self, path: &str) -> String;
     fn project_moved_to_fmt(&self, path: &str) -> String;
+    fn projects_relink_title_fmt(&self, name: &str) -> String;
+    fn projects_relink_has_state_fmt(&self, path: &str) -> String;
+    fn project_relinked_fmt(&self, path: &str) -> String;
     fn project_copied_to_fmt(&self, path: &str) -> String;
     fn projects_move_failed_fmt(&self, path: &str, error: &str) -> String;
     fn projects_copy_failed_fmt(&self, path: &str, error: &str) -> String;

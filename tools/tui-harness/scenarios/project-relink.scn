@@ -1,0 +1,68 @@
+# A project whose directory went away outside termide (doc/en/ui.md): F6 on
+# its ✗ row in the Projects menu asks where it is now, and its state — the
+# layout and the agent sessions — follows to the directory picked, no file
+# moved.
+size 160x36
+project empty
+start
+run "echo hi > keep.txt"
+wait "keep.txt"
+wait-re "^.*Projects  project "
+
+# A copy opens in the background; close it, then move it outside termide.
+key F9 Right Right Right Right Right
+wait "New project"
+key Up F5
+wait "Copy 'project' to"
+type "2"
+key Enter
+wait "project | project2"
+key F9 Right Right Right Right Right
+wait "New project"
+key Up F8
+wait "Close the project?"
+key y
+wait-gone "project | project2"
+# The menu opens again where it was.
+key Esc
+wait-gone "New project"
+run "S=\"$TERMIDE_CONFIG/ai/sessions$(cd .. && pwd -P)/project2\" && mkdir -p \"$S\" && echo '{}' > \"$S/2026-11-01T10-00-00_abcd1234.jsonl\""
+run "cd .. && mv project2 elsewhere"
+
+# Its row is marked ✗; F6 on it asks where it went.
+key F9 Right Right Right Right Right
+wait-re "✗ .*project2"
+key Up F6
+wait "Where is 'project2' now?"
+snapshot picker
+
+# A directory with a project of its own is refused.
+key Down Down Down Down Tab Enter
+wait "already has a project of its own"
+snapshot refused
+key Enter
+wait-gone "already has a project of its own"
+
+# Enter on the row asks too, as the project cannot be entered. Picked where
+# it went: its state follows, the layout's paths with it, nothing else
+# moves, and its row is no longer marked.
+key F9 Right Right Right Right Right
+wait-re "✗ .*project2"
+key Up Enter
+wait "Where is 'project2' now?"
+key Down Tab Enter
+wait-gone "Where is 'project2' now?"
+key F9 Right Right Right Right Right
+wait-re "^.*│   \d{4}-\S+ \S+ /.*/elsewhere "
+expect-not "project2"
+snapshot relinked
+run "cd .. && test -f elsewhere/keep.txt && test ! -e project2"
+run "! ls -d \"$TERMIDE_DATA\"/projects/project2-* 2>/dev/null && grep -q '/elsewhere\"' \"$TERMIDE_DATA\"/projects/elsewhere-*/project.toml"
+run "! grep -q '/project2' \"$TERMIDE_DATA\"/projects/elsewhere-*/project.toml"
+run "P=\"$TERMIDE_CONFIG/ai/sessions$(cd .. && pwd -P)\" && test -f \"$P/elsewhere/2026-11-01T10-00-00_abcd1234.jsonl\" && test ! -e \"$P/project2\""
+
+# It opens like any other project, with its layout.
+key Up Enter
+wait-re "Projects  project \| elsewhere "
+wait "keep.txt"
+quit

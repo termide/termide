@@ -114,8 +114,10 @@ rust-analyzer) and
 a session opened from its list), `project-store` (layouts in the old tree folded into flat project directories at startup, ✗ on a project whose directory is gone, `F8` deleting a project with or without its agent sessions), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its
 layout, a copy opened beside it), `project-button-menu` (a project's button in the
-menu bar opening its menu: the current project's root path, another's
-switch) and `project-move-agent` (a moved
+menu bar opening its menu: another project's offering a switch, the
+current one's not), `project-relink` (`F6` and `Enter` on a ✗ project
+pointing it at where its directory went: the layout and agent sessions
+follow, a directory with a project of its own is refused) and `project-move-agent` (a moved
 project's agent session found again at the new path, and its git worktree
 still linked) and `viewer` (the HTML and Markdown previews from `F3`: a
 search with its match count, a same-page link followed, `G` to the last

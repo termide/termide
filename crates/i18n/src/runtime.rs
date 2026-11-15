@@ -1014,13 +1014,11 @@ impl Translation for RuntimeTranslation {
         settings_logging_min_level,
         settings_vfs_connection_timeout,
         projects_new,
-        projects_change_root,
         projects_delete_title,
         projects_delete_sessions_question,
         projects_delete_with_sessions,
         projects_delete_keep_sessions,
         project_created,
-        project_moved,
         projects_close_title,
         projects_close_warning,
         projects_already_open,
@@ -3025,6 +3023,18 @@ impl Translation for RuntimeTranslation {
 
     fn project_moved_to_fmt(&self, path: &str) -> String {
         self.format("project_moved_to_fmt", &[("path", path)])
+    }
+
+    fn projects_relink_title_fmt(&self, name: &str) -> String {
+        self.format("projects_relink_title_fmt", &[("name", name)])
+    }
+
+    fn projects_relink_has_state_fmt(&self, path: &str) -> String {
+        self.format("projects_relink_has_state_fmt", &[("path", path)])
+    }
+
+    fn project_relinked_fmt(&self, path: &str) -> String {
+        self.format("project_relinked_fmt", &[("path", path)])
     }
 
     fn project_copied_to_fmt(&self, path: &str) -> String {

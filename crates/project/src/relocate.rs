@@ -34,25 +34,6 @@ pub fn relocate_project_state(
     relocate_state_in(&get_data_dir()?, from, to, copy, sessions)
 }
 
-/// Make the project at `from` the one at `to` without moving any file, as
-/// changing a project's root does: its layout, buffers and logs go to `to`
-/// as they are. What was granted stays with `from`: it was granted for what
-/// `from` holds.
-///
-/// # Errors
-///
-/// When there is no data directory or the state cannot be moved.
-pub fn rehome_project_state(from: &Path, to: &Path) -> Result<()> {
-    let data_dir = get_data_dir()?;
-    let (src, dst) = (
-        project_dir_in(&data_dir, from),
-        project_dir_in(&data_dir, to),
-    );
-    carry(&src, &dst, false, false)
-        .with_context(|| format!("Failed to carry {} to {}", src.display(), dst.display()))?;
-    rewrite_project_file(&dst.join(PROJECT_FILE), to, &|_| None)
-}
-
 fn relocate_state_in(
     data_dir: &Path,
     from: &Path,
