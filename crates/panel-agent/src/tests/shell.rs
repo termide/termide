@@ -346,13 +346,14 @@ fn an_offered_loop_starts_on_start() {
         SuggestionKind::Loop {
             interval: Some(Duration::from_secs(300)),
         },
-        "check CI",
+        "check CI until: CI is green",
         "",
     );
     panel.handle_key(chord(KeyCode::Char('1'), KeyModifiers::NONE));
     assert_eq!(worker.join().unwrap(), SuggestionReply::Run);
     let task = panel.loop_task.as_ref().expect("the loop started");
     assert_eq!(task.prompt, "check CI");
+    assert_eq!(task.until.as_deref(), Some("CI is green"));
     assert_eq!(task.interval, Some(Duration::from_secs(300)));
     assert_eq!(task.iterations, 1, "its first run went at once");
 }

@@ -759,6 +759,10 @@ impl Translation for RuntimeTranslation {
         agent_run_cancelled,
         agent_close_confirm_working,
         agent_notice_loop_stopped,
+        agent_notice_loop_stopped_by_agent,
+        agent_notice_loop_checking,
+        agent_notice_loop_met,
+        agent_notice_loop_unreachable,
         agent_notice_loop_usage,
         agent_notice_goal_stopped,
         agent_notice_empty_cut_off_retry,
@@ -2040,6 +2044,28 @@ impl Translation for RuntimeTranslation {
 
     fn agent_unfinished_loop_due_fmt(&self, wait: &str) -> String {
         self.format("agent_unfinished_loop_due_fmt", &[("wait", wait)])
+    }
+
+    fn agent_unfinished_loop_until_fmt(&self, condition: &str) -> String {
+        self.format(
+            "agent_unfinished_loop_until_fmt",
+            &[("condition", condition)],
+        )
+    }
+
+    fn agent_notice_loop_met_reason_fmt(&self, reason: &str) -> String {
+        self.format("agent_notice_loop_met_reason_fmt", &[("reason", reason)])
+    }
+
+    fn agent_notice_loop_unreachable_reason_fmt(&self, reason: &str) -> String {
+        self.format(
+            "agent_notice_loop_unreachable_reason_fmt",
+            &[("reason", reason)],
+        )
+    }
+
+    fn agent_notice_loop_check_failed_fmt(&self, error: &str) -> String {
+        self.format("agent_notice_loop_check_failed_fmt", &[("error", error)])
     }
 
     fn agent_notice_goal_reached_reason_fmt(&self, reason: &str) -> String {

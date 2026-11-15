@@ -539,10 +539,99 @@ pub fn clear_parked_of(panel: u64) -> Vec<Parked> {
         .collect()
 }
 
+/// A panel's `/loop` as the `jobs` tool shows it to the panel's agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoopInfo {
+    pub prompt: String,
+    pub interval: Option<std::time::Duration>,
+    pub until: Option<String>,
+    /// Runs sent so far, and the most it sends.
+    pub iterations: usize,
+    pub max: usize,
+}
+
+/// The id the `jobs` tool lists a panel's loop under.
+pub const LOOP_JOB: &str = "loop";
+
+/// The loops going, by panel, and whether the panel's agent asked to stop
+/// its loop: the panel takes the ask on its next tick.
+fn loops_lock() -> std::sync::MutexGuard<'static, HashMap<u64, (LoopInfo, bool)>> {
+    static LOOPS: OnceLock<Mutex<HashMap<u64, (LoopInfo, bool)>>> = OnceLock::new();
+    LOOPS
+        .get_or_init(Mutex::default)
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The panel's loop as it stands now, `None` once it has none.
+pub fn publish_loop(panel: u64, info: Option<LoopInfo>) {
+    let mut loops = loops_lock();
+    match info {
+        Some(info) => {
+            let asked = loops.get(&panel).is_some_and(|(_, asked)| *asked);
+            loops.insert(panel, (info, asked));
+        }
+        None => {
+            loops.remove(&panel);
+        }
+    }
+}
+
+/// The loop the panel has going, for `jobs` to list.
+#[must_use]
+pub fn loop_of(panel: u64) -> Option<LoopInfo> {
+    loops_lock().get(&panel).map(|(info, _)| info.clone())
+}
+
+/// The panel's agent asks to stop its loop: the loop it stops, `None`
+/// when the panel has none.
+pub fn ask_loop_stop(panel: u64) -> Option<LoopInfo> {
+    let mut loops = loops_lock();
+    let (info, asked) = loops.get_mut(&panel)?;
+    *asked = true;
+    Some(info.clone())
+}
+
+/// Whether the panel's agent asked to stop its loop; the ask is taken.
+pub(crate) fn take_loop_stop(panel: u64) -> bool {
+    loops_lock()
+        .get_mut(&panel)
+        .is_some_and(|(_, asked)| std::mem::take(asked))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use termide_agent_core::FailureKind;
+
+    #[test]
+    fn a_loop_stop_is_asked_once_and_only_of_a_loop_that_goes() {
+        let panel = 90_001;
+        assert_eq!(ask_loop_stop(panel), None);
+        assert!(!take_loop_stop(panel));
+        let info = LoopInfo {
+            prompt: "check CI".into(),
+            interval: None,
+            until: None,
+            iterations: 1,
+            max: 100,
+        };
+        publish_loop(panel, Some(info.clone()));
+        assert_eq!(loop_of(panel), Some(info.clone()));
+        assert_eq!(ask_loop_stop(panel), Some(info.clone()));
+        // A step published before the panel takes the ask keeps it.
+        publish_loop(
+            panel,
+            Some(LoopInfo {
+                iterations: 2,
+                ..info
+            }),
+        );
+        assert!(take_loop_stop(panel));
+        assert!(!take_loop_stop(panel));
+        publish_loop(panel, None);
+        assert_eq!(loop_of(panel), None);
+    }
 
     fn task(panel: Option<u64>, call: &str, background: bool) -> LiveTask<'_> {
         LiveTask {

@@ -4,11 +4,12 @@
 //! agent moves a long call — a delegate it waits for, a command — to the
 //! background to take a message meanwhile. Any of them can stop mattering
 //! while it runs. `jobs` lists them, each by its id, and `stop` stops one —
-//! without asking anyone: it is the agent's own work. What the user set going
-//! (a `/goal`, a `/loop`) is not listed: it is the user's to stop.
+//! without asking anyone: it is the agent's own work. The panel's `/loop` is
+//! listed too, so the agent can end one whose purpose is served rather than
+//! leave it running to its cap; a `/goal` is not, its judge ends it.
 //!
-//! The tool knows two sources: the tasks the app keeps for the panel
-//! ([`OwnTasks`]), and the calls running beside this one, which the context
+//! The tool knows two sources: the tasks the app keeps for the panel, its
+//! loop among them ([`OwnTasks`]), and the calls running beside this one, which the context
 //! brings where an external agent's calls outlive their step
 //! ([`ToolContext::running`]).
 

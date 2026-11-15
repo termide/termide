@@ -560,7 +560,7 @@ you have named or sent even one message to is always kept.
 | `Ctrl+F` | On a fresh session's banner, search its list of sessions by title in the prompt box; `Esc` ends the search |
 | `F7` | Start a new session (the used one is kept in the list) |
 | `F8` | Delete this session (after a confirmation) and start a fresh one; in the banner's list of sessions, delete the one under the cursor |
-| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/changes` reviews the agent's changes in the diff panel, `/new` starts a fresh session, `/fork [focus]` copies this one into a new panel (compacted on the focus when given), `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt>` re-runs a prompt on an interval (or back-to-back), `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the usage window on the session info and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it, and `/trust` lists the servers a project brings that wait for your approval, `/trust <name>` approving one (see [MCP servers](#mcp-servers)) |
+| `/name args` + `Enter` | Send the prompt template `name` with `args` filled in, run the command script `name` or send the skill `name` (`/skill:name` when the name is taken); `/compact [focus]` summarises the session, `/undo` takes the last request back, `/changes` reviews the agent's changes in the diff panel, `/new` starts a fresh session, `/fork [focus]` copies this one into a new panel (compacted on the focus when given), `/clear` starts one after discarding the current session, and `/rename [name]` (or `/name`) renames it; `/pause` stops the run after the current step and `/continue` resumes it (or, before the step ends, cancels the pause, and after a failed run tries its request again); `/loop [interval] <prompt> [until: <condition>]` re-runs a prompt on an interval (or back-to-back) — with `until:`, until a judge finds the condition met —, `/loop` alone shows the active loop, `/loop stop` (or `Esc`) ends it; `/goal <what to achieve>` works autonomously toward a goal until a judge says it is reached, `/goal` alone shows the active goal, `/goal stop` (or `Esc`) ends it; `/handoff` briefs the unfinished work, then offers to save it to `HANDOFF.md` or start a new session from it; `/usage` opens the usage window on the session info and `/prompt` opens the assembled system prompt; `/mcp` lists the MCP servers, `/mcp reload [server]` reads their configuration again (for one server, or all), and `/mcp login <server>` and `/mcp logout <server>` sign in to one and out of it, and `/trust` lists the servers a project brings that wait for your approval, `/trust <name>` approving one (see [MCP servers](#mcp-servers)) |
 | `↑` / `↓` | Move between the rows of the input as drawn, a wrapped line included; on the first or last row: take back the messages still queued (`↑`, while any wait), else recall an earlier request of this session, or come back to what you were typing. A recalled request opens with the cursor on the edge the arrow came in through, so repeated presses keep walking history |
 | `Tab` | Complete the highlighted `/command` or `@file` while the list is open |
 | `Ctrl+↑` / `Ctrl+↓`, `PageUp` / `PageDown` | Scroll the session |
@@ -1350,7 +1350,8 @@ belongs to the panel's agent alone, Claude Code included.
 `/goal` or `/loop` line to paste: the agent reaches for them when a task will
 take many turns and can be checked as done, or must be done again and again —
 polling a CI run, watching a deploy. The card shows the goal, or the loop's
-prompt and how often it runs, why it is offered and, when one is under way,
+prompt and how often it runs — with `until:` and its stop condition when the
+agent can say what makes the loop no longer needed —, why it is offered and, when one is under way,
 the goal or loop it would replace. **Start** starts it exactly as the
 `/goal` or `/loop` line typed would (see [Service prompts](#service-prompts)) — a goal offered during a
 run takes its first turn once the run ends, a loop's prompt joins the run —
@@ -2341,7 +2342,11 @@ the id too), what it is and how long it has run (`& Listing background
 work`), and with `stop` set to an id stops that one (`& Stopping <id>`): a
 task stops, a parked one is given up, a call is cancelled, and no answer
 comes from it afterwards. It asks you nothing in any mode, since it touches
-only the agent's own work; a `/goal` or `/loop` is yours and is not listed. Terminal sessions — a
+only the agent's own work. The panel's `/loop` is listed too, under the id
+`loop`, so the agent can end one whose purpose is served — the CI run went
+green — rather than leave it running to its cap; stopping it ends it as
+`/loop stop` would, and a notice says the agent stopped it. A `/goal` is
+yours and is not listed: its judge ends it. Terminal sessions — a
 `shell` call with `background` among them — are not jobs: `terminals` lists
 and closes them.
 The tool comes with `task`: an agent whose `tools` list leaves `task` out
@@ -2358,7 +2363,7 @@ gets `jobs` only by naming it. Subagents have neither.
 | A call moved to the background | an external agent, to take a message typed while it ran | `$ Running  cargo test` | `✕`, `jobs`, `Esc` | its result, to the agent, which goes on by itself | — |
 | A terminal | `shell` with `session` or `background` | `$ Terminal · name` | `✕`, `terminals close` | what it printed, when the agent reads it | 2 MiB in memory, 256 MiB of log |
 | A `/goal` | you | `◎ Heading for the goal` | `✕`, `/goal stop`, `Esc` | the judge's verdict | the judge; it pauses when the agent only talks |
-| A `/loop` | you | `↺ Repeating every 5m · 3/100` | `✕`, `/loop stop`, `Esc` | each run, in the transcript | 100 runs |
+| A `/loop` | you | `↺ Repeating every 5m · 3/100` | `✕`, `/loop stop`, `Esc`, `jobs` | each run, in the transcript | 100 runs; with `until:`, the judge |
 | A fork | the agent's `fork` | none: a panel of its own | closing its panel | nothing | the messages agents pass without you (`max_agent_messages`) |
 | A message to another panel | the agent's `send_message` | none | — | an answer, as a message, when one is asked | the messages agents pass without you (`max_agent_messages`) |
 
@@ -2689,6 +2694,23 @@ to judge strictly, say.
 /goal get the test suite green    work until the judge agrees it is done
 /goal                             show the active goal and its turn
 /goal stop                        end the active goal
+```
+
+`/loop` takes the same judge for its stop condition. `/loop [interval]
+<prompt> until: <condition>` — the last `until:` that opens a word, with
+something after it; a plain "until" stays in the prompt — has the judge check
+the condition after each run, against the session as it stands. `DONE` ends
+the loop with a "loop's condition met" notice and the reason; `IMPOSSIBLE`
+ends it with a warning; `CONTINUE` and `WAITING` — what a loop waits on anyway
+— let the next run go as scheduled, and so does a failed check, which is not
+tried again until the next run ends. The condition shows in a bare `/loop` and
+the state strip shows the check while it runs. The judge is `goal.md` with the
+condition as the goal, on the model `[ai.goal_judge]` names. The agent can
+also end the loop itself: **jobs** lists it under the id `loop`, and stopping
+it ends it as `/loop stop` would, with a notice that the agent stopped it.
+
+```
+/loop 5m check CI until: the run on main is green
 ```
 
 `/handoff` uses `handoff.md`: a read-only model call distils the transcript into

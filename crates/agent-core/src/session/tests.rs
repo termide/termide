@@ -83,6 +83,7 @@ fn runs_and_unattended_work_survive_a_reopen() {
             interval_ms: None,
             iterations: 5,
             due_ms: None,
+            until: Some("CI is green".into()),
         }),
     };
     session.append_autorun(&autorun).unwrap();

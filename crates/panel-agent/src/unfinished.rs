@@ -127,6 +127,7 @@ impl AgentPanel {
                     .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)),
                 iterations: task.iterations,
                 due_ms: task.due_ms,
+                until: task.until.clone(),
             }),
         }
     }
@@ -538,6 +539,8 @@ impl AgentPanel {
                 due_ms: repeat.due_ms,
                 iterations: repeat.iterations,
                 started: Instant::now(),
+                until: repeat.until,
+                judge_at: None,
             });
         }
     }

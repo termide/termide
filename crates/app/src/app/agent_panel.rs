@@ -3010,11 +3010,22 @@ impl OwnTasks for PanelTasks {
                     )
                 }),
         );
+        if let Some(repeat) = termide_panel_agent::live::loop_of(panel) {
+            lines.push(loop_line(&repeat));
+        }
         lines
     }
 
     fn stop(&self, id: &str, ctx: &ToolContext) -> Option<String> {
-        use termide_panel_agent::live::{withdraw, Withdrawn};
+        use termide_panel_agent::live::{withdraw, Withdrawn, LOOP_JOB};
+        if id == LOOP_JOB {
+            let repeat = termide_panel_agent::live::ask_loop_stop(ctx.panel?)?;
+            return Some(format!(
+                "Stopped the loop ({}); no further run of it will come. Tell the user why it was \
+                 no longer needed.",
+                termide_agent_tools::jobs_text::first_line(&repeat.prompt, 100)
+            ));
+        }
         match withdraw(ctx.panel?, id) {
             Withdrawn::Running(agent) => Some(format!(
                 "Stopped {agent}'s task {id}; no answer will come from it."
@@ -3025,6 +3036,28 @@ impl OwnTasks for PanelTasks {
             Withdrawn::None => None,
         }
     }
+}
+
+/// The panel's `/loop` as `jobs` lists it: its prompt, how often it runs,
+/// its stop condition and how far it has gone.
+fn loop_line(repeat: &termide_panel_agent::live::LoopInfo) -> String {
+    use termide_agent_tools::jobs_text::first_line;
+    let every = match repeat.interval {
+        Some(every) => format!("every {}", termide_agent_core::format_interval(every)),
+        None => "back to back".to_string(),
+    };
+    let until = repeat
+        .until
+        .as_deref()
+        .map(|until| format!(" · until: {}", first_line(until, 100)))
+        .unwrap_or_default();
+    format!(
+        "- {} · the user's /loop {every} · {}{until} · run {} of at most {}",
+        termide_panel_agent::live::LOOP_JOB,
+        first_line(&repeat.prompt, 100),
+        repeat.iterations,
+        repeat.max
+    )
 }
 
 /// The message a background task's answer reaches the delegating agent as:

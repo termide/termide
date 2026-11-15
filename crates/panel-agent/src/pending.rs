@@ -757,7 +757,10 @@ impl AgentPanel {
                         if self.loop_task.is_some() {
                             self.stop_loop();
                         }
-                        self.start_loop(suggestion.command.clone(), interval)
+                        // The offered prompt carries its stop condition as the
+                        // typed line would.
+                        let (prompt, until) = termide_agent_core::split_until(&suggestion.command);
+                        self.start_loop(prompt.to_string(), interval, until.map(str::to_string))
                     }
                     SuggestionKind::Command => Vec::new(),
                 };

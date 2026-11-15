@@ -10,8 +10,9 @@
 
 use serde_json::{json, Value};
 use termide_agent_core::{
-    format_interval, parse_interval, CancelToken, Suggestion, SuggestionKind, SuggestionReply,
-    Tool, ToolCall, ToolContext, ToolResultMessage, ToolText, ToolUpdate,
+    format_interval, join_until, parse_interval, split_until, CancelToken, Suggestion,
+    SuggestionKind, SuggestionReply, Tool, ToolCall, ToolContext, ToolResultMessage, ToolText,
+    ToolUpdate,
 };
 
 use crate::args::{optional_str, required_str};
@@ -93,6 +94,10 @@ impl Tool for SuggestLoopTool {
                     "type": "string",
                     "description": "The wait between runs: `30s`, `5m`, `2h`; leave it out to run again as soon as each run ends"
                 },
+                "until": {
+                    "type": "string",
+                    "description": "When the loop is no longer needed, as a judge can check it from the session after each run (`the CI run on main is green`); the loop ends once it holds. Leave it out to run until stopped"
+                },
                 "why": { "type": "string", "description": WHY }
             },
             "required": ["prompt"]
@@ -135,7 +140,17 @@ impl Tool for SuggestLoopTool {
             Ok(_) => None,
             Err(message) => return ToolResultMessage::error(call, message),
         };
-        offer(call, ctx, SuggestionKind::Loop { interval }, prompt)
+        let until = match optional_str(call, "until") {
+            Ok(until) => until.map(str::trim).filter(|c| !c.is_empty()),
+            Err(message) => return ToolResultMessage::error(call, message),
+        };
+        // The condition rides in the prompt as `/loop` takes it typed.
+        offer(
+            call,
+            ctx,
+            SuggestionKind::Loop { interval },
+            join_until(&prompt, until),
+        )
     }
 }
 
@@ -188,9 +203,15 @@ with the task as it stands."
                         Some(every) => format!("again every {}", format_interval(every)),
                         None => "again as soon as each run ends".to_string(),
                     };
+                    let until = if split_until(&typed).1.is_some() {
+                        " After each run a judge checks its condition, and the loop ends once \
+it holds."
+                    } else {
+                        ""
+                    };
                     format!(
                         "The user started the loop. Its prompt comes to you as their message \
-now, then {then}."
+now, then {then}.{until} Once it is no longer needed, stop it with `jobs`."
                     )
                 }
                 _ => "The user started the goal. Its first turn comes to you as their message \
@@ -341,6 +362,32 @@ mod tests {
             SuggestionKind::Loop { interval: None }
         );
         assert!(result.plain_text().contains("as soon as each run ends"));
+    }
+
+    /// A stop condition rides in the prompt as the typed line has it, and
+    /// the model hears that a judge checks it.
+    #[test]
+    fn a_loop_carries_its_stop_condition() {
+        let (ctx, answerer) = answered(SuggestionReply::Run);
+        let result = run(
+            &SuggestLoopTool,
+            json!({ "prompt": "check CI", "interval": "5m", "until": " CI is green " }),
+            &ctx,
+        );
+        let shown = answerer.join().unwrap().unwrap();
+        assert_eq!(shown.command, "check CI until: CI is green");
+        assert_eq!(shown.typed(), "/loop 5m check CI until: CI is green");
+        assert!(result.plain_text().contains("a judge checks its condition"));
+        assert!(result.plain_text().contains("stop it with `jobs`"));
+
+        let (ctx, answerer) = answered(SuggestionReply::Run);
+        let result = run(
+            &SuggestLoopTool,
+            json!({ "prompt": "check CI", "until": "  " }),
+            &ctx,
+        );
+        assert_eq!(answerer.join().unwrap().unwrap().command, "check CI");
+        assert!(!result.plain_text().contains("judge"));
     }
 
     /// Editing and declining are not errors: the model waits, or carries

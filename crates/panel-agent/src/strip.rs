@@ -319,6 +319,9 @@ impl AgentPanel {
             .stoppable();
             row.notes
                 .push(format!("{}/{LOOP_MAX_ITERATIONS}", task.iterations));
+            if self.loop_judging {
+                row.notes.push(t.agent_strip_checking().to_string());
+            }
             if let Some(wait) = self.loop_wait() {
                 row.notes.push(t.agent_strip_next_fmt(&wait));
             }
