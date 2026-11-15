@@ -64,16 +64,18 @@ brew install termide
 Automated packaging is configured in `.github/workflows/release.yml`.
 
 On each tag push, the workflow automatically:
-1. Runs quality checks (fmt, clippy, tests)
-2. Builds binaries for all platforms (Linux x64/arm64, macOS x64/arm64)
-3. Creates .deb and .rpm packages
+1. Runs quality checks (fmt, clippy, tests, cargo-deny)
+2. Builds binaries: Linux x64/arm64 (glibc and musl), macOS x64/arm64, Windows x64
+3. Creates .deb and .rpm packages (x86_64)
 4. Uploads all artifacts to GitHub Releases
 5. Updates AUR packages (termide and termide-bin)
-6. Updates Homebrew tap formula
+6. Updates the Homebrew tap formula
+7. Updates the website
 
 **Required secrets for automation:**
 - `AUR_SSH_KEY` - Private SSH key for pushing to AUR
-- `HOMEBREW_TAP_TOKEN` - GitHub PAT with access to homebrew-termide repo
+- `HOMEBREW_TAP_SSH_KEY` - Deploy key with write access to the homebrew-termide repo
+- `SITE_DEPLOY_KEY` - Deploy key with write access to the website repository
 
 ## NixOS
 
@@ -91,6 +93,6 @@ nix run github:termide/termide
 
 ## Notes
 
-- Version numbers and checksums are automatically updated by GitHub Actions for AUR and Homebrew
+- `tools/release/version.sh <version>` bumps the version everywhere it is repeated, the in-repo PKGBUILDs and `flake.nix` among them; CI runs `tools/release/version.sh --check`
+- The release workflow fills in the checksums of the AUR packages and the Homebrew formula
 - For official repository inclusion (Debian, Fedora, Homebrew Core), additional review processes apply
-- NixOS flake.nix needs manual version update in the release process

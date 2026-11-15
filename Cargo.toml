@@ -65,6 +65,29 @@ html5ever = "0.29"
 scraper = { version = "0.27", default-features = false }
 ureq = "2.10"
 
+# Shared by several crates; kept here so their versions move together.
+thiserror = "2.0"
+tokio = "1"
+windows-sys = "0.59"
+nix = "0.29"
+image = { version = "0.25", default-features = false }
+zeroize = "1"
+zip = { version = "9.1", default-features = false }
+tree-sitter-bash = "0.23"
+tree-sitter-c = "0.23"
+tree-sitter-cpp = "0.23"
+tree-sitter-go = "0.23"
+tree-sitter-java = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-lua = "0.5"
+tree-sitter-md = "0.3"
+tree-sitter-php = "0.24"
+tree-sitter-python = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-typescript = "0.23"
+
 [package]
 name = "termide"
 version.workspace = true
@@ -72,8 +95,8 @@ edition.workspace = true
 authors.workspace = true
 description = "All-in-one terminal workspace: editor, file manager, terminal, git and coding agent"
 publish = false
-repository = "https://github.com/termide/termide"
-license = "MIT"
+repository.workspace = true
+license.workspace = true
 keywords = ["terminal", "ide", "file-manager", "tui", "terminal-ui"]
 categories = ["command-line-utilities", "development-tools"]
 readme = "README.md"
@@ -81,7 +104,6 @@ exclude = [
     ".github/",
     "doc/",
     ".gitignore",
-    ".pre-commit-config.yaml",
     "flake.nix",
     "flake.lock"
 ]
@@ -133,12 +155,12 @@ auto-req = "no"
 # the app event loop. Everything else lives in the workspace crates, so only
 # what `src/main.rs` and `src/ui.rs` actually name belongs here — a dependency
 # needed by a crate must be declared by that crate.
-anyhow = "1.0"
+anyhow.workspace = true
 clap = { version = "4", features = ["derive"] }
-crossterm = "0.29"
-dirs = "6.0"
-log = "0.4"
-ratatui = "0.30.0"
+crossterm.workspace = true
+dirs.workspace = true
+log.workspace = true
+ratatui.workspace = true
 
 # Workspace crates referenced directly from main.rs / ui.rs
 termide-app = { path = "crates/app" }
@@ -164,11 +186,11 @@ tempfile.workspace = true
 termide-highlight = { path = "crates/highlight" }
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2"
-nix = { version = "0.29", features = ["signal", "process"] }
+libc.workspace = true
+nix = { workspace = true, features = ["signal", "process"] }
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_System_SystemInformation"] }
+windows-sys = { workspace = true, features = ["Win32_System_SystemInformation"] }
 
 # Dependencies keep line tables only: a backtrace still names their lines,
 # but their variables are not inspectable, and their artefacts come out

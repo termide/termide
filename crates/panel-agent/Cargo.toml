@@ -29,5 +29,5 @@ termide-walk = { path = "../walk" }
 
 [dev-dependencies]
 base64.workspace = true
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { workspace = true, features = ["png"] }
 tempfile.workspace = true

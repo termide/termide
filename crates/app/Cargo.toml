@@ -21,7 +21,7 @@ open = "5"
 unicode-width.workspace = true
 libc.workspace = true
 signal-hook.workspace = true
-zeroize = "1"
+zeroize.workspace = true
 
 # All app-* foundation crates
 termide-app-core = { path = "../app-core" }

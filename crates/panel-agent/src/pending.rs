@@ -404,8 +404,8 @@ impl AgentPanel {
             // The status line still announces it for an unfocused panel.
             let request = &envelope.request;
             // The card shows the intent in its title and what exactly the agent
-            // wants to do in the detail block below. MCP tools and others
-            // without a path or command have no subject, so no detail.
+            // wants to do in the detail block below. A call that names
+            // nothing — no path, command or argument — has no detail.
             let has_subject = !request.subject.is_empty();
             let t = termide_i18n::t();
             let mut base = t.agent_permission_run_fmt(&request.tool);

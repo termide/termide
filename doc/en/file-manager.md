@@ -18,9 +18,8 @@ directories — see [Archives](vfs.md#archives).
 | `PageUp` / `PageDown` | Scroll list by one page                |
 | `Home` / `End`    | Go to beginning/end of list                |
 | `.`               | Toggle hidden files visibility             |
-| `→` / `l`       | Expand directory (tree view)                |
-| `←` / `h`       | Collapse directory (tree view)              |
-| `/`              | In-tree incremental search                  |
+| `→` (`l` in vim mode) | Expand directory (tree view)            |
+| `←` (`h` in vim mode) | Collapse directory (tree view)          |
 | `Ctrl+\` / `Alt+F1` | Open directory switcher                    |
 | `Ctrl+G`          | Go to path/URL, with [suggestions](ui.md#open-prompt); a file is selected in its directory |
 | `Alt+B`           | Add bookmark                               |
@@ -82,7 +81,7 @@ under it that starts with the other panels' directories.
 freedesktop.org trash on Linux, the Recycle Bin on Windows — after a prompt
 that starts on **Yes**; take items back with the system's own tools.
 `Shift+Delete` deletes them for good, and its prompt starts on **No**. Remote
-locations (SFTP, FTP, SMB) have no trash: there `Delete` deletes for good too,
+locations (SFTP, FTP) have no trash: there `Delete` deletes for good too,
 and the prompt says so. A file system the system cannot trash on, such as
 some network mounts, reports an error; `Shift+Delete` deletes there. The keys
 are `delete` and `delete_permanently` under `[file_manager.keybindings]`.
@@ -142,7 +141,6 @@ those that do not exist yet, or are remote, carry no `▶` and do not expand.
 | `Ctrl+F` / `Alt+F7` | Search files by name (glob patterns)       |
 | `Ctrl+Shift+F`    | Search in file contents                    |
 | `Ctrl+Shift+H`    | Search & replace in file contents          |
-| `/`              | In-tree incremental search (filter as you type) |
 
 These searches use an **inline bar docked at the bottom of the panel** (not a
 floating modal), with a titled top border (`─ Find ─`) dividing it from the
@@ -202,15 +200,6 @@ replace every match in the **selected** files — after a confirmation showing h
 many occurrences in how many files (nothing selected shows a hint instead). With
 `[.*] Regex` on, the replacement supports `$1` / `${name}` capture groups;
 otherwise it is inserted verbatim. Replacements are written to disk.
-
-### In-tree Search (/)
-
-Press `/` to start incremental search within the current directory tree:
-- Filters the file list as you type, showing only matching entries
-- Parent directories of matching files remain visible for context
-- Press `Enter` to confirm and navigate to the match
-- Press `Escape` to cancel and restore the full tree
-- Works together with the tree view — matched directories auto-expand
 
 ## Clipboard
 

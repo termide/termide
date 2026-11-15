@@ -187,7 +187,11 @@ impl App {
                         use termide_modal::RenamePatternModal;
 
                         let modal = RenamePatternModal::new(
-                            &format!("Rename all ({})", original_name),
+                            &format!(
+                                "{} ({})",
+                                termide_i18n::t().conflict_rename_all(),
+                                original_name
+                            ),
                             &original_name,
                             "$0", // Default pattern
                             created,

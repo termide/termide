@@ -397,7 +397,7 @@ fn include_paths(pattern: &str, base: &Path) -> Vec<PathBuf> {
 
 /// Expand a leading `~` to the home directory, as OpenSSH does before
 /// expanding `%` tokens.
-fn expand_tilde(value: &str) -> PathBuf {
+pub(crate) fn expand_tilde(value: &str) -> PathBuf {
     if let Some(home) = dirs::home_dir() {
         if value == "~" {
             return home;

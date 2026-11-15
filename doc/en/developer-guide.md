@@ -59,9 +59,9 @@ nix build
 nix flake check
 ```
 
-The dev shell reads its compiler version from `rust-toolchain.toml`, the same
-file rustup and CI use, so a Nix and a non-Nix checkout build with the same
-compiler.
+The dev shell and `nix build` read the compiler version from
+`rust-toolchain.toml`, the same file rustup and CI use, so a Nix and a non-Nix
+checkout build with the same compiler.
 
 #### Platform notes
 

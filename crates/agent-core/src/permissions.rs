@@ -1227,7 +1227,7 @@ impl PermissionHooks {
                 // In plan mode an MCP tool counts its configured `allow`, so
                 // a lasting answer about one is worth keeping there too.
                 let mode = self.mode.get();
-                let can_persist = (matches!(mode, Mode::Configured | Mode::Auto)
+                let mut can_persist = (matches!(mode, Mode::Configured | Mode::Auto)
                     || (mode == Mode::Plan && ctx.tool.mcp))
                     && self.persist.is_some()
                     && !bundle
@@ -1247,6 +1247,9 @@ impl PermissionHooks {
                         .filter_map(|p| p.pattern.clone())
                         .collect::<Vec<_>>()
                         .join(", ")
+                } else if ctx.tool.mcp {
+                    // An answer about a server's tool is about the tool.
+                    "*".to_string()
                 } else {
                     suggested_pattern(&call.name, &subject)
                 };
@@ -1257,6 +1260,20 @@ impl PermissionHooks {
                 } else {
                     call.name.clone()
                 };
+                // `auto` sets a broad configured `allow` aside, so one saved
+                // from here would never count in it: such an answer lasts
+                // for the session instead, where it does.
+                let broad = if command_line {
+                    parts
+                        .iter()
+                        .filter_map(|p| p.pattern.as_deref())
+                        .any(|pattern| broad_allow(&tool, pattern))
+                } else {
+                    broad_allow(&tool, &suggested)
+                };
+                if mode == Mode::Auto && broad {
+                    can_persist = false;
+                }
                 let request = PermissionRequest {
                     tool,
                     suggested_pattern: suggested,
@@ -1429,6 +1446,27 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
                 format!("{action} {what}")
             }
         }
+        // Whom the job goes to and all it asks: `explorer: find the parser`.
+        "task" => format!(
+            "{}: {}",
+            text_arg(call, "agent"),
+            text_arg(call, "prompt").escape_debug()
+        ),
+        // The work the new panel takes up, and what its copy keeps in full.
+        "fork" => {
+            let prompt = text_arg(call, "prompt").escape_debug().to_string();
+            match text_arg(call, "focus") {
+                focus if focus.is_empty() => prompt,
+                focus => format!("{prompt} (focus: {})", focus.escape_debug()),
+            }
+        }
+        "skill" => text_arg(call, "name"),
+        // A server's tool takes arguments termide knows nothing of, so the
+        // card shows them all, and a rule matches the tool as a whole.
+        _ if ctx.tool.mcp => match &call.arguments {
+            Value::Object(map) if !map.is_empty() => call.arguments.to_string(),
+            _ => String::new(),
+        },
         _ => match &call.arguments {
             Value::Object(map) => map
                 .values()
@@ -1438,6 +1476,15 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
             _ => String::new(),
         },
     }
+}
+
+/// The string argument `key` of `call`, trimmed; empty when absent.
+fn text_arg(call: &ToolCall, key: &str) -> String {
+    call.arguments[key]
+        .as_str()
+        .unwrap_or("")
+        .trim()
+        .to_string()
 }
 
 fn relative_to_project(raw: &str, cwd: &Path) -> String {
@@ -1550,6 +1597,15 @@ pub fn suggested_pattern(tool: &str, subject: &str) -> String {
         }
         // A query is never repeated word for word.
         "web_search" => return "*".to_string(),
+        // Trust an agent with the jobs handed to it, not one job; nor is a
+        // fork's request ever repeated word for word.
+        "task" => {
+            return match subject.split_once(": ") {
+                Some((agent, _)) if !agent.is_empty() => format!("{agent}: *"),
+                _ => "*".to_string(),
+            };
+        }
+        "fork" => return "*".to_string(),
         _ => {}
     }
     if tool != SHELL_TOOL {

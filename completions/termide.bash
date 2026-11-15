@@ -37,6 +37,13 @@ _termide() {
     --kill)
       COMPREPLY=($(compgen -W "$(_termide_instances)" -- "$cur"))
       return ;;
+    --output)
+      COMPREPLY=($(compgen -W "text json stream-json" -- "$cur"))
+      return ;;
+    --prompt|--recall|--agent)
+      # Free text or an agent's name: nothing to offer, and not a file.
+      COMPREPLY=()
+      return ;;
   esac
 
   if [[ "$cur" == -* ]]; then

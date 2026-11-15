@@ -64,7 +64,7 @@ termide 自带的增强层默认值(`replace_all` 的 `Ctrl+Alt+R`,`toggle_comme
 在 macOS 上,所有终端默认都把 `Option` 当作**文本组合**修饰符——Ghostty
 `macos-option-as-alt=false`,kitty `macos_option_as_alt no`,iTerm2
 Option=Normal,Terminal.app 的 "Use Option as Meta key" 关闭。因此 `Option+F`
-以组合后的字形 `ƒ` 到达,不带 ALT 位,所有 `Alt+<字母>` 默认值(约 25 个
+以组合后的字形 `ƒ` 到达,不带 ALT 位,所有 `Alt+<字母>` 默认值(18 个
 全局动作)都无法触发。波及范围取决于终端:在 Ghostty 上,不产生文本的按键
 保留 ALT 位,所以 `Option+F9`、`Option+Up/Down` 和 `Option+Backspace` 仍然
 可用,而 Terminal.app 连这些键的修饰符也会剥离,只送出一个裸 `Up`。

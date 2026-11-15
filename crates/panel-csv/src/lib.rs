@@ -620,6 +620,7 @@ impl Panel for CsvPanel {
     }
 
     fn status_segments(&self) -> Vec<StatusSegment> {
+        let t = termide_i18n::t();
         if self.error.is_some() {
             return vec![];
         }
@@ -632,27 +633,43 @@ impl Panel for CsvPanel {
         // Same field order as the editor and the other viewers: View, Edit.
         vec![
             StatusSegment::new(" ", SegmentKind::Label),
-            StatusSegment::new("View: ", SegmentKind::Label),
-            StatusSegment::new("Table", SegmentKind::Value),
+            StatusSegment::new(format!("{} ", t.status_view()), SegmentKind::Label),
+            StatusSegment::new(t.status_view_table(), SegmentKind::Value),
             sep(),
-            StatusSegment::clickable("Edit: ", SegmentKind::Label, "edit_source"),
-            StatusSegment::clickable("No", SegmentKind::Active, "edit_source"),
+            StatusSegment::clickable(
+                format!("{} ", t.status_edit()),
+                SegmentKind::Label,
+                "edit_source",
+            ),
+            StatusSegment::clickable(t.ui_no(), SegmentKind::Active, "edit_source"),
             sep(),
-            StatusSegment::clickable("Delimiter: ", SegmentKind::Label, "cycle_delimiter"),
+            StatusSegment::clickable(
+                format!("{} ", t.status_delimiter()),
+                SegmentKind::Label,
+                "cycle_delimiter",
+            ),
             StatusSegment::clickable(
                 table::delimiter_label(delimiter),
                 SegmentKind::Active,
                 "cycle_delimiter",
             ),
             sep(),
-            StatusSegment::clickable("Header: ", SegmentKind::Label, "toggle_header"),
             StatusSegment::clickable(
-                if self.has_header() { "Yes" } else { "No" },
+                format!("{} ", t.status_header()),
+                SegmentKind::Label,
+                "toggle_header",
+            ),
+            StatusSegment::clickable(
+                if self.has_header() {
+                    t.ui_yes()
+                } else {
+                    t.ui_no()
+                },
                 SegmentKind::Active,
                 "toggle_header",
             ),
             sep(),
-            StatusSegment::new("Row: ", SegmentKind::Label),
+            StatusSegment::new(format!("{} ", t.status_row()), SegmentKind::Label),
             StatusSegment::new(format!("{row}/{rows}{more}"), SegmentKind::Value),
         ]
     }

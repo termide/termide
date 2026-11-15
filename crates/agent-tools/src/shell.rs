@@ -77,11 +77,27 @@ impl ShellProgram {
     pub fn bash() -> Self {
         Self::new("bash").expect("bash is a shell the agent runs in")
     }
+
+    /// The same shell, described for a tool with no terminal sessions.
+    #[must_use]
+    pub fn without_sessions(mut self) -> Self {
+        self.description = without_sessions(&self.description);
+        self
+    }
 }
 
 /// `{{shell}}` in `template` takes the shell's name.
 fn render_description(template: &str, shell: &str) -> String {
     template.replace("{{shell}}", shell)
+}
+
+/// `text` without its paragraphs about `session`, for a shell tool that
+/// has no terminal sessions to run commands in.
+fn without_sessions(text: &str) -> String {
+    text.split("\n\n")
+        .filter(|paragraph| !paragraph.contains("`session`"))
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }
 
 pub struct ShellTool {
@@ -135,8 +151,13 @@ impl Tool for ShellTool {
     }
 
     /// `{{shell}}` takes the name of the shell commands run in.
+    /// Without terminal sessions, the paragraphs about `session` go too.
     fn render_description(&self, template: &str) -> String {
-        render_description(template, &self.shell.name)
+        let text = render_description(template, &self.shell.name);
+        if self.terminals.is_some() {
+            return text;
+        }
+        without_sessions(&text)
     }
 
     fn traits(&self) -> ToolTraits {
@@ -148,6 +169,16 @@ impl Tool for ShellTool {
 
     fn parameters(&self) -> Value {
         let command = format!("The command line to run with {} -c", self.shell.name);
+        if self.terminals.is_none() {
+            return json!({
+                "type": "object",
+                "properties": {
+                    "command": { "type": "string", "description": command },
+                    "timeout": { "type": "integer", "minimum": 1, "description": "Seconds before the command is killed (default 120, max 600)" }
+                },
+                "required": ["command"]
+            });
+        }
         json!({
             "type": "object",
             "properties": {
@@ -796,6 +827,15 @@ mod tests {
         let bash = ShellTool::default();
         assert!(bash.description().contains("Run a command with bash in"));
         assert_eq!(bash.traits().shell, ShellSyntax::Posix);
+        // A shell with no terminal sessions neither offers nor mentions them.
+        assert!(!bash.parameters().to_string().contains("\"session\""));
+        assert!(!bash.parameters().to_string().contains("\"background\""));
+        let alone = ShellProgram::bash().without_sessions();
+        assert!(alone.description.contains("Run a command with bash in"));
+        assert!(!alone.description.contains("`session`"));
+        assert!(!bash
+            .render_description(&ToolText::seed(SHELL_TOOL).description)
+            .contains("`session`"));
 
         if Command::new("zsh").arg("-c").arg("true").status().is_err() {
             return;

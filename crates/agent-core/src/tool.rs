@@ -57,6 +57,29 @@ pub struct ToolContext {
     /// agent moved to the background to go on meanwhile — to list and stop.
     /// `None` where no call outlives its step: termide's own loop.
     pub running: Option<RunningCalls>,
+    /// The guards of the run the call comes from that a delegate's calls
+    /// pass as well: the tools its session switched off, the checkpoints
+    /// its `/undo` restores. `None` outside a panel's run.
+    pub inherited: Option<InheritedHooks>,
+}
+
+/// Builds, for each delegated run, the hooks it takes over from the run
+/// that delegates it.
+#[derive(Clone)]
+pub struct InheritedHooks(pub Arc<dyn Fn() -> Vec<Box<dyn crate::Hooks>> + Send + Sync>);
+
+impl InheritedHooks {
+    /// A fresh set of the hooks, for one run.
+    #[must_use]
+    pub fn build(&self) -> Vec<Box<dyn crate::Hooks>> {
+        (self.0)()
+    }
+}
+
+impl std::fmt::Debug for InheritedHooks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("InheritedHooks")
+    }
 }
 
 /// A call of the agent's that runs beside the one asking: its id as the
@@ -151,6 +174,7 @@ impl ToolContext {
             tool: ToolTraits::default(),
             resume: None,
             running: None,
+            inherited: None,
         }
     }
 }

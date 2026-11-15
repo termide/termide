@@ -31,10 +31,6 @@ pub enum PanelCommand<'a> {
     /// Response: `CommandResult::NeedsRedraw(bool)`
     CheckGitDiffReceiver,
 
-    /// Check if file was modified externally.
-    /// Response: `CommandResult::None`
-    CheckExternalModification,
-
     // === Filesystem watcher commands ===
     /// Request panel's filesystem watch info.
     /// Response: `CommandResult::FsWatchInfo { ... }`
@@ -86,15 +82,6 @@ pub enum PanelCommand<'a> {
     /// Save editor content to file.
     /// Response: `CommandResult::SaveResult { success, error }`
     Save,
-
-    /// Close editor without saving.
-    /// Response: `CommandResult::None`
-    CloseWithoutSaving,
-
-    // === FileManager commands ===
-    /// Refresh file manager directory listing.
-    /// Response: `CommandResult::NeedsRedraw(bool)`
-    RefreshDirectory,
 
     // === Git operation state ===
     /// Notify panel about git operation in progress state.

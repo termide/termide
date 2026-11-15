@@ -33,9 +33,9 @@ impl Editor {
         // Save As to write elsewhere. Overwriting in place is offered by the
         // conflict dialog when closing the editor.
         if self.file_state.external_change_detected {
-            return Err(anyhow::anyhow!(
-                "File was modified on disk. Reload (Ctrl+Shift+R) to load the disk version and discard your changes, or Save As (Ctrl+Shift+S) to write to a different file."
-            ));
+            return Err(anyhow::anyhow!(termide_i18n::t()
+                .editor_modified_on_disk()
+                .to_string()));
         }
 
         // Handle remote file saves

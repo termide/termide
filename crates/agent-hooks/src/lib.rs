@@ -218,8 +218,15 @@ fn run_hook(name: &str, config: &HookConfig, cwd: &Path, input: &Value) -> Optio
             return None;
         }
     };
+    // Written from a thread: the input carries a whole tool result, more
+    // than a pipe holds, and a hook that does not read it, or writes before
+    // it reads, would otherwise hold the agent past the timeout. Once the
+    // hook ends, the write fails and the thread ends with it.
     if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(input.to_string().as_bytes());
+        let input = input.to_string();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(input.as_bytes());
+        });
     }
     let stdout = child.stdout.take().map(read_all_in_background);
     let stderr = child.stderr.take().map(read_all_in_background);
@@ -401,5 +408,23 @@ mod tests {
             chain.after_tool_call(&call, ToolResultMessage::text(&call, "the secret is x"));
         assert_eq!(result.plain_text(), "hook b-reject: leaks a secret");
         assert!(result.is_error);
+    }
+
+    /// A result larger than a pipe holds, given to a hook that never reads
+    /// it, still ends at the hook's timeout, and leaves the result as it was.
+    #[test]
+    fn a_hook_that_reads_nothing_still_times_out() {
+        let mut hooks = BTreeMap::new();
+        hooks.insert(
+            "idle".to_string(),
+            hook(HookEvent::AfterToolCall, &["shell"], "sleep 10", 1),
+        );
+        let mut chain = CommandHooks::new(hooks, PathBuf::from("/tmp"));
+        let call = bash("cat big");
+        let big = "x".repeat(1 << 20);
+        let started = Instant::now();
+        let result = chain.after_tool_call(&call, ToolResultMessage::text(&call, &big));
+        assert!(started.elapsed() < Duration::from_secs(5));
+        assert_eq!(result.plain_text().len(), big.len());
     }
 }

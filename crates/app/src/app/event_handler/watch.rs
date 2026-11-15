@@ -1,9 +1,8 @@
-//! Filesystem watcher registration and git-status refresh event handlers.
+//! Filesystem watcher registration event handlers.
 
 use std::path::PathBuf;
 
 use crate::app::App;
-use crate::PanelExt;
 
 impl App {
     /// Handle WatchPath event - register path with file watcher
@@ -17,18 +16,6 @@ impl App {
                     }
                 } else if let Err(e) = watcher.watch_directory(path.clone()) {
                     log::error!("Failed to watch directory {}: {}", path.display(), e);
-                }
-            }
-        }
-    }
-
-    /// Handle RefreshGitStatus event - refresh git status for panels in path
-    pub(super) fn event_refresh_git_status(&mut self, path: PathBuf) {
-        // Reload FileManagers whose current path starts with the given path
-        for panel in self.layout_manager.iter_all_panels_mut() {
-            if let Some(fm) = panel.as_file_manager_mut() {
-                if fm.current_path().starts_with(&path) || path.starts_with(fm.current_path()) {
-                    let _ = fm.reload_directory();
                 }
             }
         }

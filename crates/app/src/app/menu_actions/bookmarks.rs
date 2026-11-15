@@ -405,7 +405,10 @@ impl App {
                     is_project: item.is_project,
                     selected,
                 },
-                ConfirmModal::new("Delete bookmark group?", group_name.to_string()),
+                ConfirmModal::new(
+                    termide_i18n::t().bookmarks_delete_group_confirm(),
+                    group_name.to_string(),
+                ),
             )
         } else {
             (
@@ -415,7 +418,10 @@ impl App {
                     group,
                     selected,
                 },
-                ConfirmModal::new("Delete bookmark?", item.label.to_string()),
+                ConfirmModal::new(
+                    termide_i18n::t().bookmarks_delete_confirm(),
+                    item.label.to_string(),
+                ),
             )
         };
 

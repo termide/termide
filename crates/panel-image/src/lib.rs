@@ -110,8 +110,7 @@ impl ImagePanel {
                 Some(graphics) => self.picker = Some(graphics.into_picker()),
                 None => {
                     let t = termide_i18n::t();
-                    self.error =
-                        Some(t.image_error_fmt("the terminal did not answer the graphics query"));
+                    self.error = Some(t.image_error_fmt(t.image_no_graphics_reply()));
                     return;
                 }
             }
@@ -276,6 +275,7 @@ impl Panel for ImagePanel {
     }
 
     fn status_segments(&self) -> Vec<StatusSegment> {
+        let t = termide_i18n::t();
         let (Some(dims), Some(picker)) = (self.dims(), self.picker.as_ref()) else {
             return vec![];
         };
@@ -291,14 +291,14 @@ impl Panel for ImagePanel {
             StatusSegment::new(" ", SegmentKind::Label),
             StatusSegment::new(format!("{}×{}", dims.0, dims.1), SegmentKind::Value),
             StatusSegment::new(" │ ", SegmentKind::Label),
-            StatusSegment::new("Zoom: ", SegmentKind::Label),
+            StatusSegment::new(format!("{} ", t.status_zoom()), SegmentKind::Label),
             StatusSegment::new(format!("{}%", layout.percent), SegmentKind::Value),
             StatusSegment::new(" ", SegmentKind::Label),
             StatusSegment::clickable("[−]", SegmentKind::Active, "zoom_out"),
             StatusSegment::new(" ", SegmentKind::Label),
             StatusSegment::clickable("[+]", SegmentKind::Active, "zoom_in"),
             StatusSegment::new(" ", SegmentKind::Label),
-            StatusSegment::clickable("Fit", fit_kind, "zoom_fit"),
+            StatusSegment::clickable(t.status_zoom_fit(), fit_kind, "zoom_fit"),
         ]
     }
 

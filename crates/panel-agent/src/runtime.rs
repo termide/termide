@@ -363,7 +363,22 @@ pub(crate) fn spawn_runtime(
     .with_panel(panel)
     .with_asker(asker)
     .with_prompter(delegate_prompter)
-    .with_suggester(suggester);
+    .with_suggester(suggester)
+    .with_inherited_hooks({
+        // A delegate is held to what the session switched off, and what it
+        // changes is kept for the panel's `/undo`, as the panel's own calls.
+        let blocked = Arc::clone(blocked);
+        let checkpoints = checkpoints.clone();
+        termide_agent_core::InheritedHooks(Arc::new(move || {
+            let mut hooks: Vec<Box<dyn Hooks>> = vec![Box::new(ToolsetGuard {
+                blocked: Arc::clone(&blocked),
+            })];
+            if let Some(store) = &checkpoints {
+                hooks.push(Box::new(CheckpointHooks::new(Arc::clone(store))));
+            }
+            hooks
+        }))
+    });
     if let Some(run) = shell_run {
         // A command the user confirms on the card runs through this, in the
         // middle of the call that asked.

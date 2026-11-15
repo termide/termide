@@ -99,12 +99,18 @@ cargo build --release
 The repository ships a pre-commit hook that runs the same gates as CI before
 each commit:
 
+- ✅ Documentation headings (`tools/docs/headings.sh`) and the version in every
+  file that repeats it (`tools/release/version.sh --check`), for a commit of
+  documentation alone as well
 - ✅ Code formatting check (`cargo fmt --check`)
 - ✅ Unused dependency declarations (`cargo machete`, when installed)
 - ✅ Compilation and Clippy lints (`cargo clippy --workspace --all-targets -- -D warnings`,
   which runs the compiler checks, so there is no separate `cargo check`)
 - ✅ Test suite (`cargo nextest run --workspace`, or `cargo test --workspace`
   without nextest)
+
+CI also runs `cargo deny check` and a release-mode test of the grammars on
+Linux, which the hook leaves out as too slow for a commit.
 
 The hook lives at `.githooks/pre-commit` and is versioned with the code, so it
 is present in every clone — but git only runs it once you point the repository

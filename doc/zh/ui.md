@@ -56,8 +56,8 @@
 **只能由全局设置指定的内容。** 项目的文件随仓库而来，因此它不能指定 termide 启动的程序、写入的文件或密钥发送的地址，也不能放宽代理的限制：终端的默认 shell、日志文件、网络工具的浏览器、LSP 服务器或调试器的命令和参数、连接的基础 URL 和 API 密钥变量，以及代理的权限模式。设置存储在项目中时，这些字段显示其值并注明“在全局设置中设置”，且无法更改；若出现在项目文件中，则会被忽略，并在日志中记录一行。
 
 **侧边栏区块：**
-- General、Editor、File Manager、Terminal、LSP、Logging、VFS — 普通叶节点
-- **Keybindings** — 可展开分组（▶/▼），包含 7 个子区块（Global、Editor、FileManager、GitStatus、GitDiff、GitLog、Terminal）
+- General、Editor、File Manager、Terminal、LSP、Debug、Logging、VFS、AI、Plugins — 普通叶节点
+- **Keybindings** — 可展开分组（▶/▼），位于列表末尾，包含 9 个子区块（Global、Editor、FileManager、GitStatus、GitDiff、GitLog、Terminal、Database、Viewer）
 
 **导航：**
 
@@ -267,7 +267,7 @@ toggle_hex = "Ctrl+L"
 
 **可关闭面板的特点：**
 - 面板标题中有 `[≡]` 操作按钮（点击打开上下文菜单：关闭 / 拆分 / 合并 / 移动）
-- 可通过 Escape、Alt+W、Alt+X 或 F10 关闭；关闭最后一个面板时，会在其位置打开位于项目根目录的文件管理器
+- 可通过 Alt+W、Alt+X 或 F10 关闭；面板自身没有可退出的状态（搜索栏、选区、vim 插入模式）时也可用 Escape 关闭；运行中的终端把 Escape 交给其程序，代理面板从不因 Escape 关闭；关闭最后一个面板时，会在其位置打开位于项目根目录的文件管理器
 - 列宽通过 `Alt+=` / `Alt+-` 调整
 - 列内每个面板的高度通过 `Alt+Shift+=` / `Alt+Shift+-`（步长 1 行）、用鼠标拖动面板的下边框或在列内上下拖动面板标题进行调整
 - `Alt+F11` 切换聚焦面板的全屏预设（一个面板占满整列，其余各自缩为一行标题）；再次按下恢复之前的高度
@@ -349,7 +349,7 @@ toggle_hex = "Ctrl+L"
 | `Alt+H` / `F1`    | 打开帮助窗口                               |
 | `Alt+Q`           | 关闭应用程序                               |
 | `Alt+D`           | 分离实例（可分离时）                       |
-| `Escape`          | 关闭面板 / 关闭模态框                      |
+| `Escape`          | 关闭面板（运行中的终端和代理除外）/ 关闭模态框 |
 | `Alt+W` / `Alt+X` / `F10` | 关闭面板                           |
 | `Alt+Left`        | 转到上一个面板组（水平方向）               |
 | `Alt+Right`       | 转到下一个面板组（水平方向）               |

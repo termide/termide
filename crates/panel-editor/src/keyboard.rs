@@ -18,10 +18,6 @@ pub enum EditorCommand {
     MoveCursorDown,
     MoveCursorLeft,
     MoveCursorRight,
-    #[allow(dead_code)] // Mapped to MoveToVisualLineStart in from_key_event
-    MoveToLineStart,
-    #[allow(dead_code)] // Mapped to MoveToVisualLineEnd in from_key_event
-    MoveToLineEnd,
     MoveToVisualLineStart,
     MoveToVisualLineEnd,
     PageUp,
@@ -36,10 +32,6 @@ pub enum EditorCommand {
     MoveCursorDownWithSelection,
     MoveCursorLeftWithSelection,
     MoveCursorRightWithSelection,
-    #[allow(dead_code)] // Mapped to MoveToVisualLineStartWithSelection in from_key_event
-    MoveToLineStartWithSelection,
-    #[allow(dead_code)] // Mapped to MoveToVisualLineEndWithSelection in from_key_event
-    MoveToLineEndWithSelection,
     MoveToVisualLineStartWithSelection,
     MoveToVisualLineEndWithSelection,
     PageUpWithSelection,
@@ -442,17 +434,6 @@ impl EditorCommand {
                 editor.navigate_simple(Editor::move_cursor_right);
                 Ok(())
             }
-            Self::MoveToLineStart => {
-                editor.navigate(
-                    Editor::move_to_visual_line_start,
-                    Editor::move_to_line_start,
-                );
-                Ok(())
-            }
-            Self::MoveToLineEnd => {
-                editor.navigate(Editor::move_to_visual_line_end, Editor::move_to_line_end);
-                Ok(())
-            }
             Self::MoveToVisualLineStart => {
                 editor.navigate(
                     Editor::move_to_visual_line_start,
@@ -516,20 +497,6 @@ impl EditorCommand {
             }
             Self::MoveCursorRightWithSelection => {
                 editor.navigate_with_selection_simple(Editor::move_cursor_right);
-                Ok(())
-            }
-            Self::MoveToLineStartWithSelection => {
-                editor.navigate_with_selection(
-                    Editor::move_to_visual_line_start,
-                    Editor::move_to_line_start,
-                );
-                Ok(())
-            }
-            Self::MoveToLineEndWithSelection => {
-                editor.navigate_with_selection(
-                    Editor::move_to_visual_line_end,
-                    Editor::move_to_line_end,
-                );
                 Ok(())
             }
             Self::MoveToVisualLineStartWithSelection => {
@@ -698,11 +665,7 @@ impl EditorCommand {
             Self::ReplaceNext => editor.replace_current(),
             Self::ReplaceAll => match editor.replace_all() {
                 Ok(count) => {
-                    editor.status_message = Some(format!(
-                        "Replaced {} occurrence{}",
-                        count,
-                        if count == 1 { "" } else { "s" }
-                    ));
+                    editor.status_message = Some(termide_i18n::t().editor_replaced_fmt(count));
                     Ok(())
                 }
                 Err(e) => Err(e),

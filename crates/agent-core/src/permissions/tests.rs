@@ -2464,6 +2464,111 @@ fn plan_mode_asks_about_an_mcp_tool() {
     assert!(asked.lock().unwrap()[0].can_persist);
 }
 
+/// The card about a server's tool shows every argument, and "allow
+/// always" on it writes the rule for the whole tool, as documented.
+#[test]
+fn an_mcp_tool_is_asked_about_with_all_its_arguments() {
+    let search = call(
+        "github__search_issues",
+        json!({ "repo": "termide", "query": "bug" }),
+    );
+    assert_eq!(
+        subject_of(&search, &mcp_ctx(false)),
+        r#"{"query":"bug","repo":"termide"}"#
+    );
+    assert_eq!(
+        subject_of(&call("github__whoami", json!({})), &mcp_ctx(false)),
+        ""
+    );
+
+    let saved = Arc::new(Mutex::new(Vec::new()));
+    let sink = saved.clone();
+    let (hooks_, asked) = hooks(
+        PermissionRules {
+            mode: Mode::Configured,
+            ..PermissionRules::default()
+        },
+        vec![PermissionAnswer::AllowAlways],
+    );
+    let mut hooks_ = hooks_.with_persist(Box::new(move |tool, pattern, _, _| {
+        sink.lock().unwrap().push(format!("{tool} {pattern}"));
+    }));
+    assert!(matches!(
+        hooks_.before_tool_call(&search, &mcp_ctx(false)),
+        ToolDecision::Allow
+    ));
+    assert_eq!(asked.lock().unwrap()[0].suggested_pattern, "*");
+    assert_eq!(*saved.lock().unwrap(), ["github__search_issues *"]);
+    // The rule covers the tool whatever it is next asked.
+    let other = call("github__search_issues", json!({ "query": "crash" }));
+    assert_eq!(hooks_.decide(&other, &mcp_ctx(false)), Decision::Allow);
+}
+
+/// `task`, `fork` and `skill` are judged on what they do: the job and the
+/// agent it goes to, the work a fork takes up, the skill by its name.
+#[test]
+fn delegations_and_skills_are_judged_on_what_they_do() {
+    let task = call(
+        "task",
+        json!({ "agent": "explorer", "prompt": "find the parser\nand its tests" }),
+    );
+    assert_eq!(
+        subject_of(&task, &ctx()),
+        "explorer: find the parser\\nand its tests"
+    );
+    assert_eq!(
+        suggested_pattern("task", &subject_of(&task, &ctx())),
+        "explorer: *"
+    );
+
+    let fork = call(
+        "fork",
+        json!({ "prompt": "port the tests", "focus": "the test layout", "title": "Tests" }),
+    );
+    assert_eq!(
+        subject_of(&fork, &ctx()),
+        "port the tests (focus: the test layout)"
+    );
+    assert_eq!(
+        subject_of(&call("fork", json!({ "prompt": "port the tests" })), &ctx()),
+        "port the tests"
+    );
+    assert_eq!(suggested_pattern("fork", "port the tests"), "*");
+
+    // A rule on a skill's name refuses it, arguments or not.
+    let (hooks_, _) = hooks(rules("[skill]\n\"deploy\" = \"deny\""), vec![]);
+    for args in [
+        json!({ "name": "deploy" }),
+        json!({ "name": "deploy", "args": "prod" }),
+    ] {
+        assert_eq!(hooks_.decide(&call("skill", args), &ctx()), Decision::Deny);
+    }
+}
+
+/// `auto` sets a configured `allow` for `task` aside, so "allow always"
+/// is not offered there: the answer lasts for the session, which counts.
+#[test]
+fn auto_mode_offers_no_lasting_allow_it_would_set_aside() {
+    let task = call("task", json!({ "agent": "explorer", "prompt": "look" }));
+    let (hooks_, asked) = hooks(
+        PermissionRules {
+            mode: Mode::Auto,
+            ..PermissionRules::default()
+        },
+        vec![PermissionAnswer::AllowAlways],
+    );
+    let mut hooks_ = hooks_.with_persist(Box::new(|_, _, _, _| {
+        panic!("nothing is saved");
+    }));
+    // Without a reviewer the question comes to the user.
+    assert!(matches!(
+        hooks_.before_tool_call(&task, &ctx()),
+        ToolDecision::Allow
+    ));
+    assert!(!asked.lock().unwrap()[0].can_persist);
+    assert_eq!(hooks_.decide(&task, &ctx()), Decision::Allow);
+}
+
 #[test]
 fn plan_mode_refuses_every_change_and_lets_reads_through() {
     let mode = ModeHandle::new(Mode::Plan);

@@ -51,16 +51,15 @@ pub fn cut_to_clipboard(selected_text: Option<String>) -> (ClipboardResult, bool
             match termide_clipboard::copy(&text) {
                 Ok(()) => (
                     ClipboardResult {
-                        status_message: format!(
-                            "Cut to clipboard: {:?} ({} chars)",
-                            preview, char_count
-                        ),
+                        status_message: termide_i18n::t()
+                            .editor_cut_fmt(&format!("{preview:?}"), char_count),
                     },
                     true, // should delete
                 ),
                 Err(e) => (
                     ClipboardResult {
-                        status_message: format!("Clipboard error: {}", e),
+                        status_message: termide_i18n::t()
+                            .editor_clipboard_error_fmt(&e.to_string()),
                     },
                     false, // should not delete
                 ),
@@ -68,7 +67,7 @@ pub fn cut_to_clipboard(selected_text: Option<String>) -> (ClipboardResult, bool
         }
         None => (
             ClipboardResult {
-                status_message: "Nothing selected to cut".to_string(),
+                status_message: termide_i18n::t().editor_nothing_to_cut().to_string(),
             },
             false,
         ),

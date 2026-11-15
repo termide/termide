@@ -1,7 +1,7 @@
 # Termide
 
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
-[![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
+[![CI](https://github.com/termide/termide/actions/workflows/ci.yml/badge.svg)](https://github.com/termide/termide/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 **English** | [中文](README.zh.md) | [Русский](README.ru.md)
@@ -440,11 +440,14 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 ### Quick Start
 
 After launching Termide, you'll see a width-adaptive layout:
-- **Wide terminals (>= 160 cols):** Sidebar (Git Status stacked with Operations) + two File Manager panels
-- **Normal terminals (< 160 cols):** Sidebar (Git Status, File Manager and Operations stacked) + File Manager panel
+- **Under 100 cols:** one File Manager panel
+- **100–139 cols:** File Manager + a 40-column stack of a second File Manager and Git Status
+- **140–199 cols:** File Manager + a 40-column File Manager + a 40-column stack of Git Status and Outline
+- **200 cols and wider:** two File Managers sharing the width + a 40-column stack of Git Status and Outline
+- Git Status appears only inside a git repository
 - Menu bar at the top, status bar at the bottom
 
-Stacked panels share a column with adjustable per-panel heights. `Alt+F11` toggles a "fullscreen current panel" preset (one panel takes the full column height, the rest collapse to their title row); `Ctrl+Alt+=` / `Ctrl+Alt+-` grow / shrink the focused panel by 3 lines.
+Stacked panels share a column with adjustable per-panel heights. `Alt+F11` toggles a "fullscreen current panel" preset (one panel takes the full column height, the rest collapse to their title row); `Alt+Shift+=` / `Alt+Shift+-` grow / shrink the focused panel by 1 line.
 
 Use `Alt+←/→` to switch between panel groups, `Alt+↑/↓` to navigate within a group, `Alt+M` to open the menu.
 
@@ -606,7 +609,7 @@ This project is licensed under the MIT License.
 ## Acknowledgments
 
 Built with:
-- [ratatui](https://github.com/ratatui-org/ratatui) - Terminal UI framework
+- [ratatui](https://github.com/ratatui/ratatui) - Terminal UI framework
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Cross-platform terminal manipulation
 - [portable-pty](https://github.com/wez/wezterm/tree/main/pty) - PTY implementation
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - Syntax highlighting

@@ -708,8 +708,9 @@ impl App {
                 if let Some(file_manager) = panel.as_file_manager_mut() {
                     let _ = file_manager.navigate_to(path.clone());
                     self.state.needs_watcher_registration = true;
-                    self.state
-                        .set_info(format!("Switched to: {}", path.display()));
+                    self.state.set_info(
+                        termide_i18n::t().status_switched_to_fmt(&path.display().to_string()),
+                    );
                     return Ok(());
                 }
 
@@ -753,7 +754,7 @@ impl App {
         match Terminal::new_with_cwd(term_height, term_width, cwd) {
             Ok(terminal) => Ok(terminal),
             Err(e) => {
-                let error_msg = format!("Failed to create terminal: {}", e);
+                let error_msg = termide_i18n::t().terminal_create_failed_fmt(&e.to_string());
                 log::error!("{}", error_msg);
                 self.show_error_modal(error_msg.clone());
                 anyhow::bail!(error_msg)

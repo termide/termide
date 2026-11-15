@@ -1,0 +1,1 @@
+- **The git log's `C` "checkout" key is gone, with its `checkout` setting under `[git_log.keybindings]`.** It only said checkout was not implemented; branches are checked out from the git status panel.

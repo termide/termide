@@ -418,6 +418,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Long lines in code blocks were cut off** at the panel's edge in the agent chat and the Markdown and HTML viewers; they now wrap.
 - **A paused run's controls carried over into a newly opened session.**
 
+## [0.38.0] - 2026-10-04
 
 [0.38.0]: https://github.com/termide/termide/releases/tag/0.38.0
 

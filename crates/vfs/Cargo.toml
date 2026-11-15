@@ -8,7 +8,7 @@ repository.workspace = true
 description = "Virtual File System abstraction for termide with network filesystem support"
 
 [dependencies]
-thiserror = "2.0"
+thiserror.workspace = true
 url.workspace = true
 percent-encoding = "2"
 log.workspace = true
@@ -23,7 +23,7 @@ hmac = "0.13"
 sha1 = "0.11"
 # Salt for hashed known_hosts names; the version russh already uses.
 getrandom.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "macros", "time", "net", "fs"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync", "io-util", "macros", "time", "net", "fs"] }
 
 # FTP support — rustls TLS provider (pure-Rust, enables musl-static builds).
 # `rustls-ring` keeps the TLS stack pure Rust (ring, not aws-lc-rs) so
@@ -37,7 +37,7 @@ pavao = { version = "0.2", optional = true }
 # Archive support — pure-Rust decoders only (no C zstd/xz/bzip2), so
 # musl-static builds keep needing no C toolchain. zip's deflate goes
 # through flate2's default miniz_oxide backend.
-zip = { version = "9.1", default-features = false, features = ["deflate-flate2", "deflate64", "bzip2", "lzma", "xz", "aes-crypto"], optional = true }
+zip = { workspace = true, features = ["deflate-flate2", "deflate64", "bzip2", "lzma", "xz", "aes-crypto"], optional = true }
 tar = { version = "0.4", default-features = false, optional = true }
 flate2 = { version = "1", optional = true }
 bzip2 = { version = "0.6", optional = true }
@@ -62,7 +62,7 @@ archive = ["dep:zip", "dep:tar", "dep:flate2", "dep:bzip2", "dep:lzma-rust2", "d
 libc.workspace = true
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Storage_FileSystem"] }
+windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile.workspace = true

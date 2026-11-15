@@ -1,35 +1,9 @@
-//! Modal-prompt event handlers (confirm, input, select, conflict).
-
-use std::path::PathBuf;
+//! Modal-prompt event handlers (confirm, input, select).
 
 use crate::app::App;
 use termide_i18n as i18n;
 
 impl App {
-    /// Handle ShowConflict event - show file conflict resolution modal
-    pub(super) fn event_show_conflict(
-        &mut self,
-        source: PathBuf,
-        destination: PathBuf,
-        remaining: usize,
-    ) {
-        use crate::state::{ActiveModal, BatchOperation, BatchOperationType, PendingAction};
-        use termide_modal::ConflictModal;
-
-        // Create a minimal batch operation for conflict resolution
-        let operation = BatchOperation::new(
-            BatchOperationType::Copy, // Default to copy, actual type determined by context
-            vec![source.clone()],
-            destination.parent().unwrap_or(&destination).to_path_buf(),
-        );
-
-        let modal = ConflictModal::new(&source, &destination, remaining);
-        self.state.set_pending_action(
-            PendingAction::ContinueBatchOperation { operation },
-            ActiveModal::Conflict(Box::new(modal)),
-        );
-    }
-
     /// Handle ShowSelect event - show selection modal
     pub(super) fn event_show_select(
         &mut self,

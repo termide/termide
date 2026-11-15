@@ -675,7 +675,7 @@ impl App {
         if let Err(e) = result {
             log::error!("Failed to save settings: {e}");
             self.state
-                .set_error(format!("Failed to save settings: {e}"));
+                .set_error(termide_i18n::t().settings_save_failed_fmt(&e.to_string()));
             return;
         }
         if !in_project {

@@ -1,0 +1,1 @@
+- **Cancelling a batch copy deletes what you chose.** After a cancelled copy of several files, "Delete copied" did nothing and "Keep copied" deleted the files already copied; the buttons now do what they say.

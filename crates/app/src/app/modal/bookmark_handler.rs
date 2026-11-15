@@ -21,7 +21,7 @@ impl App {
         };
 
         if result.path.is_empty() {
-            return Ok(Some("Bookmark path cannot be empty".to_string()));
+            return Ok(Some(termide_i18n::t().bookmarks_path_empty().to_string()));
         }
 
         let mut bookmark = Bookmark::new(result.path.clone());
@@ -48,15 +48,21 @@ impl App {
             proj.bookmarks.push(bookmark);
             let proj_dir = self.state.project_root.join(".termide");
             if let Err(e) = std::fs::create_dir_all(&proj_dir) {
-                return Ok(Some(format!("Failed to create .termide/: {e}")));
+                return Ok(Some(
+                    termide_i18n::t().bookmarks_create_dir_failed_fmt(&e.to_string()),
+                ));
             }
             if let Err(e) = proj.save_to_dir(&proj_dir) {
-                return Ok(Some(format!("Failed to save project bookmarks: {e}")));
+                return Ok(Some(
+                    termide_i18n::t().bookmarks_save_project_failed_fmt(&e.to_string()),
+                ));
             }
         } else {
             self.state.bookmarks.bookmarks.push(bookmark);
             if let Err(e) = self.state.bookmarks.save() {
-                return Ok(Some(format!("Failed to save bookmarks: {e}")));
+                return Ok(Some(
+                    termide_i18n::t().bookmarks_save_failed_fmt(&e.to_string()),
+                ));
             }
         }
         Ok(None)
@@ -80,7 +86,7 @@ impl App {
         };
 
         if result.path.is_empty() {
-            return Ok(Some("Bookmark path cannot be empty".to_string()));
+            return Ok(Some(termide_i18n::t().bookmarks_path_empty().to_string()));
         }
 
         // Remove old bookmark from its original location (by path + group)
@@ -118,15 +124,21 @@ impl App {
             proj.bookmarks.push(bookmark);
             let proj_dir = self.state.project_root.join(".termide");
             if let Err(e) = std::fs::create_dir_all(&proj_dir) {
-                return Ok(Some(format!("Failed to create .termide/: {e}")));
+                return Ok(Some(
+                    termide_i18n::t().bookmarks_create_dir_failed_fmt(&e.to_string()),
+                ));
             }
             if let Err(e) = proj.save_to_dir(&proj_dir) {
-                return Ok(Some(format!("Failed to save project bookmarks: {e}")));
+                return Ok(Some(
+                    termide_i18n::t().bookmarks_save_project_failed_fmt(&e.to_string()),
+                ));
             }
         } else {
             self.state.bookmarks.bookmarks.push(bookmark);
             if let Err(e) = self.state.bookmarks.save() {
-                return Ok(Some(format!("Failed to save bookmarks: {e}")));
+                return Ok(Some(
+                    termide_i18n::t().bookmarks_save_failed_fmt(&e.to_string()),
+                ));
             }
         }
 
@@ -153,7 +165,7 @@ impl App {
     pub(in crate::app) fn show_bookmark_error(&mut self, message: &str) {
         use termide_modal::InfoModal;
         let modal = InfoModal::new(
-            "Bookmark error",
+            termide_i18n::t().bookmarks_error_title(),
             vec![("".to_string(), message.to_string())],
         );
         self.state.active_modal = Some(ActiveModal::Info(Box::new(modal)));

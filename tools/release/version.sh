@@ -18,7 +18,7 @@ cd "$(git rev-parse --show-toplevel)"
 # The files that carry the version, with how many times each names it.
 EXPECTED=(
     "Cargo.toml:1"
-    "flake.nix:2"
+    "flake.nix:1"
     "README.md:23"
     "README.ru.md:23"
     "README.zh.md:23"

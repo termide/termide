@@ -131,7 +131,9 @@ impl BinaryPanel {
             self.matches.clear();
             if let Some(bar) = self.find_bar.as_mut() {
                 bar.clear_match_info();
-                bar.set_info_text(Some("file too large to search".to_string()));
+                bar.set_info_text(Some(
+                    termide_i18n::t().binary_search_too_large().to_string(),
+                ));
             }
             return;
         }

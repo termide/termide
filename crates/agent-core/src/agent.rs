@@ -26,7 +26,7 @@ use crate::provider::{ModelSpec, Provider, Request, StreamEvent, ThinkingLevel};
 use crate::shell::ShellRunner;
 use crate::spend::Spender;
 use crate::suggest::CommandSuggester;
-use crate::tool::{ToolContext, ToolRegistry, ToolUpdate};
+use crate::tool::{InheritedHooks, ToolContext, ToolRegistry, ToolUpdate};
 
 /// How many queued messages one drain point delivers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -239,6 +239,18 @@ pub fn judge_tool_call(
             ),
         ));
     };
+    // A provider keeps arguments that are no JSON object as their raw text:
+    // the model is told so, rather than that some argument is missing.
+    if let Value::String(raw) = &call.arguments {
+        let shown: String = raw.chars().take(200).collect();
+        return Judgment::Done(ToolResultMessage::error(
+            call,
+            format!(
+                "The arguments of this call are not a valid JSON object: {shown}. \
+                 Call the tool again with its arguments as one JSON object."
+            ),
+        ));
+    }
     let ctx = &ToolContext {
         tool: tool.call_traits(call, ctx),
         ..ctx.clone()
@@ -367,8 +379,36 @@ impl Hooks for ChainedHooks {
         let mut current = call.clone();
         let mut replaced = false;
         self.note = None;
-        for hook in &mut self.hooks {
+        for index in 0..self.hooks.len() {
+            let (before, rest) = self.hooks.split_at_mut(index);
+            let hook = &mut rest[0];
             let decision = hook.before_tool_call(&current, ctx);
+            // Arguments a hook rewrites are a call the hooks before it never
+            // saw: they judge it again, so a rewrite gets past no guard
+            // (plan mode, a switched-off tool) and the checkpoint covers the
+            // file the call now changes.
+            let rewritten = match &decision {
+                ToolDecision::Replace { arguments } => Some(arguments),
+                ToolDecision::Approve {
+                    arguments: Some(arguments),
+                } => Some(arguments),
+                _ => None,
+            };
+            if let Some(arguments) = rewritten {
+                let mut again = current.clone();
+                again.arguments = arguments.clone();
+                for earlier in before.iter_mut() {
+                    if let block @ ToolDecision::Block { .. } =
+                        earlier.before_tool_call(&again, ctx)
+                    {
+                        self.note = earlier
+                            .take_permission()
+                            .or_else(|| Some(PermissionNote::new(DecidedBy::Hook, false)));
+                        return block;
+                    }
+                    earlier.take_permission();
+                }
+            }
             // The hook that settles the call says who decided; one that does
             // not judge permissions (a command hook) is recorded as a hook.
             let settled = |hook: &mut Box<dyn Hooks>, allowed: bool| {
@@ -599,6 +639,8 @@ pub struct Agent {
     /// Whom a delegate's permission requests go to; `None` when no one is
     /// watching.
     prompter: Option<ChannelPrompter>,
+    /// The guards a delegate of this loop's `task` calls takes over.
+    inherited: Option<InheritedHooks>,
     /// Whom the `suggest_command` tool offers commands to; `None` when no one
     /// is watching to confirm one.
     suggester: Option<CommandSuggester>,
@@ -673,6 +715,7 @@ impl Agent {
             loop_prompt: LoopPrompt::default(),
             asker: None,
             prompter: None,
+            inherited: None,
             suggester: None,
             shell_run: None,
             intent: IntentLog::new(),
@@ -730,6 +773,14 @@ impl Agent {
     #[must_use]
     pub fn with_prompter(mut self, prompter: ChannelPrompter) -> Self {
         self.prompter = Some(prompter);
+        self
+    }
+
+    /// Hold the delegates of this loop's `task` calls to `hooks` too: the
+    /// guards of the panel that delegates.
+    #[must_use]
+    pub fn with_inherited_hooks(mut self, hooks: InheritedHooks) -> Self {
+        self.inherited = Some(hooks);
         self
     }
 
@@ -1395,6 +1446,7 @@ impl Agent {
             cwd: self.cwd.clone(),
             asker: self.asker.clone(),
             prompter: self.prompter.clone(),
+            inherited: self.inherited.clone(),
             suggester: self.suggester.clone(),
             shell_run: self.shell_run.clone(),
             session: Some(SessionView {
@@ -1437,11 +1489,14 @@ impl Agent {
         let mut reasoning = LoopGuard::new();
         let mut answer = LoopGuard::new();
         // Without reasoning asked for, whatever a server streams as such is
-        // not the model running on.
-        let budget = self
-            .model
-            .reasoning_budget
-            .filter(|_| thinking != ThinkingLevel::Off);
+        // not the model running on — unless the model cannot stop
+        // reasoning, which the provider then asks for at its least: the
+        // budget still holds it, so a retry made "without reasoning" after
+        // a cut is cut again rather than running unbounded.
+        let reasons = thinking != ThinkingLevel::Off
+            || ThinkingLevel::Off.nearest(&self.provider.thinking_levels(&self.model.id))
+                != ThinkingLevel::Off;
+        let budget = self.model.reasoning_budget.filter(|_| reasons);
         let mut reasoned_chars = 0u64;
         let mut cut = false;
         let mut over_budget = false;
@@ -1975,6 +2030,8 @@ pub(crate) mod test_support {
         pub cancel_on_call: Option<usize>,
         /// The reasoning level each call asked for.
         pub thinking_seen: Mutex<Vec<ThinkingLevel>>,
+        /// The reasoning levels it says the model accepts.
+        pub levels: Vec<ThinkingLevel>,
     }
 
     impl ScriptedProvider {
@@ -1993,6 +2050,10 @@ pub(crate) mod test_support {
     impl Provider for ScriptedProvider {
         fn name(&self) -> &str {
             "scripted"
+        }
+
+        fn thinking_levels(&self, _model: &str) -> Vec<ThinkingLevel> {
+            self.levels.clone()
         }
 
         fn stream(

@@ -855,7 +855,7 @@ impl Terminal {
                 is_error: false,
             }],
             Err(e) => vec![PanelEvent::SetStatusMessage {
-                message: format!("Clipboard error: {}", e),
+                message: termide_i18n::t().editor_clipboard_error_fmt(&e.to_string()),
                 is_error: true,
             }],
         }
@@ -1441,7 +1441,7 @@ impl Panel for Terminal {
                     self.write_screen().clear_selection();
                     if let Err(e) = copy_result {
                         return vec![PanelEvent::SetStatusMessage {
-                            message: format!("Clipboard error: {}", e),
+                            message: termide_i18n::t().editor_clipboard_error_fmt(&e.to_string()),
                             is_error: true,
                         }];
                     }
@@ -1741,15 +1741,12 @@ impl Panel for Terminal {
             | PanelCommand::OnGitUpdate { .. }
             | PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
-            | PanelCommand::CheckExternalModification
             | PanelCommand::GetFsWatchInfo
             | PanelCommand::SetFsWatchRoot { .. }
             | PanelCommand::OnFsUpdate { .. }
             | PanelCommand::Reload
             | PanelCommand::GetModificationStatus
             | PanelCommand::Save
-            | PanelCommand::CloseWithoutSaving
-            | PanelCommand::RefreshDirectory
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }

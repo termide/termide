@@ -201,23 +201,23 @@ impl App {
                 None
             }
             PANEL_ACTION_SPLIT => Some((
-                "Cannot toggle stacking",
+                termide_i18n::t().layout_cannot_toggle_stacking(),
                 self.layout_manager.toggle_panel_stacking(terminal_width),
             )),
             PANEL_ACTION_MOVE_LEFT => Some((
-                "Cannot move panel",
+                termide_i18n::t().layout_cannot_move_panel(),
                 self.layout_manager.move_panel_to_prev_group(terminal_width),
             )),
             PANEL_ACTION_MOVE_RIGHT => Some((
-                "Cannot move panel",
+                termide_i18n::t().layout_cannot_move_panel(),
                 self.layout_manager.move_panel_to_next_group(terminal_width),
             )),
             PANEL_ACTION_MOVE_UP => Some((
-                "Cannot move panel",
+                termide_i18n::t().layout_cannot_move_panel(),
                 self.layout_manager.move_panel_up_in_group(),
             )),
             PANEL_ACTION_MOVE_DOWN => Some((
-                "Cannot move panel",
+                termide_i18n::t().layout_cannot_move_panel(),
                 self.layout_manager.move_panel_down_in_group(),
             )),
             // Panel-specific entry (e.g. "Copy diagram"): route to the now-active

@@ -251,26 +251,6 @@ pub(super) fn fallback_username() -> String {
         .unwrap_or_else(|_| "root".to_string())
 }
 
-/// Expand a leading `~` in a path using `$HOME`. Returns the input
-/// unchanged if there's no tilde or no home directory.
-fn expand_tilde(p: &Path) -> PathBuf {
-    let s = match p.to_str() {
-        Some(s) => s,
-        None => return p.to_path_buf(),
-    };
-    if let Some(rest) = s.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    if s == "~" {
-        if let Some(home) = dirs::home_dir() {
-            return home;
-        }
-    }
-    p.to_path_buf()
-}
-
 /// Try every reasonable auth method until one succeeds. Stops at the
 /// first success; returns AuthenticationFailed if none work.
 ///
@@ -319,7 +299,9 @@ async fn try_authenticate(
 
             // Try keys from ssh_config first (they're authoritative).
             for raw_key in &host_cfg.identity_files {
-                let key_path = expand_tilde(raw_key);
+                let key_path = raw_key
+                    .to_str()
+                    .map_or_else(|| raw_key.clone(), crate::ssh_config::expand_tilde);
                 if !key_path.exists() {
                     continue;
                 }

@@ -2,8 +2,10 @@
 name = "termide-panel-editor"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Text editor panel for termide"
-license = "MIT"
 
 [dependencies]
 # External
@@ -42,18 +44,18 @@ termide-ui = { path = "../ui" }
 # Diagram generation
 termide-panel-outline = { path = "../panel-outline" }
 tree-sitter.workspace = true
-tree-sitter-rust = "0.23"
-tree-sitter-python = "0.23"
-tree-sitter-typescript = "0.23"
-tree-sitter-go = "0.23"
-tree-sitter-java = "0.23"
-tree-sitter-kotlin-ng = "1.1"
-tree-sitter-c = "0.23"
-tree-sitter-cpp = "0.23"
-tree-sitter-ruby = "0.23"
+tree-sitter-rust.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-kotlin-ng.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-cpp.workspace = true
+tree-sitter-ruby.workspace = true
 # Must match termide-highlight's tree-sitter-php: two versions in one binary
 # collide the `tree_sitter_php` C symbol and break PHP highlighting.
-tree-sitter-php = "0.24"
+tree-sitter-php.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

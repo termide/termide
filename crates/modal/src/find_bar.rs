@@ -47,10 +47,11 @@ pub enum FindField {
 
 impl FindField {
     fn label(self) -> &'static str {
+        let t = termide_i18n::t();
         match self {
-            FindField::Mask => "Mask: ",
-            FindField::Find => "Find: ",
-            FindField::Replace => "Repl: ",
+            FindField::Mask => t.find_bar_label_mask(),
+            FindField::Find => t.find_bar_label_find(),
+            FindField::Replace => t.find_bar_label_replace(),
         }
     }
 }
@@ -81,12 +82,13 @@ impl Btn {
 
     /// The generic control this button maps to in the [`InputBar`].
     fn control(self) -> Control {
+        let t = termide_i18n::t();
         let label = match self {
-            Btn::Replace => "Replace",
-            Btn::ReplaceAll => "Replace all",
-            Btn::Prev => "◄ Prev",
-            Btn::Next => "Next ►",
-            Btn::SelectAll => "Select all",
+            Btn::Replace => t.find_bar_replace(),
+            Btn::ReplaceAll => t.find_bar_replace_all(),
+            Btn::Prev => t.find_bar_prev(),
+            Btn::Next => t.find_bar_next(),
+            Btn::SelectAll => t.find_bar_select_all(),
             Btn::Regex => ".*",
             Btn::Case => "Aa",
             Btn::Hex => "hex",
@@ -160,12 +162,13 @@ impl FindBar {
         // The bar's name goes in the top border. A single-field bar drops its
         // inline label for a "› " prompt, since the border already names it;
         // a multi-field bar keeps per-field labels to tell them apart.
+        let t = termide_i18n::t();
         let title = if fields.contains(&FindField::Replace) {
-            "Replace"
+            t.find_bar_title_replace()
         } else if fields.contains(&FindField::Mask) {
-            "Search"
+            t.find_bar_title_search()
         } else {
-            "Find"
+            t.find_bar_title_find()
         };
         let labels: Vec<String> = if fields.len() == 1 {
             vec![String::new()]

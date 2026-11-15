@@ -101,7 +101,7 @@ impl App {
             }
             Err(e) => {
                 log::error!("Failed to start upload: {}", e);
-                self.show_error_modal(format!("Upload failed: {}", e));
+                self.show_error_modal(termide_i18n::t().op_upload_failed_fmt(&e.to_string()));
                 if let Some(panel) = self.layout_manager.active_panel_mut() {
                     if let Some(editor) = panel.as_editor_mut() {
                         editor.set_uploading(false);
@@ -132,7 +132,9 @@ impl App {
                             .and_then(|p| p.downcast_mut::<termide_panel_binary::BinaryPanel>())
                         {
                             if let Err(e) = bin.save() {
-                                self.show_error_modal(format!("Save failed: {e}"));
+                                self.show_error_modal(
+                                    termide_i18n::t().status_error_save(&e.to_string()),
+                                );
                                 return Ok(());
                             }
                         }
@@ -318,7 +320,7 @@ impl App {
     /// For file copy (is_directory=false):
     /// - partial_path = the partial file
     /// - all_dest_paths = previously completed files (empty for single file)
-    /// - Options: Delete (partial), [Delete all], Keep
+    /// - Options: see `cancel_copy_buttons`
     pub(in crate::app) fn handle_cancel_copy_cleanup(
         &mut self,
         partial_path: PathBuf,
@@ -339,9 +341,12 @@ impl App {
                         // Delete only the interrupted file
                         if partial_path.exists() {
                             if let Err(e) = std::fs::remove_file(&partial_path) {
-                                self.show_error_modal(format!("Failed to delete: {}", e));
+                                self.show_error_modal(
+                                    termide_i18n::t().status_delete_failed(&e.to_string()),
+                                );
                             } else {
-                                self.state.set_info("Partial file deleted".to_string());
+                                self.state
+                                    .set_info(termide_i18n::t().op_partial_deleted().to_string());
                             }
                         }
                     }
@@ -350,9 +355,13 @@ impl App {
                         if let Some(dest_dir) = all_dest_paths.first() {
                             if dest_dir.exists() {
                                 if let Err(e) = std::fs::remove_dir_all(dest_dir) {
-                                    self.show_error_modal(format!("Failed to delete: {}", e));
+                                    self.show_error_modal(
+                                        termide_i18n::t().status_delete_failed(&e.to_string()),
+                                    );
                                 } else {
-                                    self.state.set_info("Directory deleted".to_string());
+                                    self.state.set_info(
+                                        termide_i18n::t().op_directory_deleted().to_string(),
+                                    );
                                 }
                             }
                         }
@@ -362,21 +371,8 @@ impl App {
                     }
                 }
             } else {
-                // File copy cancellation
-                let has_multiple = !all_dest_paths.is_empty();
-
-                match (selected, has_multiple) {
-                    (0, _) => {
-                        // Delete partial file only
-                        if partial_path.exists() {
-                            if let Err(e) = std::fs::remove_file(&partial_path) {
-                                self.show_error_modal(format!("Failed to delete: {}", e));
-                            } else {
-                                self.state.set_info("File deleted".to_string());
-                            }
-                        }
-                    }
-                    (1, true) => {
+                match cancel_copy_deletes(selected, !all_dest_paths.is_empty()) {
+                    true => {
                         // Delete all copied files
                         let mut deleted = 0;
                         let mut errors = 0;
@@ -407,15 +403,15 @@ impl App {
                         }
 
                         if errors > 0 {
-                            self.show_error_modal(format!(
-                                "Deleted {} items, {} errors",
-                                deleted, errors
-                            ));
+                            self.show_error_modal(
+                                termide_i18n::t().op_deleted_items_errors_fmt(deleted, errors),
+                            );
                         } else {
-                            self.state.set_info(format!("Deleted {} items", deleted));
+                            self.state
+                                .set_info(termide_i18n::t().op_deleted_items_fmt(deleted));
                         }
                     }
-                    _ => {
+                    false => {
                         // Keep everything
                     }
                 }
@@ -433,5 +429,43 @@ impl App {
         }
 
         Ok(())
+    }
+}
+
+/// The buttons of the modal shown when a batch file copy is cancelled:
+/// "Delete copied" and "Keep copied" when something was copied, only "OK"
+/// when nothing was. `cancel_copy_deletes` reads the choice back.
+pub(in crate::app) fn cancel_copy_buttons(has_completed: bool) -> Vec<String> {
+    let t = i18n::t();
+    if has_completed {
+        vec![
+            t.op_delete_copied().to_string(),
+            t.op_keep_copied().to_string(),
+        ]
+    } else {
+        vec![t.ui_ok().to_string()]
+    }
+}
+
+/// Whether the button `selected` of `cancel_copy_buttons` deletes what was copied.
+fn cancel_copy_deletes(selected: usize, has_completed: bool) -> bool {
+    has_completed && selected == 0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_the_delete_copied_button_deletes_what_was_copied() {
+        let t = i18n::t();
+        for (i, label) in cancel_copy_buttons(true).iter().enumerate() {
+            assert_eq!(
+                cancel_copy_deletes(i, true),
+                label == t.op_delete_copied(),
+                "button {i} ({label})"
+            );
+        }
+        assert!(!cancel_copy_deletes(0, false), "OK deletes nothing");
     }
 }

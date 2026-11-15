@@ -306,11 +306,12 @@ impl VfsManager {
         })
     }
 
-    /// Connect to an SMB/CIFS server (stub when smb feature is disabled).
+    /// Connect to an SMB/CIFS server: no build of termide enables the `smb`
+    /// feature, so this is what users meet.
     #[cfg(not(feature = "smb"))]
     pub fn connect_smb(&self, _path: &VfsPath, _options: ConnectOptions) -> VfsOperation<()> {
         VfsOperation::error(VfsError::NotSupported(
-            "SMB support not compiled. Enable the 'smb' feature.".to_string(),
+            "SMB connections are not supported yet".to_string(),
         ))
     }
 

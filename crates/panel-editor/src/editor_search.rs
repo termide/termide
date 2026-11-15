@@ -525,11 +525,7 @@ impl Editor {
             Some(FindBarAction::ReplaceAll) => {
                 let count = self.replace_all().unwrap_or(0);
                 vec![PanelEvent::SetStatusMessage {
-                    message: format!(
-                        "Replaced {} occurrence{}",
-                        count,
-                        if count == 1 { "" } else { "s" }
-                    ),
+                    message: termide_i18n::t().editor_replaced_fmt(count),
                     is_error: false,
                 }]
             }

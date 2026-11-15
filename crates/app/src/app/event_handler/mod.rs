@@ -67,10 +67,6 @@ impl App {
                 self.restart_language_server(Some(file));
             }
 
-            PanelEvent::RunCommand { command, cwd } => {
-                self.event_run_command(command, cwd)?;
-            }
-
             PanelEvent::PreviewMedia(path) => {
                 self.event_preview_media(path)?;
             }
@@ -206,16 +202,6 @@ impl App {
             }
 
             // === Panel navigation ===
-            PanelEvent::NextPanel => {
-                self.layout_manager.next_group();
-                self.notify_outline_file_opened();
-            }
-
-            PanelEvent::PrevPanel => {
-                self.layout_manager.prev_group();
-                self.notify_outline_file_opened();
-            }
-
             PanelEvent::VimPanelNavigation { direction } => {
                 use termide_core::VimPanelDirection;
                 match direction {
@@ -248,35 +234,10 @@ impl App {
                 self.state.needs_redraw = true;
             }
 
-            PanelEvent::Quit => {
-                self.handle_quit_request()?;
-            }
-
             PanelEvent::WorkingDirectoryChanged => {
                 // Re-register watchers and re-sync the git panels' repository
                 // paths, the same as after an explicit navigation.
                 self.state.needs_watcher_registration = true;
-            }
-
-            PanelEvent::SaveFile(path) => {
-                self.event_save_file(path)?;
-            }
-
-            PanelEvent::CloseFile => {
-                // Same as ClosePanel for now
-                self.handle_close_panel_request()?;
-            }
-
-            PanelEvent::NavigateTo(path) => {
-                self.event_navigate_to(path)?;
-            }
-
-            PanelEvent::OpenPath { path, select_file } => {
-                self.event_open_path(path, select_file)?;
-            }
-
-            PanelEvent::GotoLine(line) => {
-                self.event_goto_line(line);
             }
 
             PanelEvent::ShowConfirm {
@@ -319,14 +280,6 @@ impl App {
                 self.event_refresh_checklist(refresh);
             }
 
-            PanelEvent::ShowConflict {
-                source,
-                destination,
-                remaining,
-            } => {
-                self.event_show_conflict(source, destination, remaining);
-            }
-
             PanelEvent::WatchPath(path) => {
                 self.event_watch_path(path);
             }
@@ -337,18 +290,6 @@ impl App {
 
             PanelEvent::FileChangedOnDisk(path) => {
                 self.fan_out_fs_changes(&std::collections::HashSet::from([path]));
-            }
-
-            PanelEvent::RefreshGitStatus(path) => {
-                self.event_refresh_git_status(path);
-            }
-
-            PanelEvent::RequestPaste => {
-                self.event_paste_to_active_panel()?;
-            }
-
-            PanelEvent::FocusPanel(name) => {
-                self.event_focus_panel(&name);
             }
 
             PanelEvent::SplitPanel { direction, .. } => {
@@ -445,14 +386,6 @@ impl App {
                     .operation_action_menu
                     .open(op_id.0, anchor_x, anchor_y, is_paused, is_command);
                 self.state.needs_redraw = true;
-            }
-
-            PanelEvent::OpenOperationsPanel => {
-                self.open_operations_panel()?;
-            }
-
-            PanelEvent::OpenOutlinePanel => {
-                self.handle_open_outline()?;
             }
 
             PanelEvent::OpenReferencesPanel {

@@ -115,27 +115,35 @@ struct Logger {
 impl Logger {
     /// Create new logger instance
     fn new(file_path: PathBuf, max_entries: usize, min_level: LogLevel) -> Self {
-        // Create parent directory if it doesn't exist
-        if let Some(parent) = file_path.parent() {
-            let _ = fs::create_dir_all(parent);
-        }
-
         // Clear log file on startup
-        if let Ok(mut file) = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&file_path)
-        {
-            let _ = writeln!(file, "=== Termide Log Start ===");
-        }
+        let opened = file_path
+            .parent()
+            .map_or(Ok(()), fs::create_dir_all)
+            .and_then(|()| {
+                OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&file_path)
+            })
+            .and_then(|mut file| writeln!(file, "=== Termide Log Start ==="));
 
-        Self {
+        let mut logger = Self {
             entries: VecDeque::new(),
             max_entries,
             min_level,
             file_path,
+        };
+        // The journal panel still shows the entries kept in memory; say there
+        // why the file stays empty.
+        if let Err(error) = opened {
+            let message = format!(
+                "cannot write the log file {}: {error}",
+                logger.file_path.display()
+            );
+            logger.add_entry(LogLevel::Error, message);
         }
+        logger
     }
 
     /// Add entry to log
@@ -272,5 +280,25 @@ pub fn get_entries_from(start_idx: usize) -> Vec<LogEntry> {
         logger.get_entries_from(start_idx)
     } else {
         Vec::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_log_file_that_cannot_be_written_is_reported_in_the_journal() {
+        let dir = std::env::temp_dir().join(format!("termide-logger-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        // A plain file where the log's directory should be.
+        let blocker = dir.join("not-a-dir");
+        fs::write(&blocker, "").unwrap();
+        let logger = Logger::new(blocker.join("termide.log"), 10, LogLevel::Info);
+        let entries = logger.get_entries_from(0);
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].level, LogLevel::Error);
+        assert!(entries[0].message.contains("cannot write the log file"));
     }
 }

@@ -21,20 +21,21 @@ pub fn format_net_speed(bytes_per_sec: u64) -> String {
     format!("{s:<7}")
 }
 
-/// Format bytes as human-readable string.
+/// Format bytes as human-readable string, in the interface language's units.
 pub fn format_bytes(bytes: u64) -> String {
     const KB: u64 = 1024;
     const MB: u64 = KB * 1024;
     const GB: u64 = MB * 1024;
 
+    let t = termide_i18n::t();
     if bytes >= GB {
-        format!("{:.1}GB", bytes as f64 / GB as f64)
+        format!("{:.1}{}", bytes as f64 / GB as f64, t.size_gigabytes())
     } else if bytes >= MB {
-        format!("{:.1}MB", bytes as f64 / MB as f64)
+        format!("{:.1}{}", bytes as f64 / MB as f64, t.size_megabytes())
     } else if bytes >= KB {
-        format!("{:.1}KB", bytes as f64 / KB as f64)
+        format!("{:.1}{}", bytes as f64 / KB as f64, t.size_kilobytes())
     } else {
-        format!("{}B", bytes)
+        format!("{}{}", bytes, t.size_bytes())
     }
 }
 

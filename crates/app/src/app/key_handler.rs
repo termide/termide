@@ -237,7 +237,7 @@ impl App {
                         pending_status = Some((t.lsp_rename_unsaved_file().to_string(), true));
                     } else if let Some(path) = path_opt {
                         events.push(termide_core::PanelEvent::ShowInput {
-                            prompt: format!("Rename '{}':", word),
+                            prompt: termide_i18n::t().lsp_rename_prompt_fmt(&word),
                             initial_value: word,
                             on_submit: termide_core::InputAction::RenameSymbol {
                                 file_path: path,
@@ -348,11 +348,13 @@ impl App {
             match self.apply_workspace_edit(edit) {
                 Ok(0) => self
                     .state
-                    .set_info("Code action made no changes".to_string()),
+                    .set_info(termide_i18n::t().lsp_code_action_no_changes().to_string()),
                 Ok(count) => self
                     .state
-                    .set_info(format!("Code action applied to {count} file(s)")),
-                Err(e) => self.state.set_error(format!("Code action failed: {e}")),
+                    .set_info(termide_i18n::t().lsp_code_action_applied_fmt(count)),
+                Err(e) => self
+                    .state
+                    .set_error(termide_i18n::t().lsp_code_action_failed_fmt(&e.to_string())),
             }
         }
 

@@ -131,7 +131,7 @@ impl AnthropicProvider {
         }
         let style = thinking_style(&request.model.id);
         let level = request.thinking.nearest(&style_levels(style));
-        let thinking = thinking_param(style, level, max_tokens);
+        let thinking = thinking_param(style, level, max_tokens, request.model.reasoning_budget);
         let replay = replay_thinking && thinking.as_ref().is_some_and(|(on, _)| *on);
         let replay_model = replay.then_some(request.model.id.as_str());
         body.insert(
@@ -418,7 +418,9 @@ fn convert_messages(messages: &[Message], replay_model: Option<&str>) -> Vec<Val
                                 "type": "tool_use",
                                 "id": call.id,
                                 "name": call.name,
-                                "input": call.arguments,
+                                // The API takes only an object; the text of a
+                                // malformed call stays in the log.
+                                "input": if call.arguments.is_object() { call.arguments.clone() } else { json!({}) },
                             }));
                         }
                         // Unsigned or earlier reasoning is not the API's to read.
@@ -518,10 +520,11 @@ fn thinking_param(
     style: ThinkingStyle,
     level: ThinkingLevel,
     max_tokens: u64,
+    reasoning_budget: Option<u64>,
 ) -> Option<(bool, Vec<(String, Value)>)> {
     match style {
         ThinkingStyle::Budget => {
-            let budget = thinking_budget(level, max_tokens)?;
+            let budget = thinking_budget(level, max_tokens, reasoning_budget)?;
             Some((
                 true,
                 vec![(
@@ -581,8 +584,15 @@ fn is_signature_rejection(message: &str) -> bool {
     message.starts_with("HTTP 400") && message.contains("signature")
 }
 
-/// The thinking budget for a level, always leaving room for the answer.
-fn thinking_budget(level: ThinkingLevel, max_tokens: u64) -> Option<u64> {
+/// The thinking budget for a level, always leaving room for the answer,
+/// and no more than the connection's `reasoning_budget`: the server then
+/// holds the model to it, which a count of the streamed text cannot do
+/// for reasoning it summarises.
+fn thinking_budget(
+    level: ThinkingLevel,
+    max_tokens: u64,
+    reasoning_budget: Option<u64>,
+) -> Option<u64> {
     let budget = match level {
         ThinkingLevel::Off => return None,
         ThinkingLevel::Minimal => 1024,
@@ -593,7 +603,8 @@ fn thinking_budget(level: ThinkingLevel, max_tokens: u64) -> Option<u64> {
     // The API requires max_tokens to exceed the budget; keep a quarter for
     // the reply at least, and never go below the 1024 floor.
     let cap = max_tokens.saturating_mul(3) / 4;
-    Some(budget.min(cap.max(1024)))
+    let budget = reasoning_budget.map_or(budget, |limit| budget.min(limit));
+    Some(budget.min(cap.max(1024)).max(1024))
 }
 
 /// One SSE `data:` line's payload; `None` for `event:`, comments and blanks.
@@ -786,19 +797,35 @@ impl Accumulator {
                 _ => {}
             }
         }
-        let stop_reason = stop_override.unwrap_or(match self.stop_reason.as_deref() {
-            Some("max_tokens") => StopReason::Length,
-            Some("tool_use") => StopReason::ToolUse,
-            _ if has_calls => StopReason::ToolUse,
-            _ => StopReason::Stop,
-        });
+        // A refusal, or a context the model could not take, is no answer: it
+        // ends as an error that says so — the latter one the loop compacts
+        // the context after — not as a reply that merely stopped.
+        let (stop_reason, error_message) = match (stop_override, self.stop_reason.as_deref()) {
+            (Some(reason), _) => (reason, None),
+            (None, Some("max_tokens")) => (StopReason::Length, None),
+            (None, Some("tool_use")) => (StopReason::ToolUse, None),
+            (None, Some("refusal")) => (
+                StopReason::Error,
+                Some("The model declined to answer (refusal).".to_string()),
+            ),
+            (None, Some("model_context_window_exceeded")) => (
+                StopReason::Error,
+                Some(
+                    "The conversation exceeds the model's context window \
+                     (model_context_window_exceeded)."
+                        .to_string(),
+                ),
+            ),
+            (None, _) if has_calls => (StopReason::ToolUse, None),
+            (None, _) => (StopReason::Stop, None),
+        };
         AssistantMessage {
             content,
             stop_reason,
             usage: self.usage,
             provider: provider.to_string(),
             model: model.to_string(),
-            error_message: None,
+            error_message,
             failure: None,
             timestamp: now_millis(),
         }
@@ -809,13 +836,20 @@ fn u64_at(value: &Value, key: &str) -> u64 {
     value.get(key).and_then(Value::as_u64).unwrap_or(0)
 }
 
-/// Tool arguments: the accumulated JSON, or an empty object when the model
-/// sent none (a no-argument tool) or something unparseable.
+/// Tool arguments: the accumulated JSON object, an empty one when the model
+/// sent none (a no-argument tool), or the raw text when it is no JSON object,
+/// which the tool call then reports to the model.
 fn parse_arguments(raw: &str) -> Value {
     if raw.trim().is_empty() {
         return json!({});
     }
-    serde_json::from_str(raw).unwrap_or_else(|_| json!({}))
+    match serde_json::from_str::<Value>(raw) {
+        Ok(value @ Value::Object(_)) => value,
+        _ => {
+            log::warn!("tool call arguments are not a JSON object: {raw}");
+            Value::String(raw.to_string())
+        }
+    }
 }
 
 fn build_agent(connect: Duration, read: Duration) -> ureq::Agent {
@@ -1032,6 +1066,19 @@ mod tests {
         assert_eq!(body["max_tokens"], json!(4096));
         assert_eq!(body["thinking"]["type"], json!("enabled"));
         assert_eq!(body["thinking"]["budget_tokens"], json!(3072)); // capped at 3/4 of max
+                                                                    // The connection's reasoning budget caps it lower still, down to the
+                                                                    // API's floor.
+        for (limit, sent) in [(2000, 2000), (100, 1024)] {
+            let capped = ModelSpec {
+                reasoning_budget: Some(limit),
+                ..model("claude-sonnet-4-5")
+            };
+            let body = provider.build_body(&Request {
+                model: &capped,
+                ..request
+            });
+            assert_eq!(body["thinking"]["budget_tokens"], json!(sent));
+        }
         assert_eq!(
             body["tools"][0]["input_schema"],
             json!({ "type": "object" })
@@ -1269,6 +1316,24 @@ mod tests {
     }
 
     #[test]
+    fn a_refused_or_overflowing_answer_ends_as_an_error_that_says_so() {
+        for (reason, says) in [
+            ("refusal", "declined"),
+            ("model_context_window_exceeded", "context window"),
+        ] {
+            let events = vec![
+                json!({ "type": "message_start", "message": { "usage": { "input_tokens": 1 } } }),
+                json!({ "type": "message_delta", "delta": { "stop_reason": reason }, "usage": { "output_tokens": 0 } }),
+                json!({ "type": "message_stop" }),
+            ];
+            let (message, _) = feed_all(&events);
+            assert_eq!(message.stop_reason, StopReason::Error, "{reason}");
+            let error = message.error_message.unwrap_or_default();
+            assert!(error.contains(says), "{reason}: {error}");
+        }
+    }
+
+    #[test]
     fn consecutive_tool_results_merge_into_one_user_turn() {
         let a = ToolCall {
             id: "u1".into(),
@@ -1336,5 +1401,35 @@ mod tests {
         assert_eq!(p.endpoint().as_deref(), Some("api.anthropic.com"));
         let g = AnthropicProvider::with_base_url("anthropic", "https://gw.example/proxy");
         assert_eq!(g.endpoint().as_deref(), Some("gw.example"));
+    }
+
+    /// Arguments that are no JSON object are kept as their text, for the
+    /// call to report, and replayed to the API as an empty object.
+    #[test]
+    fn malformed_arguments_are_kept_and_replayed_as_an_object() {
+        assert_eq!(parse_arguments(""), json!({}));
+        assert_eq!(parse_arguments("{\"a\":1}"), json!({ "a": 1 }));
+        assert_eq!(parse_arguments("{\"a\":"), json!("{\"a\":"));
+        assert_eq!(parse_arguments("[1]"), json!("[1]"));
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: json!("{\"a\":"),
+            extra_content: None,
+        };
+        let wire = convert_messages(
+            &[Message::Assistant(AssistantMessage {
+                content: vec![AssistantContent::ToolCall(call)],
+                stop_reason: StopReason::ToolUse,
+                usage: Usage::default(),
+                provider: "anthropic".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            })],
+            None,
+        );
+        assert_eq!(wire[0]["content"][0]["input"], json!({}));
     }
 }

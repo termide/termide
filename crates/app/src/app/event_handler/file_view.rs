@@ -112,18 +112,6 @@ impl App {
         Ok(())
     }
 
-    /// Handle RunCommand event - run command in a new terminal
-    pub(in crate::app) fn event_run_command(
-        &mut self,
-        command: String,
-        cwd: Option<PathBuf>,
-    ) -> Result<()> {
-        if let Err(e) = self.run_in_new_terminal(&command, cwd) {
-            log::error!("Failed to run command '{}' in a terminal: {}", command, e);
-        }
-        Ok(())
-    }
-
     /// Open a terminal panel in `cwd` and type `command` in it; the error
     /// when no terminal opened or the command could not be typed.
     pub(in crate::app) fn run_in_new_terminal(
@@ -162,7 +150,9 @@ impl App {
                 self.state.needs_redraw = true;
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open binary file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -200,7 +190,9 @@ impl App {
                 self.state.needs_redraw = true;
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -217,7 +209,9 @@ impl App {
                 self.add_panel(Box::new(panel));
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open markdown file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -231,7 +225,9 @@ impl App {
                 self.state.needs_redraw = true;
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open markdown file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -247,7 +243,9 @@ impl App {
                 self.add_panel(Box::new(panel));
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open diagram file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -261,7 +259,9 @@ impl App {
                 self.state.needs_redraw = true;
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open diagram file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -313,7 +313,9 @@ impl App {
                 self.add_panel(Box::new(panel));
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open HTML file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -327,7 +329,9 @@ impl App {
                 self.state.needs_redraw = true;
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open HTML file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -351,7 +355,7 @@ impl App {
                 self.auto_save_layout();
             }
             Err(e) => {
-                self.show_error_modal(format!("Failed to open binary file: {e}"));
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()));
             }
         }
         Ok(())
@@ -366,7 +370,9 @@ impl App {
                 self.add_panel(Box::new(panel));
                 self.auto_save_layout();
             }
-            Err(e) => self.show_error_modal(format!("Failed to open binary file: {e}")),
+            Err(e) => {
+                self.show_error_modal(termide_i18n::t().binary_open_failed_fmt(&e.to_string()))
+            }
         }
         Ok(())
     }
@@ -419,7 +425,9 @@ impl App {
         // Fallback to system default viewer (xdg-open)
         if let Err(e) = open::that(&file_path) {
             log::error!("Failed to open '{}': {}", filename, e);
-            self.show_error_modal(format!("Failed to open {}: {}", filename, e));
+            self.show_error_modal(
+                termide_i18n::t().status_error_open_file(&filename, &e.to_string()),
+            );
         }
         Ok(())
     }
@@ -438,7 +446,9 @@ impl App {
 
         if let Err(e) = open::that(&file_path) {
             log::error!("Failed to open '{}': {}", filename, e);
-            self.show_error_modal(format!("Failed to open {}: {}", filename, e));
+            self.show_error_modal(
+                termide_i18n::t().status_error_open_file(&filename, &e.to_string()),
+            );
         }
         Ok(())
     }
@@ -449,7 +459,7 @@ impl App {
         let vfs_path = match termide_vfs::parse_vfs_url(&url) {
             Ok(path) => path,
             Err(e) => {
-                let error_msg = format!("Invalid remote URL: {}", e);
+                let error_msg = termide_i18n::t().fv_invalid_remote_url_fmt(&e.to_string());
                 log::error!("{}", error_msg);
                 self.show_error_modal(error_msg);
                 return Ok(());
@@ -467,13 +477,13 @@ impl App {
             if let Some(fm) = panel.downcast_ref::<termide_panel_file_manager::FileManager>() {
                 fm.vfs_state().manager_arc()
             } else {
-                let error_msg = "No file manager panel available for remote file access";
+                let error_msg = termide_i18n::t().fv_no_fm_for_remote();
                 log::error!("{}", error_msg);
                 self.show_error_modal(error_msg.to_string());
                 return Ok(());
             }
         } else {
-            let error_msg = "No active panel";
+            let error_msg = termide_i18n::t().fv_no_active_panel();
             log::error!("{}", error_msg);
             self.show_error_modal(error_msg.to_string());
             return Ok(());
@@ -482,7 +492,7 @@ impl App {
         // Create temp directory for remote files
         let temp_dir = std::env::temp_dir().join("termide-remote-edit");
         if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-            let error_msg = format!("Failed to create temp directory: {}", e);
+            let error_msg = termide_i18n::t().fv_temp_dir_failed_fmt(&e.to_string());
             log::error!("{}", error_msg);
             self.show_error_modal(error_msg);
             return Ok(());
@@ -525,44 +535,9 @@ impl App {
                 self.open_operations_panel()?;
             }
             Err(e) => {
-                let error_msg = format!("Failed to start download: {}", e);
+                let error_msg = termide_i18n::t().fv_download_failed_fmt(&e.to_string());
                 log::error!("{}", error_msg);
                 self.show_error_modal(error_msg);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Handle SaveFile event - save file at given path
-    pub(super) fn event_save_file(&mut self, path: PathBuf) -> Result<()> {
-        // Store info needed for LSP notification (before mutable borrow)
-        let mut lsp_info: Option<(String, std::path::PathBuf)> = None;
-
-        if let Some(panel) = self.layout_manager.active_panel_mut() {
-            if let Some(editor) = panel.as_editor_mut() {
-                match editor.save_file_as(path.clone()) {
-                    Ok(()) => {
-                        let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("?");
-                        self.state.set_info(format!("Saved: {}", filename));
-
-                        // Collect LSP info for didSave notification
-                        if let Some(lang) = editor.lsp_language() {
-                            lsp_info = Some((lang.to_string(), path.clone()));
-                        }
-                    }
-                    Err(e) => {
-                        log::error!("Save failed: {}", e);
-                        self.show_error_modal(format!("Save failed: {}", e));
-                    }
-                }
-            }
-        }
-
-        // Send LSP didSave notification (triggers full analysis for semantic errors)
-        if let Some((lang, file_path)) = lsp_info {
-            if let Some(ref lsp_manager) = self.state.lsp_manager {
-                lsp_manager.did_save(&lang, &file_path, None);
             }
         }
 

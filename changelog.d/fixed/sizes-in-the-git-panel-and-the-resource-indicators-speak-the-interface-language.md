@@ -1,0 +1,1 @@
+- **Sizes in the git panel and the resource indicators speak the interface language.** A file's size in the git panel's properties and the memory and disk figures of the resource indicators kept English units (`KB`, `MB`, `GB`) whatever the language, while the file manager and the operations panel translated them. They now use the same units.

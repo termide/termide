@@ -1,7 +1,7 @@
 # Termide
 
 [![GitHub Release](https://img.shields.io/github/v/release/termide/termide)](https://github.com/termide/termide/releases)
-[![CI](https://github.com/termide/termide/actions/workflows/release.yml/badge.svg)](https://github.com/termide/termide/actions)
+[![CI](https://github.com/termide/termide/actions/workflows/ci.yml/badge.svg)](https://github.com/termide/termide/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
 [English](README.md) | [中文](README.zh.md) | **Русский**
@@ -441,11 +441,14 @@ export EDITOR=termide   # git commit, crontab -e, visudo, ...
 ### Быстрый старт
 
 После запуска Termide вы увидите раскладку, адаптивную по ширине:
-- **Широкие терминалы (>= 160 колонок):** Боковая панель (Git Status в стопке с Operations) + две панели файлового менеджера
-- **Обычные терминалы (< 160 колонок):** Боковая панель (Git Status, файловый менеджер и Operations в стопке) + панель файлового менеджера
+- **Меньше 100 колонок:** одна панель файлового менеджера
+- **100–139 колонок:** файловый менеджер + стопка шириной 40 колонок из второго файлового менеджера и Git Status
+- **140–199 колонок:** файловый менеджер + файловый менеджер шириной 40 колонок + стопка шириной 40 колонок из Git Status и Outline
+- **200 колонок и шире:** два файловых менеджера, делящих ширину, + стопка шириной 40 колонок из Git Status и Outline
+- Git Status появляется только внутри git-репозитория
 - Меню-бар сверху, статус-бар снизу
 
-Панели в стопке делят колонку с настраиваемой высотой каждой. `Alt+F11` переключает пресет «полноэкранная текущая панель» (одна панель занимает всю высоту колонки, остальные сворачиваются в строку заголовка); `Ctrl+Alt+=` / `Ctrl+Alt+-` увеличивают / уменьшают фокусную панель на 3 строки.
+Панели в стопке делят колонку с настраиваемой высотой каждой. `Alt+F11` переключает пресет «полноэкранная текущая панель» (одна панель занимает всю высоту колонки, остальные сворачиваются в строку заголовка); `Alt+Shift+=` / `Alt+Shift+-` увеличивают / уменьшают фокусную панель на 1 строку.
 
 Используйте `Alt+←/→` для переключения групп панелей, `Alt+↑/↓` для навигации внутри группы, `Alt+M` для открытия меню.
 
@@ -611,7 +614,7 @@ Issues и pull requests приветствуются. Один раз на кл�
 ## Благодарности
 
 Построено на:
-- [ratatui](https://github.com/ratatui-org/ratatui) - Фреймворк терминального UI
+- [ratatui](https://github.com/ratatui/ratatui) - Фреймворк терминального UI
 - [crossterm](https://github.com/crossterm-rs/crossterm) - Кроссплатформенная работа с терминалом
 - [portable-pty](https://github.com/wez/wezterm/tree/main/pty) - Реализация PTY
 - [tree-sitter](https://github.com/tree-sitter/tree-sitter) - Подсветка синтаксиса

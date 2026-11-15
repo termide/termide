@@ -2,8 +2,10 @@
 name = "termide-modal"
 version.workspace = true
 edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 description = "Modal dialog system for termide"
-license = "MIT"
 
 [dependencies]
 # External

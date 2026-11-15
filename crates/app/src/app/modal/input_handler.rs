@@ -53,7 +53,9 @@ impl App {
         let path = super::path_suggestions::resolve_typed_path(input, &base_dir);
 
         if !path.exists() {
-            self.show_error_modal(format!("No such path: {}", path.display()));
+            self.show_error_modal(
+                termide_i18n::t().nav_no_such_path_fmt(&path.display().to_string()),
+            );
             return Ok(());
         }
 
@@ -292,11 +294,12 @@ impl App {
         self.state.stash.include_untracked = false; // reset
         match termide_git::stash_push(&repo_path, &message, include_untracked) {
             Ok(()) => {
-                self.state.set_info("Stash created".to_string());
+                self.state
+                    .set_info(termide_i18n::t().git_stash_created_msg().to_string());
                 self.send_git_update(&repo_path);
             }
             Err(e) => {
-                self.show_error_modal(format!("Stash push error: {}", e));
+                self.show_error_modal(termide_i18n::t().git_stash_failed_fmt(&e.to_string()));
             }
         }
         Ok(())

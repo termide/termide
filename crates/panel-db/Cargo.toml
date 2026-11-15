@@ -30,4 +30,4 @@ sqlx = { version = "0.8", default-features = false, features = [
     "sqlite",
 ] }
 tempfile.workspace = true
-tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }

@@ -66,7 +66,7 @@ impl App {
             Ok(path) => Some(path),
             Err(e) => {
                 log::error!("Invalid remote URL '{}': {}", remote_url, e);
-                self.show_error_modal(format!("Invalid remote URL: {}", e));
+                self.show_error_modal(termide_i18n::t().fv_invalid_remote_url_fmt(&e.to_string()));
                 None
             }
         }

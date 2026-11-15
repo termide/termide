@@ -123,7 +123,7 @@ impl CommandPaletteModal {
 
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
         // Title
-        let title_width = "Command Palette".len() as u16 + 4;
+        let title_width = termide_i18n::t().help_desc_command_palette().width() as u16 + 4;
 
         // Max entry width: "▶ " + label + "  " + category + "  " + keybinding
         let max_entry_width = self
@@ -156,7 +156,12 @@ impl Modal for CommandPaletteModal {
         let modal_height = 2 + FILTER_ROWS + list_height.max(1);
 
         let modal_area = centered_rect_with_size(modal_width, modal_height, area);
-        let inner = render_modal_block(modal_area, buf, "Command Palette", theme);
+        let inner = render_modal_block(
+            modal_area,
+            buf,
+            termide_i18n::t().help_desc_command_palette(),
+            theme,
+        );
 
         // --- Filter input ---
         let filter_label = "  Filter: ";

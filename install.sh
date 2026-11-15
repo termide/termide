@@ -132,9 +132,13 @@ install_cargo() {
     # Build from the Git repository, not crates.io: Termide is a Cargo
     # workspace and is not published to crates.io (the name there points at
     # an obsolete early release). `--locked` builds against the committed
-    # Cargo.lock for a reproducible result.
+    # Cargo.lock for a reproducible result. CFLAGS carries the flag the
+    # repository's .cargo/config.toml sets for the syntax grammars, which
+    # cargo does not read for an install from git: without it GCC builds some
+    # grammars' scanners into code that writes into freed memory.
     info "Installing via Cargo (compiling from source)..."
-    cargo install --git https://github.com/termide/termide --locked termide
+    CFLAGS="${CFLAGS:+$CFLAGS }-fno-strict-aliasing" \
+        cargo install --git https://github.com/termide/termide --locked termide
 }
 
 # Install using Nix

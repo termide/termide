@@ -148,7 +148,7 @@ impl Translation for RuntimeTranslation {
         }
     }
 
-    // Generate 417 trivial `fn name(&self) -> &str` wrappers over get_string("name").
+    // Generate the trivial `fn name(&self) -> &str` wrappers over get_string("name").
     i18n_get_string_methods! {
         agent_input_placeholder,
         agent_input_placeholder_shell,
@@ -639,7 +639,6 @@ impl Translation for RuntimeTranslation {
         agent_delete_session,
         agent_fork_session,
         agent_rename_prompt,
-        agent_new_session,
         agent_resume,
         agent_no_sessions,
         agent_not_configured,
@@ -668,7 +667,6 @@ impl Translation for RuntimeTranslation {
         agent_perm_note_user_global,
         agent_perm_note_user_denied,
         agent_perm_note_user_denied_session,
-        agent_show_prompt,
         agent_session_info,
         agent_view_dock,
         agent_view_take_over,
@@ -836,7 +834,6 @@ impl Translation for RuntimeTranslation {
         agent_change_agent,
         agent_prompts,
         agent_no_prompts,
-        agent_undo,
         agent_thinking,
         time_unit_secs,
         time_unit_mins,
@@ -1360,6 +1357,67 @@ impl Translation for RuntimeTranslation {
         db_filter_apply,
         db_filter_clear,
         db_filter_cancel,
+        status_view,
+        status_view_text,
+        status_view_rendered,
+        status_view_table,
+        status_edit,
+        status_highlight,
+        status_tab,
+        status_eol,
+        status_encoding,
+        status_pos,
+        status_offset,
+        status_sel,
+        status_line,
+        status_type,
+        status_delimiter,
+        status_header,
+        status_row,
+        status_zoom,
+        status_zoom_fit,
+        find_bar_title_find,
+        find_bar_title_search,
+        find_bar_title_replace,
+        find_bar_label_mask,
+        find_bar_label_find,
+        find_bar_label_replace,
+        find_bar_label_text,
+        find_bar_replace,
+        find_bar_replace_all,
+        find_bar_prev,
+        find_bar_next,
+        find_bar_select_all,
+        rename_pattern_new_name,
+        editor_goto_line_title,
+        op_cancelled_title,
+        op_delete_copied,
+        op_keep_copied,
+        op_upload_cancelled_title,
+        bookmarks_delete_group_confirm,
+        bookmarks_delete_confirm,
+        bookmarks_error_title,
+        bookmarks_path_empty,
+        editor_save_before_preview,
+        editor_save_before_hex,
+        editor_nothing_to_cut,
+        editor_modified_on_disk,
+        binary_search_too_large,
+        image_no_graphics_reply,
+        op_cancelled,
+        op_file_uploaded,
+        op_partial_deleted,
+        op_directory_deleted,
+        lsp_code_action_no_changes,
+        git_file_staged,
+        git_file_unstaged,
+        git_file_reverted,
+        git_stash_created_msg,
+        git_stash_renamed,
+        layout_cannot_toggle_stacking,
+        layout_cannot_move_panel,
+        fv_no_active_panel,
+        fv_no_fm_for_remote,
     }
 
     fn agent_permission_run_fmt(&self, tool: &str) -> String {
@@ -3008,6 +3066,184 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn op_delete_partial_upload_fmt(&self, name: &str) -> String {
+        self.format("op_delete_partial_upload_fmt", &[("name", name)])
+    }
+
+    fn op_files_uploaded_fmt(&self, count: usize) -> String {
+        let plural = self.pluralize(count, "file");
+        self.format(
+            "op_files_uploaded_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn op_file_opened_fmt(&self, name: &str) -> String {
+        self.format("op_file_opened_fmt", &[("name", name)])
+    }
+
+    fn op_completed_fmt(&self, done: usize, skipped: usize, failed: usize) -> String {
+        self.format(
+            "op_completed_fmt",
+            &[
+                ("done", &done.to_string()),
+                ("skipped", &skipped.to_string()),
+                ("failed", &failed.to_string()),
+            ],
+        )
+    }
+
+    fn op_upload_failed_fmt(&self, error: &str) -> String {
+        self.format("op_upload_failed_fmt", &[("error", error)])
+    }
+
+    fn op_deleted_items_fmt(&self, count: usize) -> String {
+        let element = self.pluralize(count, "element");
+        self.format(
+            "op_deleted_items_fmt",
+            &[("count", &count.to_string()), ("element", element)],
+        )
+    }
+
+    fn op_deleted_items_errors_fmt(&self, count: usize, errors: usize) -> String {
+        let element = self.pluralize(count, "element");
+        self.format(
+            "op_deleted_items_errors_fmt",
+            &[
+                ("count", &count.to_string()),
+                ("errors", &errors.to_string()),
+                ("element", element),
+            ],
+        )
+    }
+
+    fn bookmarks_save_failed_fmt(&self, error: &str) -> String {
+        self.format("bookmarks_save_failed_fmt", &[("error", error)])
+    }
+
+    fn bookmarks_save_project_failed_fmt(&self, error: &str) -> String {
+        self.format("bookmarks_save_project_failed_fmt", &[("error", error)])
+    }
+
+    fn bookmarks_create_dir_failed_fmt(&self, error: &str) -> String {
+        self.format("bookmarks_create_dir_failed_fmt", &[("error", error)])
+    }
+
+    fn lsp_rename_prompt_fmt(&self, name: &str) -> String {
+        self.format("lsp_rename_prompt_fmt", &[("name", name)])
+    }
+
+    fn lsp_code_action_applied_fmt(&self, count: usize) -> String {
+        let plural = self.pluralize(count, "file");
+        self.format(
+            "lsp_code_action_applied_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn lsp_code_action_failed_fmt(&self, error: &str) -> String {
+        self.format("lsp_code_action_failed_fmt", &[("error", error)])
+    }
+
+    fn lsp_rename_failed_fmt(&self, error: &str) -> String {
+        self.format("lsp_rename_failed_fmt", &[("error", error)])
+    }
+
+    fn editor_replaced_fmt(&self, count: usize) -> String {
+        let plural = self.pluralize(count, "occurrence");
+        self.format(
+            "editor_replaced_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn editor_cut_fmt(&self, preview: &str, count: usize) -> String {
+        let plural = self.pluralize(count, "char");
+        self.format(
+            "editor_cut_fmt",
+            &[
+                ("preview", preview),
+                ("count", &count.to_string()),
+                ("plural", plural),
+            ],
+        )
+    }
+
+    fn editor_file_too_large_fmt(&self, size: &str, max: &str) -> String {
+        self.format("editor_file_too_large_fmt", &[("size", size), ("max", max)])
+    }
+
+    fn git_stash_dropped_fmt(&self, stash: &str) -> String {
+        self.format("git_stash_dropped_fmt", &[("stash", stash)])
+    }
+
+    fn git_stash_popped_fmt(&self, stash: &str) -> String {
+        self.format("git_stash_popped_fmt", &[("stash", stash)])
+    }
+
+    fn git_stash_applied_fmt(&self, stash: &str) -> String {
+        self.format("git_stash_applied_fmt", &[("stash", stash)])
+    }
+
+    fn git_stash_failed_fmt(&self, error: &str) -> String {
+        self.format("git_stash_failed_fmt", &[("error", error)])
+    }
+
+    fn git_revert_failed_fmt(&self, error: &str) -> String {
+        self.format("git_revert_failed_fmt", &[("error", error)])
+    }
+
+    fn git_committed_fmt(&self, hash: &str) -> String {
+        self.format("git_committed_fmt", &[("hash", hash)])
+    }
+
+    fn git_commit_failed_fmt(&self, error: &str) -> String {
+        self.format("git_commit_failed_fmt", &[("error", error)])
+    }
+
+    fn status_switched_to_fmt(&self, path: &str) -> String {
+        self.format("status_switched_to_fmt", &[("path", path)])
+    }
+
+    fn terminal_create_failed_fmt(&self, error: &str) -> String {
+        self.format("terminal_create_failed_fmt", &[("error", error)])
+    }
+
+    fn fv_invalid_remote_url_fmt(&self, error: &str) -> String {
+        self.format("fv_invalid_remote_url_fmt", &[("error", error)])
+    }
+
+    fn fv_temp_dir_failed_fmt(&self, error: &str) -> String {
+        self.format("fv_temp_dir_failed_fmt", &[("error", error)])
+    }
+
+    fn fv_download_failed_fmt(&self, error: &str) -> String {
+        self.format("fv_download_failed_fmt", &[("error", error)])
+    }
+
+    fn nav_no_such_path_fmt(&self, path: &str) -> String {
+        self.format("nav_no_such_path_fmt", &[("path", path)])
+    }
+
+    fn plugin_stopped_fmt(&self, name: &str) -> String {
+        self.format("plugin_stopped_fmt", &[("name", name)])
+    }
+
+    fn plugin_gave_up_fmt(&self, name: &str, reason: &str) -> String {
+        self.format("plugin_gave_up_fmt", &[("name", name), ("reason", reason)])
+    }
+
+    fn plugin_not_running_fmt(&self, name: &str) -> String {
+        self.format("plugin_not_running_fmt", &[("name", name)])
+    }
+
+    fn settings_save_failed_fmt(&self, error: &str) -> String {
+        self.format("settings_save_failed_fmt", &[("error", error)])
+    }
+
+    fn settings_language_failed_fmt(&self, error: &str) -> String {
+        self.format("settings_language_failed_fmt", &[("error", error)])
+    }
     // Calendar
 }
 
@@ -3145,6 +3381,36 @@ mod tests {
         assert_eq!(lines(21), "[#1 вставлено 21 строка]");
         assert_eq!(t.agent_paste_chars_fmt(1500), "1500 символов");
         assert_eq!(t.agent_paste_chars_fmt(42), "42 символа");
+    }
+
+    /// One pasted line or one copied character reads as singular, not as
+    /// "1 Zeilen" or "(1 caracteres)".
+    #[test]
+    fn line_and_char_counts_agree_with_one() {
+        let cases = [
+            ("de", "1 Zeile", "2 Zeilen"),
+            ("es", "1 línea", "2 líneas"),
+            ("fr", "1 ligne", "2 lignes"),
+            ("pt", "1 linha", "2 linhas"),
+        ];
+        for (lang, one, two) in cases {
+            let t = RuntimeTranslation::new(lang).unwrap();
+            assert_eq!(t.agent_paste_lines_fmt(1), one, "{lang}");
+            assert_eq!(t.agent_paste_lines_fmt(2), two, "{lang}");
+        }
+        let es = RuntimeTranslation::new("es").unwrap();
+        assert_eq!(es.agent_paste_chars_fmt(1), "1 carácter");
+        assert_eq!(es.agent_paste_chars_fmt(5), "5 caracteres");
+        assert!(es.editor_copied_fmt("\"a\"", 1).ends_with("(1 carácter)"));
+        let pt = RuntimeTranslation::new("pt").unwrap();
+        assert_eq!(pt.agent_paste_chars_fmt(1), "1 caractere");
+        assert!(pt.editor_cut_fmt("\"ab\"", 2).ends_with("(2 caracteres)"));
+        let ru = RuntimeTranslation::new("ru").unwrap();
+        assert_eq!(ru.editor_replaced_fmt(1), "Заменено 1 вхождение");
+        assert_eq!(ru.editor_replaced_fmt(3), "Заменено 3 вхождения");
+        let en = RuntimeTranslation::new("en").unwrap();
+        assert_eq!(en.editor_replaced_fmt(1), "Replaced 1 occurrence");
+        assert_eq!(en.editor_replaced_fmt(4), "Replaced 4 occurrences");
     }
 
     #[test]

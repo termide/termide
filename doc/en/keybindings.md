@@ -75,7 +75,7 @@ On macOS every terminal treats `Option` as a **text-composition**
 modifier by default — Ghostty `macos-option-as-alt=false`, kitty
 `macos_option_as_alt no`, iTerm2 Option=Normal, Terminal.app "Use Option
 as Meta key" off. `Option+F` therefore arrives as the composed glyph `ƒ`
-with no ALT bit, and every `Alt+<letter>` default (about 25 global
+with no ALT bit, and every `Alt+<letter>` default (18 global
 actions) is unreachable. How far that reaches depends on the terminal: on
 Ghostty the keys that produce no text keep their ALT bit, so `Option+F9`,
 `Option+Up/Down` and `Option+Backspace` still work, while Terminal.app

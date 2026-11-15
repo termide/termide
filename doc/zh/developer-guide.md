@@ -58,7 +58,7 @@ nix build
 nix flake check
 ```
 
-开发 shell 从 `rust-toolchain.toml` 读取编译器版本，与 rustup 和 CI 使用同一个
+开发 shell 和 `nix build` 从 `rust-toolchain.toml` 读取编译器版本，与 rustup 和 CI 使用同一个
 文件，因此 Nix 与非 Nix 检出使用相同的编译器构建。
 
 #### 平台说明

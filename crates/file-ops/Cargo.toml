@@ -10,7 +10,7 @@ description = "Unified file operations system for termide with queue, progress, 
 [dependencies]
 dunce.workspace = true
 filetime = "0.2"
-thiserror = "2.0"
+thiserror.workspace = true
 log.workspace = true
 termide-vfs = { path = "../vfs" }
 termide-i18n = { path = "../i18n" }
@@ -19,4 +19,4 @@ tempfile.workspace = true
 trash = "5.3"
 
 [dev-dependencies]
-zip = { version = "9.1", default-features = false, features = ["deflate-flate2", "aes-crypto"] }
+zip = { workspace = true, features = ["deflate-flate2", "aes-crypto"] }
