@@ -587,6 +587,27 @@ fn items_render_and_cache_per_width() {
 }
 
 #[test]
+fn unfolded_tool_output_wraps_to_the_width() {
+    let colors = ThemeColors::default();
+    let mut transcript = Transcript::default();
+    transcript.set_fold(FoldMode::Never);
+    let long = format!("start {} end", "x".repeat(60));
+    transcript.push(Item::Tool {
+        call: call("shell", json!({ "command": "make" })),
+        result: Some(ToolResultMessage::text(&call("shell", json!({})), &long)),
+        live: None,
+        at: "12:00".into(),
+        duration_ms: Some(10),
+        waited_ms: None,
+        waiting: false,
+    });
+    let lines = text_of(transcript.lines(30, &colors, false));
+    assert!(lines.iter().all(|l| width_of(l) <= 30), "{lines:#?}");
+    assert!(lines.iter().any(|l| l.trim() == "start"));
+    assert!(lines.iter().any(|l| l.trim_end().ends_with("end")));
+}
+
+#[test]
 fn an_unfolded_call_says_who_decided_it_unless_the_rules_did() {
     let colors = ThemeColors::default();
     let mut transcript = Transcript::default();

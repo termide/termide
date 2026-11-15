@@ -591,7 +591,8 @@ streaming reasoning, a running tool call with its live output — is always show
 unfolded and folds only once it finishes. Your
 message reads as plain text on a faint background; the reasoning, the system
 prompt and a tool's output are dim text, except an edit's diff, which is
-coloured the way the Git diff panel colours one. Every step opens with its type
+coloured the way the Git diff panel colours one. A long line of output wraps
+to the panel width under its indent. Every step opens with its type
 glyph and a localized action in the same accent, then its subject: the
 reasoning as `@ Thinking` and its text, a shell call as `$ Running` and its
 command (dim, wrapped to the width), a file tool with its path

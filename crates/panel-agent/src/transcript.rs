@@ -1981,15 +1981,15 @@ fn edit_view(result: &ToolResultMessage) -> Option<EditView> {
     })
 }
 
-/// One indented line of tool output: dim, or — for an edit's diff — colored
-/// the way the git diff panel colors it, an added or removed line tinted
-/// across the whole row.
-fn output_line(
+/// One indented line of tool output, wrapped to `width` under its indent:
+/// dim, or — for an edit's diff — colored the way the git diff panel colors
+/// it, an added or removed line tinted across each of its rows.
+fn output_lines(
     line: &str,
     kind: Option<DiffKind>,
     width: u16,
     colors: &ThemeColors,
-) -> Line<'static> {
+) -> Vec<Line<'static>> {
     let style = match kind {
         None | Some(DiffKind::Summary | DiffKind::Hunk) => Style::default().fg(colors.disabled),
         Some(DiffKind::File) => Style::default().fg(colors.info),
@@ -2001,15 +2001,21 @@ fn output_line(
             .fg(colors.error)
             .bg(termide_ui::diff_line_bg(colors.error, colors.bg)),
     };
-    let mut spans = vec![Span::raw("  "), Span::styled(line.to_string(), style)];
-    if style.bg.is_some() {
-        let pad = (width as usize).saturating_sub(2 + width_of(line));
-        spans.push(Span::styled(" ".repeat(pad), style));
-    }
-    Line::from(spans)
+    let room = (width as usize).saturating_sub(2);
+    wrap_row(line, room)
+        .into_iter()
+        .map(|row| {
+            let pad = room.saturating_sub(width_of(&row));
+            let mut spans = vec![Span::raw("  "), Span::styled(row, style)];
+            if style.bg.is_some() {
+                spans.push(Span::styled(" ".repeat(pad), style));
+            }
+            Line::from(spans)
+        })
+        .collect()
 }
 
-/// One line of prose tool output, dim and indented like [`output_line`] but
+/// One line of prose tool output, dim and indented like [`output_lines`] but
 /// wrapped to `width`; a `- ` list item continues under its text.
 fn prose_output_lines(line: &str, width: u16, colors: &ThemeColors) -> Vec<Line<'static>> {
     let style = Style::default().fg(colors.disabled);
@@ -3084,10 +3090,11 @@ fn render_body(
             for (i, line) in all.iter().enumerate().take(end).skip(start) {
                 if peer || call.name == "question" || kind(i) == Some(DiffKind::Summary) {
                     // The answers, a message, and an edit's text outside a
-                    // diff (an error), are prose: they wrap rather than clip.
+                    // diff (an error), are prose: a list item hangs under
+                    // its text. Any other output wraps under its indent.
                     lines.extend(prose_output_lines(line, width, colors));
                 } else {
-                    lines.push(output_line(line, kind(i), width, colors));
+                    lines.extend(output_lines(line, kind(i), width, colors));
                 }
             }
             if end < all.len() {

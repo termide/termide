@@ -1,0 +1,1 @@
+- **An unfolded tool call's output wraps to the panel width.** A long line of a command's output, a file read or an edit's diff ran past the right edge of the agent panel and was cut off there; it now continues on the next rows under its indent, a diff line keeping its tint across each of them.
