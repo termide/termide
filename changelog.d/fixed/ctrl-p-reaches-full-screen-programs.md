@@ -1,0 +1,1 @@
+- **`Ctrl+P` reaches full-screen programs in a terminal.** The command palette took it even while vim, fzf or emacs had the screen, where it completes or moves up a line; with the alternate screen up the key now goes to the program, while at a shell prompt it still opens the palette. The terminal guide now lists the readline `Alt` keys that global actions take.

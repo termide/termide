@@ -339,7 +339,22 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
         &t.copy_command_output,
     );
 
+    let v = &config.viewer.keybindings;
+    push(&mut out, "viewer", "toggle_hex", &v.toggle_hex);
+    push(&mut out, "viewer", "toggle_view", &v.toggle_view);
+    push(&mut out, "viewer", "open_external", &v.open_external);
+
     out
+}
+
+/// The key table a binding is matched in. The viewer's hex and view toggles
+/// are matched in the editor's table too, ahead of the editor's own actions,
+/// so a clash with one of those is as much a same-section clash.
+fn dispatch_table(loc: &BindingLocation) -> &str {
+    match (loc.section.as_str(), loc.action.as_str()) {
+        ("viewer", "toggle_hex" | "toggle_view") => "editor",
+        (section, _) => section,
+    }
 }
 
 /// Detect every conflict (same-section, shadowed, ambient) in `config`.
@@ -355,11 +370,11 @@ pub fn find_conflicts(config: &Config) -> Vec<HotkeyConflict> {
             continue;
         }
         let display = locs[0].1.clone();
-        let sections: Vec<_> = locs.iter().map(|(l, _)| l.section.clone()).collect();
+        let sections: Vec<_> = locs.iter().map(|(l, _)| dispatch_table(l)).collect();
         let kind = if sections.windows(2).all(|w| w[0] == w[1]) {
             // All in the same section.
             ConflictKind::SameSection
-        } else if sections.iter().any(|s| s == "general") {
+        } else if sections.contains(&"general") {
             ConflictKind::CrossSectionShadowed
         } else {
             ConflictKind::CrossSectionAmbient
@@ -684,6 +699,24 @@ mod tests {
             // Smoke check parsed form is non-default.
             let _ = parsed.modifiers;
         }
+    }
+
+    /// The viewer's view toggle is matched in the editor's table ahead of the
+    /// editor's actions, so an editor action on its key never fired, unwarned.
+    #[test]
+    fn an_editor_action_on_the_view_toggle_s_key_is_a_clash() {
+        let mut cfg = Config::default();
+        cfg.normalize();
+        cfg.editor.keybindings.duplicate_line = Some(KeyBinding::Single("Ctrl+E".to_string()));
+        let clash = find_conflicts(&cfg)
+            .into_iter()
+            .find(|c| c.locations.iter().any(|l| l.action == "duplicate_line"))
+            .expect("Ctrl+E is reported");
+        assert_eq!(clash.kind, ConflictKind::SameSection);
+        assert!(clash
+            .locations
+            .iter()
+            .any(|l| l.section == "viewer" && l.action == "toggle_view"));
     }
 
     #[test]

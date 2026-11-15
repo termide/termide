@@ -1114,3 +1114,26 @@ fn a_saved_file_drops_its_backup_name() {
     editor.ensure_unsaved_buffer_file();
     assert_eq!(editor.unsaved_buffer_file(), None);
 }
+
+/// With the bar focused, its own `Ctrl+R` re-run took the key from the
+/// editor's `replace_current`, though the docs promise that key acts with or
+/// without the bar.
+#[test]
+fn the_replace_key_replaces_while_the_bar_has_focus() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let (mut editor, _file) = create_editor_with_content("hello\n");
+    let mut config = termide_config::Config::default();
+    config.normalize();
+    editor.hotkeys = build_editor_hotkey_table(&config);
+    let key = |code| KeyEvent::new(code, KeyModifiers::NONE);
+    editor.open_find_bar(false);
+    editor.handle_find_bar_key(key(KeyCode::Char('l')));
+    // The replace bar keeps the query and focuses its Replace field.
+    editor.open_find_bar(true);
+    editor.handle_find_bar_key(key(KeyCode::Char('x')));
+    assert_eq!(editor.find_bar.as_ref().unwrap().replace_text(), "x");
+    editor.handle_find_bar_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    // One `l` is replaced, the current match, the other kept.
+    assert_eq!(editor.buffer.text().matches('x').count(), 1);
+    assert_eq!(editor.buffer.text().matches('l').count(), 1);
+}

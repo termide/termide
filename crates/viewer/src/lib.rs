@@ -265,8 +265,16 @@ impl Viewer {
                 self.top = offset.min(self.line_count().saturating_sub(1));
                 CommandResult::NeedsRedraw(true)
             }
+            // The global copy key, whatever it is bound to: the selection.
             // While the find bar is open it owns the keyboard (Ctrl+C/X/V
             // reach it as keys); a terminal paste goes into its query too.
+            PanelCommand::Copy if self.find_bar.is_none() => {
+                let text = self.selected_text();
+                if !text.is_empty() {
+                    let _ = termide_ui::clipboard::copy(&text);
+                }
+                CommandResult::Handled(true)
+            }
             PanelCommand::PasteText { text } => match self.find_bar.as_mut() {
                 Some(bar) => {
                     if let Some(action) = bar.paste(&text) {

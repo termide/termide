@@ -1,0 +1,29 @@
+# A commit from the git status panel's commit window: it runs in the
+# background while a slow pre-commit hook works, then reports the new
+# commit's hash, not the last word of its subject (which once came back as
+# the "hash" and, cut mid-character, crashed termide).
+project empty
+start
+run "git init -q && echo a > a.txt && git add a.txt && git commit -qm init"
+run "printf '#!/bin/sh\nsleep 3\n' > .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit"
+run "echo b > a.txt && git add a.txt"
+key Alt+G
+wait "a.txt"
+# With only staged changes the buttons read Unstage all, Revert all, Log,
+# Diff, Push (a repository without upstream counts its commits ahead),
+# Commit: Shift+Tab to them and Right to Commit.
+key Shift+Tab Right Right Right Right Right Enter
+wait "Commit 1"
+type "Исправить проверку"
+key Tab Enter
+# The hook is still sleeping: the status bar says so and the interface
+# answers keys meanwhile.
+wait "Git commit..."
+key Alt+M
+wait "Projects"
+key Esc
+wait-re "Committed: [0-9a-f]{7}" 15
+expect-not "проверку]"
+run "git log -1 --format=%s | grep -qx 'Исправить проверку'"
+snapshot committed
+quit --force

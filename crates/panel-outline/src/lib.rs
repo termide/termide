@@ -297,6 +297,13 @@ impl Panel for OutlinePanel {
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
+            // The global copy key: the selected symbol's name.
+            PanelCommand::Copy => {
+                if let Some(symbol) = self.symbols.get(self.selected_index) {
+                    let _ = termide_clipboard::copy(&symbol.name);
+                }
+                CommandResult::Handled(true)
+            }
             PanelCommand::MarkStale => {
                 self.is_stale = true;
                 CommandResult::None
@@ -507,11 +514,9 @@ impl Panel for OutlinePanel {
         // No text input here: every key is a shortcut, matched on the
         // layout-normalized form so it works on a Cyrillic layout too.
         let key = chord.canonical;
-        // Ctrl+C: copy selected symbol name to clipboard
+        // Ctrl+C reaches here only when the global copy key is bound to
+        // something else; the copy itself comes as `PanelCommand::Copy`.
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            if let Some(symbol) = self.symbols.get(self.selected_index) {
-                let _ = termide_clipboard::copy(&symbol.name);
-            }
             return vec![];
         }
 

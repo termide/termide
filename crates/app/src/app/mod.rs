@@ -1351,6 +1351,7 @@ impl App {
 
             // Check background git operation result (push/pull)
             self.check_git_operation_result();
+            self.check_git_commits();
 
             // Check background command operation result (.report. commands)
             self.check_command_operation_result();

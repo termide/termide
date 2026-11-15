@@ -1401,7 +1401,6 @@ impl Translation for RuntimeTranslation {
         editor_save_before_preview,
         editor_save_before_hex,
         editor_nothing_to_cut,
-        editor_modified_on_disk,
         binary_search_too_large,
         image_no_graphics_reply,
         op_cancelled,
@@ -2160,6 +2159,13 @@ impl Translation for RuntimeTranslation {
         self.format("editor_file_opened", &[("filename", filename)])
     }
 
+    fn editor_modified_on_disk_fmt(&self, reload: &str, save_as: &str) -> String {
+        self.format(
+            "editor_modified_on_disk_fmt",
+            &[("reload", reload), ("save_as", save_as)],
+        )
+    }
+
     fn editor_search_match_info(&self, current: usize, total: usize) -> String {
         self.format(
             "editor_search_match_info",
@@ -2689,6 +2695,10 @@ impl Translation for RuntimeTranslation {
 
     fn git_push_in_progress(&self) -> String {
         self.get_string("git_push_in_progress").to_string()
+    }
+
+    fn git_commit_in_progress(&self) -> String {
+        self.get_string("git_commit_in_progress").to_string()
     }
 
     fn git_pull_in_progress(&self) -> String {
@@ -3665,6 +3675,7 @@ mod tests {
                     t.op_activity_copying().to_string(),
                     t.op_activity_trashing().to_string(),
                     t.git_push_in_progress(),
+                    t.git_commit_in_progress(),
                     t.git_pull_in_progress(),
                     t.git_fetch_in_progress(),
                     t.op_status_queued_fmt(3),

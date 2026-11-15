@@ -582,10 +582,7 @@ pub(super) fn enum_options(config: &Config, tab: SettingsTab, index: usize) -> O
             (values, labels, config.debug.console.clone())
         }
         (SettingsTab::Logging, 1) => {
-            let values: Vec<String> = ["trace", "debug", "info", "warn", "error"]
-                .iter()
-                .map(|s| s.to_string())
-                .collect();
+            let values: Vec<String> = LOG_LEVELS.iter().map(|s| s.to_string()).collect();
             (values.clone(), values, config.logging.min_level.clone())
         }
         (SettingsTab::Ai, 1) => {
@@ -972,12 +969,7 @@ pub(super) fn cycle_enum_forward(config: &mut Config, tab: SettingsTab, index: u
         },
         SettingsTab::Logging => {
             if index == 1 {
-                config.logging.min_level = match config.logging.min_level.as_str() {
-                    "debug" => "info".to_string(),
-                    "info" => "warn".to_string(),
-                    "warn" => "error".to_string(),
-                    _ => "debug".to_string(),
-                };
+                config.logging.min_level = step_log_level(&config.logging.min_level, true);
             }
         }
         SettingsTab::Ai => match index {
@@ -1033,12 +1025,7 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
         },
         SettingsTab::Logging => {
             if index == 1 {
-                config.logging.min_level = match config.logging.min_level.as_str() {
-                    "debug" => "error".to_string(),
-                    "info" => "debug".to_string(),
-                    "warn" => "info".to_string(),
-                    _ => "warn".to_string(),
-                };
+                config.logging.min_level = step_log_level(&config.logging.min_level, false);
             }
         }
         SettingsTab::Ai => match index {
@@ -1052,6 +1039,24 @@ pub(super) fn cycle_enum_backward(config: &mut Config, tab: SettingsTab, index: 
         },
         _ => {}
     }
+}
+
+/// The log levels in the order the field steps through them.
+const LOG_LEVELS: [&str; 5] = ["trace", "debug", "info", "warn", "error"];
+
+/// The level one step from `level`, wrapping at either end; an unknown
+/// level steps to `info`.
+fn step_log_level(level: &str, forward: bool) -> String {
+    let Some(at) = LOG_LEVELS.iter().position(|l| *l == level) else {
+        return "info".to_string();
+    };
+    let n = LOG_LEVELS.len();
+    let next = if forward {
+        (at + 1) % n
+    } else {
+        (at + n - 1) % n
+    };
+    LOG_LEVELS[next].to_string()
 }
 
 #[cfg(test)]
@@ -1195,6 +1200,20 @@ mod field_index_tests {
 #[cfg(test)]
 mod enum_option_tests {
     use super::*;
+
+    /// Left and Right skipped `trace`, though the list offers it.
+    #[test]
+    fn the_log_level_steps_through_every_level() {
+        let mut level = "error".to_string();
+        let mut seen = Vec::new();
+        for _ in 0..LOG_LEVELS.len() {
+            level = step_log_level(&level, true);
+            seen.push(level.clone());
+        }
+        assert_eq!(seen, ["trace", "debug", "info", "warn", "error"]);
+        assert_eq!(step_log_level("trace", false), "error");
+        assert_eq!(step_log_level("debug", false), "trace");
+    }
 
     /// Every field declared as an enum must be able to list its choices —
     /// otherwise its dropdown opens empty and the value becomes uneditable

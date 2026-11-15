@@ -86,6 +86,21 @@ impl App {
             ("editor", termide_panel_editor::SEND_TO_AGENT_ACTION) => {
                 &config.editor.keybindings.send_to_agent
             }
+            ("editor", termide_panel_editor::STAGE_CHANGE_ACTION) => {
+                &config.editor.keybindings.stage_change
+            }
+            ("editor", termide_panel_editor::UNSTAGE_CHANGE_ACTION) => {
+                &config.editor.keybindings.unstage_change
+            }
+            ("editor", termide_panel_editor::REVERT_CHANGE_ACTION) => {
+                &config.editor.keybindings.revert_change
+            }
+            ("editor", termide_panel_editor::FOLD_ALL_ACTION) => {
+                &config.editor.keybindings.fold_all
+            }
+            ("editor", termide_panel_editor::UNFOLD_ALL_ACTION) => {
+                &config.editor.keybindings.unfold_all
+            }
             ("terminal", termide_panel_terminal::SEND_TO_AGENT_ACTION) => {
                 &config.terminal.keybindings.send_to_agent
             }

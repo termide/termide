@@ -75,6 +75,8 @@ impl HelpGenerator {
     /// Generate help sections from configuration.
     pub fn generate(config: &Config) -> Vec<HelpSection> {
         let t = termide_i18n::t();
+        // The global copy key reaches these panels as their copy command.
+        let copy = Self::format_keys(&config.general.keybindings.copy);
 
         vec![
             Self::generate_global_section(&config.general.keybindings, t),
@@ -82,7 +84,7 @@ impl HelpGenerator {
             Self::generate_navigation_section(t),
             Self::generate_file_manager_section(&config.file_manager.keybindings, t),
             Self::generate_editor_section(&config.editor.keybindings, t),
-            Self::generate_viewers_section(&config.viewer.keybindings, t),
+            Self::generate_viewers_section(&config.viewer.keybindings, &copy, t),
             Self::generate_git_status_section(&config.git_status.keybindings, t),
             Self::generate_git_diff_section(&config.git_diff.keybindings, t),
             Self::generate_git_log_section(
@@ -91,11 +93,11 @@ impl HelpGenerator {
                 t,
             ),
             Self::generate_terminal_section(&config.terminal.keybindings, t),
-            Self::generate_agent_section(t),
+            Self::generate_agent_section(&copy, t),
             Self::generate_database_section(&config.database.keybindings, t),
-            Self::generate_diagnostics_section(t),
+            Self::generate_diagnostics_section(&copy, t),
             Self::generate_operations_section(t),
-            Self::generate_outline_section(t),
+            Self::generate_outline_section(&copy, t),
             Self::generate_references_section(t),
             Self::generate_image_section(t),
         ]
@@ -874,7 +876,7 @@ impl HelpGenerator {
     /// handling in `termide-panel-agent`'s `input.rs`, and the full table in
     /// `doc/en/agent.md`. Prompt editing keys shared by every text field and
     /// the `/` commands (listed by completion) are left out.
-    fn generate_agent_section(t: &dyn termide_i18n::Translation) -> HelpSection {
+    fn generate_agent_section(copy: &str, t: &dyn termide_i18n::Translation) -> HelpSection {
         let entry = |keys: &str, description: &str| HelpEntry {
             keys: keys.to_string(),
             description: description.to_string(),
@@ -893,7 +895,7 @@ impl HelpGenerator {
             entry("$", t.help_desc_agent_shell()),
             entry("Ctrl+↑↓ / PgUp / PgDn", t.help_desc_agent_scroll()),
             entry("Ctrl+Home / Ctrl+End", t.help_desc_agent_jump()),
-            entry("Ctrl+C", t.help_desc_agent_copy()),
+            entry(copy, t.help_desc_agent_copy()),
             entry("Ctrl+S", t.help_desc_agent_save()),
             entry("Space / ← / →", t.help_desc_agent_chat_fold()),
             entry("o", t.help_desc_agent_chat_open()),
@@ -993,14 +995,14 @@ impl HelpGenerator {
     }
 
     /// Generate diagnostics panel keybindings section.
-    fn generate_diagnostics_section(t: &dyn termide_i18n::Translation) -> HelpSection {
+    fn generate_diagnostics_section(copy: &str, t: &dyn termide_i18n::Translation) -> HelpSection {
         let entries = vec![
             HelpEntry {
                 keys: "Enter".to_string(),
                 description: t.help_desc_navigate().to_string(),
             },
             HelpEntry {
-                keys: "Ctrl+C".to_string(),
+                keys: copy.to_string(),
                 description: t.help_desc_copy_name().to_string(),
             },
             HelpEntry {
@@ -1038,14 +1040,14 @@ impl HelpGenerator {
     }
 
     /// Generate outline panel keybindings section.
-    fn generate_outline_section(t: &dyn termide_i18n::Translation) -> HelpSection {
+    fn generate_outline_section(copy: &str, t: &dyn termide_i18n::Translation) -> HelpSection {
         let entries = vec![
             HelpEntry {
                 keys: "Enter".to_string(),
                 description: t.help_desc_navigate().to_string(),
             },
             HelpEntry {
-                keys: "Ctrl+C".to_string(),
+                keys: copy.to_string(),
                 description: t.help_desc_copy_name().to_string(),
             },
         ];
@@ -1072,6 +1074,7 @@ impl HelpGenerator {
     /// Generate image viewer keybindings section.
     fn generate_viewers_section(
         kb: &ViewerKeybindings,
+        copy: &str,
         t: &dyn termide_i18n::Translation,
     ) -> HelpSection {
         let toggle = Self::format_keys(&kb.toggle_view);
@@ -1089,7 +1092,7 @@ impl HelpGenerator {
                 description: t.help_desc_viewer_reload().to_string(),
             },
             HelpEntry {
-                keys: "Ctrl+C".to_string(),
+                keys: copy.to_string(),
                 description: t.help_desc_viewer_copy().to_string(),
             },
             HelpEntry {

@@ -42,7 +42,7 @@ Opened with `Alt+P` or menu **Options → Settings**. The previous horizontal-ta
 - **Content area** — fields of the selected section, organised under `── Group ──` subheaders and separated by blank spacers
 - **Bottom buttons** — `Stored: Global / Project`, `Reset`, `Close`
 
-**Saving.** Every change applies and saves at once: a switch or a dropdown when it is set, a text or number field on `Enter`. There is no Apply button and nothing to cancel.
+**Saving.** Every change applies and saves at once: a switch or a dropdown when it is set, a text or number field on `Enter`. There is no Apply button and nothing to cancel. A number field left empty or holding something else than a number keeps its value. A few agent settings reach only the agent panels opened after the change (see [Configuring a model](agent.md#configuring-a-model)).
 
 **Where settings are stored.** The first button switches storage:
 - **Global** — `~/.config/termide/config.toml`, shared by every project.

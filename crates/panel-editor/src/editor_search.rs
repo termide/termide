@@ -449,16 +449,28 @@ impl Editor {
         &mut self,
         key: crossterm::event::KeyEvent,
     ) -> Vec<PanelEvent> {
-        use crossterm::event::{KeyCode, KeyModifiers};
-
-        // F3 / Shift+F3 step matches regardless of which field has focus.
-        if key.code == KeyCode::F(3) {
-            if key.modifiers.contains(KeyModifiers::SHIFT) {
-                self.search_prev();
-            } else {
-                self.search_next();
-            }
+        // The editor's own search keys act whichever field has focus, as
+        // configured: stepping through matches, and replacing once the bar
+        // has a Replace field (before the bar's `Ctrl+R` re-run takes it).
+        if self.hotkeys.matches("search_next", &key) {
+            self.search_next();
             return vec![PanelEvent::NeedsRedraw];
+        }
+        if self.hotkeys.matches("search_prev", &key) {
+            self.search_prev();
+            return vec![PanelEvent::NeedsRedraw];
+        }
+        let replacing = !self.config.read_only
+            && self
+                .search
+                .state
+                .as_ref()
+                .is_some_and(|s| s.replace_with.is_some());
+        if replacing && self.hotkeys.matches("replace_all", &key) {
+            return self.apply_find_bar_action(Some(FindBarAction::ReplaceAll), None);
+        }
+        if replacing && self.hotkeys.matches("replace_current", &key) {
+            return self.replace_current_event();
         }
 
         let Some(mut bar) = self.find_bar.take() else {
