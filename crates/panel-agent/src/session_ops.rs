@@ -169,7 +169,7 @@ impl AgentPanel {
             &self.reviewer,
             &self.side_models,
             &self.refusals,
-            self.persist_rule,
+            self.persist_rule.clone(),
             self.hooks.as_ref(),
             self.backend.as_ref(),
             self.checkpoints.clone(),

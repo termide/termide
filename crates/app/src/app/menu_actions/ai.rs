@@ -233,6 +233,7 @@ impl App {
         let cwd = self.project_root.clone();
         if let Some(panel) = crate::app::agent_panel::restore_agent_panel(
             &settings,
+            &self.project_root,
             cwd,
             Some(path),
             None,

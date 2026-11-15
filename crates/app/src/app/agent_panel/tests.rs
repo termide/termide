@@ -1163,11 +1163,38 @@ fn a_broken_config_is_left_for_a_hand_fix() {
     // The file is untouched, not appended to.
     assert_eq!(std::fs::read_to_string(&path).unwrap(), broken);
 }
+/// An "allow always in this project" rule goes to the panel's own project,
+/// not to whichever project is current (the process's working directory)
+/// when it is granted: a panel of a project in the background must not
+/// grant the current one.
+#[test]
+fn a_project_rule_goes_to_the_panel_s_project() {
+    let root = tempfile::tempdir().unwrap();
+    let root = root.path();
+    assert_ne!(std::env::current_dir().unwrap(), root);
+    let setup = agent_setup(
+        &AiSettings::default(),
+        root.join("sub"),
+        root,
+        DEFAULT_AGENT,
+        None,
+    );
+    let persist = setup.persist_rule.expect("rules are persisted");
+    persist("shell", "make *", Decision::Allow, PersistScope::Project);
+
+    let path = termide_project::trust_path(root).unwrap();
+    let kept = std::fs::read_to_string(&path).unwrap_or_default();
+    // Out of the user's data directory again before anything is checked.
+    let _ = std::fs::remove_dir_all(termide_project::project_dir(root).unwrap());
+    assert!(kept.contains("make *"), "{kept}");
+}
+
 #[test]
 fn restore_is_skipped_without_a_connection_to_run_on() {
     let mut settings = AiSettings::default();
     assert!(restore_agent_panel(
         &settings,
+        Path::new("/tmp"),
         PathBuf::from("/tmp"),
         None,
         None,

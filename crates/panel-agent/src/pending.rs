@@ -978,7 +978,7 @@ impl AgentPanel {
                     }
                     2 => {
                         self.rules.add("command", &script.name, Decision::Allow);
-                        if let Some(persist) = self.persist_rule {
+                        if let Some(persist) = &self.persist_rule {
                             persist(
                                 "command",
                                 &script.name,

@@ -159,6 +159,7 @@ impl App {
         let settings = self.state.config.ai.clone();
         let Some(mut panel) = restore_agent_panel(
             &settings,
+            &self.project_root,
             cwd.to_path_buf(),
             Some(copy.clone()),
             None,
@@ -282,9 +283,15 @@ impl App {
             .active_panel()
             .and_then(|panel| panel.downcast_ref::<AgentPanel>())
             .map(AgentPanel::panel_id);
-        let Some(panel) =
-            restore_numbered_agent_panel(&settings, new_cwd.clone(), moved, agent, setup, number)
-        else {
+        let Some(panel) = restore_numbered_agent_panel(
+            &settings,
+            &self.project_root,
+            new_cwd.clone(),
+            moved,
+            agent,
+            setup,
+            number,
+        ) else {
             return Ok(());
         };
         // The old panel lets its log go; it finds the file moved, and an
@@ -382,21 +389,24 @@ fn fork_title(title: Option<&str>, prompt: &str) -> String {
 /// no connection to run on any more; a session log that has gone missing starts a
 /// fresh session in the same project — on the `setup` saved for it when
 /// nothing was sent in it —, an agent definition that has gone missing falls
-/// back to the default one.
+/// back to the default one. `project_root` is the project the panel
+/// belongs to, which may lie above `cwd`.
 pub(crate) fn restore_agent_panel(
     settings: &AiSettings,
+    project_root: &Path,
     cwd: PathBuf,
     session: Option<PathBuf>,
     agent: Option<String>,
     setup: AgentSetupState,
 ) -> Option<AgentPanel> {
-    restore_numbered_agent_panel(settings, cwd, session, agent, setup, None)
+    restore_numbered_agent_panel(settings, project_root, cwd, session, agent, setup, None)
 }
 
 /// [`restore_agent_panel`] for a panel taking the place of the one numbered
 /// `panel_id`, whose number it keeps; `None` gives it a number of its own.
 fn restore_numbered_agent_panel(
     settings: &AiSettings,
+    project_root: &Path,
     cwd: PathBuf,
     session: Option<PathBuf>,
     agent: Option<String>,
@@ -438,11 +448,7 @@ fn restore_numbered_agent_panel(
             &setup,
         )
     });
-    // termide's project root is its working directory, which follows the
-    // current project; the layout restore runs off the App, so read it from
-    // the same source.
-    let project_root = std::env::current_dir().unwrap_or_else(|_| cwd.clone());
-    let mut panel_setup = agent_setup(settings, cwd, &project_root, agent, session);
+    let mut panel_setup = agent_setup(settings, cwd, project_root, agent, session);
     panel_setup.panel_id = panel_id;
     Some(AgentPanel::new(panel_setup))
 }
@@ -3397,7 +3403,14 @@ fn agent_setup(
             termide_config::FoldBlocks::OnFinish => FoldMode::OnFinish,
             termide_config::FoldBlocks::Never => FoldMode::Never,
         },
-        persist_rule: Some(persist_rule),
+        persist_rule: Some({
+            // The panel's own project, though another one is current when
+            // the rule is granted.
+            let project_root = project_root.to_path_buf();
+            Arc::new(move |tool: &str, pattern: &str, decision, scope| {
+                persist_rule(&project_root, tool, pattern, decision, scope)
+            })
+        }),
         session_dir,
         session,
         shell_run: Some(shell_run),
@@ -3778,7 +3791,7 @@ fn default_openai_base_url() -> String {
 }
 
 /// Persist an "allow always" rule as `[ai.permissions.<tool>]`: for the
-/// project, in termide's data directory under the current project
+/// project at `project_root`, in termide's data directory
 /// (`termide_project::granted_rules_path`) — never in the repository, whose
 /// config may not allow anything — or in the global configuration.
 ///
@@ -3787,15 +3800,18 @@ fn default_openai_base_url() -> String {
 /// table (two tables of the same name are invalid TOML and would break the
 /// whole file). `toml_edit` keeps the file's other settings, comments and
 /// layout intact.
-fn persist_rule(tool: &str, pattern: &str, decision: Decision, scope: PersistScope) {
+fn persist_rule(
+    project_root: &Path,
+    tool: &str,
+    pattern: &str,
+    decision: Decision,
+    scope: PersistScope,
+) {
     let path = match scope {
         // Not the project's own `.termide/config.toml`: the repository's
         // config may not allow anything, so the user's grants for it are
         // kept in termide's data instead.
-        PersistScope::Project => match std::env::current_dir()
-            .map_err(anyhow::Error::from)
-            .and_then(|cwd| termide_project::granted_rules_path(&cwd))
-        {
+        PersistScope::Project => match termide_project::granted_rules_path(project_root) {
             Ok(path) => path,
             Err(error) => {
                 log::warn!("cannot find where to keep the project's rules: {error}");

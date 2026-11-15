@@ -405,7 +405,7 @@ pub struct AgentPanelSetup {
     /// What the model reads when a call is refused, from
     /// `system/permissions.md`.
     pub refusals: Refusals,
-    /// Where "allow always" rules go; a plain function so it survives a
+    /// Where "allow always" rules go, kept by the panel so it survives a
     /// session switch. `None` keeps such rules in memory only.
     pub persist_rule: Option<PersistFn>,
     /// Directory holding this project's session logs; `None` runs without
@@ -430,9 +430,9 @@ pub struct AgentPanelSetup {
     pub on_limit: LimitPolicy,
 }
 
-/// Records an "allow always" rule outside the panel, in the project's or the
-/// global configuration.
-pub type PersistFn = fn(&str, &str, Decision, PersistScope);
+/// Records an "allow always" rule outside the panel, in the configuration
+/// of the panel's project or in the global one.
+pub type PersistFn = std::sync::Arc<dyn Fn(&str, &str, Decision, PersistScope) + Send + Sync>;
 
 /// Makes the extra hooks of one agent (command hooks from `hooks.toml`).
 pub type HooksFactory = Arc<dyn Fn() -> Box<dyn Hooks> + Send + Sync>;
@@ -1441,7 +1441,7 @@ impl AgentPanel {
             &setup.reviewer,
             &setup.side_models,
             &setup.refusals,
-            setup.persist_rule,
+            setup.persist_rule.clone(),
             setup.hooks.as_ref(),
             // No agent runs on another termide's session: an external one
             // would resume it beside the one running there.

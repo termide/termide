@@ -233,8 +233,8 @@ pub(crate) fn spawn_runtime(
         .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
         .with_refusals(refusals.clone());
     let mode = hooks.mode_handle();
-    if let Some(persist) = persist_rule {
-        hooks = hooks.with_persist(Box::new(persist) as PersistRule);
+    if let Some(persist) = &persist_rule {
+        hooks = hooks.with_persist(persist_hook(persist));
     }
     // The chain every call of termide's tools runs through, before the
     // permission decision: what the session switched off goes first, refused
@@ -287,8 +287,8 @@ pub(crate) fn spawn_runtime(
                 .with_mode_handle(mode.clone())
                 .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
                 .with_refusals(refusals.clone());
-        if let Some(persist) = persist_rule {
-            host_permissions = host_permissions.with_persist(Box::new(persist) as PersistRule);
+        if let Some(persist) = &persist_rule {
+            host_permissions = host_permissions.with_persist(persist_hook(persist));
         }
         let mut host_chain = guards(checkpoints.clone());
         host_chain.push(Box::new(host_permissions));
@@ -297,7 +297,7 @@ pub(crate) fn spawn_runtime(
             prompter: external_prompter.clone(),
             cancel: cancel.clone(),
             rules: backend_rules,
-            persist: persist_rule.map(|f| Box::new(f) as PersistRule),
+            persist: persist_rule.as_ref().map(persist_hook),
             mode: mode.clone(),
             system_prompt: backend_prompt,
             plan: plan_prompt.clone(),
@@ -544,4 +544,10 @@ pub(crate) fn hms_from_millis(ms: u64) -> String {
         chrono::offset::LocalResult::Single(dt) => dt.format("%H:%M:%S").to_string(),
         _ => String::new(),
     }
+}
+
+/// The permission hooks' handle on the panel's `persist`.
+fn persist_hook(persist: &PersistFn) -> PersistRule {
+    let persist = Arc::clone(persist);
+    Box::new(move |tool, pattern, decision, scope| persist(tool, pattern, decision, scope))
 }

@@ -398,10 +398,15 @@ fn construct_panel(
             session,
             agent,
             setup,
-        } => {
-            crate::app::agent_panel::restore_agent_panel(agent_settings, cwd, session, agent, setup)
-                .map(|p| Box::new(p) as Box<dyn Panel + Send>)
-        }
+        } => crate::app::agent_panel::restore_agent_panel(
+            agent_settings,
+            project_root,
+            cwd,
+            session,
+            agent,
+            setup,
+        )
+        .map(|p| Box::new(p) as Box<dyn Panel + Send>),
     }
 }
 
