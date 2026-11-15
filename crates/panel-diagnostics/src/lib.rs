@@ -336,6 +336,20 @@ impl Panel for DiagnosticsPanel {
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
+            // The global copy key: the selected diagnostic as `file:line:col: message`.
+            PanelCommand::Copy => {
+                if let Some(entry) = self.selected_entry() {
+                    let text = format!(
+                        "{}:{}:{}: {}",
+                        entry.file_path.display(),
+                        entry.line + 1,
+                        entry.column + 1,
+                        entry.message
+                    );
+                    let _ = termide_clipboard::copy(&text);
+                }
+                CommandResult::Handled(true)
+            }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {
                 self.scroll_offset = offset;
@@ -538,18 +552,9 @@ impl Panel for DiagnosticsPanel {
         // No text input here: every key is a shortcut, matched on the
         // layout-normalized form so it works on a Cyrillic layout too.
         let key = chord.canonical;
-        // Ctrl+C: copy selected diagnostic to clipboard
+        // Ctrl+C reaches here only when the global copy key is bound to
+        // something else; the copy itself comes as `PanelCommand::Copy`.
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            if let Some(entry) = self.selected_entry() {
-                let text = format!(
-                    "{}:{}:{}: {}",
-                    entry.file_path.display(),
-                    entry.line + 1,
-                    entry.column + 1,
-                    entry.message
-                );
-                let _ = termide_clipboard::copy(&text);
-            }
             return vec![];
         }
 

@@ -1401,7 +1401,6 @@ impl Translation for RuntimeTranslation {
         editor_save_before_preview,
         editor_save_before_hex,
         editor_nothing_to_cut,
-        editor_modified_on_disk,
         binary_search_too_large,
         image_no_graphics_reply,
         op_cancelled,
@@ -2158,6 +2157,13 @@ impl Translation for RuntimeTranslation {
 
     fn editor_file_opened(&self, filename: &str) -> String {
         self.format("editor_file_opened", &[("filename", filename)])
+    }
+
+    fn editor_modified_on_disk_fmt(&self, reload: &str, save_as: &str) -> String {
+        self.format(
+            "editor_modified_on_disk_fmt",
+            &[("reload", reload), ("save_as", save_as)],
+        )
     }
 
     fn editor_search_match_info(&self, current: usize, total: usize) -> String {

@@ -331,7 +331,7 @@ impl FindBar {
     fn sync_status(&mut self) {
         let status = self.info_text.clone().or_else(|| {
             self.match_info
-                .map(|(cur, total)| format!("{cur} of {total}"))
+                .map(|(cur, total)| termide_i18n::t().editor_search_match_info(cur, total))
         });
         self.inner.set_status(status);
     }

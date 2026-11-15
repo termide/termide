@@ -50,6 +50,8 @@ pub struct MermaidPanel {
     is_light: bool,
     hotkeys: HotkeyTable,
     last_config_ptr: usize,
+    /// Events of a command, which cannot return them: delivered on `tick`.
+    pending: Vec<PanelEvent>,
 }
 
 impl MermaidPanel {
@@ -72,6 +74,7 @@ impl MermaidPanel {
             is_light: false,
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
+            pending: Vec::new(),
         };
         panel.set_file(path);
         Ok(panel)
@@ -235,8 +238,18 @@ impl Panel for MermaidPanel {
         "mermaid"
     }
 
+    fn tick(&mut self) -> Vec<PanelEvent> {
+        std::mem::take(&mut self.pending)
+    }
+
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
+            // The global copy key, whatever it is bound to: the diagram.
+            PanelCommand::Copy => {
+                let events = self.copy_to_clipboard();
+                self.pending.extend(events);
+                CommandResult::Handled(true)
+            }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { axis, offset } => {
                 match axis {
@@ -351,10 +364,9 @@ impl Panel for MermaidPanel {
         if self.hotkeys.matches("toggle_view", &key) {
             return vec![PanelEvent::SwapActiveToText(self.file_path.clone())];
         }
-        // Copy the whole diagram: `y` (yank) or Ctrl+C.
-        if matches!(key.code, KeyCode::Char('y'))
-            || (key.code == KeyCode::Char('c') && key.modifiers.contains(KeyModifiers::CONTROL))
-        {
+        // Copy the whole diagram: `y` (yank) here, the global copy key as
+        // `PanelCommand::Copy`.
+        if matches!(key.code, KeyCode::Char('y')) {
             return self.copy_to_clipboard();
         }
         // Ctrl+S: export the diagram source to a chosen file (Save As).
@@ -488,6 +500,7 @@ mod tests {
             is_light: false,
             hotkeys: HotkeyTable::default(),
             last_config_ptr: 0,
+            pending: Vec::new(),
         };
         p.rebuild();
         p

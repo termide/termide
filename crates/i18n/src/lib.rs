@@ -2139,7 +2139,8 @@ pub trait Translation: Send + Sync {
     fn editor_save_before_preview(&self) -> &str;
     fn editor_save_before_hex(&self) -> &str;
     fn editor_nothing_to_cut(&self) -> &str;
-    fn editor_modified_on_disk(&self) -> &str;
+    /// `reload` and `save_as` are the keys bound to those editor actions.
+    fn editor_modified_on_disk_fmt(&self, reload: &str, save_as: &str) -> String;
     fn binary_search_too_large(&self) -> &str;
     fn image_no_graphics_reply(&self) -> &str;
     fn op_cancelled(&self) -> &str;

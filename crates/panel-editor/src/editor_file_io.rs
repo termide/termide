@@ -28,14 +28,18 @@ impl Editor {
         )>,
     > {
         // Check for external modification conflict. There is no in-place
-        // force-save shortcut (Ctrl+Shift+S is Save As), so point the user at
-        // the actions that actually exist: reload to take the disk version, or
+        // force-save shortcut, so point the user at the actions that exist,
+        // on the keys they are bound to: reload to take the disk version, or
         // Save As to write elsewhere. Overwriting in place is offered by the
         // conflict dialog when closing the editor.
         if self.file_state.external_change_detected {
-            return Err(anyhow::anyhow!(termide_i18n::t()
-                .editor_modified_on_disk()
-                .to_string()));
+            let key = |action: &str| match self.hotkeys.display(action) {
+                keys if keys.is_empty() => "—".to_string(),
+                keys => keys,
+            };
+            return Err(anyhow::anyhow!(
+                termide_i18n::t().editor_modified_on_disk_fmt(&key("reload"), &key("save_as"))
+            ));
         }
 
         // Handle remote file saves

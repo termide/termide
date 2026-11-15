@@ -695,10 +695,9 @@ impl Panel for PluginListPanel {
         // No text input here: every key is a shortcut, matched on the
         // layout-normalized form so it works on any keyboard layout.
         let key = chord.canonical;
+        // Ctrl+C reaches here only when the global copy key is bound to
+        // something else; the copy itself comes as `PanelCommand::Copy`.
         if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
-            if let Some(text) = self.row_text(self.selected) {
-                let _ = termide_clipboard::copy(&text);
-            }
             return vec![];
         }
         if self.hotkeys.matches_canonical("refresh", &key) {
@@ -798,6 +797,13 @@ impl Panel for PluginListPanel {
 
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         match cmd {
+            // The global copy key: the selected row's text.
+            PanelCommand::Copy => {
+                if let Some(text) = self.row_text(self.selected) {
+                    let _ = termide_clipboard::copy(&text);
+                }
+                CommandResult::Handled(true)
+            }
             PanelCommand::GetScrollBars => CommandResult::ScrollBars(self.scrollbars),
             PanelCommand::SetScrollOffset { offset, .. } => {
                 self.scroll = offset;
