@@ -1,5 +1,5 @@
 //! Carrying a project's session logs along when the project's directory is
-//! moved or copied.
+//! moved or copied, and deleting them with the project.
 //!
 //! The logs of a project are filed under its path (see
 //! `termide_project::project_key`), those of directories inside it nested
@@ -92,6 +92,44 @@ pub fn relocate_sessions(relocation: SessionsRelocation) -> io::Result<HashMap<P
         }
     }
     Ok(logs.into_iter().collect())
+}
+
+/// Whether the session directory `dir` holds a session log of its own, not
+/// counting those of the directories nested in it.
+pub fn has_sessions(dir: &Path) -> bool {
+    std::fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            entry.file_type().is_ok_and(|t| t.is_file())
+                && entry.path().extension().is_some_and(|ext| ext == "jsonl")
+        })
+    })
+}
+
+/// Delete the sessions filed in the session directory `dir` — its files and
+/// their checkpoints — keeping those of the directories nested in it, and
+/// `dir` itself when they leave it non-empty.
+///
+/// # Errors
+///
+/// When an entry cannot be deleted.
+pub fn delete_sessions(dir: &Path) -> io::Result<()> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let path = entry.path();
+        if !entry.file_type()?.is_dir() {
+            std::fs::remove_file(&path)?;
+        } else if entry.file_name() == CHECKPOINTS_DIR {
+            std::fs::remove_dir_all(&path)?;
+        }
+    }
+    // Left non-empty by nested sessions, it stays.
+    let _ = std::fs::remove_dir(dir);
+    Ok(())
 }
 
 /// Whether `rel`, relative to a session directory, lies among checkpoints.
@@ -313,6 +351,30 @@ mod tests {
                 )
             })
             .collect()
+    }
+
+    /// Deleting a project's sessions takes its logs and checkpoints and
+    /// leaves those of a directory nested in it.
+    #[test]
+    fn deleting_keeps_the_nested_sessions() {
+        let fx = Fixture::new();
+        let nested_dir = fx.from_dir.join("sub");
+        let (own, _) = fx.log(&fx.from_dir, &fx.from_root);
+        let (nested, _) = fx.log(&nested_dir, &fx.from_root.join("sub"));
+        assert!(has_sessions(&fx.from_dir));
+
+        delete_sessions(&fx.from_dir).unwrap();
+
+        assert!(!own.exists());
+        assert!(!fx.from_dir.join(CHECKPOINTS_DIR).exists());
+        assert!(!has_sessions(&fx.from_dir));
+        assert!(nested.exists());
+        assert!(nested_dir.join(CHECKPOINTS_DIR).exists());
+
+        delete_sessions(&nested_dir).unwrap();
+        assert!(!nested_dir.exists());
+        // Nothing left to delete is no error.
+        delete_sessions(&nested_dir).unwrap();
     }
 
     /// A move keeps the logs' names and ids, points their headers and

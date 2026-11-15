@@ -162,6 +162,21 @@ pub struct App {
     recent_destinations: recent_destinations::RecentDestinations,
 }
 
+/// Where this run logs: a new file in the `logs/` of the project it starts
+/// in, after the store dropped the logs no run wrote to for a day; the
+/// system temp directory when there is no data directory.
+fn project_log_path(project_root: &std::path::Path) -> std::path::PathBuf {
+    termide_project::sweep_store();
+    termide_project::project_dir(project_root)
+        .map(|dir| termide_project::new_log_path(&dir))
+        .unwrap_or_else(|_| {
+            std::env::temp_dir().join(format!(
+                "termide-{}",
+                termide_project::generate_log_filename()
+            ))
+        })
+}
+
 /// Keep the windows external agents report in `<config>/ai/acp-windows.json`,
 /// for sizing what a new session of one is told of a conversation it joins.
 fn remember_agent_windows() {
@@ -197,15 +212,7 @@ impl App {
         let log_file_path = if let Some(ref path) = state.config.logging.file_path {
             std::path::PathBuf::from(path)
         } else {
-            termide_project::ProjectLayout::get_project_dir(&project_root)
-                .map(|dir| {
-                    // Cleanup old log files (older than 24 hours)
-                    let _ = termide_project::cleanup_old_logs(&dir);
-                    dir.join(termide_project::generate_log_filename())
-                })
-                .unwrap_or_else(|_| {
-                    std::env::temp_dir().join(termide_project::generate_log_filename())
-                })
+            project_log_path(&project_root)
         };
         let min_log_level = termide_logger::LogLevel::from_str(&state.config.logging.min_level)
             .ok()
@@ -227,12 +234,6 @@ impl App {
             Err(e) => {
                 log::error!("Failed to initialize watcher: {}", e);
             }
-        }
-
-        // Clean up old project layouts (configurable retention period)
-        let retention_days = state.config.general.project_retention_days;
-        if let Err(e) = termide_project::cleanup_old_projects(&project_root, retention_days) {
-            log::warn!("Failed to cleanup old project layouts: {}", e);
         }
 
         Self {
@@ -307,14 +308,7 @@ impl App {
         let log_file_path = if let Some(ref path) = state.config.logging.file_path {
             std::path::PathBuf::from(path)
         } else {
-            termide_project::ProjectLayout::get_project_dir(&project_root)
-                .map(|dir| {
-                    let _ = termide_project::cleanup_old_logs(&dir);
-                    dir.join(termide_project::generate_log_filename())
-                })
-                .unwrap_or_else(|_| {
-                    std::env::temp_dir().join(termide_project::generate_log_filename())
-                })
+            project_log_path(&project_root)
         };
         let min_log_level = termide_logger::LogLevel::from_str(&state.config.logging.min_level)
             .ok()
@@ -336,12 +330,6 @@ impl App {
             Err(e) => {
                 log::error!("Failed to initialize watcher: {}", e);
             }
-        }
-
-        // Clean up old project layouts
-        let retention_days = state.config.general.project_retention_days;
-        if let Err(e) = termide_project::cleanup_old_projects(&project_root, retention_days) {
-            log::warn!("Failed to cleanup old project layouts: {}", e);
         }
 
         // Warn about same-section conflicts and bindings that need

@@ -489,7 +489,7 @@ Termide следует [спецификации XDG Base Directory](https://spe
 - macOS: `~/Library/Application Support/termide/projects/`
 - Windows: `%APPDATA%\termide\projects\`
 
-**Расположение файла логов:** каждый запуск пишет свой `session-<date>-<time>.log`
+**Расположение файла логов:** каждый запуск пишет свой `logs/<date>-<time>.log`
 в каталог проекта внутри расположения данных проектов, указанного выше; логи
 старше 24 часов удаляются. `logging.file_path` заменяет это одним фиксированным
 файлом.
@@ -506,7 +506,6 @@ Termide следует [спецификации XDG Base Directory](https://spe
 theme = "windows-xp"
 language = "auto"  # auto, bn, de, en, es, fr, hi, id, ja, ko, pt, ru, th, tr, vi, zh
 vim_mode = false
-project_retention_days = 30
 bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # экземпляр переживает закрытие терминала (Unix)

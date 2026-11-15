@@ -614,44 +614,75 @@ leaves the actor free to serve other panels' metadata requests.
 
 Each project's panel layout is saved and restored (`ProjectLayout`):
 
-**Storage Location:**
-- Linux: `~/.local/share/termide/projects/<project_path>/session.toml`
-- macOS: `~/Library/Application Support/termide/projects/<project_path>/session.toml`
+**Storage Location:** everything termide keeps for a project, but its agent
+sessions, lives in one flat directory per project
+(`crates/project/src/store.rs`):
 
-A data directory from before the rename, `sessions/`, is moved to `projects/`
-on the first start. Whatever an older termide writes to `sessions/` after that
-is folded into `projects/` on the next start, the newer of two copies of a file
-winning. The **Journal** panel reports each move and any failure.
+- Linux: `~/.local/share/termide/projects/<name>-<hash>/`
+- macOS: `~/Library/Application Support/termide/projects/<name>-<hash>/`
+
+`<name>` is the root's directory name reduced to `[A-Za-z0-9_-]`, `<hash>` 12
+hex digits of the root's canonical path, so no character of a path needs
+escaping. The root itself is read from `project.toml`, never from the name.
+
+```
+projects/<name>-<hash>/
+├── project.toml   # root = "/path"; [layout]
+├── trust.toml     # [ai.permissions] "allow always" rules; [approved]
+├── owner.lock     # held by the instance that has the project open
+├── owner.toml     # which instance that is
+├── logs/          # <date>-<time>.log, one per run, kept 24 hours
+└── buffers/       # <date>-<time>.txt, unsaved editor contents
+```
+
+The agent sessions stay under `ai/sessions/<project path>/`, beside the
+agents. A project lives as long as the user keeps it: deleting it from the
+Projects menu or the switcher (`F8`) removes its directory, and its agent
+sessions too when the user says so. Nothing is deleted by age but the logs; a
+directory left with nothing in it is dropped at startup.
+
+A delete or a move first claims the project's `owner.lock`, so a project open
+in another instance is never taken from under it, and the lock file goes last,
+still held.
+
+A data directory from before this layout — `sessions/`, or `projects/` as a
+tree mirroring the project paths with `session.toml`, `session-*.log` and
+`unsaved-*` files, plus the `trust/` and `locks/` trees — is folded into it on
+the first start; the **Journal** panel reports each move and any failure. An
+older termide running beside a newer one does not see the other's locks.
 
 **Features:**
 - Automatic layout save on exit
 - Panel layout restoration on startup
 - Project switching via the Projects menu
-- Retention (`project_retention_days`) with automatic cleanup of old layouts
+- Projects whose root no longer exists are marked ✗ in the menu
 
-The file keeps its historical name, `session.toml`. It is replaced atomically
-(written to a temporary file, synced, renamed), as are the backups of unsaved
-buffers beside it, so a crash never leaves half a file. A `session.toml` that
-cannot be parsed — damaged, or written by a newer termide — is renamed to
-`session.toml.broken-<time>` and reported in the **Journal**; the project then
-opens in the default layout with its unsaved buffers recovered as editor
-panels, and the next save writes a fresh file without destroying the old one.
+`project.toml` is replaced atomically (written to a temporary file, synced,
+renamed), as are the unsaved buffers, so a crash never leaves half a file. A
+`project.toml` that cannot be parsed — damaged, or written by a newer termide
+— is renamed to `project.toml.broken-<time>` and reported in the **Journal**;
+the project then opens in the default layout with its unsaved buffers
+recovered as editor panels, and the next save writes a fresh file without
+destroying the old one.
 
 **Layout File Format:**
 ```toml
+root = "/home/user/project"
+
+[layout]
 focused_group = 0
 
-[[panel_groups]]
+[[layout.panel_groups]]
 expanded_index = 1            # focused panel within the group
 width = 80                    # column width (None = auto-distribute)
 split_heights = [12, 6]       # per-panel heights (omitted when uncached)
 fullscreen_cache = [10, 8]    # heights to restore on Alt+F11 toggle-off
 
-[[panel_groups.panels]]
+[[layout.panel_groups.panels]]
 type = "file_manager"
 path_or_url = "/home/user/project"
 
-[[panel_groups.panels]]
+[[layout.panel_groups.panels]]
 type = "editor"
 path = "/home/user/project/main.rs"
 ```
@@ -744,7 +775,7 @@ the app's `VaultState`. See `doc/en/passwords.md` for the user view.
 ## Debugging Architecture
 
 **Log System:**
-- Each run logs to its own `session-*.log` in the project's data directory, or to `[logging] file_path` (see the developer guide)
+- Each run logs to its own file in the project's `logs/` directory, or to `[logging] file_path` (see the developer guide)
 - Levels: trace, debug, info, warn, error
 - Timestamp and component prefixes
 - Logs older than 24 hours are removed at startup
@@ -789,7 +820,8 @@ termide runs, where a key is sent, or how freely the agent acts.
   approved as they are configured (`agent_core::approvals`), and its agents
   start only in `plan` or `ask` and are never external ones
 - What the user decides for a project — approvals, "allow always" rules — is
-  kept under `trust/` in termide's data directory, never in the project
+  kept in the project's `trust.toml` in termide's data directory, never in
+  the project
 
 ## Conclusion
 

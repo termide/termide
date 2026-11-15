@@ -9,12 +9,20 @@ use std::path::{Path, PathBuf};
 
 mod maintenance;
 pub use maintenance::*;
+mod migrate;
+pub use migrate::migrate_legacy_layouts;
 mod open_list;
 pub use open_list::{load_open_projects, save_open_projects, SavedOpenProjects};
 mod ownership;
 mod relocate;
+mod store;
 pub use ownership::{claim_project, project_owner, Owner, ProjectClaim};
-pub use relocate::relocate_project_state;
+pub use relocate::{rehome_project_state, relocate_project_state};
+use store::PROJECT_FILE;
+pub use store::{
+    delete_project, list_all_projects, project_dir, project_id, sweep_store, trust_path,
+    DeleteError, ProjectInfo,
+};
 
 /// The saved layout of a project: its panels, restored on the next start
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -78,7 +86,7 @@ pub enum PanelState {
     Editor {
         /// File path (None for unnamed/scratch buffers)
         path: Option<PathBuf>,
-        /// Temporary file name for unsaved buffers (format: unsaved-YYYYMMDD-HHIISS-MSEC.txt)
+        /// File name of the unsaved changes in the project's `buffers/`
         #[serde(skip_serializing_if = "Option::is_none")]
         unsaved_buffer_file: Option<String>,
     },
@@ -208,11 +216,15 @@ impl AgentSetupState {
     }
 }
 
-/// The relative path a project's data is filed under: its canonical path
-/// with the root components stripped (leading `/` on Unix; drive prefix and
-/// `\` on Windows), so joining it onto a base directory nests rather than
-/// replaces. `Component::Prefix` covers `C:` and `\\server\share`,
+/// The relative path a directory's agent session logs are filed under (see
+/// `termide_agent_core`): its canonical path with the root components
+/// stripped (leading `/` on Unix; drive prefix and `\` on Windows), so
+/// joining it onto a base directory nests rather than replaces.
+/// `Component::Prefix` covers `C:` and `\\server\share`,
 /// `Component::RootDir` covers `/` and `\`.
+///
+/// The project store does not use it: projects are kept side by side, see
+/// [`project_id`].
 #[must_use]
 pub fn project_key(project_root: &Path) -> PathBuf {
     let canonical =
@@ -228,36 +240,27 @@ pub fn project_key(project_root: &Path) -> PathBuf {
         .collect()
 }
 
-/// Where termide keeps what the user decided about a project, apart from
-/// the project itself: a repository's own files must not be able to grant
-/// anything.
-const TRUST_DIR: &str = "trust";
-
 /// The file holding the "allow always" permission rules given for the
-/// project at `project_root`, in the shape of `[ai.permissions]`.
+/// project at `project_root`, in the shape of `[ai.permissions]`: its
+/// [`trust_path`].
 ///
 /// # Errors
 ///
 /// When there is no data directory.
 pub fn granted_rules_path(project_root: &Path) -> Result<PathBuf> {
-    Ok(get_data_dir()?
-        .join(TRUST_DIR)
-        .join(project_key(project_root))
-        .join("permissions.toml"))
+    trust_path(project_root)
 }
 
 /// The file holding the launches approved for the project at
 /// `project_root`: the MCP servers and hooks it brings (see
-/// `termide_agent_core::approvals`).
+/// `termide_agent_core::approvals`), under `[approved]` in its
+/// [`trust_path`].
 ///
 /// # Errors
 ///
 /// When there is no data directory.
 pub fn approvals_path(project_root: &Path) -> Result<PathBuf> {
-    Ok(get_data_dir()?
-        .join(TRUST_DIR)
-        .join(project_key(project_root))
-        .join("approved.toml"))
+    trust_path(project_root)
 }
 
 /// Get the data directory for termide.
@@ -267,136 +270,31 @@ pub(crate) fn get_data_dir() -> Result<PathBuf> {
         .context("Failed to determine data directory")
 }
 
-/// Directory holding every project's saved layout.
-///
-/// Before the rename this was `sessions`; [`migrate_legacy_layouts`] moves
-/// the old tree across at startup so saved layouts survive an upgrade.
-pub(crate) const PROJECTS_DIR: &str = "projects";
-const LEGACY_PROJECTS_DIR: &str = "sessions";
-
-/// Move the saved layouts of a termide older than the rename into place.
-///
-/// Runs once at startup, before the logger is up, so the outcome is returned
-/// for the caller to log rather than logged here. Run on every launch: an
-/// older termide may have written `sessions/` again since the last one.
-pub fn migrate_legacy_layouts() -> Vec<(log::Level, String)> {
-    match get_data_dir() {
-        Ok(data_dir) => migrate_legacy_dir(&data_dir),
-        Err(_) => Vec::new(),
-    }
+/// What `project.toml` holds as it is written: the root, then the layout.
+#[derive(Serialize)]
+struct ProjectFileOut<'a> {
+    root: &'a Path,
+    layout: &'a ProjectLayout,
 }
 
-/// Move `<data>/sessions` to `<data>/projects`, or fold it into `projects`
-/// when both exist. Failures are reported, never fatal: a fresh directory is
-/// created instead and only the old layouts are lost.
-fn migrate_legacy_dir(data_dir: &Path) -> Vec<(log::Level, String)> {
-    let legacy = data_dir.join(LEGACY_PROJECTS_DIR);
-    let current = data_dir.join(PROJECTS_DIR);
-    if !legacy.is_dir() {
-        return Vec::new();
-    }
-    let (from, to) = (legacy.display(), current.display());
-    if !current.exists() {
-        return vec![match std::fs::rename(&legacy, &current) {
-            Ok(()) => (
-                log::Level::Info,
-                format!("moved saved layouts from {from} to {to}"),
-            ),
-            Err(e) => (
-                log::Level::Warn,
-                format!("could not move {from} to {to}: {e}"),
-            ),
-        }];
-    }
-    // Both exist: an older termide kept writing to the legacy directory after
-    // the move. Fold what it left into the current one and drop the shell.
-    vec![match merge_move(&legacy, &current) {
-        Ok(()) => (
-            log::Level::Info,
-            format!("folded saved layouts from {from} into {to}"),
-        ),
-        Err(e) => (
-            log::Level::Warn,
-            format!("could not fold {from} into {to}: {e}"),
-        ),
-    }]
-}
-
-/// Move everything under `src` into `dst`, recursing into directories that
-/// exist on both sides and keeping the newer of two files with the same
-/// name. Directories emptied on the way are removed, `src` included.
-fn merge_move(src: &Path, dst: &Path) -> std::io::Result<()> {
-    for entry in std::fs::read_dir(src)? {
-        let entry = entry?;
-        let from = entry.path();
-        let to = dst.join(entry.file_name());
-        if !to.exists() {
-            std::fs::rename(&from, &to)?;
-        } else if from.is_dir() && to.is_dir() {
-            merge_move(&from, &to)?;
-        } else if from.is_file() && to.is_file() {
-            let newer = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-            if newer(&from) > newer(&to) {
-                std::fs::rename(&from, &to)?;
-            } else {
-                std::fs::remove_file(&from)?;
-            }
-        }
-    }
-    // Only an empty directory goes; anything unexpected stays for the user.
-    let _ = std::fs::remove_dir(src);
-    Ok(())
-}
-
-/// Remove the files of the project stored in `project_dir`, then the
-/// directories left empty up to `projects_dir`.
-///
-/// Storage directories nest like the project paths they mirror, so the
-/// subdirectories of `project_dir` hold the state of projects inside this
-/// one and are kept.
-fn delete_project_files(project_dir: &Path, projects_dir: &Path) -> std::io::Result<()> {
-    if !project_dir.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(project_dir)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            fs::remove_file(entry.path())?;
-        }
-    }
-    let mut dir = project_dir;
-    while dir != projects_dir && dir.starts_with(projects_dir) && fs::remove_dir(dir).is_ok() {
-        match dir.parent() {
-            Some(parent) => dir = parent,
-            None => break,
-        }
-    }
-    Ok(())
+/// What `project.toml` holds as it is read. The root is the store's to
+/// know; a file without a layout is a project with none saved.
+#[derive(Deserialize)]
+struct ProjectFileIn {
+    #[serde(default)]
+    layout: Option<ProjectLayout>,
 }
 
 impl ProjectLayout {
-    /// Get the storage directory for a specific project
-    ///
-    /// Creates nested subdirectories matching the project path with root stripped.
-    /// Example (Unix):    /home/user/project1 -> ~/.local/share/termide/projects/home/user/project1/
-    /// Example (Windows): C:\Users\user\proj  -> %APPDATA%\termide\projects\Users\user\proj\
+    /// The directory the project at `project_root` is kept in, see
+    /// [`project_dir`].
     pub fn get_project_dir(project_root: &Path) -> Result<PathBuf> {
-        Ok(get_data_dir()?
-            .join(PROJECTS_DIR)
-            .join(project_key(project_root)))
+        project_dir(project_root)
     }
 
-    /// Get the path to the layout file (`session.toml`) of a specific project
+    /// The file holding the project's root and layout (`project.toml`).
     pub fn get_project_path(project_root: &Path) -> Result<PathBuf> {
-        Ok(Self::get_project_dir(project_root)?.join("session.toml"))
-    }
-
-    /// Delete the stored state of a specific project.
-    pub fn delete_layout(project_root: &Path) -> Result<()> {
-        let project_dir = Self::get_project_dir(project_root)?;
-        let projects_dir = get_data_dir()?.join(PROJECTS_DIR);
-        delete_project_files(&project_dir, &projects_dir)
-            .with_context(|| format!("Failed to delete project layout: {}", project_dir.display()))
+        Ok(project_dir(project_root)?.join(PROJECT_FILE))
     }
 
     /// Load the saved layout of a specific project
@@ -404,9 +302,10 @@ impl ProjectLayout {
         let path = Self::get_project_path(project_root)?;
         let contents = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read layout file: {}", path.display()))?;
-        let layout: ProjectLayout = toml::from_str(&contents)
+        let file: ProjectFileIn = toml::from_str(&contents)
             .with_context(|| format!("Failed to parse layout file: {}", path.display()))?;
-        Ok(layout)
+        file.layout
+            .with_context(|| format!("No layout saved in {}", path.display()))
     }
 
     /// Load the saved layout of a project to restore it, as [`Self::load`]
@@ -421,32 +320,36 @@ impl ProjectLayout {
     /// Save this layout for a specific project
     pub fn save(&self, project_root: &Path) -> Result<()> {
         let project_dir = Self::get_project_dir(project_root)?;
-
-        // Ensure the project directory exists
         fs::create_dir_all(&project_dir).with_context(|| {
             format!(
                 "Failed to create project directory: {}",
                 project_dir.display()
             )
         })?;
-
-        let path = project_dir.join("session.toml");
-        let contents = toml::to_string_pretty(self).context("Failed to serialize layout")?;
-
+        let path = project_dir.join(PROJECT_FILE);
+        let contents = toml::to_string_pretty(&ProjectFileOut {
+            root: project_root,
+            layout: self,
+        })
+        .context("Failed to serialize layout")?;
         termide_fsutil::write_atomic(&path, contents.as_bytes())
             .with_context(|| format!("Failed to write layout file: {}", path.display()))?;
-
         Ok(())
     }
 }
 
-/// Parse the layout file at `path`; when it is there but unreadable as a
-/// layout, rename it to `session.toml.broken-<local time>` beside itself.
+/// Parse the layout in the `project.toml` at `path`; when the file is there
+/// but unreadable, rename it to `project.toml.broken-<local time>` beside
+/// itself.
 fn load_or_set_aside(path: &Path) -> Result<ProjectLayout> {
     let contents = fs::read_to_string(path)
         .with_context(|| format!("Failed to read layout file: {}", path.display()))?;
-    let error = match toml::from_str::<ProjectLayout>(&contents) {
-        Ok(layout) => return Ok(layout),
+    let error = match toml::from_str::<ProjectFileIn>(&contents) {
+        Ok(file) => {
+            return file
+                .layout
+                .with_context(|| format!("No layout saved in {}", path.display()))
+        }
         Err(e) => e,
     };
     let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f");
@@ -473,12 +376,12 @@ mod tests {
     use super::*;
 
     /// A layout that does not parse is moved aside, not left to be
-    /// overwritten by the default layout's first save; a readable one and a
-    /// missing one are left alone.
+    /// overwritten by the default layout's first save; a readable one, one
+    /// with no layout and a missing one are left alone.
     #[test]
     fn an_unreadable_layout_is_moved_aside() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("session.toml");
+        let path = tmp.path().join(PROJECT_FILE);
         let names = || {
             let mut names: Vec<String> = fs::read_dir(tmp.path())
                 .unwrap()
@@ -491,16 +394,24 @@ mod tests {
         assert!(load_or_set_aside(&path).is_err());
         assert!(names().is_empty());
 
-        fs::write(&path, "focused_group = 0\npanel_groups = []\n").unwrap();
-        assert!(load_or_set_aside(&path).is_ok());
-        assert_eq!(names(), ["session.toml"]);
+        fs::write(&path, "root = \"/p\"\n").unwrap();
+        assert!(load_or_set_aside(&path).is_err());
+        assert_eq!(names(), [PROJECT_FILE]);
 
-        let broken = "focused_group = 0\n[[panel_groups]\n";
+        fs::write(
+            &path,
+            "root = \"/p\"\n[layout]\nfocused_group = 0\npanel_groups = []\n",
+        )
+        .unwrap();
+        assert!(load_or_set_aside(&path).is_ok());
+        assert_eq!(names(), [PROJECT_FILE]);
+
+        let broken = "root = \"/p\"\n[layout]\nfocused_group = 0\n[[layout.panel_groups]\n";
         fs::write(&path, broken).unwrap();
         let error = load_or_set_aside(&path).unwrap_err().to_string();
         let left = names();
         assert_eq!(left.len(), 1, "{left:?}");
-        assert!(left[0].starts_with("session.toml.broken-"), "{left:?}");
+        assert!(left[0].starts_with("project.toml.broken-"), "{left:?}");
         assert!(error.contains(&left[0]), "{error}");
         assert_eq!(
             fs::read_to_string(tmp.path().join(&left[0])).unwrap(),
@@ -508,44 +419,28 @@ mod tests {
         );
     }
 
+    /// `project.toml` names the root first and holds the layout under
+    /// `[layout]`; reading it back gives the layout.
+    #[test]
+    fn the_project_file_holds_the_root_and_the_layout() {
+        let layout = ProjectLayout {
+            panel_groups: vec![],
+            focused_group: 0,
+        };
+        let text = toml::to_string_pretty(&ProjectFileOut {
+            root: Path::new("/home/u/proj"),
+            layout: &layout,
+        })
+        .unwrap();
+        assert!(text.starts_with("root = \"/home/u/proj\"\n"), "{text}");
+        assert!(text.contains("[layout]"), "{text}");
+        let back: ProjectFileIn = toml::from_str(&text).unwrap();
+        assert_eq!(back.layout.unwrap().focused_group, 0);
+    }
+
     #[derive(Serialize, Deserialize)]
     struct Panels {
         panels: Vec<PanelState>,
-    }
-
-    /// Deleting a project keeps the projects stored inside it and prunes
-    /// only the directories it leaves empty.
-    #[test]
-    fn deleting_a_project_keeps_nested_projects() {
-        let tmp = tempfile::tempdir().unwrap();
-        let projects = tmp.path().join(PROJECTS_DIR);
-        let outer = projects.join("home/u/notes");
-        let inner = outer.join("journal");
-        let lone = projects.join("home/u/work/api");
-        for dir in [&inner, &lone] {
-            fs::create_dir_all(dir).unwrap();
-        }
-        for file in [
-            outer.join("session.toml"),
-            outer.join("session-1.log"),
-            inner.join("session.toml"),
-            lone.join("session.toml"),
-        ] {
-            fs::write(file, "").unwrap();
-        }
-
-        delete_project_files(&outer, &projects).unwrap();
-        assert!(!outer.join("session.toml").exists());
-        assert!(!outer.join("session-1.log").exists());
-        assert!(inner.join("session.toml").exists());
-
-        delete_project_files(&lone, &projects).unwrap();
-        assert!(!projects.join("home/u/work").exists());
-        assert!(projects.join("home/u").exists());
-
-        delete_project_files(&inner, &projects).unwrap();
-        assert!(!projects.join("home").exists());
-        assert!(projects.exists());
     }
 
     /// The agent variant serialises like the others and an absent session
@@ -580,62 +475,7 @@ mod tests {
         let back: Panels = toml::from_str(&text).unwrap();
         assert_eq!(back.panels, panels.panels);
     }
-    /// A termide older than the rename keeps writing `sessions/` after the
-    /// first move; what it leaves there is folded into `projects/`, newer
-    /// files winning, and the empty shell disappears.
-    #[test]
-    fn leftover_legacy_layouts_are_folded_into_projects() {
-        let tmp = tempfile::tempdir().unwrap();
-        let legacy = tmp.path().join(LEGACY_PROJECTS_DIR);
-        let current = tmp.path().join(PROJECTS_DIR);
-        let write = |base: &Path, rel: &str, body: &str| {
-            let path = base.join(rel);
-            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-            std::fs::write(path, body).unwrap();
-        };
-        write(&legacy, "home/u/only-legacy/session.toml", "legacy only");
-        write(&legacy, "home/u/both/session.toml", "legacy newer");
-        write(&current, "home/u/both/session.toml", "current older");
-        write(&current, "home/u/only-current/session.toml", "current only");
-        let old = std::time::SystemTime::now() - std::time::Duration::from_secs(600);
-        std::fs::File::open(current.join("home/u/both/session.toml"))
-            .unwrap()
-            .set_modified(old)
-            .unwrap();
 
-        let notes = migrate_legacy_dir(tmp.path());
-
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].0, log::Level::Info, "{}", notes[0].1);
-        assert!(!legacy.exists());
-        let read = |rel: &str| std::fs::read_to_string(current.join(rel)).unwrap();
-        assert_eq!(read("home/u/only-legacy/session.toml"), "legacy only");
-        assert_eq!(read("home/u/both/session.toml"), "legacy newer");
-        assert_eq!(read("home/u/only-current/session.toml"), "current only");
-
-        // Idempotent: nothing left to do.
-        assert!(migrate_legacy_dir(tmp.path()).is_empty());
-        assert!(current.join("home/u/both/session.toml").is_file());
-    }
-    /// The first launch after the upgrade finds only `sessions/` and moves
-    /// the whole tree, reporting it for the journal.
-    #[test]
-    fn legacy_layouts_move_to_projects() {
-        let tmp = tempfile::tempdir().unwrap();
-        let legacy = tmp.path().join(LEGACY_PROJECTS_DIR);
-        let current = tmp.path().join(PROJECTS_DIR);
-        std::fs::create_dir_all(legacy.join("home/u/proj")).unwrap();
-        std::fs::write(legacy.join("home/u/proj/session.toml"), "layout").unwrap();
-
-        let notes = migrate_legacy_dir(tmp.path());
-
-        assert_eq!(notes.len(), 1);
-        assert_eq!(notes[0].0, log::Level::Info, "{}", notes[0].1);
-        assert!(!legacy.exists());
-        let moved = std::fs::read_to_string(current.join("home/u/proj/session.toml")).unwrap();
-        assert_eq!(moved, "layout");
-        assert!(migrate_legacy_dir(tmp.path()).is_empty());
-    }
     #[test]
     fn project_key_mirrors_the_path_without_its_root() {
         assert_eq!(

@@ -62,7 +62,6 @@ pub mod defaults {
     pub const LANGUAGE: &str = "auto";
     pub const AUTO_STACK_THRESHOLD: u16 = 80;
     pub const MIN_PANEL_WIDTH: u16 = 20;
-    pub const PROJECT_RETENTION_DAYS: u32 = 30;
     pub const TAB_SIZE: usize = 4;
     pub const SHOW_GIT_DIFF: bool = true;
     pub const WORD_WRAP: bool = true;
@@ -131,12 +130,7 @@ const LEGACY_AI_CONNECTION: &str = "default";
 /// file into the serialised defaults, which already hold the new name, and a
 /// table with both a field and its alias is rejected as a duplicate — so the
 /// old spelling is renamed in the raw file before it is merged.
-const RENAMED_KEYS: [(&[&str], &str, &str); 4] = [
-    (
-        &["general"],
-        "session_retention_days",
-        "project_retention_days",
-    ),
+const RENAMED_KEYS: [(&[&str], &str, &str); 3] = [
     (
         &["general", "keybindings"],
         "open_sessions",
@@ -1020,18 +1014,17 @@ mod layered_load_tests {
         );
     }
 
-    /// The defaults already hold `project_retention_days`; merging the old
-    /// spelling next to it used to be a duplicate field that reset the whole
-    /// config to defaults.
+    /// Saved layouts are no longer deleted by age: a file still setting how
+    /// long to keep them, in either spelling, loads as before, the key left
+    /// unread.
     #[test]
-    fn the_old_retention_key_is_read_on_the_layered_path() {
-        let (loaded, _dir) = layered(
-            "[general]\ntheme = \"nord\"\nsession_retention_days = 7\n",
-            None,
-        );
-        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-        assert_eq!(loaded.effective.general.project_retention_days, 7);
-        assert_eq!(loaded.effective.general.theme, "nord");
+    fn the_retired_retention_key_is_left_alone() {
+        for key in ["session_retention_days", "project_retention_days"] {
+            let (loaded, _dir) =
+                layered(&format!("[general]\ntheme = \"nord\"\n{key} = 7\n"), None);
+            assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+            assert_eq!(loaded.effective.general.theme, "nord");
+        }
     }
 
     #[test]
@@ -1049,16 +1042,6 @@ mod layered_load_tests {
             loaded.global_layer.general.keybindings.open_projects,
             binding("Alt+1")
         );
-    }
-
-    #[test]
-    fn with_both_spellings_the_new_one_wins() {
-        let (loaded, _dir) = layered(
-            "[general]\nsession_retention_days = 7\nproject_retention_days = 9\n",
-            None,
-        );
-        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
-        assert_eq!(loaded.effective.general.project_retention_days, 9);
     }
 
     #[test]
@@ -1084,18 +1067,16 @@ mod layered_load_tests {
 
     #[test]
     fn an_invalid_value_leaves_out_only_itself() {
-        let text = "[general]\ntheme = \"nord\"\nproject_retention_days = \"many\"\n[editor]\ntab_size = 8\n";
+        let text =
+            "[general]\ntheme = \"nord\"\nmin_panel_width = \"many\"\n[editor]\ntab_size = 8\n";
         let (loaded, dir) = layered(text, None);
         let config = &loaded.effective;
         assert_eq!(config.general.theme, "nord");
         assert_eq!(config.editor.tab_size, 8);
-        assert_eq!(
-            config.general.project_retention_days,
-            defaults::PROJECT_RETENTION_DAYS
-        );
+        assert_eq!(config.general.min_panel_width, defaults::MIN_PANEL_WIDTH);
         assert_eq!(loaded.warnings.len(), 1);
         assert!(
-            loaded.warnings[0].contains("general.project_retention_days"),
+            loaded.warnings[0].contains("general.min_panel_width"),
             "{:?}",
             loaded.warnings
         );

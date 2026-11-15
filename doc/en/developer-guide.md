@@ -383,9 +383,9 @@ When making changes, test:
 
 ### Logging
 
-Each run writes its log to `session-<date>-<time>.log` in the project's data
-directory (`~/.local/share/termide/projects/<project>/` on Linux,
-`~/Library/Application Support/termide/projects/<project>/` on macOS); logs
+Each run writes its log to `logs/<date>-<time>.log` in the project's data
+directory (`~/.local/share/termide/projects/<name>-<hash>/` on Linux,
+`~/Library/Application Support/termide/projects/<name>-<hash>/` on macOS); logs
 older than 24 hours are removed at startup. The `[logging]` section changes
 this:
 

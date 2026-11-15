@@ -16,7 +16,7 @@ use termide_ui_render::{
 use crate::open_projects::OpenProjectView;
 use crate::AppState;
 
-pub use termide_modal::projects::{CURRENT_MARK, OPEN_MARK};
+pub use termide_modal::projects::{CURRENT_MARK, MISSING_MARK, OPEN_MARK};
 
 /// A project as the Projects menu and the project switcher list it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,15 +32,24 @@ pub struct ListedProject {
     /// When a project not open was last worked on. An open project's layout
     /// is saved all the time, so its time would always read "now": `None`.
     pub modified: Option<SystemTime>,
+    /// Its root is gone: moved or deleted outside termide (marked ✗).
+    pub missing: bool,
+}
+
+/// A project termide keeps state for, as the store lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnownProject {
+    pub root: PathBuf,
+    /// When it was last worked on.
+    pub modified: SystemTime,
+    /// Its root no longer exists.
+    pub missing: bool,
 }
 
 /// The projects to list: the `open` ones in their order — the user's, and
 /// it numbers them for `goto_project_N` — then the `known` ones not open
-/// (root and last use), the most recently used first.
-pub fn listed_projects(
-    open: &[OpenProjectView],
-    known: &[(PathBuf, SystemTime)],
-) -> Vec<ListedProject> {
+/// the most recently used first.
+pub fn listed_projects(open: &[OpenProjectView], known: &[KnownProject]) -> Vec<ListedProject> {
     let mut listed: Vec<ListedProject> = open
         .iter()
         .map(|view| ListedProject {
@@ -49,17 +58,23 @@ pub fn listed_projects(
             attention: view.attention,
             taken: view.taken,
             modified: None,
+            missing: false,
         })
         .collect();
     let mut others: Vec<ListedProject> = known
         .iter()
-        .filter(|(root, _)| !open.iter().any(|view| same_project(&view.root, root)))
-        .map(|(root, modified)| ListedProject {
-            root: root.clone(),
+        .filter(|known| {
+            !open
+                .iter()
+                .any(|view| same_project(&view.root, &known.root))
+        })
+        .map(|known| ListedProject {
+            root: known.root.clone(),
             open: false,
             attention: false,
             taken: false,
-            modified: Some(*modified),
+            modified: Some(known.modified),
+            missing: known.missing,
         })
         .collect();
     others.sort_by_key(|project| std::cmp::Reverse(project.modified));
@@ -79,22 +94,29 @@ fn same_project(a: &Path, b: &Path) -> bool {
     tail(a) == tail(b)
 }
 
-/// The projects worked on and when, from their saved layouts.
-pub fn known_projects() -> Vec<(PathBuf, SystemTime)> {
+/// The projects worked on, when, and whether their roots are still there,
+/// from the store.
+pub fn known_projects() -> Vec<KnownProject> {
     termide_project::list_all_projects()
         .unwrap_or_default()
         .into_iter()
-        .map(|info| (info.project_path, info.modified))
+        .map(|info| KnownProject {
+            missing: !info.project_path.is_dir(),
+            root: info.project_path,
+            modified: info.modified,
+        })
         .collect()
 }
 
 /// The mark in front of a project: ● for the current one, ○ for another
-/// open one, blank for the rest.
+/// open one, ✗ for one whose root is gone, blank for the rest.
 pub fn project_mark(project: &ListedProject, current: &Path) -> &'static str {
     if project.root == current {
         CURRENT_MARK
     } else if project.open {
         OPEN_MARK
+    } else if project.missing {
+        MISSING_MARK
     } else {
         " "
     }
@@ -331,13 +353,12 @@ mod tests {
 
     /// `(root, last use)` pairs, the first `seconds` after the epoch and
     /// so on.
-    fn known(list: &[(&str, u64)]) -> Vec<(PathBuf, SystemTime)> {
+    fn known(list: &[(&str, u64)]) -> Vec<KnownProject> {
         list.iter()
-            .map(|(root, seconds)| {
-                (
-                    PathBuf::from(root),
-                    SystemTime::UNIX_EPOCH + Duration::from_secs(*seconds),
-                )
+            .map(|(root, seconds)| KnownProject {
+                root: PathBuf::from(root),
+                modified: SystemTime::UNIX_EPOCH + Duration::from_secs(*seconds),
+                missing: false,
             })
             .collect()
     }
@@ -382,6 +403,24 @@ mod tests {
             .map(|item| item.crossed_out)
             .collect();
         assert_eq!(crossed, [false, true]);
+    }
+
+    /// A project whose root is gone is marked in the menu, unless open.
+    #[test]
+    fn a_project_whose_root_is_gone_is_marked() {
+        let mut state = test_state();
+        state.project_root = PathBuf::from("/p/one");
+        state.open_projects = vec![open("/p/one", false)];
+        state.cache.projects = known(&[("/p/one", 20), ("/p/two", 10)]);
+        for project in &mut state.cache.projects {
+            project.missing = true;
+        }
+        let marks: Vec<_> = rows(&state.projects_menu())
+            .into_iter()
+            .filter(|row| row != "---")
+            .map(|row| row.chars().next().unwrap())
+            .collect();
+        assert_eq!(marks, ['●', '✗']);
     }
 
     #[test]

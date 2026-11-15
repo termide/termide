@@ -269,7 +269,7 @@ Termide 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 Windows Ter
 **配置路径：**
 - 配置文件: `%APPDATA%\termide\config.toml`
 - 项目数据: `%APPDATA%\termide\projects\`
-- 日志文件: `%APPDATA%\termide\projects\<project>\session-*.log`
+- 日志文件: `%APPDATA%\termide\projects\<名称>-<哈希>\logs\*.log`
 
 ### Windows (WSL)
 

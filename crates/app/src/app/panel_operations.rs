@@ -375,8 +375,9 @@ impl App {
         Ok(())
     }
 
-    /// Ask before deleting the saved layout of the project at `path`, then
-    /// return `from` where it was asked.
+    /// Ask before deleting what termide keeps of the project at `path` —
+    /// and, when it has agent sessions, whether they go too — then return
+    /// `from` where it was asked.
     pub(super) fn confirm_delete_project(
         &mut self,
         path: std::path::PathBuf,
@@ -386,25 +387,64 @@ impl App {
         let message = t.projects_delete_fmt(&termide_core::util::shorten_home_path(
             &path.display().to_string(),
         ));
-        let modal = termide_modal::ConfirmModal::new(t.projects_delete_title(), message);
-        self.state.set_pending_action(
-            PendingAction::DeleteProject { path, from },
-            ActiveModal::Confirm(Box::new(modal)),
-        );
+        let has_sessions = super::agent_panel::session_dir_of(&path)
+            .is_some_and(|dir| termide_agent_core::relocate::has_sessions(&dir));
+        let modal = if has_sessions {
+            ActiveModal::Choice(Box::new(termide_modal::ChoiceModal::new(
+                t.projects_delete_title(),
+                Some(format!(
+                    "{message}\n\n{}",
+                    t.projects_delete_sessions_question()
+                )),
+                vec![
+                    t.projects_delete_with_sessions().to_string(),
+                    t.projects_delete_keep_sessions().to_string(),
+                    t.editor_cancel().to_string(),
+                ],
+            )))
+        } else {
+            ActiveModal::Confirm(Box::new(termide_modal::ConfirmModal::new(
+                t.projects_delete_title(),
+                message,
+            )))
+        };
+        self.state
+            .set_pending_action(PendingAction::DeleteProject { path, from }, modal);
     }
 
+    /// Delete what termide keeps of the project at `path`, its agent
+    /// sessions too when `sessions` says so, then return `from`.
     pub(super) fn handle_delete_project(
         &mut self,
         path: &std::path::Path,
+        sessions: bool,
         from: ProjectsOrigin,
     ) -> Result<()> {
-        if let Err(e) = termide_project::ProjectLayout::delete_layout(path) {
-            log::error!("Failed to delete project layout for {:?}: {}", path, e);
+        // The project first: it refuses while the project is open elsewhere,
+        // and its sessions are then in no one's use.
+        match termide_project::delete_project(path) {
+            Ok(()) => {}
             // Keep the error on screen instead of reopening over it.
-            self.show_error_modal(i18n::t().projects_delete_failed_fmt(&e.to_string()));
-            return Ok(());
+            Err(termide_project::DeleteError::Open(owner)) => {
+                self.show_error_modal(super::parked_projects::open_elsewhere_message(path, &owner));
+                return Ok(());
+            }
+            Err(e) => {
+                log::error!("Failed to delete project {:?}: {}", path, e);
+                self.show_error_modal(i18n::t().projects_delete_failed_fmt(&e.to_string()));
+                return Ok(());
+            }
         }
-        log::info!("Deleted project layout for {:?}", path);
+        log::info!("Deleted the stored state of project {:?}", path);
+        if sessions {
+            if let Some(dir) = super::agent_panel::session_dir_of(path) {
+                if let Err(e) = termide_agent_core::relocate::delete_sessions(&dir) {
+                    log::error!("Failed to delete the sessions of {:?}: {}", path, e);
+                    self.show_error_modal(i18n::t().projects_delete_failed_fmt(&e.to_string()));
+                    return Ok(());
+                }
+            }
+        }
         self.return_to_projects(from)
     }
 
@@ -443,9 +483,8 @@ impl App {
         }
 
         // 1. Clear any existing layout of the target directory
-        if let Ok(project_dir) = ProjectLayout::get_project_dir(&new_project_root) {
+        if let Ok(layout_file) = ProjectLayout::get_project_path(&new_project_root) {
             // Remove the layout file if it exists (this clears the layout)
-            let layout_file = project_dir.join("session.toml");
             if layout_file.exists() {
                 if let Err(e) = std::fs::remove_file(&layout_file) {
                     log::error!(
@@ -505,8 +544,6 @@ impl App {
 
     /// Move the current project's stored state to a new directory
     fn move_project_to(&mut self, new_project_root: std::path::PathBuf) -> Result<()> {
-        use termide_project::ProjectLayout;
-
         let new_project_root = super::parked_projects::project_root_of(new_project_root);
 
         let old_project_root = self.project_root.clone();
@@ -529,47 +566,16 @@ impl App {
         // 1. Save the current layout
         self.auto_save_layout();
 
-        // 2. Copy all project data to new location (including unsaved buffers)
-        if let Ok(old_project_dir) = ProjectLayout::get_project_dir(&old_project_root) {
-            if let Ok(new_project_dir) = ProjectLayout::get_project_dir(&new_project_root) {
-                // Create the new project directory if needed
-                if let Err(e) = std::fs::create_dir_all(&new_project_dir) {
-                    log::error!(
-                        "Failed to create project directory {}: {}",
-                        new_project_dir.display(),
-                        e
-                    );
-                }
-
-                // Copy all files from the old project directory
-                if let Ok(entries) = std::fs::read_dir(&old_project_dir) {
-                    for entry in entries.flatten() {
-                        let path = entry.path();
-                        if path.is_file() {
-                            if let Some(filename) = path.file_name() {
-                                let new_path = new_project_dir.join(filename);
-                                if let Err(e) = std::fs::copy(&path, &new_path) {
-                                    log::error!(
-                                        "Failed to copy project file {} -> {}: {}",
-                                        path.display(),
-                                        new_path.display(),
-                                        e
-                                    );
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Remove the old project directory
-                if let Err(e) = std::fs::remove_dir_all(&old_project_dir) {
-                    log::warn!(
-                        "Failed to remove old project directory {}: {}",
-                        old_project_dir.display(),
-                        e
-                    );
-                }
-            }
+        // 2. Carry its layout, buffers and logs to the new root
+        if let Err(e) = termide_project::rehome_project_state(&old_project_root, &new_project_root)
+        {
+            log::error!("Failed to carry the project's state to {new_project_root:?}: {e:#}");
+        }
+        if let (Ok(old), Ok(new)) = (
+            termide_project::project_dir(&old_project_root),
+            termide_project::project_dir(&new_project_root),
+        ) {
+            termide_logger::relocate_file(&old, &new);
         }
 
         // 3. Change working directory

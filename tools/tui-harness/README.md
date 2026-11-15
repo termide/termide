@@ -59,6 +59,7 @@ Timeouts are in seconds and default to 10.
 |---|---|
 | `size 120x36` | Screen size (before `start`; the default) |
 | `project demo` \| `empty` | The project termide starts in (before `start`) |
+| `setup "COMMAND"` | Run a shell command in the project once it is made, before termide starts, as `run` does (before `start`) |
 | `config FILE` | Use FILE (relative to the scenario) instead of `config.toml`; `{mock_llm_port}` in it is filled in |
 | `mock-llm [flavor]` | Start the mock model: `default`, `llamacpp`, `omlx` or `openrouter` |
 | `mock-acp PROVIDER [agent]` | Connect the `claude_code`, `codex` or `gemini_cli` stand-in; with `agent`, only put the stand-ins on `PATH` |
@@ -76,7 +77,7 @@ Timeouts are in seconds and default to 10.
 | `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
 | `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …`, and each tool termide's MCP server lists to it as `tool: …` |
 | `mock-acp-count "TEXT" N` | Check that the ACP stand-in's log holds TEXT exactly N times |
-| `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away |
+| `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away. `$TERMIDE_CONFIG` and `$TERMIDE_DATA` name termide's config and data directories |
 | `snapshot NAME` | Save the screen as text |
 | `sleep S` | Let termide run for S seconds |
 | `quit [--force]` | `Alt+Q` and wait for termide to exit; `--force` confirms a "Quit anyway?" |
@@ -104,7 +105,7 @@ termide's tools as on a connection), `settings-fields` (the settings
 window's Option as Alt and git graph fields on General, the terminal session
 limit and the bell on the AI page) and
 `usage` (the usage window from `F3` and the AI menu: its scopes, a period,
-a session opened from its list), `project-move` (`F6` and `F5` on a
+a session opened from its list), `project-store` (layouts in the old tree folded into flat project directories at startup, ✗ on a project whose directory is gone, `F8` deleting a project with or without its agent sessions), `project-move` (`F6` and `F5` on a
 project in the Projects menu: the directory moved and reopened with its
 layout, a copy opened beside it) and `project-move-agent` (a moved
 project's agent session found again at the new path, and its git worktree

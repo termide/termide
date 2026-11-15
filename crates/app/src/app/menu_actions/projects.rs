@@ -38,6 +38,7 @@ impl App {
                 is_open: project.open,
                 attention: project.attention,
                 taken: project.taken,
+                missing: project.missing,
                 project_path: project.root,
             })
             .collect();

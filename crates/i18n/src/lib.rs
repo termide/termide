@@ -1642,7 +1642,6 @@ pub trait Translation: Send + Sync {
     fn settings_general_icon_mode(&self) -> &str;
     fn settings_general_auto_stack_threshold(&self) -> &str;
     fn settings_general_min_panel_width(&self) -> &str;
-    fn settings_general_project_retention(&self) -> &str;
     fn settings_general_bell(&self) -> &str;
     fn settings_general_resource_interval(&self) -> &str;
 
@@ -1705,6 +1704,9 @@ pub trait Translation: Send + Sync {
     fn projects_new(&self) -> &str;
     fn projects_change_root(&self) -> &str;
     fn projects_delete_title(&self) -> &str;
+    fn projects_delete_sessions_question(&self) -> &str;
+    fn projects_delete_with_sessions(&self) -> &str;
+    fn projects_delete_keep_sessions(&self) -> &str;
     fn projects_delete_fmt(&self, path: &str) -> String;
     fn projects_open_elsewhere_fmt(&self, path: &str, pid: &str) -> String;
     fn projects_open_in_instance_fmt(&self, path: &str, id: &str) -> String;

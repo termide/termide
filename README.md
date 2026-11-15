@@ -487,7 +487,7 @@ the file without the ignored setting, the file as it was is first copied to
 - macOS: `~/Library/Application Support/termide/projects/`
 - Windows: `%APPDATA%\termide\projects\`
 
-**Log file location:** each run writes its own `session-<date>-<time>.log`
+**Log file location:** each run writes its own `logs/<date>-<time>.log`
 into the project's directory under the project data location above; logs older
 than 24 hours are removed. `logging.file_path` replaces this with one fixed file.
 
@@ -503,7 +503,6 @@ than 24 hours are removed. `logging.file_path` replaces this with one fixed file
 theme = "windows-xp"
 language = "auto"  # auto, bn, de, en, es, fr, hi, id, ja, ko, pt, ru, th, tr, vi, zh
 vim_mode = false
-project_retention_days = 30
 bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # keep the instance alive across terminal closes (Unix)

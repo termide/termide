@@ -32,6 +32,8 @@ use crate::{
 pub const CURRENT_MARK: &str = "●";
 /// Marks a project open in the background.
 pub const OPEN_MARK: &str = "○";
+/// The mark of a project whose root is gone.
+pub const MISSING_MARK: &str = "✗";
 
 /// Action returned by the projects modal
 #[derive(Debug, Clone)]
@@ -64,6 +66,8 @@ pub struct ProjectItem {
     /// Not loaded yet, and another instance has opened it since it was
     /// reopened here: it cannot be entered (drawn crossed out).
     pub taken: bool,
+    /// Its root is gone: moved or deleted outside termide.
+    pub missing: bool,
 }
 
 impl ProjectItem {
@@ -76,6 +80,8 @@ impl ProjectItem {
             format!("{CURRENT_MARK} ")
         } else if self.is_open {
             format!("{OPEN_MARK} ")
+        } else if self.missing {
+            format!("{MISSING_MARK} ")
         } else {
             "  ".to_string()
         };
@@ -541,6 +547,7 @@ mod tests {
             is_open,
             attention: false,
             taken: false,
+            missing: false,
         }
     }
 

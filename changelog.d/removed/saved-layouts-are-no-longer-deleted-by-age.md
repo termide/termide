@@ -1,0 +1,1 @@
+- **Saved layouts are no longer deleted by age.** The `project_retention_days` setting and its field on the settings window are gone. A project's stored state stays until you delete it from the `Projects` menu or the switcher (`Delete`/`F8`). A `project_retention_days` line left in a config file is ignored.

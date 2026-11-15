@@ -229,6 +229,12 @@ def config_dir(home):
         return home / "Library" / "Application Support" / "termide"
     return home / ".config" / "termide"
 
+def data_dir(home):
+    # Likewise `dirs::data_dir()`, where the projects are kept.
+    if sys.platform == "darwin":
+        return home / "Library" / "Application Support" / "termide"
+    return home / ".local" / "share" / "termide"
+
 
 # --- a scenario -------------------------------------------------------------------
 
@@ -258,6 +264,7 @@ class Run:
         self.scratch = Path(tempfile.mkdtemp(prefix=f"tui-harness-{self.name}-", dir=base))
         self.home = self.scratch / "home"
         self.project = None
+        self.setup = []
 
     # setup verbs, before `start`
 
@@ -271,6 +278,9 @@ class Run:
         if kind not in ("demo", "empty"):
             raise Failure("project takes demo or empty")
         self.project_kind = kind
+
+    def v_setup(self, command):
+        self.setup.append(command)
 
     def v_config(self, file):
         self.config = (self.path.parent / file).resolve()
@@ -378,6 +388,8 @@ class Run:
         argv = [a.replace("{project}", str(self.project)) for a in argv]
         # Every byte termide wrote, for replaying a failure; closed in cleanup().
         self.log = open(self.out / "output.bin", "wb")  # noqa: SIM115
+        for command in self.setup:
+            self.v_run(command)
         self.term = Term(argv, env, self.project, self.cols, self.rows, self.log)
         # The first frame: the status bar is drawn last.
         self.wait_until(lambda: self.term.text().strip(), 15, "the first frame")
@@ -514,7 +526,11 @@ class Run:
             command,
             shell=True,
             cwd=cwd,
-            env=self.env(),
+            env=dict(
+                self.env(),
+                TERMIDE_CONFIG=str(config_dir(self.home)),
+                TERMIDE_DATA=str(data_dir(self.home)),
+            ),
             capture_output=True,
             text=True,
             check=False,
