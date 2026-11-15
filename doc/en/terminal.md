@@ -59,6 +59,14 @@ under `[general.keybindings]`. `Alt+D` detaches a
 [detached instance](detached-instances.md); outside one it has nothing to do and goes
 to the shell, as readline's `kill-word`.
 
+The other global `Alt+<letter>` keys are taken first as well, among them
+readline's `Alt+T` (transpose words), `Alt+C` (capitalize), `Alt+L`
+(downcase) and `Alt+N` / `Alt+P` (history search); rebind them under
+`[general.keybindings]` to give them to the shell. `Ctrl+P` opens the
+command palette at a shell prompt, where `Up` recalls the previous command;
+while a full-screen program — vim, less, fzf — has the screen, it goes to
+that program.
+
 A shell with no binding for such a sequence echoes its last letter: bash 5
 and zsh print `A` for `Shift+Up`, `D` for `Shift+Left`, and so on. Any
 xterm-compatible terminal behaves the same. Bind the keys in `~/.inputrc`

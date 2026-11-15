@@ -730,6 +730,12 @@ impl Terminal {
         TerminalInfo { user_host, cwd }
     }
 
+    /// Whether a full-screen program (vim, less, fzf…) has the alternate
+    /// screen up, and so its own use for keys the shell would leave alone.
+    pub fn runs_full_screen_program(&self) -> bool {
+        self.read_screen().use_alt_screen
+    }
+
     /// Acquire a read lock on the terminal screen, recovering from poisoning.
     fn read_screen(&self) -> std::sync::RwLockReadGuard<'_, TerminalScreen> {
         self.screen.read().unwrap_or_else(|e| {

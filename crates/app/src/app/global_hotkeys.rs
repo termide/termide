@@ -228,6 +228,12 @@ impl App {
             return Ok(true);
         }
         if table.matches("open_command_palette", key) {
+            // A full-screen program has its own use for it: vim's completion,
+            // fzf's and emacs's previous line. At a shell prompt the palette
+            // wins; Up recalls the history there.
+            if self.full_screen_terminal_is_focused() {
+                return Ok(false);
+            }
             self.handle_open_command_palette()?;
             return Ok(true);
         }
@@ -381,6 +387,14 @@ impl App {
         }
         self.open_path_prompt();
         true
+    }
+
+    /// Whether the focused panel is a terminal with a full-screen program.
+    fn full_screen_terminal_is_focused(&mut self) -> bool {
+        self.layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.as_terminal_mut())
+            .is_some_and(|terminal| terminal.runs_full_screen_program())
     }
 
     /// Whether the focused panel is a terminal.
