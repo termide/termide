@@ -83,8 +83,8 @@ tar xzf termide-0.49.0-x86_64-unknown-linux-musl.tar.gz
 ldd ./termide   # → "not a dynamic executable"
 ```
 
-To build it yourself (e.g. for a different musl variant), the flake exposes the
-recipe as a derivation:
+To build it yourself, the flake exposes the recipe as a derivation; it builds
+for the architecture of the machine it runs on (x86_64 or ARM64):
 
 ```bash
 nix build github:termide/termide#termide-static
@@ -234,7 +234,7 @@ termide --completions fish > ~/.config/fish/completions/termide.fish
 ```
 
 The same three files live in the repository's `completions/` directory and in
-the release tarballs. The `.deb`, `.rpm` and AUR packages install them
+the release tarballs. The `.deb`, `.rpm`, AUR and Nix packages install them
 system-wide, so with a package nothing needs adding to a shell rc file.
 
 ## Platform-Specific Notes

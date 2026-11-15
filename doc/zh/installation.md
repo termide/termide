@@ -83,7 +83,7 @@ tar xzf termide-0.49.0-x86_64-unknown-linux-musl.tar.gz
 ldd ./termide   # → "not a dynamic executable"
 ```
 
-如需自行构建（例如针对其他 musl 变体），flake 暴露了相同的派生：
+如需自行构建，flake 暴露了相同的派生；它针对运行所在机器的架构（x86_64 或 ARM64）构建：
 
 ```bash
 nix build github:termide/termide#termide-static
@@ -227,8 +227,8 @@ termide --completions zsh > ~/.zfunc/_termide
 termide --completions fish > ~/.config/fish/completions/termide.fish
 ```
 
-同样的三个文件也位于仓库的 `completions/` 目录和发布 tarball 中。`.deb`、`.rpm`
-和 AUR 包会将它们安装到系统范围，因此使用包安装时无需在 shell rc 文件中添加任何
+同样的三个文件也位于仓库的 `completions/` 目录和发布 tarball 中。`.deb`、`.rpm`、
+AUR 和 Nix 包会将它们安装到系统范围，因此使用包安装时无需在 shell rc 文件中添加任何
 内容。
 
 ## 平台特定说明

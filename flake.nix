@@ -76,20 +76,39 @@
         # stdenv rather than as `darwin.apple_sdk.frameworks.*` attributes.
         buildInputs = [ ];
 
+        # The default package builds with the same pinned compiler as the dev
+        # shell, without its extensions and extra targets.
+        rustMinimal = pkgs.rust-bin.stable.${rustChannel}.minimal;
+        rustPlatform = pkgs.makeRustPlatform {
+          cargo = rustMinimal;
+          rustc = rustMinimal;
+        };
+
+        # What the default and the static package share.
+        packageArgs = {
+          pname = "termide";
+          version = "0.49.0";
+
+          src = ./.;
+          cargoLock.lockFile = ./Cargo.lock;
+
+          # GCC miscompiles tree-sitter's array.h under strict aliasing; the
+          # deb, rpm, AUR and install.sh builds pass the same flag.
+          env.NIX_CFLAGS_COMPILE = "-fno-strict-aliasing";
+        };
+
       in
       {
         packages = {
-          default = pkgs.rustPlatform.buildRustPackage {
-            pname = "termide";
-            version = "0.49.0";
+          default = rustPlatform.buildRustPackage (packageArgs // {
+            nativeBuildInputs = [ pkgs.pkg-config pkgs.installShellFiles ];
 
-            src = ./.;
-
-            cargoLock = {
-              lockFile = ./Cargo.lock;
-            };
-
-            nativeBuildInputs = [ pkgs.pkg-config ];
+            postInstall = ''
+              installShellCompletion --cmd termide \
+                --bash completions/termide.bash \
+                --zsh completions/_termide \
+                --fish completions/termide.fish
+            '';
 
             meta = with pkgs.lib; {
               description = "All-in-one terminal workspace: editor, file manager, terminal, git and coding agent";
@@ -99,7 +118,7 @@
               mainProgram = "termide";
               platforms = platforms.unix;
             };
-          };
+          });
 
           termide = self.packages.${system}.default;
         } // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
@@ -109,22 +128,14 @@
           # Possible only because the workspace is pure-Rust end-to-end:
           # FTPS uses rustls + webpki-roots, SFTP uses russh +
           # russh-sftp (no OpenSSL / no libssh2). Tree-sitter grammars
-          # are compiled by build.rs against musl-gcc.
-          termide-static = let
-            muslPkgs = pkgs.pkgsCross.musl64;
-          in muslPkgs.rustPlatform.buildRustPackage {
-            pname = "termide";
-            version = "0.49.0";
-
-            src = ./.;
-            cargoLock.lockFile = ./Cargo.lock;
-
-            # Force static crt linkage so the binary has no .so deps.
-            CARGO_BUILD_TARGET = "x86_64-unknown-linux-musl";
-            RUSTFLAGS = "-C target-feature=+crt-static";
-
+          # are compiled by build.rs against musl-gcc. pkgsStatic targets
+          # the musl flavour of the host's own architecture, so this builds
+          # on x86_64 and aarch64 alike. It takes nixpkgs' own compiler:
+          # the pinned rust-overlay toolchain's build scripts segfault in
+          # pkgsStatic's cross setup.
+          termide-static = pkgs.pkgsStatic.rustPlatform.buildRustPackage (packageArgs // {
             doCheck = false;
-          };
+          });
         };
 
         apps = {
