@@ -197,6 +197,11 @@ window from its next request. A run going on finishes on the endpoint it
 started on and moves when the turn ends; a panel whose connection was deleted
 stays where it is.
 
+How a panel folds its blocks (`fold_blocks`), its web tools (`[ai.web]`),
+compaction (`[ai.compaction]`) and `max_tokens_per_turn` are taken when the
+panel opens: a change to them reaches agent panels opened after it, while one
+already open keeps what it opened with.
+
 The configuration file never holds an API key. A connection finds its key in
 two places, in this order:
 

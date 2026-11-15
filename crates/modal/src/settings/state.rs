@@ -775,9 +775,13 @@ impl SettingsModal {
 
         match desc.field_type {
             FieldType::Number => {
-                let val = self.edit_input.text().parse::<u64>().unwrap_or(0);
-                self.apply_number(tab, field_idx, val);
-                self.mark_dirty();
+                // Empty or mistyped input keeps the value: a `0` in its place
+                // would turn off the vault's auto-lock or time out every
+                // remote connection at once.
+                if let Ok(val) = self.edit_input.text().trim().parse::<u64>() {
+                    self.apply_number(tab, field_idx, val);
+                    self.mark_dirty();
+                }
             }
             FieldType::OptionalText => {
                 let text = self.edit_input.text().to_string();
@@ -889,20 +893,24 @@ impl SettingsModal {
     }
 
     fn apply_number(&mut self, tab: SettingsTab, index: usize, val: u64) {
+        // A value past the field's type keeps its largest, never wraps.
+        let u16_of = |val: u64| u16::try_from(val).unwrap_or(u16::MAX);
+        let usize_of = |val: u64| usize::try_from(val).unwrap_or(usize::MAX);
         match tab {
             SettingsTab::General => match index {
-                4 => self.config.general.auto_stack_threshold = val as u16,
-                5 => self.config.general.min_panel_width = val as u16,
-                7 => self.config.general.resource_monitor_interval = val,
+                4 => self.config.general.auto_stack_threshold = u16_of(val),
+                5 => self.config.general.min_panel_width = u16_of(val),
+                // Sampling on every pass of the loop costs CPU for nothing.
+                7 => self.config.general.resource_monitor_interval = val.max(100),
                 _ => {}
             },
             SettingsTab::Editor => match index {
-                0 => self.config.editor.tab_size = val as usize,
+                0 => self.config.editor.tab_size = usize_of(val).max(1),
                 6 => self.config.editor.large_file_threshold_mb = val,
                 _ => {}
             },
             SettingsTab::FileManager => match index {
-                0 => self.config.file_manager.extended_view_width = val as usize,
+                0 => self.config.file_manager.extended_view_width = usize_of(val),
                 1 => self.config.file_manager.content_search_max_file_size_mb = val,
                 3 => self.config.file_manager.dir_size_budget_ms = val,
                 _ => {}
@@ -919,7 +927,7 @@ impl SettingsModal {
                 _ => {}
             },
             SettingsTab::Vfs => match index {
-                0 => self.config.vfs.connection_timeout_secs = val,
+                0 => self.config.vfs.connection_timeout_secs = val.max(1),
                 1 => self.config.vault.lock_after_mins = val,
                 _ => {}
             },
@@ -1055,6 +1063,34 @@ mod content_row_tests {
         modal.commit_edit();
         assert_eq!(modal.config.terminal.scrollback_lines, 2500);
         assert_eq!(modal.config.terminal.default_shell, None);
+    }
+
+    /// An emptied or mistyped number was saved as `0`: the vault's auto-lock
+    /// went off and every remote connection timed out at once.
+    #[test]
+    fn a_number_field_left_empty_or_mistyped_keeps_its_value() {
+        let mut modal = SettingsModal::new(Config::default(), Config::default(), false);
+        modal.active_tab = SettingsTab::Vfs;
+        for (field, text) in [(0, ""), (1, "15m"), (0, "0")] {
+            modal.field_cursor = modal
+                .content_rows()
+                .iter()
+                .position(|row| *row == ContentRow::Field(field))
+                .expect("the field is shown");
+            modal.start_edit();
+            modal.edit_input = termide_ui::TextInput::with_text(text.to_string());
+            modal.commit_edit();
+        }
+        assert_eq!(
+            modal.config.vault.lock_after_mins,
+            Config::default().vault.lock_after_mins
+        );
+        // A typed `0` is a value, but no timeout is shorter than a second.
+        assert_eq!(modal.config.vfs.connection_timeout_secs, 1);
+
+        modal.active_tab = SettingsTab::General;
+        modal.apply_number(SettingsTab::General, 5, 65_536);
+        assert_eq!(modal.config.general.min_panel_width, u16::MAX);
     }
 
     #[test]

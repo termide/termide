@@ -599,7 +599,8 @@ impl Panel for FileManager {
     fn prepare_render(&mut self, theme: &termide_theme::Theme, config: &std::sync::Arc<Config>) {
         self.cached_theme = *theme;
         self.vim_mode = config.general.vim_mode;
-        self.cached_vfs_timeout_secs = config.vfs.connection_timeout_secs;
+        // `0` in config.toml would give up on every connection at once.
+        self.cached_vfs_timeout_secs = config.vfs.connection_timeout_secs.max(1);
         let config_ptr = std::sync::Arc::as_ptr(config) as usize;
         if self.last_config_ptr != config_ptr {
             self.last_config_ptr = config_ptr;
