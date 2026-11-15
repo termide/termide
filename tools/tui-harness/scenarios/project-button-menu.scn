@@ -4,10 +4,10 @@
 size 160x36
 project empty
 start
-wait-re "^.*Options  project "
+wait-re "^.*Projects  project "
 
 # A copy opens in the background beside the current project.
-key F9 Right Right
+key F9 Right Right Right Right Right
 wait "New project"
 # The root path is changed from the project's own menu only.
 expect-not "Change root path"

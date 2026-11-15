@@ -1,0 +1,1 @@
+- **`Projects` is the last menu item.** The menu bar now reads `Bookmarks`, `Commands`, `Windows`, `Options`, `AI`, `Projects`, so the `Projects` menu sits right before the open projects' buttons and `→` steps from it straight onto them.

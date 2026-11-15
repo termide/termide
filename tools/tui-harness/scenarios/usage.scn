@@ -42,7 +42,7 @@ expect "Want me to highlight critical rows"
 # From the menu, on the project.
 key Alt+M
 wait "Projects"
-key Right Right Right
+key Right Right Right Right
 wait "Prompts"
 key Down Down Down Down Down Enter
 wait "Top sessions"

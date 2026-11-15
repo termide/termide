@@ -52,10 +52,11 @@ fn compute_menu_items() -> Vec<String> {
     vec![
         t.menu_bookmarks().to_string(),
         t.menu_commands().to_string(),
-        t.menu_projects().to_string(),
-        t.menu_ai().to_string(),
         t.menu_windows().to_string(),
         t.menu_options().to_string(),
+        t.menu_ai().to_string(),
+        // Last, so that the open projects' buttons follow it.
+        t.menu_projects().to_string(),
     ]
 }
 
@@ -122,17 +123,18 @@ pub const BOOKMARKS_MENU_INDEX: usize = 0;
 /// Index of Commands menu item
 pub const COMMANDS_MENU_INDEX: usize = 1;
 
-/// Index of Projects menu item
-pub const PROJECTS_MENU_INDEX: usize = 2;
-
-/// Index of the AI menu item
-pub const AI_MENU_INDEX: usize = 3;
-
 /// Index of Windows menu item
-pub const WINDOWS_MENU_INDEX: usize = 4;
+pub const WINDOWS_MENU_INDEX: usize = 2;
 
 /// Index of Options menu item
-pub const OPTIONS_MENU_INDEX: usize = 5;
+pub const OPTIONS_MENU_INDEX: usize = 3;
+
+/// Index of the AI menu item
+pub const AI_MENU_INDEX: usize = 4;
+
+/// Index of Projects menu item: the last title, just before the open
+/// projects' buttons.
+pub const PROJECTS_MENU_INDEX: usize = 5;
 
 /// Pre-computed x positions and widths for all menu items.
 /// Avoids repeated `get_menu_items()` allocations in hot paths.
@@ -618,7 +620,7 @@ mod tests {
 
         let order = bar.nav_order();
         let projects_at = MENU_ITEM_COUNT;
-        assert_eq!(order[projects_at - 1], OPTIONS_MENU_INDEX);
+        assert_eq!(order[projects_at - 1], PROJECTS_MENU_INDEX);
         assert_eq!(
             order[projects_at..projects_at + 2],
             [PROJECT_BUTTON_BASE, PROJECT_BUTTON_BASE + 1]

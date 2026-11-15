@@ -10,7 +10,7 @@ project empty
 setup "mkdir -p other && P=$(pwd -P) && for p in other gone; do mkdir -p \"$TERMIDE_DATA/projects$P/$p\" && printf 'focused_group = 0\npanel_groups = []\n' > \"$TERMIDE_DATA/projects$P/$p/session.toml\"; done"
 setup "S=\"$TERMIDE_CONFIG/ai/sessions$(pwd -P)/other\" && mkdir -p \"$S/sub\" \"$S/checkpoints/abcd1234\" && echo '{}' > \"$S/2026-11-01T10-00-00_abcd1234.jsonl\" && echo '{}' > \"$S/sub/2026-11-01T11-00-00_ef567890.jsonl\""
 start
-wait-re "Options  project "
+wait-re "Projects  project "
 
 # The old tree is gone, each project has its own flat directory.
 run "test ! -e \"$TERMIDE_DATA/projects/private\" && test ! -e \"$TERMIDE_DATA/projects/tmp\""
