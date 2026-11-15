@@ -852,15 +852,6 @@ pub struct GeneralSettings {
     #[serde(default = "default_min_panel_width")]
     pub min_panel_width: u16,
 
-    /// How long a project's saved layout is kept, in days. The old
-    /// `session_retention_days` spelling is still accepted so configs written
-    /// before the rename keep working.
-    #[serde(
-        default = "default_project_retention_days",
-        alias = "session_retention_days"
-    )]
-    pub project_retention_days: u32,
-
     /// Enable Vim mode globally (disabled by default)
     /// - In editor: NORMAL/INSERT/VISUAL modes, operators, motions
     /// - In list panels: j/k/g/G navigation
@@ -1289,10 +1280,6 @@ fn default_min_panel_width() -> u16 {
     defaults::MIN_PANEL_WIDTH
 }
 
-fn default_project_retention_days() -> u32 {
-    defaults::PROJECT_RETENTION_DAYS
-}
-
 fn default_bell_on_operation_complete() -> bool {
     defaults::BELL_ON_OPERATION_COMPLETE
 }
@@ -1514,12 +1501,6 @@ pub struct LegacyConfig {
     pub show_git_diff: bool,
     #[serde(default = "default_extended_view_width")]
     pub fm_extended_view_width: usize,
-    // A pre-sections config file only ever spelled this the old way.
-    #[serde(
-        default = "default_project_retention_days",
-        rename = "session_retention_days"
-    )]
-    pub project_retention_days: u32,
     #[serde(default = "default_word_wrap")]
     pub word_wrap: bool,
     #[serde(default = "default_min_level")]
@@ -1536,7 +1517,6 @@ impl From<LegacyConfig> for Config {
                 language: legacy.language,
                 auto_stack_threshold: legacy.min_panel_width, // migrate old field
                 min_panel_width: default_min_panel_width(),
-                project_retention_days: legacy.project_retention_days,
                 vim_mode: default_vim_mode(),
                 bell_on_operation_complete: default_bell_on_operation_complete(),
                 icon_mode: IconMode::default(),
@@ -1593,7 +1573,6 @@ impl Default for GeneralSettings {
             language: default_language(),
             auto_stack_threshold: default_auto_stack_threshold(),
             min_panel_width: default_min_panel_width(),
-            project_retention_days: default_project_retention_days(),
             vim_mode: default_vim_mode(),
             bell_on_operation_complete: default_bell_on_operation_complete(),
             icon_mode: IconMode::default(),

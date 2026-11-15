@@ -383,9 +383,9 @@ WARN Missing translation key: my_key (using English fallback)
 
 ### Логирование
 
-Каждый запуск пишет свой лог в `session-<дата>-<время>.log` в каталоге
-данных проекта (`~/.local/share/termide/projects/<проект>/` в Linux,
-`~/Library/Application Support/termide/projects/<проект>/` в macOS); логи
+Каждый запуск пишет свой лог в `logs/<дата>-<время>.log` в каталоге
+данных проекта (`~/.local/share/termide/projects/<имя>-<хеш>/` в Linux,
+`~/Library/Application Support/termide/projects/<имя>-<хеш>/` в macOS); логи
 старше 24 часов удаляются при запуске. Раздел `[logging]` меняет это:
 
 ```toml

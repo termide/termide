@@ -607,35 +607,55 @@ actor（见 `crates/vfs/src/sftp.rs`）。同步工作线程驱动分块循环�
 
 每个项目的面板布局都会被保存和恢复（`ProjectLayout`）：
 
-**存储位置：**
-- Linux: `~/.local/share/termide/projects/<project_path>/session.toml`
-- macOS: `~/Library/Application Support/termide/projects/<project_path>/session.toml`
+**存储位置：** termide 为项目保存的一切（代理会话除外）都放在每个项目一个的扁平目录中（`crates/project/src/store.rs`）：
 
-重命名之前的数据目录 `sessions/` 会在首次启动时迁移到 `projects/`。此后旧版 termide 再写入 `sessions/` 的内容，会在下次启动时合并到 `projects/`，同名文件保留较新的一份。每次迁移及失败都会记录在 **日志** 面板中。
+- Linux: `~/.local/share/termide/projects/<名称>-<哈希>/`
+- macOS: `~/Library/Application Support/termide/projects/<名称>-<哈希>/`
+
+`<名称>` 是根目录名精简为 `[A-Za-z0-9_-]` 后的结果，`<哈希>` 是根目录规范路径的 12 位十六进制摘要，因此路径中的任何字符都无需转义。根目录本身从 `project.toml` 读取，而不是从名称推断。
+
+```
+projects/<名称>-<哈希>/
+├── project.toml   # root = "/路径"; [layout]
+├── trust.toml     # [ai.permissions] “始终允许”规则; [approved]
+├── owner.lock     # 由打开该项目的实例持有
+├── owner.toml     # 是哪个实例
+├── logs/          # <日期>-<时间>.log，每次运行一个，保留 24 小时
+└── buffers/       # <日期>-<时间>.txt，编辑器中未保存的内容
+```
+
+代理会话仍保存在 `ai/sessions/<项目路径>/` 中，与代理放在一起。项目的存在取决于用户：在“项目”菜单或切换器中删除它（`F8`）会移除其目录，用户选择时也会一并删除代理会话。除日志外，不会按时间删除任何内容；空目录在启动时清除。
+
+删除或移动会先占用项目的 `owner.lock`，因此在另一个实例中打开的项目不会被抢走，锁文件最后删除，删除时仍被持有。
+
+旧布局的数据目录——`sessions/`，或按项目路径组织成树、含 `session.toml`、`session-*.log` 和 `unsaved-*` 文件的 `projects/`，以及 `trust/` 和 `locks/` 树——会在首次启动时合并到新布局中；每次迁移及失败都会记录在 **日志** 面板中。与新版同时运行的旧版 termide 看不到新版的锁。
 
 **功能特性：**
 - 退出时自动保存布局
 - 启动时恢复面板布局
 - 通过“项目”菜单切换项目
-- 保留期限（`project_retention_days`），自动清理旧布局
+- 根目录已不存在的项目在菜单中以 ✗ 标记
 
-该文件沿用历史名称 `session.toml`。
+`project.toml` 以原子方式替换（写入临时文件、同步、重命名），未保存的缓冲区也是如此，因此崩溃不会留下半个文件。
 
 **布局文件格式：**
 ```toml
+root = "/home/user/project"
+
+[layout]
 focused_group = 0
 
-[[panel_groups]]
+[[layout.panel_groups]]
 expanded_index = 1            # 组内聚焦面板
 width = 80                    # 列宽（None = 自动分配）
 split_heights = [12, 6]       # 每面板高度（无缓存时省略）
 fullscreen_cache = [10, 8]    # Alt+F11 关闭时恢复的高度
 
-[[panel_groups.panels]]
+[[layout.panel_groups.panels]]
 type = "file_manager"
 path_or_url = "/home/user/project"
 
-[[panel_groups.panels]]
+[[layout.panel_groups.panels]]
 type = "editor"
 path = "/home/user/project/main.rs"
 ```
@@ -715,7 +735,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 ## 调试架构
 
 **日志系统：**
-- 每次运行写入项目数据目录中各自的 `session-*.log`，或写入 `[logging] file_path`（见开发者指南）
+- 每次运行写入项目 `logs/` 目录中各自的日志文件，或写入 `[logging] file_path`（见开发者指南）
 - 级别：trace、debug、info、warn、error
 - 时间戳和组件前缀
 - 启动时删除超过 24 小时的日志
@@ -752,7 +772,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 - `.termide/config.toml` 经过 `config::layer_rules`：其中的程序（调试器、LSP 服务器、shell、浏览器）、日志文件、连接的地址和密钥变量、代理的模式和 `allow` 规则都会被丢弃；设置模态框将这些字段显示为仅限全局
 - 插件只存在于全局插件目录中；项目只能在全局配置给定的模式范围内开关插件
 - 项目的 MCP 服务器、钩子和 `commands.toml` 命令只有在按其当前配置获得批准后才会启动（`agent_core::approvals`），其代理只能以 `plan` 或 `ask` 启动，且绝不是外部代理
-- 用户为项目作出的决定——批准、“始终允许”规则——保存在 termide 数据目录的 `trust/` 下，绝不保存在项目中
+- 用户为项目作出的决定——批准、“始终允许”规则——保存在 termide 数据目录中该项目的 `trust.toml` 里，绝不保存在项目中
 
 ## 总结
 

@@ -277,7 +277,7 @@ Termide работает нативно на Windows 10+ через ConPTY. Дл
 **Пути конфигурации:**
 - Конфиг: `%APPDATA%\termide\config.toml`
 - Проекты: `%APPDATA%\termide\projects\`
-- Логи: `%APPDATA%\termide\projects\<project>\session-*.log`
+- Логи: `%APPDATA%\termide\projects\<имя>-<хеш>\logs\*.log`
 
 ### Windows (WSL)
 

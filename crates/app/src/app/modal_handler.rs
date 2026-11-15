@@ -702,10 +702,16 @@ impl App {
                     self.handle_new_project_result(value)?;
                 }
                 PendingAction::DeleteProject { path, from } => {
-                    if value.get::<bool>().copied().unwrap_or(false) {
-                        self.handle_delete_project(&path, from)?;
-                    } else {
-                        self.return_to_projects(from)?;
+                    // A confirmation when the project has no agent sessions,
+                    // else a choice: with them, without them, or cancel.
+                    let sessions = match (value.get::<bool>(), value.get::<usize>()) {
+                        (Some(true), _) | (_, Some(1)) => Some(false),
+                        (_, Some(0)) => Some(true),
+                        _ => None,
+                    };
+                    match sessions {
+                        Some(sessions) => self.handle_delete_project(&path, sessions, from)?,
+                        None => self.return_to_projects(from)?,
                     }
                 }
                 PendingAction::DeleteBookmark {

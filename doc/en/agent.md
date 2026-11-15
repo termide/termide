@@ -1649,7 +1649,7 @@ ring when they end); it rings once until you look at the panel, and
 `bell_on_attention = false` under `[ai]`, or the bell's field on the settings
 window's AI page, silences it. "In this project" keeps
 the rule in termide's data directory, filed under the project
-(`trust/<project path>/permissions.toml`), "everywhere" appends it to the
+(`projects/<name>-<hash>/trust.toml`), "everywhere" appends it to the
 global configuration; answers for the session live until the panel closes.
 The rule is not written to the project's `.termide/config.toml`: a file that
 comes with the repository may make the agent ask or refuse, but its `mode`
@@ -2943,7 +2943,7 @@ project brings that waits so, `/trust <name>` (or a tick on its heading in
 the toolset list) approves it and connects it. The approval is for the launch as
 it is now — command, arguments, environment, working directory, or URL,
 headers and OAuth client — and is kept in termide's data directory under the
-project (`trust/<project path>/approved.toml`), never in the project. If the
+project (`projects/<name>-<hash>/trust.toml`), never in the project. If the
 repository changes any of it, it waits again. The approval is also bound to
 what you were shown: `/trust <name>` and the tick approve the launch of the
 last notice or of the heading beside the box, and if the file says something

@@ -275,7 +275,7 @@ Termide runs natively on Windows 10+ using ConPTY. Requires Windows Terminal for
 **Configuration paths:**
 - Config: `%APPDATA%\termide\config.toml`
 - Projects: `%APPDATA%\termide\projects\`
-- Logs: `%APPDATA%\termide\projects\<project>\session-*.log`
+- Logs: `%APPDATA%\termide\projects\<name>-<hash>\logs\*.log`
 
 ### Windows (WSL)
 

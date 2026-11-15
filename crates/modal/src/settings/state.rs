@@ -513,26 +513,25 @@ impl SettingsModal {
                 Field(1),  // theme
                 Field(2),  // language
                 Field(3),  // icon_mode
-                Field(12), // git_log.unicode_graph
+                Field(11), // git_log.unicode_graph
                 Spacer,
                 Header(t.settings_header_input()),
                 Field(0),  // vim_mode
-                Field(11), // report_all_keys
+                Field(10), // report_all_keys
                 Spacer,
                 Header(t.settings_header_layout()),
                 Field(4), // auto_stack_threshold
                 Field(5), // min_panel_width
                 Spacer,
                 Header(t.settings_header_notifications()),
-                Field(7), // bell
+                Field(6), // bell
                 Spacer,
                 Header(t.settings_header_performance()),
-                Field(6), // project_retention
-                Field(8), // resource_monitor_interval
+                Field(7), // resource_monitor_interval
                 Spacer,
                 Header(t.settings_header_instance()),
-                Field(9),  // always_detachable
-                Field(10), // restore_projects
+                Field(8), // always_detachable
+                Field(9), // restore_projects
             ],
             SettingsTab::Editor => vec![
                 Header(t.settings_header_typing()),
@@ -894,8 +893,7 @@ impl SettingsModal {
             SettingsTab::General => match index {
                 4 => self.config.general.auto_stack_threshold = val as u16,
                 5 => self.config.general.min_panel_width = val as u16,
-                6 => self.config.general.project_retention_days = val as u32,
-                8 => self.config.general.resource_monitor_interval = val,
+                7 => self.config.general.resource_monitor_interval = val,
                 _ => {}
             },
             SettingsTab::Editor => match index {

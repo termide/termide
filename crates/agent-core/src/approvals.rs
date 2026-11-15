@@ -30,6 +30,10 @@ struct Approved {
     commands: BTreeMap<String, String>,
 }
 
+/// The table of the project's grants file the approvals are kept under,
+/// beside its "allow always" rules (`[ai.permissions]`).
+const SECTION: &str = "approved";
+
 /// The approvals of one project, kept in `path`. Without a path nothing is
 /// approved and nothing can be.
 #[derive(Debug, Clone, Default)]
@@ -47,13 +51,18 @@ impl Approvals {
         let Some(path) = &self.path else {
             return Approved::default();
         };
-        match std::fs::read_to_string(path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_else(|e| {
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return Approved::default();
+        };
+        toml::from_str::<toml::Table>(&text)
+            .and_then(|mut file| match file.remove(SECTION) {
+                Some(section) => section.try_into(),
+                None => Ok(Approved::default()),
+            })
+            .unwrap_or_else(|e| {
                 log::warn!("ignoring {}: {e}", path.display());
                 Approved::default()
-            }),
-            Err(_) => Approved::default(),
-        }
+            })
     }
 
     fn write(&self, approved: &Approved) -> Result<(), String> {
@@ -180,7 +189,17 @@ fn write_file(path: &Path, approved: &Approved) -> Result<(), String> {
         std::fs::create_dir_all(dir)
             .map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
     }
-    let text = toml::to_string(approved).map_err(|e| e.to_string())?;
+    // The file holds the project's other grants too: only the section is
+    // replaced. A file that does not parse is not written over.
+    let mut file = match std::fs::read_to_string(path) {
+        Ok(text) => toml::from_str::<toml::Table>(&text)
+            .map_err(|e| format!("cannot read {}: {e}", path.display()))?,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => toml::Table::new(),
+        Err(e) => return Err(format!("cannot read {}: {e}", path.display())),
+    };
+    let section = toml::Value::try_from(approved).map_err(|e| e.to_string())?;
+    file.insert(SECTION.to_string(), section);
+    let text = toml::to_string(&file).map_err(|e| e.to_string())?;
     std::fs::write(path, text).map_err(|e| format!("cannot write {}: {e}", path.display()))
 }
 
@@ -314,5 +333,31 @@ mod tests {
             .approve_hook("check", &hook, &hook.fingerprint())
             .unwrap());
         assert!(approvals.hook_approved("check", &hook));
+    }
+
+    /// The approvals share the project's grants file with its "allow
+    /// always" rules: writing them keeps the rules, and the rules do not
+    /// read as approvals.
+    #[test]
+    fn approvals_keep_the_rules_beside_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("trust.toml");
+        let rules = "[ai.permissions.shell]\n\"ls *\" = \"allow\"\n";
+        std::fs::write(&path, rules).unwrap();
+        let approvals = Approvals::new(Some(path.clone()));
+        let mut servers = BTreeMap::from([("p".to_string(), server("npx"))]);
+        approvals.withhold_mcp(&mut servers);
+        assert!(servers["p"].withheld);
+
+        let shown = servers["p"].fingerprint();
+        assert!(approvals.approve_mcp("p", &servers["p"], &shown).unwrap());
+        let file: toml::Table = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(
+            file["ai"]["permissions"]["shell"]["ls *"].as_str(),
+            Some("allow")
+        );
+        assert!(file["approved"]["mcp"].get("p").is_some());
+        approvals.withhold_mcp(&mut servers);
+        assert!(!servers["p"].withheld);
     }
 }

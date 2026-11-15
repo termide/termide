@@ -99,10 +99,6 @@ pub(super) fn fields_for_tab(tab: SettingsTab) -> Vec<FieldDescriptor> {
                 field_type: FieldType::Number,
             },
             FieldDescriptor {
-                label: t.settings_general_project_retention(),
-                field_type: FieldType::Number,
-            },
-            FieldDescriptor {
                 label: t.settings_general_bell(),
                 field_type: FieldType::Bool,
             },
@@ -329,13 +325,12 @@ pub(super) fn get_field_value(config: &Config, tab: SettingsTab, index: usize) -
             3 => format!("{:?}", config.general.icon_mode).to_lowercase(),
             4 => config.general.auto_stack_threshold.to_string(),
             5 => config.general.min_panel_width.to_string(),
-            6 => config.general.project_retention_days.to_string(),
-            7 => bool_str(config.general.bell_on_operation_complete),
-            8 => config.general.resource_monitor_interval.to_string(),
-            9 => bool_str(config.general.always_detachable),
-            10 => bool_str(config.general.restore_projects),
-            11 => bool_str(config.general.report_all_keys),
-            12 => bool_str(config.git_log.unicode_graph),
+            6 => bool_str(config.general.bell_on_operation_complete),
+            7 => config.general.resource_monitor_interval.to_string(),
+            8 => bool_str(config.general.always_detachable),
+            9 => bool_str(config.general.restore_projects),
+            10 => bool_str(config.general.report_all_keys),
+            11 => bool_str(config.git_log.unicode_graph),
             _ => String::new(),
         },
         SettingsTab::Editor => match index {
@@ -493,14 +488,14 @@ pub(super) fn toggle_field(config: &mut Config, tab: SettingsTab, index: usize) 
     match tab {
         SettingsTab::General => match index {
             0 => config.general.vim_mode = !config.general.vim_mode,
-            7 => {
+            6 => {
                 config.general.bell_on_operation_complete =
                     !config.general.bell_on_operation_complete
             }
-            9 => config.general.always_detachable = !config.general.always_detachable,
-            10 => config.general.restore_projects = !config.general.restore_projects,
-            11 => config.general.report_all_keys = !config.general.report_all_keys,
-            12 => config.git_log.unicode_graph = !config.git_log.unicode_graph,
+            8 => config.general.always_detachable = !config.general.always_detachable,
+            9 => config.general.restore_projects = !config.general.restore_projects,
+            10 => config.general.report_all_keys = !config.general.report_all_keys,
+            11 => config.git_log.unicode_graph = !config.git_log.unicode_graph,
             _ => {}
         },
         SettingsTab::Editor => match index {
@@ -1069,7 +1064,7 @@ mod field_index_tests {
     /// writes another. This pins the newest one down end to end.
     #[test]
     fn always_detachable_reads_and_writes_the_same_field() {
-        let index = 9;
+        let index = 8;
         let mut config = Config::default();
 
         let fields = fields_for_tab(SettingsTab::General);
@@ -1106,7 +1101,7 @@ mod field_index_tests {
     /// The same end-to-end pin for the field after it.
     #[test]
     fn restore_projects_reads_and_writes_the_same_field() {
-        let index = 10;
+        let index = 9;
         let mut config = Config::default();
 
         let fields = fields_for_tab(SettingsTab::General);
@@ -1136,8 +1131,8 @@ mod field_index_tests {
     fn the_late_toggles_read_and_write_their_own_settings() {
         type Read = fn(&Config) -> bool;
         let cases: [(SettingsTab, usize, Read); 3] = [
-            (SettingsTab::General, 11, |c| c.general.report_all_keys),
-            (SettingsTab::General, 12, |c| c.git_log.unicode_graph),
+            (SettingsTab::General, 10, |c| c.general.report_all_keys),
+            (SettingsTab::General, 11, |c| c.git_log.unicode_graph),
             (SettingsTab::Ai, AI_BELL_ON_ATTENTION_FIELD, |c| {
                 c.ai.bell_on_attention
             }),

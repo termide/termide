@@ -256,7 +256,7 @@ pub struct CacheState {
     pub hotkey_table: Option<termide_core::HotkeyTable>,
     /// Projects worked on and when, for the Projects menu (loaded on open,
     /// cleared on close).
-    pub projects: Vec<(std::path::PathBuf, std::time::SystemTime)>,
+    pub projects: Vec<crate::projects_menu::KnownProject>,
 }
 
 /// Active scrollbar thumb drag.

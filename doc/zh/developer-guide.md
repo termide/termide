@@ -371,7 +371,7 @@ WARN Missing translation key: my_key (using English fallback)
 
 ### 日志
 
-每次运行都把日志写入项目数据目录中的 `session-<日期>-<时间>.log`（Linux 上为 `~/.local/share/termide/projects/<项目>/`，macOS 上为 `~/Library/Application Support/termide/projects/<项目>/`）；超过 24 小时的日志在启动时删除。`[logging]` 部分可以改变这一点：
+每次运行都把日志写入项目数据目录中的 `logs/<日期>-<时间>.log`（Linux 上为 `~/.local/share/termide/projects/<名称>-<哈希>/`，macOS 上为 `~/Library/Application Support/termide/projects/<名称>-<哈希>/`）；超过 24 小时的日志在启动时删除。`[logging]` 部分可以改变这一点：
 
 ```toml
 [logging]

@@ -1,0 +1,50 @@
+# The project store (doc/en/architecture.md, "Project Layouts"): layouts
+# left in the old tree under projects/ are folded into one flat directory per
+# project at startup; a project whose root is gone is marked ✗; Delete/F8 on
+# a project that is not open deletes its directory and, when asked to, its
+# agent sessions, keeping those of a directory nested in it.
+size 140x30
+project empty
+# Two projects in the old tree: `other`, with agent sessions of its own and
+# of `other/sub`, and `gone`, whose directory no longer exists.
+setup "mkdir -p other && P=$(pwd -P) && for p in other gone; do mkdir -p \"$TERMIDE_DATA/projects$P/$p\" && printf 'focused_group = 0\npanel_groups = []\n' > \"$TERMIDE_DATA/projects$P/$p/session.toml\"; done"
+setup "S=\"$TERMIDE_CONFIG/ai/sessions$(pwd -P)/other\" && mkdir -p \"$S/sub\" \"$S/checkpoints/abcd1234\" && echo '{}' > \"$S/2026-11-01T10-00-00_abcd1234.jsonl\" && echo '{}' > \"$S/sub/2026-11-01T11-00-00_ef567890.jsonl\""
+start
+wait-re "Options  project "
+
+# The old tree is gone, each project has its own flat directory.
+run "test ! -e \"$TERMIDE_DATA/projects/private\" && test ! -e \"$TERMIDE_DATA/projects/tmp\""
+run "test -f \"$TERMIDE_DATA\"/projects/other-*/project.toml && test -f \"$TERMIDE_DATA\"/projects/gone-*/project.toml"
+
+key 'Alt+\'
+wait "project/other"
+wait-re "✗ .*project/gone"
+expect-not "✗ .*project/other"
+snapshot switcher
+
+# Delete `other`: it has agent sessions, so the question offers them too.
+type "other"
+key F8
+wait "Delete the project?"
+wait "It also has agent sessions"
+snapshot delete-choice
+key Enter
+wait-gone "Delete the project?"
+run "! ls -d \"$TERMIDE_DATA\"/projects/other-* 2>/dev/null"
+run "S=\"$TERMIDE_CONFIG/ai/sessions$(pwd -P)/other\" && test ! -e \"$S/2026-11-01T10-00-00_abcd1234.jsonl\" && test ! -e \"$S/checkpoints\" && test -f \"$S/sub/2026-11-01T11-00-00_ef567890.jsonl\""
+
+# `gone` has no sessions: a plain confirmation.
+key Esc
+key 'Alt+\'
+wait "project/gone"
+type "gone"
+key F8
+wait "Delete the project?"
+expect-not "agent sessions"
+snapshot delete-confirm
+key y
+wait-gone "Delete the project?"
+run "! ls -d \"$TERMIDE_DATA\"/projects/gone-* 2>/dev/null"
+# No other project is left, so the switcher does not open again.
+wait-gone "project/gone"
+quit

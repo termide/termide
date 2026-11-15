@@ -479,7 +479,7 @@ Termide 遵循 [XDG Base Directory 规范](https://specifications.freedesktop.or
 - Windows: `%APPDATA%\termide\projects\`
 
 **日志文件位置：** 每次运行都会在上述项目数据位置下对应项目的目录中写入各自的
-`session-<date>-<time>.log`；超过 24 小时的日志会被删除。设置 `logging.file_path`
+`logs/<date>-<time>.log`；超过 24 小时的日志会被删除。设置 `logging.file_path`
 可改为使用单个固定文件。
 
 **书签位置：**
@@ -494,7 +494,6 @@ Termide 遵循 [XDG Base Directory 规范](https://specifications.freedesktop.or
 theme = "windows-xp"
 language = "auto"  # auto, bn, de, en, es, fr, hi, id, ja, ko, pt, ru, th, tr, vi, zh
 vim_mode = false
-project_retention_days = 30
 bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # 实例在终端关闭后继续运行（仅限 Unix）
