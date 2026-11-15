@@ -1,0 +1,31 @@
+# The shared config with the language servers off, for settings-live.scn
+# to turn them on from the settings window.
+[general]
+language = "en"
+icon_mode = "unicode"
+# The status bar's resource figures change on their own; keep them still.
+resource_monitor_interval = 60000
+
+[editor]
+show_blame = false
+
+[ai]
+connection = "local"
+
+[ai.connections.local]
+provider = "openai_compatible"
+base_url = "http://127.0.0.1:{mock_llm_port}/v1"
+model = "qwen3-coder-30b-a3b"
+
+[ai.permissions]
+mode = "configured"
+
+[ai.permissions.edit]
+"inventory/**" = "allow"
+
+# The agent scenario answers a permission card on the test run.
+[ai.permissions.shell]
+"python3 *" = "ask"
+
+[lsp]
+enabled = false

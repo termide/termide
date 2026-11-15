@@ -54,7 +54,7 @@ pub use panel::{
 };
 pub use scrollbar::{ScrollAxis, ScrollBarGeometry, ScrollBars};
 pub use terminal_caps::{
-    attention_mark, get_terminal_caps, init_icon_mode, init_terminal_caps, refresh_terminal_caps,
+    attention_mark, get_terminal_caps, init_terminal_caps, refresh_terminal_caps, set_icon_mode,
     use_emoji_icons, ColorDepth, TerminalCaps,
 };
 pub use terminal_modes::{

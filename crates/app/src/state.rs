@@ -318,7 +318,7 @@ impl AppState {
     }
 
     /// Create LSP configuration from app config
-    fn create_lsp_config(config: &Config) -> LspConfig {
+    pub(crate) fn create_lsp_config(config: &Config) -> LspConfig {
         let mut servers = std::collections::HashMap::new();
 
         for (lang, server_config) in &config.lsp.servers {

@@ -1,0 +1,72 @@
+# Settings that apply at once (doc/en/ui.md, "Saving"): LSP turned on in
+# the settings window starts rust-analyzer for the file an editor has open,
+# and turned off stops it and clears its diagnostics; the icon mode changes
+# the panel headers' icons; the log goes on in a newly named file. `lsp`
+# needs rust-analyzer on PATH.
+project empty
+lsp
+config settings-live.toml
+start
+run "mkdir src && printf '[package]\nname = \"live\"\nversion = \"0.1.0\"\nedition = \"2021\"\n' > Cargo.toml && printf 'use std::fmt;\n\nfn main() {}\n' > src/main.rs"
+wait "Cargo.toml"
+run "true"
+key Down Enter
+wait "main.rs"
+key End F4
+wait "use std::fmt;"
+sleep 3
+expect-not "[unused_imports]"
+
+# LSP on: the open editor attaches to a new server.
+key Alt+P
+wait "Icon mode"
+key Down Down Down Down
+wait "LSP enabled"
+snapshot lsp-page
+key Tab Enter
+wait "LSP enabled             [✓]"
+key Esc Esc
+wait-gone "LSP enabled"
+wait "[unused_imports]" 120
+snapshot lsp-on
+
+# LSP off: the server goes and its diagnostics with it.
+key Alt+P
+wait "Icon mode"
+key Down Down Down Down
+wait "LSP enabled"
+key Tab Enter
+wait "LSP enabled             [ ]"
+key Esc Esc
+wait-gone "LSP enabled"
+wait-gone "[unused_imports]" 30
+snapshot lsp-off
+
+# Emoji icons in the panel headers, then back to none.
+key Alt+P
+wait "Icon mode"
+key Tab Down Down Left
+wait "< emoji >"
+key Esc Esc
+wait-gone "Icon mode"
+wait "[≡] 📁"
+snapshot emoji
+key Alt+P
+wait "Icon mode"
+key Tab Down Down Right
+wait "< unicode >"
+key Esc Esc
+wait-gone "Icon mode"
+wait-gone "📁"
+
+# The log continues in the file named on the Logging page.
+key Alt+P
+wait "Icon mode"
+key Down Down Down Down Down Down
+wait "Log file path"
+key Tab Enter
+type "live.log"
+key Enter
+file-contains live.log "continued from"
+key Esc Esc
+quit --force

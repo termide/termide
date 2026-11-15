@@ -242,6 +242,28 @@ impl App {
         }
     }
 
+    /// Drop the checks and what is known of the files of the languages
+    /// `retired` names, all when `None`: their servers were shut down by a
+    /// change of the settings. A check under way is answered without a
+    /// report; the server's clearing of its diagnostics is no answer.
+    pub(in crate::app) fn forget_lsp_checks(&mut self, retired: Option<&HashSet<String>>) {
+        let of_retired = |path: &Path| {
+            retired.is_none_or(|langs| {
+                LspManager::detect_language(path).is_some_and(|lang| langs.contains(&lang))
+            })
+        };
+        let checks = &mut self.lsp_checks;
+        for waiter in std::mem::take(&mut checks.waiting) {
+            if retired.is_none_or(|langs| langs.contains(&waiter.lang)) {
+                let _ = waiter.reply.send(None);
+            } else {
+                checks.waiting.push(waiter);
+            }
+        }
+        checks.opened.retain(|path, _| !of_retired(path));
+        checks.known.retain(|path, _| !of_retired(path));
+    }
+
     fn answer_lsp_checks(&mut self) {
         if self.lsp_checks.waiting.is_empty() {
             return;
