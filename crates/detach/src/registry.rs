@@ -374,6 +374,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn without_a_start_time_the_socket_must_answer() {
+        let _no_child = crate::CHILD_SPAWN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let id = "test-legacy-sidecar";
         let socket = paths::socket_path(id).unwrap();
         let _ = std::fs::remove_file(&socket);

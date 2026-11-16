@@ -131,7 +131,17 @@ static SERVED: AtomicBool = AtomicBool::new(false);
 
 /// Send `request` and wait for the answer `answer` brings.
 fn ask<T>(request: Request, answer: &Receiver<Result<T, String>>) -> Result<T, String> {
-    if !SERVED.load(Ordering::Acquire) {
+    ask_if_served(SERVED.load(Ordering::Acquire), request, answer)
+}
+
+/// [`ask`] with whether an app answers given: the flag is process-wide, and
+/// other tests in the same process set it.
+fn ask_if_served<T>(
+    served: bool,
+    request: Request,
+    answer: &Receiver<Result<T, String>>,
+) -> Result<T, String> {
+    if !served {
         return Err("no agent panels are open to message here".into());
     }
     port()
@@ -783,7 +793,7 @@ pub(super) fn serve_for_test(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use termide_agent_core::{CancelToken, ToolCall};
+    use termide_agent_core::CancelToken;
 
     #[test]
     fn a_chain_of_messages_without_the_user_is_cut_off() {
@@ -901,31 +911,33 @@ mod tests {
     }
 
     #[test]
-    fn without_an_app_the_tools_say_there_is_no_one_to_message() {
-        let [agents, send] = peer_tools("default", Path::new("/proj"));
-        let call = |name: &str, args| ToolCall {
-            id: "c".into(),
-            name: name.into(),
-            arguments: args,
-            extra_content: None,
-        };
-        let ctx = ToolContext::new("/proj");
-        let listed = agents.execute(
-            &call("agents", serde_json::json!({})),
-            &ctx,
-            &mut |_| {},
-            &CancelToken::new(),
+    fn without_an_app_there_is_no_one_to_message() {
+        let (reply, answer) = mpsc::channel();
+        let listed = ask_if_served(
+            false,
+            Request::List {
+                from: None,
+                project_root: PathBuf::from("/proj"),
+                reply,
+            },
+            &answer,
         );
-        assert!(listed.is_error && listed.plain_text().contains("no agent panels"));
-        let sent = send.execute(
-            &call(
-                "send_message",
-                serde_json::json!({ "to": "1a2b3c4d", "kind": "info", "text": "hi" }),
-            ),
-            &ctx,
-            &mut |_| {},
-            &CancelToken::new(),
+        assert!(listed.unwrap_err().contains("no agent panels"));
+        let (reply, answer) = mpsc::channel();
+        let sent = ask_if_served(
+            false,
+            Request::Send {
+                from: None,
+                session: None,
+                agent: "default".into(),
+                project_root: PathBuf::from("/proj"),
+                to: "1a2b3c4d".into(),
+                kind: OriginKind::Info,
+                text: "hi".into(),
+                reply,
+            },
+            &answer,
         );
-        assert!(sent.is_error);
+        assert!(sent.unwrap_err().contains("no agent panels"));
     }
 }

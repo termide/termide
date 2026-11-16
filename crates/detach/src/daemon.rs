@@ -609,6 +609,9 @@ mod tests {
     /// believe it is hosted in the outer instance.
     #[test]
     fn hosting_variables_do_not_reach_child_processes() {
+        let _spawning = crate::CHILD_SPAWN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         std::env::set_var(SOCKET_ENV, "/run/termide/outer.sock");
         std::env::set_var(ID_ENV, "outer");
         assert_eq!(

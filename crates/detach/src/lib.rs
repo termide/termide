@@ -36,6 +36,12 @@ pub use reattach::{
 
 use anyhow::Result;
 
+/// Held by a test that starts a child process and by one that needs a socket
+/// it closed to refuse connections: between fork and exec the child holds a
+/// copy of every descriptor, a listening socket included.
+#[cfg(all(test, unix))]
+pub(crate) static CHILD_SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Render the detached-instance list as a table, or a hint when there is none.
 pub fn format_instance_list() -> Result<String> {
     let instances = registry::list()?;
