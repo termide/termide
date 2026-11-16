@@ -11,8 +11,8 @@ use anyhow::{Context, Result};
 
 use crate::ownership::{LOCK_FILE, OWNER_FILE};
 use crate::store::{
-    delete_dir, holds_only_owner, nested_in, project_dir_in, projects_dir_in, PROJECT_FILE,
-    TRUST_FILE,
+    delete_dir, holds_only_owner, list_in, nested_in, project_dir_in, projects_dir_in,
+    PROJECT_FILE, TRUST_FILE,
 };
 use crate::{get_data_dir, PanelState, ProjectFileOut, ProjectLayout};
 
@@ -69,6 +69,91 @@ fn relocate_state_in(
             log::warn!("Could not rewrite the layout in {}: {e:#}", dst.display());
         }
     }
+    Ok(())
+}
+
+/// Point the agent panels of every saved layout at the session logs that
+/// moved, as `sessions` maps their old paths to the new ones: sessions
+/// worked in `from`, a directory gone, carried to `to` without their
+/// project moving. Such a panel's working directory follows them. Layouts
+/// that name none of them are left as they are.
+///
+/// # Errors
+///
+/// When there is no data directory.
+pub fn relocate_session_paths(
+    from: &Path,
+    to: &Path,
+    sessions: &HashMap<PathBuf, PathBuf>,
+) -> Result<()> {
+    relocate_sessions_in(&get_data_dir()?, from, to, sessions);
+    Ok(())
+}
+
+fn relocate_sessions_in(
+    data_dir: &Path,
+    from: &Path,
+    to: &Path,
+    sessions: &HashMap<PathBuf, PathBuf>,
+) {
+    if sessions.is_empty() {
+        return;
+    }
+    for project in list_in(&projects_dir_in(data_dir)) {
+        let path = project.dir.join(PROJECT_FILE);
+        if let Err(e) = rewrite_agent_sessions(&path, from, to, sessions) {
+            log::warn!("Could not rewrite the layout in {}: {e:#}", path.display());
+        }
+    }
+}
+
+/// Rewrite the agent panels of the layout in `path` whose session moved;
+/// the file is written only when one did.
+fn rewrite_agent_sessions(
+    path: &Path,
+    from: &Path,
+    to: &Path,
+    sessions: &HashMap<PathBuf, PathBuf>,
+) -> Result<()> {
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e.into()),
+    };
+    let mut table: toml::Table = toml::from_str(&text)?;
+    let Some(mut layout) = table
+        .get("layout")
+        .cloned()
+        .and_then(|value| value.try_into::<ProjectLayout>().ok())
+    else {
+        return Ok(());
+    };
+    let mut changed = false;
+    for panel in layout
+        .panel_groups
+        .iter_mut()
+        .flat_map(|group| group.panels.iter_mut())
+    {
+        if let PanelState::Agent {
+            cwd,
+            session: Some(session),
+            ..
+        } = panel
+        {
+            if let Some(new) = sessions.get(session.as_path()) {
+                *session = new.clone();
+                if let Some(new_cwd) = termide_fsutil::rebase(cwd, from, to) {
+                    *cwd = new_cwd;
+                }
+                changed = true;
+            }
+        }
+    }
+    if !changed {
+        return Ok(());
+    }
+    table.insert("layout".into(), toml::Value::try_from(&layout)?);
+    termide_fsutil::write_atomic(path, toml::to_string_pretty(&table)?.as_bytes())?;
     Ok(())
 }
 
@@ -355,5 +440,43 @@ mod tests {
         assert_eq!(read(data, to), (to.to_path_buf(), vec![terminal(to)]));
         assert!(old_dir.join(TRUST_FILE).exists());
         assert!(!project_dir_in(data, to).join(TRUST_FILE).exists());
+    }
+
+    /// Sessions of a gone subdirectory carried elsewhere: the project whose
+    /// layout names one keeps its root, its agent panel follows the log,
+    /// and its other panels stay as they are.
+    #[test]
+    fn moved_sessions_are_followed_in_every_layout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let data = tmp.path();
+        let root = Path::new("/nonexistent/p");
+        let (from, to) = (root.join("sub"), PathBuf::from("/nonexistent/q"));
+        let old_log = PathBuf::from("/cfg/ai/sessions/nonexistent/p/sub/x_1.jsonl");
+        let new_log = PathBuf::from("/cfg/ai/sessions/nonexistent/q/x_1.jsonl");
+        let other = PanelState::Agent {
+            cwd: root.to_path_buf(),
+            session: Some("/cfg/ai/sessions/nonexistent/p/y_2.jsonl".into()),
+            agent: None,
+            setup: Default::default(),
+        };
+        let agent = |cwd: &Path, session: &Path| PanelState::Agent {
+            cwd: cwd.to_path_buf(),
+            session: Some(session.to_path_buf()),
+            agent: None,
+            setup: Default::default(),
+        };
+        save(data, root, vec![agent(&from, &old_log), other.clone()]);
+        let untouched = save(data, Path::new("/nonexistent/r"), vec![other.clone()]);
+        let before = fs::read_to_string(untouched.join(PROJECT_FILE)).unwrap();
+
+        let sessions = HashMap::from([(old_log, new_log.clone())]);
+        relocate_sessions_in(data, &from, &to, &sessions);
+
+        assert_eq!(
+            read(data, root),
+            (root.to_path_buf(), vec![agent(&to, &new_log), other])
+        );
+        let after = fs::read_to_string(untouched.join(PROJECT_FILE)).unwrap();
+        assert_eq!(before, after, "a layout naming none is not rewritten");
     }
 }

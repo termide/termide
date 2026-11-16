@@ -2062,8 +2062,10 @@ session was last worked on and how many sessions it has
 - `Enter` opens a new agent panel working in that directory; its welcome
   banner lists the directory's sessions to resume, rename (`F2`) or delete
   (`F8`). On a directory that is gone it asks where the directory is now,
-  and files its sessions there, rewriting the paths they name, as moving a
-  project carries its sessions along; refused while one of them is open.
+  and files its sessions there, with those of its subdirectories, rewriting
+  the paths they name, as moving a project carries its sessions along: agent
+  panels in saved layouts follow their sessions. Refused while one of them
+  is open.
 - `Delete` deletes all the directory's sessions after a confirmation giving
   their number. Sessions open in a panel stay and are reported; the
   sessions of directories inside it are not touched.

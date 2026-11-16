@@ -238,12 +238,8 @@ impl App {
         let t = termide_i18n::t();
         let to_dir = super::super::agent_panel::session_dir_of(&target);
         if let Some(to_dir) = to_dir.filter(|_| target != cwd) {
-            let open = std::fs::read_dir(&dir).is_ok_and(|entries| {
-                entries
-                    .flatten()
-                    .any(|entry| termide_agent_core::Session::is_open(&entry.path()))
-            });
-            if open {
+            // The whole tree moves, the sessions of subdirectories too.
+            if any_session_open(&dir) {
                 self.show_error_modal(t.ai_sessions_open().to_string());
                 return Ok(());
             }
@@ -254,10 +250,18 @@ impl App {
                 to_root: &target,
                 copy: false,
             };
-            if let Err(e) = termide_agent_core::relocate::relocate_sessions(relocation) {
-                log::error!("cannot move the sessions of {}: {e}", cwd.display());
-                self.show_error_modal(e.to_string());
-                return Ok(());
+            let moved = match termide_agent_core::relocate::relocate_sessions(relocation) {
+                Ok(moved) => moved,
+                Err(e) => {
+                    log::error!("cannot move the sessions of {}: {e}", cwd.display());
+                    self.show_error_modal(e.to_string());
+                    return Ok(());
+                }
+            };
+            // Agent panels of saved layouts follow their logs, as after a
+            // project move.
+            if let Err(e) = termide_project::relocate_session_paths(&cwd, &target, &moved) {
+                log::warn!("cannot point the layouts at the moved sessions: {e:#}");
             }
             self.state
                 .set_info(t.ai_sessions_relinked_fmt(&parked_projects::display_root(&target)));
@@ -566,6 +570,21 @@ impl App {
         self.state.ui.ai_submenu.select(section.index());
         self.state.open_ai_nested_submenu(section);
     }
+}
+
+/// Whether a session log anywhere under `dir` is open: in a panel here or
+/// in another instance.
+fn any_session_open(dir: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        match entry.file_type() {
+            Ok(kind) if kind.is_dir() => any_session_open(&path),
+            _ => termide_agent_core::Session::is_open(&path),
+        }
+    })
 }
 
 #[cfg(test)]
