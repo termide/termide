@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "SSH askpass hazırlanamadı: {error}"
 git_spawn_failed_fmt = "git başlatılamadı: {error}"
 image_cache_failed_fmt = "Görsel önbelleğe alınamadı: {error}"
 fetch_unsupported_type_fmt = "Desteklenmeyen içerik türü: {type}"
-vfs_protocol_unsupported_fmt = "{protocol} bağlantıları henüz desteklenmiyor"
 op_move_source_not_deleted_fmt = "Kopyalama başarılı, ancak kaynak silinemedi: {error}"
 op_temp_dir_failed_fmt = "Geçici dizin oluşturulamadı: {error}"
 

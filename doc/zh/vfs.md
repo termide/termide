@@ -5,7 +5,8 @@ Termide 内置纯 Rust 的 VFS 层，让[文件管理器](file-manager.md)能够
 面板之间复制、重命名等——使用相同的界面，进度显示在[操作面板](operations.md)
 中。
 
-无需任何原生库：SFTP 基于 `russh` + `russh-sftp`，FTPS 基于 `rustls`。
+无需任何原生库：SFTP 基于 `russh` + `russh-sftp`，FTPS 基于 `rustls`，
+SMB 基于 `smb2`，NFS 基于 `nfs3_client`。
 在 Alpine / musl 上开箱即用地支持静态构建。
 
 ## 支持的协议
@@ -15,9 +16,10 @@ Termide 内置纯 Rust 的 VFS 层，让[文件管理器](file-manager.md)能够
 | `sftp://`   | 基于 SSH 的 SFTP                                   |
 | `ftp://`    | 普通 FTP                                           |
 | `ftps://`   | TLS 加密的 FTP（rustls）                           |
+| `smb://`    | SMB 2 和 3：Windows、Samba 与 NAS 共享             |
+| `nfs://`    | NFS 第 3 版                                        |
 
-`smb://` 与 `nfs://` 会被 URL 解析器识别，但目前未提供对应的 provider
-——请通过操作系统原生挂载使用它们。
+这两者的特别之处见 [SMB 与 NFS](#smb-与-nfs)。
 
 ## URL 语法
 
@@ -34,6 +36,8 @@ sftp://nvn@example.com/home/nvn/projects
 sftp://example.com:2222/srv/builds
 ftp://files.example.com/pub
 ftps://secure.example.com/uploads
+smb://bob@nas.local/media/films
+nfs://nas.local/srv/backup
 ```
 
 说明：
@@ -41,7 +45,8 @@ ftps://secure.example.com/uploads
   percent-decode 回 UTF-8。
 - 省略用户名或端口时，SFTP 会从 SSH 配置中取得它们（见
   [SSH 配置](#ssh-配置sftp)）。
-- 否则，省略端口时使用协议默认值（22 / 21 / 990）。
+- 否则，省略端口时使用协议默认值（22 / 21 / 990 / 445）；NFS 会询问
+  服务器的 portmapper。
 - URL 中的密码不会被使用。服务器要求密码时，Termide 会询问它，
   并可将其保存到[密码库](passwords.md)；对 SFTP 而言，基于密钥的
   认证仍是更好的选择。
@@ -170,6 +175,34 @@ URL 中写明的端口或用户优先于 `Port` 和 `User`，与 `ssh` 命令行
   行号。无法绕过：如果更换是预期的，请用对话框给出的 `ssh-keygen -R`
   命令删除旧密钥后重新连接。
 
+## SMB 与 NFS
+
+`smb://host/share/path` 通过 SMB 2 或 3 打开一个共享，`smb://host/`
+把服务器的共享列为目录（隐藏的 `$` 共享和打印机不显示）。用户写在
+地址里：`smb://bob@nas.local/media`，带域时为
+`smb://CORP;bob@server/media`。服务器要求密码时，Termide 会询问，并可
+保存到[密码库](passwords.md)。不写用户时以访客登录，服务器可能拒绝；
+此时请指定用户。
+
+`nfs://host/export/path` 打开一个 NFSv3 导出，`nfs://host/` 把服务器的
+导出显示为目录：导出 `/srv/media` 显示为 `srv`，其中有 `media`。NFS
+没有密码。服务器信任客户端发送的用户和组 ID，因此 Termide 像系统的
+NFS 客户端一样发送你的 ID，服务器按自己的规则（`root_squash`、
+`all_squash`）映射。地址中的端口（`nfs://nas:2049/srv`）是 NFS 服务的
+端口；服务器没有 portmapper 时，也会在该端口上寻找挂载服务，因为容器中
+的服务器常在同一端口上同时提供两者。
+
+有两类导出无法打开，面板会说明是哪一类以及原因：
+
+- **只接受来自特权端口（1024 以下）请求的导出。** 这是 Linux 的默认
+  选项 `secure`，而 Linux 只把这些端口给 root；macOS 自 10.14 起任何人
+  都可使用。请在服务器上为该导出加上 `insecure`，或用系统挂载该导出
+  并打开挂载点。
+- **需要 Kerberos 的导出**（`sec=krb5`、`krb5i` 或 `krb5p`）。请用系统
+  挂载并打开挂载点。
+
+只支持 NFSv4 的服务器同样无法连接；大多数服务器会同时提供第 3 版。
+
 ## 远程面板的体验
 
 所有远程操作都是异步的：
@@ -194,8 +227,9 @@ URL 中写明的端口或用户优先于 `Port` 和 `User`，与 `ssh` 命令行
   部分文件，面板会询问是否删除——参见[操作面板](operations.md)的
   取消清理章节。
 
-同一 SFTP / FTP 连接内的重命名留在服务器端：单一连接内的移动以
-remote-rename 完成，而不是 download-then-upload。
+同一连接内的移动在服务器上以重命名完成，而不是先下载再上传；SMB 限于
+同一共享内，NFS 限于同一导出内，这是协议所允许的范围。其他情况下，
+移动会先复制再删除。
 
 ## 项目
 
@@ -285,7 +319,8 @@ DVD-Video、Blu-ray）只会显示其旁边很小的 ISO 9660 部分，通常只
 
 ## 限制 / 已知缺口
 
-- 目前没有 `smb://` / `nfs://` provider，只有 URL 解析。
+- 不支持 NFS 第 4 版和 Kerberos；限定特权端口的导出在 Linux 上需要
+  root。见 [SMB 与 NFS](#smb-与-nfs)。
 - 中断的传输没有按 byte offset 续传：取消后的上传重新发起时从头
   开始。
 - 远程面板不会询问加密 SSH 密钥的密码短语；请将密钥加载到

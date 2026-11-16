@@ -2,7 +2,7 @@
 
 The file manager panel provides an intuitive interface for navigating the file system and performing operations on files and directories.
 
-Remote filesystems (SFTP / FTP / FTPS) appear in the same panel as
+Remote filesystems (SFTP / FTP / FTPS / SMB / NFS) appear in the same panel as
 local paths — see [Remote Filesystems](vfs.md) for URL syntax and
 authentication setup. ZIP and tar archives open like read-only
 directories — see [Archives](vfs.md#archives).
@@ -81,7 +81,7 @@ under it that starts with the other panels' directories.
 freedesktop.org trash on Linux, the Recycle Bin on Windows — after a prompt
 that starts on **Yes**; take items back with the system's own tools.
 `Shift+Delete` deletes them for good, and its prompt starts on **No**. Remote
-locations (SFTP, FTP) have no trash: there `Delete` deletes for good too,
+locations (SFTP, FTP, SMB, NFS) have no trash: there `Delete` deletes for good too,
 and the prompt says so. A file system the system cannot trash on, such as
 some network mounts, reports an error; `Shift+Delete` deletes there. The keys
 are `delete` and `delete_permanently` under `[file_manager.keybindings]`.

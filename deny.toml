@@ -106,6 +106,10 @@ allow = [
     "MPL-2.0",
     "CC0-1.0",
     "0BSD",
+    # `nfs3_client`, `nfs3_types` and `nfs3_macros` (termide-vfs NFS
+    # support) are dedicated to the public domain under the Unlicense:
+    # no conditions at all, like CC0-1.0 above.
+    "Unlicense",
 ]
 exceptions = []
 

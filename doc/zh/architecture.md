@@ -668,10 +668,9 @@ path = "/home/user/project/main.rs"
 
 一个纯 Rust 的 VFS 层让远程服务器在应用的其余部分看来像本地目录。无需原生
 OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行在 `rustls`
-上。构建可在 Alpine / musl 上静态完成。
+上，SMB 运行在 `smb2` 上，NFSv3 运行在 `nfs3_client` 上。构建可在 Alpine / musl 上静态完成。
 
-**支持的协议：** `sftp://`、`ftp://`、`ftps://`（URL 解析也识别 `smb://` /
-`nfs://`，但尚未提供相应的 provider）。
+**支持的协议：** `sftp://`、`ftp://`、`ftps://`、`smb://`、`nfs://`。
 
 **关键组件：**
 - **`VfsProvider` trait**（`crates/vfs/src/traits.rs`）——供 FileManager、
@@ -684,6 +683,10 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
   `russh-sftp` 会话，处理小的原子命令（`OpenRead` / `ReadChunk` / `WriteChunk` /
   `CloseHandle` / `Stat` / `ListDir` / `MkdirRecursive` / …）。分块循环位于同步
   工作线程一侧，在分发之间轮询暂停/取消。
+- **SMB 与 NFS**（`crates/vfs/src/smb.rs`、`nfs.rs`）——运行在同一个共享 tokio
+  运行时（`rt.rs`）上的异步客户端。它们的上传和下载（单个文件或整棵树）在
+  `chunked.rs` 中于独立线程上进行，每次阻塞调用传一块，块与块之间报告进度、
+  响应暂停和取消。
 - **URL 解析**（`crates/vfs/src/url.rs`）——UTF-8 往返并对路径做百分号解码，
   使非 ASCII 文件名得以保留。
 - **认证**——SSH agent → `~/.ssh/config` 的 `IdentityFile` → 默认密钥

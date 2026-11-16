@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "SSH askpass を準備できませんでした: {error}
 git_spawn_failed_fmt = "git を起動できませんでした: {error}"
 image_cache_failed_fmt = "画像をキャッシュできませんでした: {error}"
 fetch_unsupported_type_fmt = "サポートされていないコンテンツタイプ: {type}"
-vfs_protocol_unsupported_fmt = "{protocol} 接続はまだサポートされていません"
 op_move_source_not_deleted_fmt = "コピーは成功しましたが、コピー元を削除できませんでした: {error}"
 op_temp_dir_failed_fmt = "一時ディレクトリを作成できませんでした: {error}"
 

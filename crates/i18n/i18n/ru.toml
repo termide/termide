@@ -1693,7 +1693,6 @@ git_askpass_failed_fmt = "Не удалось подготовить SSH askpass
 git_spawn_failed_fmt = "Не удалось запустить git: {error}"
 image_cache_failed_fmt = "Не удалось сохранить изображение в кэш: {error}"
 fetch_unsupported_type_fmt = "Неподдерживаемый тип содержимого: {type}"
-vfs_protocol_unsupported_fmt = "Подключения {protocol} пока не поддерживаются"
 op_move_source_not_deleted_fmt = "Копирование выполнено, но исходный файл удалить не удалось: {error}"
 op_temp_dir_failed_fmt = "Не удалось создать временный каталог: {error}"
 

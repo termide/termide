@@ -84,7 +84,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 ### Files and data
 
 - **Dual-pane file manager** - Tree with nested git status, glob and regex search, batch operations; zip, tar and ISO archives open like folders and `P` packs the selection; files copy and paste to and from other apps through the system clipboard
-- **Remote filesystems** - SFTP, FTP and FTPS in pure Rust, with copying between local and remote panels; SMB and NFS shares are not built in — mount them with the OS and open the mount point
+- **Remote filesystems** - SFTP, FTP, FTPS, SMB and NFSv3 in pure Rust, with copying between local and remote panels
 - **Background operations** - Copy, move, upload and download with progress, pause, resume and cancel
 - **Database viewer** - SQLite, PostgreSQL and MySQL from a bookmark URL: server-side sort, per-column filters, cell editing, rows as TSV, JSON or INSERT
 - **CSV and TSV tables** - Delimited files as a sortable table with the delimiter and header guessed; read from disk in windows, so a file of any size opens at once

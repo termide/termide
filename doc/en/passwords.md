@@ -6,7 +6,7 @@ to contain them.
 
 The vault serves:
 
-- **Remote file systems** — SFTP, FTP, FTPS (see [VFS](vfs.md)).
+- **Remote file systems** — SFTP, FTP, FTPS, SMB (see [VFS](vfs.md)).
 - **Databases** — PostgreSQL and MySQL (see [Database Viewer](database.md)).
 - **Git over HTTPS** — user name and password or token for push, pull and
   fetch.
@@ -17,8 +17,8 @@ The vault serves:
 ## How it works
 
 1. A connection is refused: SFTP after the SSH agent and keys, FTP after
-   the anonymous login, a database without a password, git without
-   credentials.
+   the anonymous login, SMB or a database without a password, git
+   without credentials.
 2. If the vault holds a password for that server and user, Termide uses it.
    When the vault is locked, it asks for the master password first.
 3. Otherwise Termide asks for the password. Tick **Save in password vault**

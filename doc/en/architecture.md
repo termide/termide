@@ -695,11 +695,12 @@ A legacy `mode = "accordion"` field is still accepted on read and triggers a one
 
 A pure-Rust VFS layer makes remote servers look like local
 directories to the rest of the app. No native OpenSSL or libssh —
-SFTP runs on `russh` + `russh-sftp`, FTPS on `rustls`. Builds work
+SFTP runs on `russh` + `russh-sftp`, FTPS on `rustls`, SMB on `smb2`,
+NFSv3 on `nfs3_client`. Builds work
 statically on Alpine / musl.
 
-**Supported protocols:** `sftp://`, `ftp://`, `ftps://` (URL parsing
-also recognises `smb://` / `nfs://` but no provider is shipped yet).
+**Supported protocols:** `sftp://`, `ftp://`, `ftps://`, `smb://`,
+`nfs://`.
 
 **Key components:**
 - **`VfsProvider` trait** (`crates/vfs/src/traits.rs`) — abstract
@@ -714,6 +715,11 @@ also recognises `smb://` / `nfs://` but no provider is shipped yet).
   (`OpenRead` / `ReadChunk` / `WriteChunk` / `CloseHandle` / `Stat`
   / `ListDir` / `MkdirRecursive` / …). Chunk loops live on the sync
   worker side, polling pause/cancel between dispatches.
+- **SMB and NFS** (`crates/vfs/src/smb.rs`, `nfs.rs`) — async clients
+  driven on one shared tokio runtime (`rt.rs`). Their uploads and
+  downloads, a file or a whole tree, run in `chunked.rs` on a thread of
+  their own, a piece per blocking call, with progress, pause and cancel
+  between pieces.
 - **URL parsing** (`crates/vfs/src/url.rs`) — UTF-8 round-trip with
   percent-decoded paths so non-ASCII filenames survive.
 - **Authentication** — SSH agent → `~/.ssh/config` `IdentityFile`

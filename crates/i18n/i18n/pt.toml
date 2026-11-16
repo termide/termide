@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "Não foi possível preparar o SSH askpass: {error}"
 git_spawn_failed_fmt = "Não foi possível iniciar o git: {error}"
 image_cache_failed_fmt = "Não foi possível armazenar a imagem em cache: {error}"
 fetch_unsupported_type_fmt = "Tipo de conteúdo não suportado: {type}"
-vfs_protocol_unsupported_fmt = "Conexões {protocol} ainda não são suportadas"
 op_move_source_not_deleted_fmt = "A cópia foi concluída, mas não foi possível excluir a origem: {error}"
 op_temp_dir_failed_fmt = "Não foi possível criar o diretório temporário: {error}"
 

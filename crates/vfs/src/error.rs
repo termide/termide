@@ -133,10 +133,10 @@ pub enum VfsError {
     #[error("SMB error: {0}")]
     Smb(String),
 
-    /// NFS/FUSE mount error.
+    /// NFS-specific error.
     #[cfg(feature = "nfs")]
-    #[error("NFS mount error: {0}")]
-    NfsMount(String),
+    #[error("NFS error: {0}")]
+    Nfs(String),
 
     /// An archive could not be read: corrupt, truncated, encrypted or using
     /// an unsupported compression method.

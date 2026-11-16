@@ -2244,7 +2244,6 @@ pub trait Translation: Send + Sync {
     fn git_spawn_failed_fmt(&self, error: &str) -> String;
     fn image_cache_failed_fmt(&self, error: &str) -> String;
     fn fetch_unsupported_type_fmt(&self, content_type: &str) -> String;
-    fn vfs_protocol_unsupported_fmt(&self, protocol: &str) -> String;
 }
 
 /// Initialize translation system.

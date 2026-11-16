@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "เตรียม SSH askpass ไม่ได้: {er
 git_spawn_failed_fmt = "เริ่ม git ไม่ได้: {error}"
 image_cache_failed_fmt = "แคชรูปภาพไม่ได้: {error}"
 fetch_unsupported_type_fmt = "ไม่รองรับประเภทเนื้อหา: {type}"
-vfs_protocol_unsupported_fmt = "ยังไม่รองรับการเชื่อมต่อ {protocol}"
 op_move_source_not_deleted_fmt = "คัดลอกสำเร็จ แต่ลบต้นฉบับไม่ได้: {error}"
 op_temp_dir_failed_fmt = "สร้างไดเรกทอรีชั่วคราวไม่ได้: {error}"
 

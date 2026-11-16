@@ -3420,10 +3420,6 @@ impl Translation for RuntimeTranslation {
     fn fetch_unsupported_type_fmt(&self, content_type: &str) -> String {
         self.format("fetch_unsupported_type_fmt", &[("type", content_type)])
     }
-
-    fn vfs_protocol_unsupported_fmt(&self, protocol: &str) -> String {
-        self.format("vfs_protocol_unsupported_fmt", &[("protocol", protocol)])
-    }
     // Calendar
 }
 

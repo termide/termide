@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "Không thể chuẩn bị SSH askpass: {error}"
 git_spawn_failed_fmt = "Không thể khởi chạy git: {error}"
 image_cache_failed_fmt = "Không thể lưu ảnh vào bộ nhớ đệm: {error}"
 fetch_unsupported_type_fmt = "Loại nội dung không được hỗ trợ: {type}"
-vfs_protocol_unsupported_fmt = "Kết nối {protocol} chưa được hỗ trợ"
 op_move_source_not_deleted_fmt = "Sao chép thành công nhưng không thể xóa nguồn: {error}"
 op_temp_dir_failed_fmt = "Không thể tạo thư mục tạm: {error}"
 
