@@ -6,7 +6,9 @@
 #
 # set-name names a file in sets/ (one task name per line); without it, or
 # with `all`, the whole dataset runs. Results go to jobs/<job-name>/, with
-# bench-meta.json recording the agent, the termide commit and the model.
+# bench-meta.json recording the agent, the termide commit, the model and the
+# conditions (machine, Docker, model server; see conditions.py). While it
+# runs, watchdog.sh samples the power source and copies OMLX's request log.
 #
 # Environment:
 #   AGENT     termide (default) or a Harbor agent: opencode, qwen-coder,
@@ -30,8 +32,10 @@ root=$(cd "$bench/../.." && pwd)
 job=${1:?job name}
 shift
 set_file=""
+set_name=all
 if [ $# -gt 0 ] && [ "${1#-}" = "$1" ]; then
   if [ "$1" != all ]; then
+    set_name=$1
     set_file="$bench/sets/$1.txt"
     [ -f "$set_file" ] || { echo "no set $set_file" >&2; exit 2; }
   fi
@@ -87,9 +91,11 @@ if curl -sf -o /dev/null "http://127.0.0.1:$port/simple/pytest/"; then
 fi
 
 mkdir -p "$bench/jobs/$job"
-python3 -I - "$bench/jobs/$job/bench-meta.json" "$root" "$AGENT" "$MODEL" "$BASE_URL" "$DATASET" "$CONCURRENT" "$mirror" "$REASONING" "$REASONING_BUDGET" <<'EOF'
+python3 -I - "$bench/jobs/$job/bench-meta.json" "$root" "$AGENT" "$MODEL" "$BASE_URL" "$DATASET" "$CONCURRENT" "$mirror" "$REASONING" "$REASONING_BUDGET" "$set_name" <<'EOF'
 import json, subprocess, sys
-out, root, agent, model, base_url, dataset, concurrent, mirror, reasoning, budget = sys.argv[1:]
+out, root, agent, model, base_url, dataset, concurrent, mirror, reasoning, budget, set_name = sys.argv[1:]
+sys.path.insert(0, root + "/tools/bench")
+import conditions
 git = lambda *a: subprocess.run(["git", "-C", root, *a], capture_output=True, text=True).stdout.strip()
 meta = {"agent": agent}
 if agent == "termide":
@@ -100,15 +106,17 @@ if agent == "termide":
         "reasoning": reasoning,
         "reasoning_budget": int(budget),
     }
-meta |= {"model": model, "base_url": base_url, "dataset": dataset, "concurrent": int(concurrent),
-         "verifier_mirror": mirror == "true"}
+meta |= {"model": model, "base_url": base_url, "connection": conditions.connection(base_url),
+         "dataset": dataset, "set": set_name, "concurrent": int(concurrent),
+         "verifier_mirror": mirror == "true", "conditions": conditions.static(base_url)}
 json.dump(meta, open(out, "w"), indent=2)
 EOF
 
-# Two models do not fit in OMLX at once: stop the run if another one loads.
-if $omlx; then
-  sh "$bench/watchdog.sh" "$MODEL" $$ >>"$bench/jobs/$job/watchdog.log" 2>&1 &
-fi
+# Two models do not fit in OMLX at once: the watchdog stops the run if
+# another one loads. It also records the power source and OMLX's requests.
+keep=""
+$omlx && keep=$MODEL
+sh "$bench/watchdog.sh" "$keep" $$ "$bench/jobs/$job" >>"$bench/jobs/$job/watchdog.log" 2>&1 &
 
 cd "$bench"
 export PYTHONPATH="$bench"

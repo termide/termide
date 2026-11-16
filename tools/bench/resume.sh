@@ -42,10 +42,11 @@ if [ -d "$bench/mirror" ] && ! curl -sf -o /dev/null "http://127.0.0.1:$port/sim
   nohup "$bench/mirror.sh" serve >>"$bench/jobs/mirror.log" 2>&1 &
 fi
 
-model=$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$dir/bench-meta.json" 2>/dev/null || true)
+keep=""
 case "$(cat "$dir/bench-meta.json" 2>/dev/null)" in
-  *:10000/*) [ -n "$model" ] && sh "$bench/watchdog.sh" "$model" $$ >>"$dir/watchdog.log" 2>&1 & ;;
+  *:10000/*) keep=$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("model",""))' "$dir/bench-meta.json" 2>/dev/null || true) ;;
 esac
+sh "$bench/watchdog.sh" "$keep" $$ "$dir" >>"$dir/watchdog.log" 2>&1 &
 
 cd "$bench"
 export PYTHONPATH="$bench"

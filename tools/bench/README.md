@@ -18,8 +18,9 @@ container (the SWE-bench family included; its registry name is not checked yet).
 | `run.sh` | runs a job: dataset, model, task set, watchdog, `bench-meta.json` |
 | `resume.sh` | takes an interrupted job up again in the background |
 | `sets/*.txt` | named task subsets, one task name per line |
-| `report.py` | one job as a table of outcomes, or two jobs compared |
-| `watchdog.sh` | stops a run when OMLX loads another model (see below) |
+| `report.py` | one job as a table of outcomes, jobs compared, or a matrix slice (`grid`) |
+| `conditions.py` | the machine, Docker and model server a job runs under |
+| `watchdog.sh` | stops a run when OMLX loads another model; records power and OMLX requests |
 | `mirror.sh`, `mirror_server.py` | local mirror of what the verifiers download (see Setup) |
 | `bin/`, `jobs/`, `mirror/` | build output, results, mirrored files; not committed |
 
@@ -105,6 +106,8 @@ the run uses whatever `bin/termide` holds.
 tools/bench/report.py debug8-qwen                 # per trial: outcome, times, tool calls
 tools/bench/report.py debug8-qwen debug8-opencode debug8-qwencode   # task × harness matrix
 tools/bench/report.py debug8-before debug8-after  # two termide builds the same way
+tools/bench/report.py grid sub18 --model Qwen3.8-Flash-Next-oQ4e-mtp   # harnesses on one model
+tools/bench/report.py grid sub18 --agent termide  # termide on each model and connection
 tools/bench/report.py trace debug8-qwen extract-elf   # one trial step by step
 harbor view tools/bench/jobs                      # Harbor's own trajectory browser
 ```
@@ -115,12 +118,50 @@ time, tests failed), `agent-error` (the agent exited with an error), `env`
 (no verdict: the verifier timed out or did not run) and `infra` (the model
 server failed). `env` and `infra` say nothing about the agent, so the score is
 also given without them. In the matrix a task in bold had different outcomes
-in different jobs, and the published scores of the dataset are printed under
-it for reference. Tool counts come from termide's own log and are left blank
+in different jobs, and under a table of Qwen3.6-35B-A3B the published scores
+(below) are printed for reference. Tool counts come from termide's own log and are left blank
 for other agents. Each trial's `agent/termide.jsonl` is the agent's
 event stream: tool calls with their subjects and outputs, messages, the final
 result with the run's token usage, every event with its time; `trace` reads
 it as a timeline.
+
+### Matrices and conditions
+
+Every job is a point in harness × model and connection × task set, taken
+under some conditions. `grid` cuts one slice of them: `--model` fixes the
+model and puts the harnesses side by side, `--agent` fixes the harness and
+puts the models and connections (OMLX, OpenRouter, …) side by side. It finds
+the jobs by their `bench-meta.json`: the latest job that ran the set fills a
+cell, and a later job of the same cell on some of its tasks (a rerun) replaces
+their trials. Cells nothing has filled yet are listed as not run.
+
+Terminal-Bench limits the agent in seconds, so a score compares only with one
+taken under the same conditions. `run.sh` records them in `bench-meta.json`
+(`conditions.py` prints them): the machine (chip, memory, OS; never its host
+name, since reports get published — `BENCH_MACHINE=<name>` names it when the
+hardware alone does not tell two machines apart), Docker's
+CPUs and memory, the model server, its version and the settings that change
+its speed. `grid` makes a table per profile — the machine, the trials at once
+and the agent's time multiplier — and lists under it the conditions that
+differ between its columns: another Docker limit, another server version,
+another termide build.
+
+While a job runs, `watchdog.sh` writes what the trials ran into:
+`power.log`, the power source every minute (a gap is the machine asleep), and
+`requests.log`, OMLX's line for each request, which outlives OMLX's own logs.
+Under each table, per column:
+
+- `tok/s out`: tokens written per second of request, prompt processing
+  included: the speed the model was served at.
+- `overlapping requests`: trials in which one request started before the
+  previous one ended — another client on the same model, or a harness's own
+  parallel calls (title generation, subagents). Blank when trials ran side by
+  side.
+- `on battery`, `slept`: trials that drew on the battery or that the machine
+  slept through; the latter are spoiled, rerun them.
+
+Jobs from before 2026-11-17 have only their machine filled in afterwards,
+and their speed only while OMLX keeps its logs (a few days).
 
 ## Pitfalls
 
