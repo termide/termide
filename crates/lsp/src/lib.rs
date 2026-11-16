@@ -996,10 +996,30 @@ mod tests {
         }
     }
 
+    /// The nearest directory holding a marker is the root, from a file or
+    /// a directory; with no marker up to `/` there is none.
     #[test]
     fn test_find_workspace_root() {
-        // This test depends on the actual filesystem
-        // In a real test, we'd use tempfile to create a test directory structure
+        let tmp = tempfile::tempdir().unwrap();
+        let outer = tmp.path().join("outer");
+        let inner = outer.join("crates/inner");
+        std::fs::create_dir_all(inner.join("src")).unwrap();
+        std::fs::write(outer.join("Cargo.toml"), "").unwrap();
+        std::fs::write(inner.join("Cargo.toml"), "").unwrap();
+        let file = inner.join("src/lib.rs");
+        std::fs::write(&file, "").unwrap();
+        let markers = ["Cargo.toml".to_string()];
+
+        assert_eq!(
+            LspManager::find_workspace_root(&file, &markers),
+            Some(inner.clone())
+        );
+        assert_eq!(
+            LspManager::find_workspace_root(&outer.join("crates"), &markers),
+            Some(outer)
+        );
+        let unmarked = ["no-such-marker-anywhere.lock".to_string()];
+        assert_eq!(LspManager::find_workspace_root(&file, &unmarked), None);
     }
 
     /// Restarts against stand-in servers written in `sh`.
