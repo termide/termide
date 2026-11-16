@@ -202,14 +202,15 @@ impl DiagnosticsPanel {
             }
         }
 
-        // Clamp selection
-        if self.selected_index >= self.all_diagnostics.len() {
-            self.selected_index = self.all_diagnostics.len().saturating_sub(1);
-        }
-
         // Invalidate caches
         self.filter_cache_valid = false;
         self.counts_cache_valid = false;
+
+        // Clamp selection to the rows the filter shows, which it counts.
+        let count = self.filtered_count();
+        if self.selected_index >= count {
+            self.selected_index = count.saturating_sub(1);
+        }
     }
 
     /// Ensure filtered diagnostics cache is valid.
@@ -455,8 +456,11 @@ impl Panel for DiagnosticsPanel {
             for (display_idx, orig_idx) in visible_indices {
                 let entry = &self.all_diagnostics[orig_idx];
                 let y = content_top + display_idx as u16;
-                // Selection cursor hidden when the panel isn't focused.
-                let is_selected = ctx.is_focused && orig_idx == selected_index;
+                // Selection cursor hidden when the panel isn't focused. The
+                // selection counts the filtered rows, as `display_idx` does
+                // from the top of the view.
+                let is_selected =
+                    ctx.is_focused && self.scroll_offset + display_idx == selected_index;
 
                 // Determine style
                 let (line_style, icon_style) = if is_selected {
@@ -642,5 +646,93 @@ impl Panel for DiagnosticsPanel {
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<termide_core::PanelState> {
         Some(termide_core::PanelState::Diagnostics)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lsp_types::{Position, Range};
+    use termide_core::{KeyChord, PanelConfig, ThemeColors};
+
+    fn diagnostic(line: u32, severity: DiagnosticSeverity, message: &str) -> Diagnostic {
+        Diagnostic {
+            range: Range::new(Position::new(line, 0), Position::new(line, 1)),
+            severity: Some(severity),
+            message: message.into(),
+            ..Default::default()
+        }
+    }
+
+    /// The rows drawn with the selection's background.
+    fn highlighted(panel: &mut DiagnosticsPanel) -> Vec<String> {
+        let area = Rect::new(0, 0, 60, 10);
+        let mut buf = Buffer::empty(area);
+        let colors = ThemeColors::default();
+        let config = PanelConfig {
+            tab_size: 4,
+            word_wrap: false,
+            show_line_numbers: false,
+            show_hidden_files: false,
+        };
+        let ctx = RenderContext {
+            theme: &colors,
+            config: &config,
+            is_focused: true,
+            panel_index: 0,
+            terminal_width: 60,
+            terminal_height: 10,
+            border_right_x: None,
+            border_left_x: None,
+            border_bottom_y: None,
+        };
+        panel.render(area, &mut buf, &ctx);
+        let selected = panel.cached_theme.selected_bg;
+        (1..area.height)
+            .filter(|&y| buf[(1, y)].bg == selected)
+            .map(|y| (0..area.width).map(|x| buf[(x, y)].symbol()).collect())
+            .collect()
+    }
+
+    /// With a severity filter the highlighted row is the one Enter opens,
+    /// and an update keeps the selection within the filtered rows.
+    #[test]
+    fn the_highlight_follows_the_filtered_selection() {
+        let mut panel = DiagnosticsPanel::new(&Theme::default());
+        panel.update_diagnostics(
+            PathBuf::from("/p/a.rs"),
+            &[
+                diagnostic(1, DiagnosticSeverity::WARNING, "first warning"),
+                diagnostic(2, DiagnosticSeverity::ERROR, "first error"),
+                diagnostic(3, DiagnosticSeverity::WARNING, "second warning"),
+                diagnostic(4, DiagnosticSeverity::ERROR, "second error"),
+            ],
+        );
+        // All → Errors.
+        panel.handle_key(KeyChord::identity(crossterm::event::KeyEvent::new(
+            KeyCode::Char('f'),
+            KeyModifiers::CONTROL,
+        )));
+        assert!(panel.filter == SeverityFilter::Errors);
+        panel.handle_key(KeyChord::identity(crossterm::event::KeyEvent::new(
+            KeyCode::Down,
+            KeyModifiers::NONE,
+        )));
+        assert_eq!(panel.selected_entry().unwrap().message, "second error");
+        let rows = highlighted(&mut panel);
+        assert_eq!(rows.len(), 1, "{rows:?}");
+        assert!(rows[0].contains("second error"), "{rows:?}");
+
+        // One error is left: the selection is clamped to it.
+        panel.update_diagnostics(
+            PathBuf::from("/p/a.rs"),
+            &[
+                diagnostic(1, DiagnosticSeverity::WARNING, "first warning"),
+                diagnostic(2, DiagnosticSeverity::ERROR, "first error"),
+                diagnostic(3, DiagnosticSeverity::WARNING, "second warning"),
+            ],
+        );
+        assert_eq!(panel.selected_entry().unwrap().message, "first error");
+        assert!(highlighted(&mut panel)[0].contains("first error"));
     }
 }

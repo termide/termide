@@ -541,6 +541,7 @@ impl AgentPanel {
                 started: Instant::now(),
                 until: repeat.until,
                 judge_at: None,
+                judging: false,
             });
         }
     }

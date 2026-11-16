@@ -125,7 +125,7 @@ pub fn project_mark(project: &ListedProject, current: &Path) -> &'static str {
 /// One row of the Projects menu.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectRow {
-    /// One of the fixed actions (New / Switch / Change root) by index.
+    /// One of the fixed actions above the projects (New) by index.
     Action(usize),
     /// Reopen the projects open together in the last run.
     Reopen,

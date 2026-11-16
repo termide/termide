@@ -248,6 +248,9 @@ impl AgentPanel {
         // session's banner.
         self.activity = None;
         self.loop_task = None;
+        // A judge call in flight went with the old runtime: its verdict
+        // never comes, and the flag would hold back every later judge.
+        self.loop_judging = false;
         self.goal_task = None;
         self.restored = None;
         self.adopt_logged_autorun();

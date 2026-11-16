@@ -17,7 +17,7 @@ mod ownership;
 mod relocate;
 mod store;
 pub use ownership::{claim_project, project_owner, Owner, ProjectClaim};
-pub use relocate::relocate_project_state;
+pub use relocate::{relocate_project_state, relocate_session_paths};
 use store::PROJECT_FILE;
 pub use store::{
     delete_project, list_all_projects, project_dir, project_id, sweep_store, trust_path,
