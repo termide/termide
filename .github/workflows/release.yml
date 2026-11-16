@@ -322,7 +322,8 @@ jobs:
           # Generate .SRCINFO using Docker (run as non-root user)
           OWNER=$(stat -c %u:%g .)
           docker run --rm -v "$PWD:/pkg" archlinux:base bash -c "
-            pacman -Sy --noconfirm pacman-contrib sudo fakeroot
+            set -e
+            pacman -Syu --noconfirm pacman-contrib sudo fakeroot
             useradd -m builder
             chown -R builder:builder /pkg
             cd /pkg && sudo -u builder makepkg --printsrcinfo > .SRCINFO
@@ -356,7 +357,8 @@ jobs:
           # Generate .SRCINFO using Docker (run as non-root user)
           OWNER=$(stat -c %u:%g .)
           docker run --rm -v "$PWD:/pkg" archlinux:base bash -c "
-            pacman -Sy --noconfirm pacman-contrib sudo fakeroot
+            set -e
+            pacman -Syu --noconfirm pacman-contrib sudo fakeroot
             useradd -m builder
             chown -R builder:builder /pkg
             cd /pkg && sudo -u builder makepkg --printsrcinfo > .SRCINFO
