@@ -1,1 +1,0 @@
-- **A project's button opens the project's menu.** A project's button in the menu bar opens the project's menu, as a menu item opens its dropdown — by a click on the current project's button, or by walking onto any button with `←`/`→`: Switch to project, Move, Copy and Close. The button is shown even when only one project is open.

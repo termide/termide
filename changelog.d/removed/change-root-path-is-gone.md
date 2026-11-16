@@ -1,1 +1,0 @@
-- **Change root path is gone from the `Projects` menu.** It pointed the current project at another directory, taking only its layout along. `F6` (Move project…) moves the directory with everything Termide keeps of it, and on a project marked ✗, whose directory was moved outside Termide, `F6` points it at the new place with all of that, no file moved.

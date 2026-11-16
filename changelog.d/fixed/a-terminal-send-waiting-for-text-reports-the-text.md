@@ -1,1 +1,0 @@
-- **A terminal `send` waiting for text reports the text.** When the awaited text and the shell's return to its prompt arrived together, the call could answer that the command finished rather than that the text appeared; the text is now checked once more before the finish is reported.

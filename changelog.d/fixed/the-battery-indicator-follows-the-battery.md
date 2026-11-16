@@ -1,1 +1,0 @@
-- **The battery indicator follows the battery.** A new reading was drawn only when something else on the screen changed; the menu bar is now redrawn whenever any of its indicators would read differently.

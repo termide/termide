@@ -1,1 +1,0 @@
-- **A terminal panel's title follows a program that quits.** After `less`, `vim` or another program quit, the title could keep its name, `(less)`, until something else redrew the screen. A change of title now redraws the panel by itself.

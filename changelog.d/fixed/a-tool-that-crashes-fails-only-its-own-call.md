@@ -1,1 +1,0 @@
-- **A tool that crashes fails only its own call.** A tool that hit an internal error took down the agent's run, or the call an external agent made through termide's tools, which then stayed listed as running. The call now ends with an error result the model reads, and the run goes on.

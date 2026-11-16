@@ -1,1 +1,0 @@
-- **The git log's keys follow the settings.** `info` and `view_diff` under `[git_log.keybindings]` were read but never checked — `Space`, `d` and `Ctrl+R` were fixed in the code — so rebinding them did nothing; they now work, with a new `refresh` (`Ctrl+R`).

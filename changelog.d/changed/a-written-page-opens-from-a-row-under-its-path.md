@@ -1,1 +1,0 @@
-- **A written page opens from a row under its path.** The row a `write` of an HTML, Markdown or Mermaid file adds under its headline now reads `Open in HTML ↗`, dim and underlined like a link, and stands under the file's path instead of repeating its name in the accent color.

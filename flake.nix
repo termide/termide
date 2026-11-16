@@ -87,7 +87,7 @@
         # What the default and the static package share.
         packageArgs = {
           pname = "termide";
-          version = "0.49.0";
+          version = "0.50.0";
 
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;

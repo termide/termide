@@ -1,1 +1,0 @@
-- **The agent banner counts its sessions.** The heading over a fresh agent panel's session list shows how many sessions it offers, `Sessions (42)`, and during a `Ctrl+F` search how many match out of all, `Sessions (3/42)`.

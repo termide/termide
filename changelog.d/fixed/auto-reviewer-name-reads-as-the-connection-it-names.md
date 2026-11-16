@@ -1,1 +1,0 @@
-- **`auto_reviewer = "name"` reads as the connection it names.** The string form, from before the reviewer could name a model, was set aside with a warning; it now reads as that connection.

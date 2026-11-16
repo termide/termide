@@ -1,1 +1,0 @@
-- **The Nix package installs shell completions.** `nix build` and `nix profile install` now put the bash, zsh and fish completions in place as the deb, rpm and AUR packages do, and build with the compiler pinned in `rust-toolchain.toml` rather than nixpkgs' own. `nix build .#termide-static` targets the machine's own architecture instead of always x86_64.
