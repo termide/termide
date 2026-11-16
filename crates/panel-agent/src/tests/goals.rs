@@ -290,7 +290,7 @@ fn a_loop_verdict_ends_it_or_lets_it_run_on() {
         panel.submit();
         panel.busy = false;
         end_run_of(panel, 1);
-        panel.loop_judging = true;
+        judging(panel);
     };
     let verdict = |outcome, reason: &str| AgentEvent::GoalJudged {
         outcome,
@@ -333,7 +333,7 @@ fn a_loop_verdict_does_not_reach_the_goal() {
     type_text(&mut panel, "/loop 5m check CI until: CI is green");
     panel.submit();
     panel.busy = false;
-    panel.loop_judging = true;
+    judging(&mut panel);
     panel.apply(AgentEvent::GoalJudged {
         outcome: termide_agent_core::GoalOutcome::Done,
         reason: "green".into(),
@@ -341,6 +341,52 @@ fn a_loop_verdict_does_not_reach_the_goal() {
     });
     assert!(panel.loop_task.is_none(), "the loop ended");
     assert!(panel.goal_task.is_some(), "the goal goes on");
+}
+
+/// The loop's judge call is in flight, as `run_loop_judge` leaves it.
+fn judging(panel: &mut AgentPanel) {
+    panel.loop_judging = true;
+    panel.loop_task.as_mut().expect("a loop").judging = true;
+}
+
+/// A loop started while the previous loop's check is in flight does not
+/// take that verdict: the old condition is not the new loop's.
+#[test]
+fn a_new_loop_does_not_take_the_old_loops_verdict() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/loop 5m check CI until: CI is green");
+    panel.submit();
+    judging(&mut panel);
+    type_text(&mut panel, "/loop 5m check the deploy until: it is live");
+    panel.submit();
+    panel.apply(AgentEvent::GoalJudged {
+        outcome: termide_agent_core::GoalOutcome::Done,
+        reason: "green".into(),
+        reply: String::new(),
+    });
+    let task = panel.loop_task.as_ref().expect("the new loop goes on");
+    assert_eq!(task.prompt, "check the deploy");
+    assert!(
+        task.next_at.is_none(),
+        "no run scheduled by the old verdict"
+    );
+    assert!(!panel.loop_judging, "the judge is free again");
+}
+
+/// A session switch drops the runtime with its judge call: the panel's
+/// judges are not held back waiting for a verdict that never comes.
+#[test]
+fn a_session_switch_frees_the_loop_judge() {
+    let mut panel = panel(vec![]);
+    panel.busy = true;
+    type_text(&mut panel, "/loop 5m check CI until: CI is green");
+    panel.submit();
+    judging(&mut panel);
+    panel.busy = false;
+    panel.switch_session(None);
+    assert!(panel.loop_task.is_none());
+    assert!(!panel.loop_judging);
 }
 
 /// The panel's agent stops the loop through `jobs`: the panel takes the ask

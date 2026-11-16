@@ -821,6 +821,10 @@ struct LoopTask {
     /// When the judge call on the finished run is due; `None` without a
     /// condition, or while a run or the judge call is in flight.
     judge_at: Option<Instant>,
+    /// The judge call in flight checks this loop's condition. A loop
+    /// started while an earlier one's check was in flight does not take
+    /// that verdict.
+    judging: bool,
 }
 
 /// A running `/goal`: work autonomously toward `goal`. After each work turn a
@@ -1126,7 +1130,9 @@ pub struct AgentPanel {
     /// An active `/loop`: re-runs its prompt after each turn until stopped.
     loop_task: Option<LoopTask>,
     /// The judge call in flight checks the loop's stop condition, not the
-    /// goal: its verdict goes to the loop, or nowhere if it has stopped.
+    /// goal: its verdict goes to the loop that asked for it, or nowhere if
+    /// that loop has ended. Belongs to the runtime: cleared with it when the
+    /// panel changes session.
     loop_judging: bool,
     /// What the panel last told [`live`] of its loop, for the `jobs` tool;
     /// told again only when it changes.

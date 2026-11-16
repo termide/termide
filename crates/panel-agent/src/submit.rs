@@ -652,6 +652,7 @@ impl AgentPanel {
             started: Instant::now(),
             until,
             judge_at: None,
+            judging: false,
         });
         self.loop_step()
     }
@@ -668,6 +669,9 @@ impl AgentPanel {
         match self.runtime.judge(condition) {
             Ok(()) => {
                 self.loop_judging = true;
+                if let Some(task) = self.loop_task.as_mut() {
+                    task.judging = true;
+                }
                 self.activity = Some(Activity {
                     prompt_tokens: (self.context_tokens > 0).then_some(self.context_tokens),
                     ..Activity::new(Phase::Judge)
@@ -692,7 +696,7 @@ impl AgentPanel {
     /// outside, which is what a loop waits for anyway — its next run is
     /// scheduled as usual.
     pub(crate) fn on_loop_verdict(&mut self, outcome: GoalOutcome, reason: &str) {
-        if self.loop_task.is_none() {
+        if !self.take_loop_verdict() {
             return;
         }
         let t = termide_i18n::t();
@@ -726,7 +730,7 @@ impl AgentPanel {
     /// A check of the loop's stop condition failed: the loop is not given up
     /// over it — the next run goes as scheduled, and is checked again.
     pub(crate) fn on_loop_judge_failed(&mut self, error: &str) {
-        if self.loop_task.is_none() {
+        if !self.take_loop_verdict() {
             return;
         }
         self.notice(
@@ -734,6 +738,14 @@ impl AgentPanel {
             NoticeKind::Warn,
         );
         self.schedule_loop_run();
+    }
+
+    /// Whether the verdict that just came in is the current loop's: false
+    /// when the loop ended, or was replaced, while its check was in flight.
+    fn take_loop_verdict(&mut self) -> bool {
+        self.loop_task
+            .as_mut()
+            .is_some_and(|task| std::mem::take(&mut task.judging))
     }
 
     /// Schedule the loop's next run: after its interval, or at once.
