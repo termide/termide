@@ -506,11 +506,7 @@ impl VfsState {
                 self.manager.connect_ftp(&path, ConnectOptions::default())
             }
             VfsProtocol::Smb => self.manager.connect_smb(&path, ConnectOptions::default()),
-            VfsProtocol::Nfs => {
-                return Err(VfsError::NotSupported(
-                    termide_i18n::t().vfs_protocol_unsupported_fmt("NFS"),
-                ));
-            }
+            VfsProtocol::Nfs => self.manager.connect_nfs(&path, ConnectOptions::default()),
             VfsProtocol::Archive => self
                 .manager
                 .connect_archive(&path, ConnectOptions::default()),

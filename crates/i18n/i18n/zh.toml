@@ -1674,7 +1674,6 @@ git_askpass_failed_fmt = "无法准备 SSH askpass：{error}"
 git_spawn_failed_fmt = "无法启动 git：{error}"
 image_cache_failed_fmt = "无法缓存图片：{error}"
 fetch_unsupported_type_fmt = "不支持的内容类型：{type}"
-vfs_protocol_unsupported_fmt = "暂不支持 {protocol} 连接"
 op_move_source_not_deleted_fmt = "复制成功，但无法删除源文件：{error}"
 op_temp_dir_failed_fmt = "无法创建临时目录：{error}"
 

@@ -14,8 +14,8 @@
 //! Remote paths are specified using URLs:
 //! - `sftp://user@host:port/path` - SFTP (SSH File Transfer Protocol)
 //! - `ftp://host/path` - FTP
-//! - `smb://server/share/path` - SMB/CIFS
-//! - `nfs://server/export/path` - NFS (via FUSE)
+//! - `smb://server/share/path` - SMB2/3
+//! - `nfs://server/export/path` - NFSv3
 //! - `archive:///local/a.zip!/inner/path` - inside a zip or tar archive (read-only)
 //! - `/local/path` - Local filesystem
 //!
@@ -52,11 +52,16 @@ pub mod ssh_config;
 #[cfg(feature = "ftp")]
 pub mod ftp;
 
+#[cfg(any(feature = "smb", feature = "nfs"))]
+mod chunked;
+#[cfg(any(feature = "smb", feature = "nfs"))]
+mod rt;
+
 #[cfg(feature = "smb")]
 pub mod smb;
 
 #[cfg(feature = "nfs")]
-pub mod fuse_mount;
+pub mod nfs;
 
 #[cfg(feature = "archive")]
 pub mod archive;
@@ -158,6 +163,7 @@ impl VfsManager {
         feature = "sftp",
         feature = "ftp",
         feature = "smb",
+        feature = "nfs",
         feature = "archive"
     ))]
     fn spawn_connect<P, F>(
@@ -268,7 +274,8 @@ impl VfsManager {
         })
     }
 
-    /// Connect to an SMB/CIFS server.
+    /// Connect to an SMB server. The provider is the server's: the share is
+    /// the first component of each path, `smb://host/` lists the shares.
     #[cfg(feature = "smb")]
     pub fn connect_smb(&self, path: &VfsPath, options: ConnectOptions) -> VfsOperation<()> {
         use crate::smb::SmbProvider;
@@ -276,43 +283,38 @@ impl VfsManager {
         if !matches!(path.protocol, VfsProtocol::Smb) {
             return VfsOperation::error(VfsError::InvalidPath("Expected SMB path".to_string()));
         }
-
-        let host = match &path.host {
-            Some(h) => h.clone(),
-            None => {
-                return VfsOperation::error(VfsError::InvalidPath(
-                    "Missing host in SMB path".to_string(),
-                ))
-            }
+        let Some(host) = path.host.clone() else {
+            return VfsOperation::error(VfsError::InvalidPath(
+                "Missing host in SMB path".to_string(),
+            ));
         };
-
         let port = path.effective_port();
         let username = path.username.clone();
-
-        // Extract share from first path component: /share/rest/of/path
-        let path_str = path.path.display().to_string();
-        let trimmed = path_str.trim_start_matches('/');
-        let share = trimmed.split('/').next().filter(|s| !s.is_empty());
-
-        let share_owned = share.map(String::from);
         self.spawn_connect(options, path, move || {
-            SmbProvider::new(
-                &host,
-                port,
-                share_owned.as_deref(),
-                username.as_deref(),
-                None,
-            )
+            SmbProvider::new(&host, port, username.as_deref())
         })
     }
 
-    /// Connect to an SMB/CIFS server: no build of termide enables the `smb`
-    /// feature, so this is what users meet.
-    #[cfg(not(feature = "smb"))]
-    pub fn connect_smb(&self, _path: &VfsPath, _options: ConnectOptions) -> VfsOperation<()> {
-        VfsOperation::error(VfsError::NotSupported(
-            "SMB connections are not supported yet".to_string(),
-        ))
+    /// Connect to an NFSv3 server. The provider is the server's: it mounts
+    /// each export the first time a path on it is used, starting with the
+    /// one `path` is on, so a refused export fails the connection.
+    #[cfg(feature = "nfs")]
+    pub fn connect_nfs(&self, path: &VfsPath, options: ConnectOptions) -> VfsOperation<()> {
+        use crate::nfs::NfsProvider;
+
+        if !matches!(path.protocol, VfsProtocol::Nfs) {
+            return VfsOperation::error(VfsError::InvalidPath("Expected NFS path".to_string()));
+        }
+        let Some(host) = path.host.clone() else {
+            return VfsOperation::error(VfsError::InvalidPath(
+                "Missing host in NFS path".to_string(),
+            ));
+        };
+        let port = path.port;
+        let initial = path.path.clone();
+        self.spawn_connect(options, path, move || {
+            NfsProvider::new(&host, port, &initial)
+        })
     }
 
     /// Open an archive: read its table of contents on a background thread.

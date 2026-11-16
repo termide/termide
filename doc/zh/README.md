@@ -10,7 +10,7 @@
 - [应用程序窗口概览](ui.md) - 了解 UI 布局
 - [文件管理器](file-manager.md) - 文件导航和操作
 - [操作面板](operations.md) - 后台传输：暂停、恢复、取消、部分上传清理
-- [远程文件系统（VFS）](vfs.md) - 通过 SFTP / FTP / FTPS 浏览和传输文件
+- [远程文件系统（VFS）](vfs.md) - 通过 SFTP / FTP / FTPS / SMB / NFS 浏览和传输文件
 - [数据库查看器](database.md) - 只读浏览 SQLite / PostgreSQL / MySQL 表
 - [密码库](passwords.md) - 以主密码加密保存连接密码
 - [终端](terminal.md) - 使用集成终端

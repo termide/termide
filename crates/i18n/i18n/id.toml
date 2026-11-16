@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "Gagal menyiapkan SSH askpass: {error}"
 git_spawn_failed_fmt = "Gagal menjalankan git: {error}"
 image_cache_failed_fmt = "Gagal menyimpan gambar ke cache: {error}"
 fetch_unsupported_type_fmt = "Jenis konten tidak didukung: {type}"
-vfs_protocol_unsupported_fmt = "Koneksi {protocol} belum didukung"
 op_move_source_not_deleted_fmt = "Penyalinan berhasil, tetapi sumber gagal dihapus: {error}"
 op_temp_dir_failed_fmt = "Gagal membuat direktori sementara: {error}"
 

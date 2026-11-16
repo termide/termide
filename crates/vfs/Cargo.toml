@@ -31,8 +31,12 @@ tokio = { workspace = true, features = ["rt-multi-thread", "sync", "io-util", "m
 suppaftp = { version = "10.0.2", features = ["rustls-ring"] }
 webpki-roots.workspace = true
 
-# SMB support (optional, may require system libraries)
-pavao = { version = "0.2", optional = true }
+# SMB2/3 — pure Rust on tokio, crypto from RustCrypto: no libsmbclient
+# (GPL, not linkable statically) and no C toolchain.
+smb2 = { version = "0.43", default-features = false, features = ["tokio"], optional = true }
+
+# NFSv3 — pure Rust on tokio; its `nfs3_types` come re-exported.
+nfs3_client = { version = "0.9", features = ["tokio"], optional = true }
 
 # Archive support — pure-Rust decoders only (no C zstd/xz/bzip2), so
 # musl-static builds keep needing no C toolchain. zip's deflate goes
@@ -51,11 +55,11 @@ tempfile.workspace = true
 dirs.workspace = true
 
 [features]
-default = ["sftp", "ftp", "archive"]
+default = ["sftp", "ftp", "smb", "nfs", "archive"]
 sftp = []
 ftp = []
-smb = ["pavao"]
-nfs = []
+smb = ["dep:smb2"]
+nfs = ["dep:nfs3_client"]
 archive = ["dep:zip", "dep:tar", "dep:flate2", "dep:bzip2", "dep:lzma-rust2", "dep:ruzstd"]
 
 [target.'cfg(unix)'.dependencies]
@@ -69,4 +73,6 @@ tempfile.workspace = true
 # Encoders to build test archives.
 lzma-rust2 = { workspace = true, features = ["std", "xz", "encoder"] }
 bzip2.workspace = true
+# An in-memory NFSv3 server to test the NFS provider against.
+nfs3_server = { version = "0.11", features = ["memfs"] }
 

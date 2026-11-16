@@ -1,1 +1,0 @@
-- **An `smb://` location says SMB is not supported yet.** Opening one reported "SMB support not compiled. Enable the 'smb' feature.", an instruction for whoever builds termide, not for its user; no build ships SMB. It now says SMB connections are not supported yet, and the file manager's docs no longer list SMB among the remote locations.

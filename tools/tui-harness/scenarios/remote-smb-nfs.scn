@@ -1,0 +1,28 @@
+# SMB and NFS addresses (doc/en/vfs.md#smb-and-nfs): each is connected to,
+# not refused as unsupported; with no server listening the panel says the
+# connection failed and stays where it was.
+project empty
+start
+key Ctrl+G
+wait "Go to Path"
+key Ctrl+A
+type "nfs://127.0.0.1:9/export"
+key Enter
+wait "Connection Error" 20
+expect-re "[Cc]onnection refused"
+expect-not "not supported"
+snapshot nfs
+key Enter
+wait-gone "Connection Error"
+key Ctrl+G
+wait "Go to Path"
+key Ctrl+A
+type "smb://127.0.0.1:9/share"
+key Enter
+wait "Connection Error" 20
+expect-re "[Cc]onnection refused"
+expect-not "not supported"
+snapshot smb
+key Enter
+wait-gone "Connection Error"
+quit --force

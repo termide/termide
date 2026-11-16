@@ -1693,7 +1693,6 @@ git_askpass_failed_fmt = "Failed to prepare SSH askpass: {error}"
 git_spawn_failed_fmt = "Failed to start git: {error}"
 image_cache_failed_fmt = "Failed to cache image: {error}"
 fetch_unsupported_type_fmt = "Unsupported content type: {type}"
-vfs_protocol_unsupported_fmt = "{protocol} connections are not supported yet"
 op_move_source_not_deleted_fmt = "Copy succeeded but failed to delete source: {error}"
 op_temp_dir_failed_fmt = "Failed to create temp directory: {error}"
 

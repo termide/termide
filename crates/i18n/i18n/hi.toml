@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "SSH askpass तैयार नहीं हो सक
 git_spawn_failed_fmt = "git शुरू नहीं हो सका: {error}"
 image_cache_failed_fmt = "छवि कैश नहीं हो सकी: {error}"
 fetch_unsupported_type_fmt = "असमर्थित सामग्री प्रकार: {type}"
-vfs_protocol_unsupported_fmt = "{protocol} कनेक्शन अभी समर्थित नहीं हैं"
 op_move_source_not_deleted_fmt = "कॉपी सफल रही, लेकिन स्रोत हटाया नहीं जा सका: {error}"
 op_temp_dir_failed_fmt = "अस्थायी निर्देशिका नहीं बन सकी: {error}"
 

@@ -1660,7 +1660,6 @@ git_askpass_failed_fmt = "SSH askpass를 준비할 수 없습니다: {error}"
 git_spawn_failed_fmt = "git을 시작할 수 없습니다: {error}"
 image_cache_failed_fmt = "이미지를 캐시할 수 없습니다: {error}"
 fetch_unsupported_type_fmt = "지원되지 않는 콘텐츠 유형: {type}"
-vfs_protocol_unsupported_fmt = "{protocol} 연결은 아직 지원되지 않습니다"
 op_move_source_not_deleted_fmt = "복사는 성공했지만 원본을 삭제하지 못했습니다: {error}"
 op_temp_dir_failed_fmt = "임시 디렉터리를 만들 수 없습니다: {error}"
 

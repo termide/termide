@@ -7,8 +7,8 @@ and remote panels, renamed, and so on — the same UI, with progress
 shown in the [Operations panel](operations.md).
 
 No native libraries are required: SFTP runs on `russh` + `russh-sftp`,
-FTPS on `rustls`. Builds work statically on Alpine / musl out of the
-box.
+FTPS on `rustls`, SMB on `smb2`, NFS on `nfs3_client`. Builds work
+statically on Alpine / musl out of the box.
 
 ## Supported protocols
 
@@ -17,10 +17,10 @@ box.
 | `sftp://` | SSH File Transfer Protocol over SSH             |
 | `ftp://`  | Plain FTP                                       |
 | `ftps://` | FTP over TLS (rustls)                           |
+| `smb://`  | SMB 2 and 3: Windows, Samba and NAS shares      |
+| `nfs://`  | NFS version 3                                   |
 
-`smb://` and `nfs://` are recognised by the URL parser but the
-providers behind them are not currently shipped — use them via the
-operating system's native mount instead.
+See [SMB and NFS](#smb-and-nfs) for what is particular to those two.
 
 ## URL syntax
 
@@ -37,6 +37,8 @@ sftp://nvn@example.com/home/nvn/projects
 sftp://example.com:2222/srv/builds
 ftp://files.example.com/pub
 ftps://secure.example.com/uploads
+smb://bob@nas.local/media/films
+nfs://nas.local/srv/backup
 ```
 
 Notes:
@@ -44,7 +46,8 @@ Notes:
   percent-decodes them back to UTF-8 before talking to the server.
 - Omitting the user or port makes SFTP take them from your SSH
   configuration (see [SSH configuration](#ssh-configuration-sftp)).
-- Otherwise, omitting the port uses the protocol default (22 / 21 / 990).
+- Otherwise, omitting the port uses the protocol default (22 / 21 / 990
+  / 445); NFS asks the server's portmapper.
 - A password in the URL is not used. When a server asks for one, Termide
   prompts for it and can keep it in the
   [password vault](passwords.md); for SFTP, key-based authentication
@@ -193,6 +196,40 @@ is looked up under its `HostKeyAlias` if set, else under its
   change is expected, remove the old key with the `ssh-keygen -R`
   command the dialog gives, and connect again.
 
+## SMB and NFS
+
+`smb://host/share/path` opens a share over SMB 2 or 3, and
+`smb://host/` lists the server's shares as directories (the hidden
+`$` shares and printers left out). Put the user in the address:
+`smb://bob@nas.local/media`, or with a domain
+`smb://CORP;bob@server/media`. When the server wants a password,
+Termide asks for it and can keep it in the
+[password vault](passwords.md). Without a user it signs in as a guest,
+which a server may refuse; then give a user.
+
+`nfs://host/export/path` opens an NFSv3 export, and `nfs://host/`
+shows the server's exports as directories: an export `/srv/media`
+appears as `srv`, with `media` in it. NFS has no password. The server
+trusts the user and group ids the client sends, so Termide sends
+yours, as the system's NFS client does, and the server maps them by
+its own rules (`root_squash`, `all_squash`). A port in the address
+(`nfs://nas:2049/srv`) is the NFS service's; when the server has no
+portmapper, its mount service is looked for on that port too, as
+servers in a container often answer both there.
+
+Two kinds of export cannot be opened, and the panel says which and why:
+
+- **An export that takes requests only from a privileged port**
+  (below 1024). That is the Linux default, `secure`, and Linux gives
+  those ports to root only; macOS gives them to anyone since 10.14.
+  Add `insecure` to the export's options on the server, or mount the
+  export with the system and open the mount point.
+- **An export that needs Kerberos** (`sec=krb5`, `krb5i` or `krb5p`).
+  Mount it with the system and open the mount point.
+
+A server that speaks only NFSv4 is not reached either; most servers
+serve version 3 alongside.
+
 ## How remote panels feel
 
 Remote operations are all asynchronous:
@@ -224,8 +261,10 @@ panel. The transfer registers as an operation in the
   whether to delete it — see the cancel-cleanup section in
   [Operations panel](operations.md).
 
-Same-host SFTP and FTP renames stay on the server: a move within one
-connection issues a remote-side rename, not download-then-upload.
+A move within one connection is renamed on the server, not downloaded
+and uploaded again; on SMB within one share and on NFS within one
+export, as the protocols allow. Anywhere else the move copies and
+then deletes.
 
 ## Projects
 
@@ -355,7 +394,8 @@ the password before starting and asks again after a wrong one.
 
 ## Limitations / known gaps
 
-- No `smb://` / `nfs://` provider yet — only URL parsing.
+- NFS version 4 and Kerberos are not spoken, and an export kept to
+  privileged ports needs root on Linux; see [SMB and NFS](#smb-and-nfs).
 - No resume-from-byte-offset for interrupted transfers: cancelled
   uploads start over from the beginning if re-issued.
 - The passphrase of an encrypted SSH key is not asked for in remote
