@@ -1,0 +1,1 @@
+- **The diagnostics panel highlights the row `Enter` opens.** With the Errors or Warnings filter on, the highlight was drawn by the row's place in the unfiltered list, so it sat on another row or on none, and `Enter` opened a diagnostic that was not highlighted; an update could also leave the selection past the filtered rows.
