@@ -14,6 +14,10 @@
                                  `all`), one table per profile of conditions
                                  (machine, trials at once, agent time), with
                                  the conditions that differ within it listed
+    report.py status [<job>...]  where the running jobs (or the given ones)
+                                 stand: progress, the trial that runs, its
+                                 phase and time, its agent's last step, the
+                                 model's last request, the power
     report.py trace <job> <task> one termide trial step by step: each call
                                  with its time, failed calls with their output,
                                  how much it reasoned, loops cut
@@ -43,6 +47,7 @@ other agents.
 
 import json
 import re
+import subprocess
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -580,6 +585,204 @@ def grid(set_name: str, axis: str, value: str) -> None:
         print()
 
 
+def harbor_pid(job: Path) -> str | None:
+    """The pid of the harbor process running the job, if one is."""
+    out = subprocess.run(["pgrep", "-f", f"harbor (run|job resume).*(--job-name |/jobs/){re.escape(job.name)}( |$)"], capture_output=True, text=True)
+    pids = out.stdout.split()
+    return pids[0] if pids else None
+
+
+def task_limit(trial: Path, job: Path) -> float | None:
+    """The agent's time limit for the trial's task, in seconds: the task's
+    own, times the job's multiplier."""
+    task = (json.loads((trial / "config.json").read_text()).get("task") or {})
+    name, ref = task.get("name", ""), (task.get("ref") or "").removeprefix("sha256:")
+    path = Path.home() / ".cache" / "harbor" / "tasks" / "packages" / name / ref / "task.toml"
+    if not path.exists():
+        return None
+    import tomllib
+
+    agent = tomllib.loads(path.read_text()).get("agent") or {}
+    return agent["timeout_sec"] * multipliers(job)["agent"] if "timeout_sec" in agent else None
+
+
+def live_events(trial: Path) -> list[dict]:
+    """termide's event log as it is being written, inside the task container."""
+    container = f"{trial.name.lower()}__env-main-1"
+    out = subprocess.run(
+        ["docker", "exec", container, "cat", "/logs/agent/termide.jsonl"], capture_output=True, text=True
+    )
+    evs = []
+    for line in out.stdout.splitlines():
+        try:
+            evs.append(json.loads(line))
+        except json.JSONDecodeError:
+            pass
+    return evs
+
+
+def fmt_clock(s: float) -> str:
+    s = int(s)
+    return f"{s // 3600}:{s % 3600 // 60:02}:{s % 60:02}" if s >= 3600 else f"{s // 60}:{s % 60:02}"
+
+
+MARK = {"pass": "✓", "env": "⚠", "infra": "⚠", "running": "▶"}  # ✗ for the rest
+WHY = {
+    "late": "solved after its time",
+    "timeout": "timeout",
+    "fail": "tests failed",
+    "agent-error": "agent error",
+    "env": "environment broke",
+    "infra": "server broke",
+}
+PENDING_LISTED = 20  # more pending tasks than this collapse into one line
+
+
+def tests_passed(trial: Path) -> str:
+    """`tests 3/7` from the verifier's report, when it wrote one."""
+    path = trial / "verifier" / "ctrf.json"
+    if not path.exists():
+        return ""
+    summary = (json.loads(path.read_text()).get("results") or {}).get("summary") or {}
+    return f"tests {summary['passed']}/{summary['tests']}" if summary.get("tests") else ""
+
+
+def trial_started(trial: Path) -> datetime:
+    path = trial / "result.json"
+    if path.exists() and (at := json.loads(path.read_text()).get("started_at")):
+        return parse_time(at)
+    return datetime.fromtimestamp((trial / "config.json").stat().st_mtime).astimezone()
+
+
+def trial_wall(trial: Path) -> str:
+    path = trial / "result.json"
+    result = json.loads(path.read_text()) if path.exists() else {}
+    if not (result.get("started_at") and result.get("finished_at")):
+        return ""
+    return fmt_clock((parse_time(result["finished_at"]) - parse_time(result["started_at"])).total_seconds())
+
+
+def running_lines(trial: Path, job: Path, pid: str | None, now: datetime) -> tuple[str, list[str]]:
+    """The running trial's phase and, under it, the agent's last step."""
+    setup = trial / "agent" / "setup"
+    verifier = trial / "verifier"
+    if verifier.exists() and any(verifier.iterdir()):
+        return "verifier", []
+    if not setup.exists():
+        return "environment", []
+    phase = "agent"
+    if pid:
+        ran = (now - datetime.fromtimestamp(setup.stat().st_mtime).astimezone()).total_seconds()
+        limit = task_limit(trial, job)
+        phase += f" {fmt_clock(ran)}" + (f" of {fmt_clock(limit)}" if limit else "")
+    evs = live_events(trial) if pid else []
+    if not evs:
+        return phase, []
+    calls = [e for e in evs if e.get("type") == "tool_use"]
+    errors = sum(1 for e in evs if e.get("type") == "tool_result" and e.get("error"))
+    phase += f" · {len(calls)} calls ({errors} failed)"
+    last = evs[-1]
+    if last.get("type") == "result":
+        return phase, [f"finished at {fmt_clock(last.get('elapsed_ms', 0) / 1000)}: stop {last.get('stop_reason')}"
+                       + (f", error {last.get('error')}" if last.get("error") else "")]
+    what = {"thinking": "reasoning", "tool_input": "writing a call", "message": "writing"}.get(
+        last.get("type"), last.get("type")
+    )
+    detail = [f"{what} since {fmt_clock(last.get('elapsed_ms', 0) / 1000)}"]
+    if calls:
+        c = calls[-1]
+        subject = (c.get("subject") or "").splitlines()[0] if c.get("subject") else ""
+        subject = subject if len(subject) <= 60 else subject[:59] + "…"
+        detail.append(f"last call {fmt_clock(c.get('elapsed_ms', 0) / 1000)} {c.get('name')} {subject}".rstrip())
+    return phase, detail
+
+
+def status(job: Path) -> None:
+    """Where a job stands: its conditions (machine, power, model speed) on
+    top, then every task in the order it ran, marked with its outcome, the
+    running one with its phase and its agent's last step, then the pending."""
+    now = datetime.now().astimezone()
+    pid = harbor_pid(job)
+    rows = load(job)
+    done = [r for r in rows if r["outcome"] != "running"]
+    m = meta(job)
+    if pid:
+        state = f"running {fmt_clock((now - started(job)).total_seconds())}"
+    else:
+        state = "not running"
+    print(f"{job.name} · {state} · {task_set(job)} · {now:%H:%M}")
+    print(f"  {agent_label(job, rows)} · {m.get('model')} · {connection(job)}")
+
+    conditions = [profile(job)]
+    samples = power(job)
+    if samples:
+        t, src = samples[-1]
+        age = (now - t).total_seconds()
+        conditions.append(src.replace("AC Power", "on AC").replace("Battery Power", "ON BATTERY")
+                          + (f" (sampled {fmt_clock(age)} ago)" if age > 120 else ""))
+    elif pid:
+        conditions.append("power not recorded")
+    print("  " + " · ".join(conditions))
+    reqs = requests(job)
+    if reqs:
+        recent = [(rs, re_, rn) for rs, re_, rn in reqs if now - re_ < timedelta(minutes=10)]
+        busy = sum((re_ - rs).total_seconds() for rs, re_, _ in recent)
+        if busy:
+            print(f"  model: {sum(rn for _, _, rn in recent) / busy:.0f} tok/s over 10 min")
+
+    total = json.loads((job / "result.json").read_text()).get("n_total_trials") if (job / "result.json").exists() else None
+    total = total or (len(task_names(job)) if task_names(job) else len(done))
+    print()
+    # The marks below count the outcomes; only the share passed goes here.
+    summary = " · ".join(score(done).replace("**", "").split(" · ")[:-1]) if done else "no results yet"
+    print(f"  {summary} · done {len(done)} of {total}")
+    print()
+
+    by_task = {r["task"]: r for r in rows}
+    trials = sorted((t for t in job.iterdir() if t.is_dir() and (t / "config.json").exists()), key=trial_started)
+    width = max((len(t.name.rsplit("__", 1)[0]) for t in trials), default=0) + 2
+    for trial in trials:
+        task = trial.name.rsplit("__", 1)[0]
+        r = by_task.get(task) or trial_row(trial)
+        outcome = r["outcome"]
+        mark = MARK.get(outcome, "✗")
+        if outcome == "running":
+            phase, detail = running_lines(trial, job, pid, now)
+            print(f"  {mark} {task:<{width}}{phase}")
+            for line in detail:
+                print(f"      {line}")
+            continue
+        parts = [trial_wall(trial)]
+        if outcome != "pass":
+            tests = tests_passed(trial) if outcome in ("fail", "timeout", "late") else ""
+            # A plain failure is its tests: `tests 0/4` says it all.
+            if not (outcome == "fail" and tests):
+                parts.append(WHY.get(outcome, outcome))
+            parts.append(tests)
+            if outcome in ("env", "infra", "agent-error") and (r["exception"] or r["error"]):
+                parts.append((r["exception"] or r["error"]).splitlines()[0][:60])
+        print(f"  {mark} {task:<{width}}" + " · ".join(p for p in parts if p))
+
+    if tasks := task_names(job):
+        started_tasks = {t.name.rsplit("__", 1)[0] for t in trials}
+        pending = sorted(tasks - started_tasks)
+        if len(pending) > PENDING_LISTED:
+            print(f"  ◷ {len(pending)} pending: " + ", ".join(pending))
+        else:
+            for task in pending:
+                print(f"  ◷ {task}")
+
+
+def status_all(names: list[str]) -> None:
+    jobs = [job_dir(n) for n in names] if names else [j for j in all_jobs() if harbor_pid(j)]
+    if not jobs:
+        latest = max(all_jobs(), key=started, default=None)
+        print("no job is running" + (f"; the latest is {latest.name}:" if latest else ""))
+        jobs = [latest] if latest else []
+    for job in jobs:
+        status(job)
+
+
 def trace(job: Path, task: str) -> None:
     """One termide trial, step by step: when each call started, what it ran,
     and the output of the calls that failed."""
@@ -653,7 +856,9 @@ def thinking(job: Path, task: str) -> None:
 
 def main() -> None:
     args = sys.argv[1:]
-    if len(args) == 3 and args[0] == "trace":
+    if args and args[0] == "status":
+        status_all(args[1:])
+    elif len(args) == 3 and args[0] == "trace":
         trace(job_dir(args[1]), args[2])
     elif len(args) == 4 and args[0] == "grid" and args[2] in ("--model", "--agent"):
         grid(args[1], args[2][2:], args[3])

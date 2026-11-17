@@ -4,53 +4,71 @@ name = "Build release"
 mode = "report"
 key = "Ctrl+Alt+B"
 
-# Live checks of the UI through tools/tui-harness; scenarios separated by
-# spaces, or every one when left empty.
-[tui-harness]
-command = "cargo build && tools/tui-harness/run.sh $TERMIDE_PARAM_SCENARIOS"
-name = "TUI harness"
+# Terminal-Bench runs (tools/bench/README.md). A job runs detached from
+# termide; these start, follow and stop it.
+[bench-start]
+command = "{ [ \"$TERMIDE_PARAM_BUILD\" != true ] || tools/bench/build.sh; } && AGENT={agent} MODEL={model} tools/bench/start.sh {job} {set} $TERMIDE_PARAM_ARGS"
+name = "Start a job"
+group = "Benchmark"
 mode = "report"
 cwd = "project"
 
-[[tui-harness.params]]
-name = "scenarios"
-label = "Scenarios (empty: all)"
+[[bench-start.params]]
+name = "job"
+label = "Job name"
 
-# The pre-commit gate on what is staged now, without committing: the same
-# fmt / machete / clippy / nextest the hook runs at `git commit`.
-[gate-staged]
-command = ".githooks/pre-commit"
-name = "Gate the staged changes"
-mode = "report"
-cwd = "project"
+[[bench-start.params]]
+name = "set"
+label = "Task set"
+type = "select"
+options = ["sub18", "debug8", "all"]
 
-# The narrow check of one crate while working on it (AGENTS.md, Validation).
-[check-crate]
-command = "cargo clippy -p termide-{crate} --all-targets -- -D warnings && cargo nextest run -p termide-{crate}"
-name = "Clippy and tests of one crate"
-mode = "report"
-cwd = "project"
+[[bench-start.params]]
+name = "agent"
+label = "Harness"
+type = "select"
+options = ["termide", "opencode", "qwen-coder"]
 
-[[check-crate.params]]
-name = "crate"
-label = "Crate (without termide-)"
-default = "panel-agent"
+[[bench-start.params]]
+name = "model"
+label = "Model"
+default = "Qwen3.8-Flash-Next-oQ4e-mtp"
 
-# How big target/ has grown; past tens of GiB, `cargo clean` speeds builds up.
-[target-size]
-command = "du -sh target target/* 2>/dev/null | sort -h | tail -8"
-name = "Size of target/"
-mode = "report"
-cwd = "project"
+[[bench-start.params]]
+name = "build"
+label = "Rebuild termide first"
+type = "bool"
+default = false
 
-# README and website screenshots (tools/screenshots/README.md); tapes
-# separated by spaces, or every one when left empty. Needs Docker.
-[screenshots]
-command = "tools/screenshots/run.sh $TERMIDE_PARAM_TAPES"
-name = "Render screenshots"
+[[bench-start.params]]
+name = "args"
+label = "Harbor args (other harnesses: --agent-setup-timeout-multiplier 4)"
+
+[bench-watch]
+command = "tools/bench/status.sh --watch"
+name = "Status"
+group = "Benchmark"
 mode = "terminal"
 cwd = "project"
 
-[[screenshots.params]]
-name = "tapes"
-label = "Tapes (empty: all)"
+[bench-stop]
+command = "tools/bench/stop.sh {job}"
+name = "Stop a job"
+group = "Benchmark"
+mode = "report"
+cwd = "project"
+
+[[bench-stop.params]]
+name = "job"
+label = "Job name (empty: every running one)"
+
+[bench-resume]
+command = "tools/bench/resume.sh {job}"
+name = "Resume a job"
+group = "Benchmark"
+mode = "report"
+cwd = "project"
+
+[[bench-resume.params]]
+name = "job"
+label = "Job name"

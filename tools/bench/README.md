@@ -17,6 +17,7 @@ container (the SWE-bench family included; its registry name is not checked yet).
 | `build.sh` | builds this checkout as a static x86_64 musl binary into `bin/` |
 | `run.sh` | runs a job: dataset, model, task set, watchdog, `bench-meta.json` |
 | `resume.sh` | takes an interrupted job up again in the background |
+| `status.sh` | where the running jobs stand; `--watch` keeps redrawing it |
 | `sets/*.txt` | named task subsets, one task name per line |
 | `report.py` | one job as a table of outcomes, jobs compared, or a matrix slice (`grid`) |
 | `conditions.py` | the machine, Docker and model server a job runs under |
@@ -84,16 +85,28 @@ and directory) so that it runs again from the start, starts the mirror if it
 is down, and resumes in the background, detached from the terminal, logging
 to `jobs/<job>.out`. It is
 `PYTHONPATH=tools/bench harbor job resume -p tools/bench/jobs/<job>`
-underneath (`-f <ErrorType>` reruns the trials that failed with that error). Resuming
-keeps the job's settings: Harbor refuses a job whose `config.json` was
-edited. To give the trials that got no verdict another go with other limits,
-run them as a job of their own and merge it in the report:
+underneath (`-f <ErrorType>` reruns the trials that failed with that error).
+Resuming keeps the job's settings: Harbor refuses a job whose `config.json`
+was edited. To give the trials that got no verdict another go with other
+limits, run them as a job of their own and merge it in the report:
 
 ```sh
 AGENT=opencode tools/bench/run.sh debug8-opencode-r all -i '*/cobol-modernization' \
   --verifier-timeout-multiplier 3
 tools/bench/report.py debug8-qwen debug8-opencode+debug8-opencode-r
 ```
+
+A job started this way belongs to no terminal, so nothing in termide shows
+it. `tools/bench/status.sh` does. On top are the conditions: the machine, how
+many trials run at once, the agent's time multiplier, the power source and the
+model's speed over the last 10 minutes. Then come the score so far and every
+task in the order it ran: `✓` passed, `✗` failed (with why, and how many of
+its tests passed), `⚠` broken by the environment rather than the agent, `▶`
+running, `◷` pending. The running task shows its phase (environment, agent,
+verifier), the agent's time against its limit and termide's last step, read
+live from the task container.
+`status.sh --watch` redraws it every 15 seconds; a terminal panel running it
+follows the job, and closing the panel leaves the job alone.
 
 `bench-meta.json` in the job records the termide commit (and whether the tree
 was dirty), the model and the dataset, so a result can be traced to the code
