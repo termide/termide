@@ -729,11 +729,7 @@ fn command_shortcut(command: &termide_config::commands::CommandItem) -> Option<S
 fn command_label(command: &termide_config::commands::CommandItem) -> String {
     use termide_config::commands::CommandMode;
 
-    let display_name = command
-        .metadata
-        .as_ref()
-        .and_then(|m| m.display_name.as_deref())
-        .unwrap_or(&command.name);
+    let display_name = command.label();
 
     if termide_core::use_emoji_icons() {
         let icon = match command.mode {
@@ -765,17 +761,8 @@ pub fn get_commands_items(
     let has_global = registry.root_items.iter().any(|s| !s.is_project)
         || registry.groups.iter().any(|g| !g.is_project);
 
-    // Project commands first (bold)
-    for command in registry.root_items.iter().filter(|s| s.is_project) {
-        items.push(
-            DropdownItem::new(
-                command_label(command),
-                encode_command_menu_key(CommandMenuKeyKind::Command, &command.name, true),
-            )
-            .with_shortcut(command_shortcut(command))
-            .with_project(),
-        );
-    }
+    // Project commands first (bold); groups before single commands, as
+    // folders before files.
     for group in registry.groups.iter().filter(|g| g.is_project) {
         items.push(
             DropdownItem::new(
@@ -786,6 +773,16 @@ pub fn get_commands_items(
             .with_project(),
         );
     }
+    for command in registry.root_items.iter().filter(|s| s.is_project) {
+        items.push(
+            DropdownItem::new(
+                command_label(command),
+                encode_command_menu_key(CommandMenuKeyKind::Command, &command.name, true),
+            )
+            .with_shortcut(command_shortcut(command))
+            .with_project(),
+        );
+    }
 
     // Separator between project and global
     if has_project && has_global {
@@ -793,15 +790,6 @@ pub fn get_commands_items(
     }
 
     // Global commands
-    for command in registry.root_items.iter().filter(|s| !s.is_project) {
-        items.push(
-            DropdownItem::new(
-                command_label(command),
-                encode_command_menu_key(CommandMenuKeyKind::Command, &command.name, false),
-            )
-            .with_shortcut(command_shortcut(command)),
-        );
-    }
     for group in registry.groups.iter().filter(|g| !g.is_project) {
         items.push(
             DropdownItem::new(
@@ -809,6 +797,15 @@ pub fn get_commands_items(
                 encode_command_menu_key(CommandMenuKeyKind::Group, &group.name, false),
             )
             .with_submenu(),
+        );
+    }
+    for command in registry.root_items.iter().filter(|s| !s.is_project) {
+        items.push(
+            DropdownItem::new(
+                command_label(command),
+                encode_command_menu_key(CommandMenuKeyKind::Command, &command.name, false),
+            )
+            .with_shortcut(command_shortcut(command)),
         );
     }
 
@@ -1650,5 +1647,38 @@ mod plugin_command_tests {
         assert_eq!(items.len(), 3);
         assert_eq!(items[2].key, "plugin_command:p:a");
         assert_eq!(get_commands_items(&registry, &[]).len(), 2);
+    }
+
+    #[test]
+    fn groups_come_before_single_commands() {
+        use termide_config::commands::{
+            CommandCwd, CommandGroup, CommandItem, CommandMode, CommandsRegistry,
+        };
+        let item = |name: &str, is_project: bool| CommandItem {
+            name: name.into(),
+            command: Some("true".into()),
+            mode: CommandMode::Terminal,
+            cwd: CommandCwd::Panel,
+            is_project,
+            metadata: None,
+        };
+        let group = |name: &str, is_project: bool| CommandGroup {
+            name: name.into(),
+            items: vec![item("inner", is_project)],
+            is_project,
+        };
+        let registry = CommandsRegistry {
+            root_items: vec![item("build", true), item("mine", false)],
+            groups: vec![group("Benchmark", true), group("Tools", false)],
+        };
+        let keys: Vec<String> = get_commands_items(&registry, &[])
+            .into_iter()
+            .skip(2)
+            .map(|i| i.key)
+            .collect();
+        let pos = |needle: &str| keys.iter().position(|k| k.contains(needle)).unwrap();
+        assert!(pos("Benchmark") < pos("build"));
+        assert!(pos("build") < pos("Tools"));
+        assert!(pos("Tools") < pos("mine"));
     }
 }

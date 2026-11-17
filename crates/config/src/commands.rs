@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::get_config_dir;
 
@@ -54,6 +54,33 @@ pub enum CommandCwd {
     /// The project root, whatever panel is focused: the static point a command's
     /// relative paths are written against — the folder its `commands.toml` sits in.
     Project,
+}
+
+/// The folder a project's commands with `cwd = "project"` run in: the project
+/// root, unless its `.termide/commands.toml` (or `.termide` itself) is a link.
+/// Then it is the folder that holds the `.termide` directory the real file sits
+/// in (the real file's own folder when that is not a `.termide`), since that
+/// is where the commands' relative paths were written from: a project over
+/// several repositories takes one repository's commands by linking to them.
+pub fn project_commands_root(project_root: &Path) -> PathBuf {
+    let file = project_root.join(".termide").join("commands.toml");
+    let (Ok(real), Ok(root)) = (
+        dunce::canonicalize(&file),
+        dunce::canonicalize(project_root),
+    ) else {
+        return project_root.to_path_buf();
+    };
+    let Some(dir) = real.parent() else {
+        return project_root.to_path_buf();
+    };
+    if dir == root.join(".termide") {
+        return project_root.to_path_buf();
+    }
+    if dir.file_name().is_some_and(|name| name == ".termide") {
+        dir.parent().unwrap_or(dir).to_path_buf()
+    } else {
+        dir.to_path_buf()
+    }
 }
 
 impl CommandCwd {
@@ -618,6 +645,19 @@ pub struct CommandItem {
 }
 
 impl CommandItem {
+    /// The label the menu shows: `name`, or the identifier without one.
+    pub fn label(&self) -> &str {
+        self.metadata
+            .as_ref()
+            .and_then(|m| m.display_name.as_deref())
+            .unwrap_or(&self.name)
+    }
+
+    /// The order of the menu: by label ignoring case, then as written.
+    fn sort_key(&self) -> (String, String) {
+        (self.label().to_lowercase(), self.label().to_string())
+    }
+
     /// The debugger this command runs under, as written in `commands.toml`.
     pub fn debugger(&self) -> Option<&str> {
         self.metadata.as_ref()?.debugger.as_deref()
@@ -800,10 +840,15 @@ impl CommandsRegistry {
             }
         }
 
-        registry.root_items.sort_by(|a, b| a.name.cmp(&b.name));
-        registry.groups.sort_by(|a, b| a.name.cmp(&b.name));
+        // The menu lists them as the user reads them: by label, ignoring case.
+        registry
+            .root_items
+            .sort_by_cached_key(CommandItem::sort_key);
+        registry
+            .groups
+            .sort_by_cached_key(|g| (g.name.to_lowercase(), g.name.clone()));
         for group in &mut registry.groups {
-            group.items.sort_by(|a, b| a.name.cmp(&b.name));
+            group.items.sort_by_cached_key(CommandItem::sort_key);
         }
 
         log::debug!(
@@ -1149,5 +1194,104 @@ debugger_args = ["--only-same-user=false", "--log"]
         assert!(CommandsMetadata::parse(wrong).entries["go"]
             .debugger_args
             .is_empty());
+    }
+
+    #[test]
+    fn project_commands_run_where_their_file_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".termide")).unwrap();
+        std::fs::write(root.join(".termide/commands.toml"), "").unwrap();
+        assert_eq!(project_commands_root(root), root);
+        // No commands file at all: the project root.
+        let bare = tempfile::tempdir().unwrap();
+        assert_eq!(project_commands_root(bare.path()), bare.path());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_project_commands_run_in_the_repository_they_come_from() {
+        let dir = tempfile::tempdir().unwrap();
+        let org = dunce::canonicalize(dir.path()).unwrap();
+        let repo = org.join("repo");
+        std::fs::create_dir_all(repo.join(".termide")).unwrap();
+        std::fs::write(repo.join(".termide/commands.toml"), "").unwrap();
+
+        // The file linked into the project's own `.termide`.
+        std::fs::create_dir_all(org.join(".termide")).unwrap();
+        std::os::unix::fs::symlink(
+            "../repo/.termide/commands.toml",
+            org.join(".termide/commands.toml"),
+        )
+        .unwrap();
+        assert_eq!(project_commands_root(&org), repo);
+
+        // The whole `.termide` linked.
+        let other = org.join("other");
+        std::fs::create_dir_all(&other).unwrap();
+        std::os::unix::fs::symlink(repo.join(".termide"), other.join(".termide")).unwrap();
+        assert_eq!(project_commands_root(&other), repo);
+
+        // A file kept outside any `.termide`: its own folder.
+        let shared = org.join("shared");
+        std::fs::create_dir_all(&shared).unwrap();
+        std::fs::write(shared.join("cmds.toml"), "").unwrap();
+        let third = org.join("third");
+        std::fs::create_dir_all(third.join(".termide")).unwrap();
+        std::os::unix::fs::symlink(
+            shared.join("cmds.toml"),
+            third.join(".termide/commands.toml"),
+        )
+        .unwrap();
+        assert_eq!(project_commands_root(&third), shared);
+    }
+
+    #[test]
+    fn commands_are_listed_by_label_ignoring_case() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("commands.toml"),
+            r#"
+[a-last]
+command = "true"
+name = "Zebra"
+
+[z-first]
+command = "true"
+name = "apple"
+
+[m-middle]
+command = "true"
+
+[[m-middle.params]]
+name = "x"
+
+[g-two]
+command = "true"
+name = "Stop"
+group = "bench"
+
+[g-one]
+command = "true"
+name = "start"
+group = "bench"
+
+[other]
+command = "true"
+group = "Alpha"
+"#,
+        )
+        .unwrap();
+        let registry = CommandsRegistry::load_from_dir(dir.path()).unwrap();
+        let labels: Vec<&str> = registry.root_items.iter().map(CommandItem::label).collect();
+        assert_eq!(labels, ["apple", "m-middle", "Zebra"]);
+        let groups: Vec<&str> = registry.groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(groups, ["Alpha", "bench"]);
+        let bench: Vec<&str> = registry.groups[1]
+            .items
+            .iter()
+            .map(CommandItem::label)
+            .collect();
+        assert_eq!(bench, ["start", "Stop"]);
     }
 }

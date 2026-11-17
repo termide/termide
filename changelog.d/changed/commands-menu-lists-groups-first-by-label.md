@@ -1,0 +1,1 @@
+- **The Commands menu lists groups first, alphabetically by label.** In each part of the menu, project and global, groups now come before single commands, as folders before files; commands are sorted by the label the menu shows rather than by their identifier, and both ignore case.

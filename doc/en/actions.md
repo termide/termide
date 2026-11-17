@@ -72,10 +72,10 @@ An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of 
 The `Commands` menu in the menu bar lists, from top to bottom:
 
 1. `Add command...` — opens the form for a new command.
-2. Project commands without a group, then project groups (bold).
-3. Global commands without a group, then global groups.
+2. Project groups, then project commands without a group (bold).
+3. Global groups, then global commands without a group.
 
-Within each part, commands and groups are sorted by identifier and group name. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report, 🐞 a command with a `debugger`.
+Groups come first, as folders before files. Within each part, and within a group, commands are sorted by their label (`name`, or the identifier when there is none) and groups by name, alphabetically and ignoring case. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report, 🐞 a command with a `debugger`.
 
 Keys on a selected command:
 
@@ -108,7 +108,7 @@ Saving from the form, renaming or deleting edits `commands.toml` in place: the o
 
 ## Execution modes
 
-A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none. With `cwd = "project"` a command runs in the project root whatever panel is focused: that is the static point its relative paths are written against, the folder its own `commands.toml` sits in. Where a command runs is part of what an approval covers — changing `cwd` asks for the project's command again.
+A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none. With `cwd = "project"` a command runs in the project root whatever panel is focused: that is the static point its relative paths are written against, the folder its own `commands.toml` sits in. A project over several repositories can take one repository's commands by linking its `.termide/commands.toml` (or the whole `.termide`) to that repository's: a project command with `cwd = "project"` then runs in the folder that holds the `.termide` the real file sits in — the repository its paths were written for — not in the project root. Where a command runs is part of what an approval covers — changing `cwd` asks for the project's command again.
 
 | Mode | How it runs | Output |
 |------|-------------|--------|

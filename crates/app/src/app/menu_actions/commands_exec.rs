@@ -138,8 +138,12 @@ impl App {
             expand_placeholders(&line, &values, Quoting::Posix)
         };
         // A command runs where it says: the focused panel's directory, or the
-        // project root — the static point its relative paths are written against.
+        // project root — the static point its relative paths are written against;
+        // for a project command, where its linked `commands.toml` really lives.
         let cwd = match command.cwd {
+            CommandCwd::Project if command.is_project => {
+                termide_config::commands::project_commands_root(&self.project_root)
+            }
             CommandCwd::Project => self.project_root.clone(),
             CommandCwd::Panel => self.get_focused_panel_cwd(),
         };
