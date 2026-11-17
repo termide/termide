@@ -756,6 +756,15 @@ pub fn get_commands_items(
         DropdownItem::separator(),
     ];
 
+    // A group shows a folder, as bookmark groups do, so its name lines up
+    // with the commands' names after their icons.
+    let group_label = |name: &str| {
+        if termide_core::use_emoji_icons() {
+            format!("📂 {name}")
+        } else {
+            name.to_string()
+        }
+    };
     let has_project = registry.root_items.iter().any(|s| s.is_project)
         || registry.groups.iter().any(|g| g.is_project);
     let has_global = registry.root_items.iter().any(|s| !s.is_project)
@@ -766,7 +775,7 @@ pub fn get_commands_items(
     for group in registry.groups.iter().filter(|g| g.is_project) {
         items.push(
             DropdownItem::new(
-                &group.name,
+                group_label(&group.name),
                 encode_command_menu_key(CommandMenuKeyKind::Group, &group.name, true),
             )
             .with_submenu()
@@ -793,7 +802,7 @@ pub fn get_commands_items(
     for group in registry.groups.iter().filter(|g| !g.is_project) {
         items.push(
             DropdownItem::new(
-                &group.name,
+                group_label(&group.name),
                 encode_command_menu_key(CommandMenuKeyKind::Group, &group.name, false),
             )
             .with_submenu(),

@@ -75,7 +75,7 @@ The `Commands` menu in the menu bar lists, from top to bottom:
 2. Project groups, then project commands without a group (bold).
 3. Global groups, then global commands without a group.
 
-Groups come first, as folders before files. Within each part, and within a group, commands are sorted by their label (`name`, or the identifier when there is none) and groups by name, alphabetically and ignoring case. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report, 🐞 a command with a `debugger`.
+Groups come first, as folders before files. Within each part, and within a group, commands are sorted by their label (`name`, or the identifier when there is none) and groups by name, alphabetically and ignoring case. A group opens a submenu with its commands; clicking the group header again closes it. A command's hotkey is shown in the shortcut column. When the terminal supports emoji, each label is prefixed with its mode: 💻 terminal, ⚙ background, 📋 report, 🐞 a command with a `debugger`, and a group with 📂.
 
 Keys on a selected command:
 
