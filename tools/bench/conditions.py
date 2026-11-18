@@ -28,6 +28,8 @@ def run(*cmd: str) -> str:
 def connection(base_url: str) -> str:
     """What serves the model, from the endpoint the container is given."""
     url = urlparse(base_url)
+    if url.scheme == "claude-subscription":  # run.sh's name for a Claude login
+        return "claude subscription"
     if url.port == 10000:
         return "omlx"
     host = url.hostname or base_url

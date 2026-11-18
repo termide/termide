@@ -77,7 +77,7 @@ Timeouts are in seconds and default to 10.
 | `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
 | `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …`, and each tool termide's MCP server lists to it as `tool: …` |
 | `mock-acp-count "TEXT" N` | Check that the ACP stand-in's log holds TEXT exactly N times |
-| `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away. `$TERMIDE_CONFIG` and `$TERMIDE_DATA` name termide's config and data directories |
+| `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away. `$TERMIDE_CONFIG` and `$TERMIDE_DATA` name termide's config and data directories, `$TERMIDE_BIN` the binary under test (for `--prompt`) |
 | `snapshot NAME` | Save the screen as text |
 | `sleep S` | Let termide run for S seconds |
 | `quit [--force]` | `Alt+Q` and wait for termide to exit; `--force` confirms a "Quit anyway?" |

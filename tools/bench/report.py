@@ -655,11 +655,26 @@ def trial_started(trial: Path) -> datetime:
 
 
 def trial_wall(trial: Path) -> str:
+    """The agent's own time on the task: not the container's start, the
+    agent's install (minutes of apt for some harnesses) or the verifier."""
     path = trial / "result.json"
     result = json.loads(path.read_text()) if path.exists() else {}
-    if not (result.get("started_at") and result.get("finished_at")):
-        return ""
-    return fmt_clock((parse_time(result["finished_at"]) - parse_time(result["started_at"])).total_seconds())
+    s = seconds(result.get("agent_execution"))
+    return fmt_clock(s) if s is not None else ""
+
+def agent_log_born(trial: Path) -> datetime | None:
+    """When the agent began the task, while it runs: the creation of its log
+    (termide.jsonl, claude-code.txt...) in the container's /logs/agent, which
+    the run command writes and the install does not. Harbor copies the logs
+    out only when the trial ends."""
+    container = f"{trial.name.lower()}__env-main-1"
+    out = subprocess.run(
+        ["docker", "exec", container, "sh", "-c",
+         'stat -c %W /logs/agent/*.jsonl /logs/agent/*.txt 2>/dev/null'],
+        capture_output=True, text=True,
+    ).stdout.split()
+    born = [int(s) for s in out if s.isdigit() and int(s) > 0]
+    return datetime.fromtimestamp(min(born)).astimezone() if born else None
 
 
 def running_lines(trial: Path, job: Path, pid: str | None, now: datetime) -> tuple[str, list[str]]:
@@ -670,9 +685,14 @@ def running_lines(trial: Path, job: Path, pid: str | None, now: datetime) -> tup
         return "verifier", []
     if not setup.exists():
         return "environment", []
+    began = agent_log_born(trial) if pid else None
+    if pid and began is None:
+        # Installing the agent: its time does not count against the limit.
+        since = datetime.fromtimestamp(setup.stat().st_mtime).astimezone()
+        return f"agent setup {fmt_clock((now - since).total_seconds())}", []
     phase = "agent"
-    if pid:
-        ran = (now - datetime.fromtimestamp(setup.stat().st_mtime).astimezone()).total_seconds()
+    if began:
+        ran = (now - began).total_seconds()
         limit = task_limit(trial, job)
         phase += f" {fmt_clock(ran)}" + (f" of {fmt_clock(limit)}" if limit else "")
     evs = live_events(trial) if pid else []

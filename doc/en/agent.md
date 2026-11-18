@@ -3152,9 +3152,16 @@ with a reason the model reads. In the default `auto` mode the reviewer decides
 what the rules leave open, and a call it cannot decide is refused; in
 `configured`, add `allow` rules for the exact commands and paths the task
 needs, or set `mode = "all"` for unattended work. Plan mode has no meaning
-without the panel and is treated as `auto`, and an external (`command`) agent cannot be run this
-way. There are no terminal sessions either: `shell` runs each command on its
+without the panel and is treated as `auto`. There are no terminal sessions either: `shell` runs each command on its
 own, without `session` and `background`, and `terminals` is not offered.
+
+On a CLI-agent connection (`claude_code`, `codex`, `gemini_cli`), or with an
+agent whose `AGENT.md` names a `command`, the task runs in that agent's own
+loop over ACP, as it would in a panel: Claude Code takes termide's prompt and
+tools in place of its own, signed in with its own login, and the connection's
+`model` is picked before the task goes out. The output is the same, with
+`provider` `acp` in the result. The agent's own permission requests that the
+rules leave open are refused like everything else.
 
 `termide --recall "<query>"` runs the [recall](#recall) search without the UI
 and prints the results — the text the agent would read — or, with

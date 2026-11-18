@@ -7,7 +7,7 @@ key = "Ctrl+Alt+B"
 # Terminal-Bench runs (tools/bench/README.md). A job runs detached from
 # termide; these start, follow and stop it.
 [bench-start]
-command = "{ [ \"$TERMIDE_PARAM_BUILD\" != true ] || tools/bench/build.sh; } && AGENT={agent} MODEL={model} tools/bench/start.sh {job} {set} $TERMIDE_PARAM_ARGS"
+command = "{ [ \"$TERMIDE_PARAM_BUILD\" != true ] || tools/bench/build.sh; } && AGENT={agent} MODEL={model} CONCURRENT={concurrent} tools/bench/start.sh {job} {set} $TERMIDE_PARAM_ARGS"
 name = "Start a job"
 group = "Benchmark"
 mode = "report"
@@ -27,12 +27,17 @@ options = ["sub18", "debug8", "all"]
 name = "agent"
 label = "Harness"
 type = "select"
-options = ["termide", "opencode", "qwen-coder"]
+options = ["termide", "opencode", "qwen-coder", "claude-code", "termide-claude-code"]
 
 [[bench-start.params]]
 name = "model"
-label = "Model"
+label = "Model (claude-code, termide-claude-code: claude-sonnet-5)"
 default = "Qwen3.8-Flash-Next-oQ4e-mtp"
+
+[[bench-start.params]]
+name = "concurrent"
+label = "Trials at once (1 for a local model)"
+default = "1"
 
 [[bench-start.params]]
 name = "build"

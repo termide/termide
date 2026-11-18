@@ -12,7 +12,8 @@
 #
 # Environment:
 #   AGENT     termide (default) or a Harbor agent: opencode, qwen-coder,
-#             pi, terminus-2... (`harbor agent list`)
+#             pi, terminus-2... (`harbor agent list`); claude-code and
+#             termide-claude-code run on a Claude subscription (README)
 #   MODEL     model id as the endpoint names it (Qwen3.6-35B-A3B-8bit)
 #   BASE_URL  endpoint as the container sees it (OMLX on the host)
 #   API_KEY   key for it; for OMLX it is read from ~/.omlx/settings.json
@@ -59,7 +60,33 @@ case "$BASE_URL" in *:10000/*) omlx=true ;; esac
 if [ -z "${API_KEY:-}" ] && $omlx; then
   API_KEY=$(python3 -I -c 'import json,os;print(json.load(open(os.path.expanduser("~/.omlx/settings.json")))["auth"]["api_key"])')
 fi
-if [ "$AGENT" = termide ]; then
+provider=openai
+case "$AGENT" in claude-code | termide-claude-code)
+  # Claude Code on the user's subscription, bare or driven by termide over
+  # ACP: the OAuth token of `claude setup-token`, from the environment or
+  # the login keychain.
+  token=${CLAUDE_CODE_OAUTH_TOKEN:-$(security find-generic-password -s termide-bench-claude-oauth -w 2>/dev/null || true)}
+  [ -n "$token" ] || { echo "no Claude token: claude setup-token, then keep it in the keychain as termide-bench-claude-oauth" >&2; exit 2; }
+  BASE_URL=claude-subscription://
+  ;;
+esac
+if [ "$AGENT" = claude-code ]; then
+  provider=anthropic
+  set -- -a claude-code --ae "CLAUDE_CODE_OAUTH_TOKEN=$token" --ae CLAUDE_FORCE_OAUTH=1 "$@"
+elif [ "$AGENT" = termide-claude-code ]; then
+  # termide's prompt and tools in Claude Code's loop: the harness is termide,
+  # the connection the subscription.
+  AGENT=termide
+  provider=anthropic
+  # termide sets no effort on an ACP agent: Claude Code's default applies.
+  REASONING=agent-default
+  [ -x "$bench/bin/termide" ] || { echo "run $bench/build.sh first" >&2; exit 2; }
+  set -- -a harbor_termide.agent:TermideAgent \
+    --ae TERMIDE_PROVIDER=claude_code \
+    --ae "TERMIDE_MODEL=$MODEL" \
+    --ae "CLAUDE_CODE_OAUTH_TOKEN=$token" \
+    "$@"
+elif [ "$AGENT" = termide ]; then
   [ -x "$bench/bin/termide" ] || { echo "run $bench/build.sh first" >&2; exit 2; }
   set -- -a harbor_termide.agent:TermideAgent \
     --ae "TERMIDE_MODEL=$MODEL" \
@@ -126,7 +153,7 @@ awake=""
 command -v caffeinate >/dev/null && awake="caffeinate -is"
 $awake harbor run -y \
   -d "$DATASET" \
-  -m "openai/$MODEL" \
+  -m "$provider/$MODEL" \
   -n "$CONCURRENT" \
   -o "$bench/jobs" --job-name "$job" \
   "$@"

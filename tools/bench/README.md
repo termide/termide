@@ -73,6 +73,23 @@ the task container from npm or PyPI at their latest version unless
 `--ak version=…` pins one; the version it ran is in each trial's
 `result.json` and heads the report's column.
 
+`AGENT=claude-code` runs Claude Code on a Claude subscription rather than an
+endpoint: `MODEL` is a Claude model (`claude-sonnet-5`), and the login is the
+OAuth token `claude setup-token` prints, taken from `CLAUDE_CODE_OAUTH_TOKEN`
+or the login keychain (`security add-generic-password -a "$USER" -s
+termide-bench-claude-oauth -w`, which asks for it). The model is not on this
+machine, so several trials can run at once (`CONCURRENT=4`); the
+subscription's limits are then what may cut a run short.
+
+`AGENT=termide-claude-code` runs termide on the same subscription the way the
+app does: termide drives Claude Code over ACP (the
+`@agentclientprotocol/claude-agent-acp` adapter, installed in the container
+with Node), so the model works through termide's system prompt and tools
+inside Claude Code's loop. The job records the harness as `termide`, the
+connection as `claude subscription`, and the reasoning as `agent-default`:
+termide sets no effort on an ACP agent, so the pair with `claude-code`
+compares the harnesses at Claude Code's default effort.
+
 Everything after the set name goes to `harbor run` as is
 (`--agent-timeout-multiplier`, `--verifier-timeout-multiplier`, `-k` for
 several attempts, `-i`/`-x` for more filters).
@@ -102,9 +119,11 @@ many trials run at once, the agent's time multiplier, the power source and the
 model's speed over the last 10 minutes. Then come the score so far and every
 task in the order it ran: `✓` passed, `✗` failed (with why, and how many of
 its tests passed), `⚠` broken by the environment rather than the agent, `▶`
-running, `◷` pending. The running task shows its phase (environment, agent,
-verifier), the agent's time against its limit and termide's last step, read
-live from the task container.
+running, `◷` pending. The running task shows its phase (environment, agent
+setup, agent, verifier), the agent's time against its limit and termide's
+last step, read live from the task container. Times are the agent's own,
+from its start on the task: the container's start, the agent's install and
+the verifier are not in them.
 `status.sh --watch` redraws it every 15 seconds; a terminal panel running it
 follows the job, and closing the panel leaves the job alone.
 
