@@ -119,9 +119,11 @@ many trials run at once, the agent's time multiplier, the power source and the
 model's speed over the last 10 minutes. Then come the score so far and every
 task in the order it ran: `✓` passed, `✗` failed (with why, and how many of
 its tests passed), `⚠` broken by the environment rather than the agent, `▶`
-running, `◷` pending. The running task shows its phase (environment, agent,
-verifier), the agent's time against its limit and termide's last step, read
-live from the task container.
+running, `◷` pending. The running task shows its phase (environment, agent
+setup, agent, verifier), the agent's time against its limit and termide's
+last step, read live from the task container. Times are the agent's own,
+from its start on the task: the container's start, the agent's install and
+the verifier are not in them.
 `status.sh --watch` redraws it every 15 seconds; a terminal panel running it
 follows the job, and closing the panel leaves the job alone.
 
