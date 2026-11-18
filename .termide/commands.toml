@@ -49,6 +49,18 @@ default = false
 name = "args"
 label = "Harbor args (other harnesses: --agent-setup-timeout-multiplier 4)"
 
+[bench-queue]
+command = "tools/bench/queue.sh tools/bench/queues/{queue}.txt"
+name = "Run a queue"
+group = "Benchmark"
+mode = "report"
+cwd = "project"
+
+[[bench-queue.params]]
+name = "queue"
+label = "Queue (tools/bench/queues/; runs again where it stopped)"
+default = "tb21-full"
+
 [bench-watch]
 command = "tools/bench/status.sh --watch"
 name = "Status"

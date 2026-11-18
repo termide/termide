@@ -17,6 +17,7 @@ container (the SWE-bench family included; its registry name is not checked yet).
 | `build.sh` | builds this checkout as a static x86_64 musl binary into `bin/` |
 | `run.sh` | runs a job: dataset, model, task set, watchdog, `bench-meta.json` |
 | `resume.sh` | takes an interrupted job up again in the background |
+| `queue.sh`, `queues/*.txt` | runs a list of jobs one after another in the background |
 | `status.sh` | where the running jobs stand; `--watch` keeps redrawing it |
 | `sets/*.txt` | named task subsets, one task name per line |
 | `report.py` | one job as a table of outcomes, jobs compared, or a matrix slice (`grid`) |
@@ -120,6 +121,17 @@ AGENT=opencode tools/bench/run.sh debug8-opencode-r all -i '*/cobol-modernizatio
   --verifier-timeout-multiplier 3
 tools/bench/report.py debug8-qwen debug8-opencode+debug8-opencode-r
 ```
+
+A comparison of several jobs is a queue: `tools/bench/queue.sh
+queues/<name>.txt` runs the jobs a file lists, one line each (`job set
+VAR=value… harbor args…`), one after another in the background, logging to
+`jobs/queue-<name>.out`. `queues/tb21-full.txt` is the full comparison. A
+finished job is skipped and an interrupted one resumed, so after a reboot
+the same command takes the queue up where it stopped. Before each job it
+checks that Docker still runs amd64 containers: when the Docker VM's Rosetta
+breaks, every task fails at once (`exec /bin/sh: no such file or
+directory`), and `orb stop && orb start` mends it. A job that ends
+unfinished stops the queue, so `stop.sh` stops a queue too.
 
 A job started this way belongs to no terminal, so nothing in termide shows
 it. `tools/bench/status.sh` does. On top are the conditions: the machine, how
