@@ -17,6 +17,8 @@
 #   MODEL     model id as the endpoint names it (Qwen3.6-35B-A3B-8bit)
 #   BASE_URL  endpoint as the container sees it (OMLX on the host)
 #   API_KEY   key for it; for OMLX it is read from ~/.omlx/settings.json
+#   AGENT_VERSION  the harness's version in place of its pin below (for
+#             termide-claude-code, the ACP adapter's)
 #   DATASET   Harbor dataset (terminal-bench/terminal-bench-2-1)
 #   CONCURRENT  trials at once (1): a local model server splits its
 #               generation between them, so each runs slower against its
@@ -61,6 +63,21 @@ if [ -z "${API_KEY:-}" ] && $omlx; then
   API_KEY=$(python3 -I -c 'import json,os;print(json.load(open(os.path.expanduser("~/.omlx/settings.json")))["auth"]["api_key"])')
 fi
 provider=openai
+# The versions the harnesses run at, pinned so that every job of a
+# comparison runs the same code (Harbor installs its agents at their latest
+# otherwise). termide-claude-code pins Claude Code's ACP adapter, whose
+# 0.108.1 bundles Claude Code 2.1.326: the pair runs one Claude Code.
+case "$AGENT" in
+  claude-code) pin=2.1.326 ;;
+  termide-claude-code) pin=0.108.1 ;;
+  opencode) pin=1.19.6 ;;
+  qwen-coder) pin=0.28.0 ;;
+  *) pin="" ;;
+esac
+AGENT_VERSION=${AGENT_VERSION:-$pin}
+case "$AGENT" in termide | termide-claude-code) ;; *)
+  [ -n "$AGENT_VERSION" ] && set -- --ak "version=$AGENT_VERSION" "$@" ;;
+esac
 case "$AGENT" in claude-code | termide-claude-code)
   # Claude Code on the user's subscription, bare or driven by termide over
   # ACP: the OAuth token of `claude setup-token`, from the environment or
@@ -83,6 +100,7 @@ elif [ "$AGENT" = termide-claude-code ]; then
   [ -x "$bench/bin/termide" ] || { echo "run $bench/build.sh first" >&2; exit 2; }
   set -- -a harbor_termide.agent:TermideAgent \
     --ae TERMIDE_PROVIDER=claude_code \
+    --ae "TERMIDE_ACP_ADAPTER_VERSION=$AGENT_VERSION" \
     --ae "TERMIDE_MODEL=$MODEL" \
     --ae "CLAUDE_CODE_OAUTH_TOKEN=$token" \
     "$@"
@@ -118,9 +136,9 @@ if curl -sf -o /dev/null "http://127.0.0.1:$port/simple/pytest/"; then
 fi
 
 mkdir -p "$bench/jobs/$job"
-python3 -I - "$bench/jobs/$job/bench-meta.json" "$root" "$AGENT" "$MODEL" "$BASE_URL" "$DATASET" "$CONCURRENT" "$mirror" "$REASONING" "$REASONING_BUDGET" "$set_name" <<'EOF'
+python3 -I - "$bench/jobs/$job/bench-meta.json" "$root" "$AGENT" "$MODEL" "$BASE_URL" "$DATASET" "$CONCURRENT" "$mirror" "$REASONING" "$REASONING_BUDGET" "$set_name" "$AGENT_VERSION" <<'EOF'
 import json, subprocess, sys
-out, root, agent, model, base_url, dataset, concurrent, mirror, reasoning, budget, set_name = sys.argv[1:]
+out, root, agent, model, base_url, dataset, concurrent, mirror, reasoning, budget, set_name, version = sys.argv[1:]
 sys.path.insert(0, root + "/tools/bench")
 import conditions
 git = lambda *a: subprocess.run(["git", "-C", root, *a], capture_output=True, text=True).stdout.strip()
@@ -133,6 +151,10 @@ if agent == "termide":
         "reasoning": reasoning,
         "reasoning_budget": int(budget),
     }
+    if version:
+        meta["acp_adapter"] = f"claude-agent-acp {version}"
+elif version:
+    meta["agent_version"] = version
 meta |= {"model": model, "base_url": base_url, "connection": conditions.connection(base_url),
          "dataset": dataset, "set": set_name, "concurrent": int(concurrent),
          "verifier_mirror": mirror == "true", "conditions": conditions.static(base_url)}

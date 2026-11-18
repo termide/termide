@@ -31,12 +31,12 @@ options = ["termide", "opencode", "qwen-coder", "claude-code", "termide-claude-c
 
 [[bench-start.params]]
 name = "model"
-label = "Model (claude-code, termide-claude-code: claude-sonnet-5)"
+label = "Model (claude-code, termide-claude-code: claude-sonnet-5-5)"
 default = "Qwen3.8-Flash-Next-oQ4e-mtp"
 
 [[bench-start.params]]
 name = "concurrent"
-label = "Trials at once (1 for a local model)"
+label = "Trials at once (1 for any comparison)"
 default = "1"
 
 [[bench-start.params]]

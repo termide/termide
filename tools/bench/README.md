@@ -69,26 +69,34 @@ AGENT=opencode tools/bench/run.sh debug8-opencode debug8   # another harness, sa
 `AGENT` takes any agent Harbor has built in (`harbor agent list`): `opencode`
 and `qwen-coder` are the two in the published comparison below, `pi`,
 `terminus-2`, `codex` and others work the same way. Harbor installs them in
-the task container from npm or PyPI at their latest version unless
-`--ak version=…` pins one; the version it ran is in each trial's
-`result.json` and heads the report's column.
+the task container from npm or PyPI, at their latest version unless
+`--ak version=…` pins one. `run.sh` pins the harnesses of the published
+comparisons (`claude-code`, `opencode`, `qwen-coder`, and the ACP adapter of
+`termide-claude-code`), so that every job of a comparison runs the same code;
+`AGENT_VERSION` overrides a pin. The version a trial ran is in its
+`result.json` and heads the report's column, the pin in `bench-meta.json`.
 
 `AGENT=claude-code` runs Claude Code on a Claude subscription rather than an
-endpoint: `MODEL` is a Claude model (`claude-sonnet-5`), and the login is the
-OAuth token `claude setup-token` prints, taken from `CLAUDE_CODE_OAUTH_TOKEN`
-or the login keychain (`security add-generic-password -a "$USER" -s
-termide-bench-claude-oauth -w`, which asks for it). The model is not on this
-machine, so several trials can run at once (`CONCURRENT=4`); the
-subscription's limits are then what may cut a run short.
+endpoint: `MODEL` is a Claude model's full id (`claude-sonnet-5-5`), and the
+login is the OAuth token `claude setup-token` prints, taken from
+`CLAUDE_CODE_OAUTH_TOKEN` or the login keychain (`security
+add-generic-password -a "$USER" -s termide-bench-claude-oauth -w`, which asks
+for it). The model is not on this machine, but the tasks are: run these one
+at a time too, since trials side by side share its CPUs and memory against
+their wall-clock limits.
 
 `AGENT=termide-claude-code` runs termide on the same subscription the way the
-app does: termide drives Claude Code over ACP (the
-`@agentclientprotocol/claude-agent-acp` adapter, installed in the container
-with Node), so the model works through termide's system prompt and tools
-inside Claude Code's loop. The job records the harness as `termide`, the
-connection as `claude subscription`, and the reasoning as `agent-default`:
-termide sets no effort on an ACP agent, so the pair with `claude-code`
-compares the harnesses at Claude Code's default effort.
+app does: termide drives Claude Code over ACP, so the model works through
+termide's system prompt and tools inside Claude Code's loop. The container
+gets Node 22 and the `@agentclientprotocol/claude-agent-acp` adapter at its
+pin, whose Claude Agent SDK bundles the Claude Code version bare
+`claude-code` is pinned to, and the model reaches it as `ANTHROPIC_MODEL`, as
+bare Claude Code takes `--model`. The adapter offers an older model such as
+`claude-sonnet-5` only when that variable names it. The job records the
+harness as `termide`, the connection as `claude subscription`, and the
+reasoning as `agent-default`: termide sets no effort on an ACP agent, so the
+pair with `claude-code` compares the harnesses at Claude Code's default
+effort.
 
 Everything after the set name goes to `harbor run` as is
 (`--agent-timeout-multiplier`, `--verifier-timeout-multiplier`, `-k` for
@@ -208,7 +216,9 @@ and their speed only while OMLX keeps its logs (a few days).
   15–30 tokens/s, against ~100 for a short single request: the two share
   the server's generation for little more throughput in all, and one's
   prompt processing stalls the other. `run.sh` therefore runs one trial at
-  a time unless `CONCURRENT` says otherwise. For harness
+  a time unless `CONCURRENT` says otherwise, and a comparison keeps it so
+  for every harness, a hosted model's too: trials side by side also share
+  the machine's CPUs, memory and Docker. For harness
   comparisons run with `--agent-timeout-multiplier` and also report the 1×
   score; say which one a number is.
 - **Slow mirrors.** Without `mirror.sh serve`, verifiers time out or fail
@@ -231,6 +241,13 @@ and their speed only while OMLX keeps its logs (a few days).
   prevents idle sleep, and system sleep on AC power only: closing the lid on
   battery still sleeps. Check `pmset -g log | grep -E ' (Sleep|Wake) '` when
   a trial's agent time exceeds its limit, and rerun those trials.
+- **Reasoning across harnesses.** On a local server termide's level goes in
+  the chat template's `enable_thinking`, on for every level but `off`: a
+  Qwen model reasons at `high` as it does by default, and `opencode` and
+  `qwen-coder`, which send no level, get the same default. Only termide sends
+  the model's reasoning back with the turn (`preserve_thinking`), which is
+  the harness's own doing. On the Claude subscription neither harness sets an
+  effort (`agent-default`).
 - **Runaway reasoning.** The model sometimes reasons for tens of thousands
   of tokens in one turn (12 minutes with no output, or up to OMLX's
   32768-token cap, `stop` = `length`). One such turn uses up a task's whole

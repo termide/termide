@@ -12,8 +12,9 @@ The model endpoint must be reachable from the container: TERMIDE_BASE_URL
 
 With TERMIDE_PROVIDER=claude_code termide drives Claude Code over ACP instead,
 on the subscription of CLAUDE_CODE_OAUTH_TOKEN: Node 22 (from nvm, on
-termide's PATH only) and the ACP adapter go into the container, and termide
-selects TERMIDE_MODEL in the adapter's session.
+termide's PATH only) and the ACP adapter at TERMIDE_ACP_ADAPTER_VERSION go
+into the container, an agent `bench` runs the adapter, and TERMIDE_MODEL
+reaches it as ANTHROPIC_MODEL, the model its sessions start on.
 """
 
 import asyncio
@@ -32,11 +33,14 @@ LOG_NAME = "termide.jsonl"
 # Where the agent's config lives; XDG_CONFIG_HOME points there, whatever the
 # agent user's $HOME is.
 CONFIG_HOME = "/installed-agent/config"
-# termide's own `npx` command for a `claude_code` connection, run once at
-# install with its stdin closed so the adapter exits: its packages are then
-# in npm's cache, and the run's start does not spend the agent's time on them.
-ACP_ADAPTER = "@agentclientprotocol/claude-agent-acp@latest"
-WARM_ADAPTER = f"echo | timeout 600 npx -y {ACP_ADAPTER} >/dev/null 2>&1; true"
+# Claude Code's ACP adapter. A `claude_code` connection would run its latest
+# release through npx; the bench pins one instead (TERMIDE_ACP_ADAPTER_VERSION,
+# 0.108.1 by default: it bundles Claude Code 2.1.326, the version bare
+# claude-code runs at), installs it at setup and runs it as the `command` of
+# an agent of its own, named on the command line.
+ACP_ADAPTER = "@agentclientprotocol/claude-agent-acp"
+ACP_ADAPTER_VERSION = "0.108.1"
+ACP_AGENT = "bench"
 # The directory of the Node install puts in front of termide's PATH.
 NODE_PATH_FILE = f"{CONFIG_HOME}/node-bin"
 WITH_NODE = f'PATH="$(cat {NODE_PATH_FILE}):$PATH"; export PATH; '
@@ -112,7 +116,18 @@ class TermideAgent(BaseInstalledAgent):
                 f"printf %s {shlex.quote(node_bin)} > {NODE_PATH_FILE}"
             ),
         )
-        await self.exec_as_agent(environment, command=WITH_NODE + WARM_ADAPTER)
+        version = self._adapter_version()
+        await self.exec_as_agent(
+            environment,
+            command=(
+                WITH_NODE
+                + f"npm install -g {ACP_ADAPTER}@{shlex.quote(version)}"
+                + ' && test -x "$(cat ' + NODE_PATH_FILE + ')/claude-agent-acp"'
+            ),
+        )
+
+    def _adapter_version(self) -> str:
+        return self._get_env("TERMIDE_ACP_ADAPTER_VERSION") or ACP_ADAPTER_VERSION
 
     def _provider(self) -> str:
         return self._get_env("TERMIDE_PROVIDER") or "openai_compatible"
@@ -138,10 +153,9 @@ class TermideAgent(BaseInstalledAgent):
                 "[ai.connections.bench]",
             ]
             + (
-                # The adapter picks a model of its own on every new session,
-                # whatever ANTHROPIC_MODEL says; termide selects this one
-                # once the session is up. Claude Code logs in on its own.
-                ['provider = "claude_code"', f"model = {_toml_str(model)}"]
+                # The `bench` agent (below) runs Claude Code whatever the
+                # connection says; one must still be there.
+                ['provider = "claude_code"']
                 if self._provider() == "claude_code"
                 else [
                     'provider = "openai_compatible"',
@@ -164,6 +178,38 @@ class TermideAgent(BaseInstalledAgent):
             remote_path=f"{CONFIG_HOME}/termide/config.toml",
             filename="config.toml",
         )
+        if self._provider() == "claude_code":
+            await self._write_acp_agent(environment)
+
+    async def _write_acp_agent(self, environment: BaseEnvironment) -> None:
+        # The pinned adapter as an agent's `command` (not run through a shell,
+        # so its absolute path), recognised as Claude Code's for termide's
+        # prompt and tools. The model is ANTHROPIC_MODEL's (see run), which
+        # the adapter starts each session on, as bare Claude Code takes
+        # --model; a full id such as claude-sonnet-5-5 matches none of the
+        # adapter's aliases by name, so the agent names none. Claude Code
+        # logs in on its own.
+        result = await self.exec_as_agent(environment, command=f"cat {NODE_PATH_FILE}")
+        node_bin = (result.stdout or "").strip()
+        agent_dir = f"{CONFIG_HOME}/termide/ai/agents/{ACP_AGENT}"
+        await self.exec_as_root(
+            environment, command=f"mkdir -p {agent_dir} && chmod -R 777 {CONFIG_HOME}"
+        )
+        await self._upload_config_text(
+            environment,
+            content="\n".join(
+                [
+                    "---",
+                    "description: Claude Code through its pinned ACP adapter",
+                    f"command: {node_bin}/claude-agent-acp",
+                    "adapter: claude_code",
+                    "---",
+                    "",
+                ]
+            ),
+            remote_path=f"{agent_dir}/AGENT.md",
+            filename="AGENT.md",
+        )
 
     @with_prompt_template
     async def run(
@@ -177,16 +223,20 @@ class TermideAgent(BaseInstalledAgent):
             "XDG_CONFIG_HOME": CONFIG_HOME,
         }
         prefix = ""
+        agent = ""
         if self._provider() == "claude_code":
             env["CLAUDE_CODE_OAUTH_TOKEN"] = self._get_env("CLAUDE_CODE_OAUTH_TOKEN") or ""
             env["CLAUDE_FORCE_OAUTH"] = "1"
+            # The adapter starts each session on the model this names (and
+            # lists an older one such as claude-sonnet-5 only then).
             env["ANTHROPIC_MODEL"] = self._model()
             prefix = WITH_NODE
+            agent = f" --agent {ACP_AGENT}"
         try:
             await self.exec_as_agent(
                 environment,
                 command=(
-                    f"{prefix}{REMOTE_BIN} --prompt {shlex.quote(instruction)} --output stream-json"
+                    f"{prefix}{REMOTE_BIN} --prompt {shlex.quote(instruction)}{agent} --output stream-json"
                     f" 2>/logs/agent/termide.stderr | tee /logs/agent/{LOG_NAME}"
                 ),
                 env=env,
