@@ -3159,7 +3159,8 @@ On a CLI-agent connection (`claude_code`, `codex`, `gemini_cli`), or with an
 agent whose `AGENT.md` names a `command`, the task runs in that agent's own
 loop over ACP, as it would in a panel: Claude Code takes termide's prompt and
 tools in place of its own, signed in with its own login, and the connection's
-`model` is picked before the task goes out. The output is the same, with
+`model` (for a `command` agent, the `model` its `AGENT.md` names) is picked
+before the task goes out. The output is the same, with
 `provider` `acp` in the result. The agent's own permission requests that the
 rules leave open are refused like everything else.
 

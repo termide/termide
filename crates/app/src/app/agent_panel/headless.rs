@@ -149,13 +149,16 @@ pub fn run_agent_headless(
         return 2;
     }
     let definition = dirs.agent(name);
-    // An agent of its own `command` runs whatever the connection; else a
-    // CLI-agent connection runs its adapter.
+    // An agent of its own `command` runs whatever the connection, on its
+    // `model` as in a panel; else a CLI-agent connection runs its adapter.
     let external = definition
         .spec
         .acp
         .clone()
-        .map(|config| (name.to_string(), config, String::new()))
+        .map(|config| {
+            let model = definition.spec.model.clone().unwrap_or_default();
+            (name.to_string(), config, model)
+        })
         .or_else(|| {
             cli_acp_config(connection).map(|config| {
                 let model = definition
