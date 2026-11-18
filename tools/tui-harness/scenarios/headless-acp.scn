@@ -1,0 +1,16 @@
+# `termide --prompt` on a `claude_code` connection: the task runs in Claude
+# Code over ACP, served termide's tools, and is reported as stream-json as
+# termide's own loop is. The stand-in in tools/screenshots/mock-acp plays
+# its task by calling termide's tools through the MCP server.
+mock-llm
+mock-acp claude_code
+start
+wait "README.md"
+run "\"$TERMIDE_BIN\" --prompt 'flag critical low-stock items in the reorder report' --output stream-json > headless.jsonl 2> headless.err"
+mock-acp-got "session/new" 5
+mock-acp-got "tool: read" 5
+mock-acp-got "prompt: flag critical low-stock items" 5
+file-contains headless.jsonl "\"name\":\"read\",\"subject\":\"inventory/report.py\",\"type\":\"tool_use\""
+file-contains headless.jsonl "\"type\":\"result\""
+file-contains headless.jsonl "\"ok\":true"
+quit --force

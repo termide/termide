@@ -1,0 +1,1 @@
+- **`termide --prompt` runs Claude Code, Codex and Gemini CLI.** On a CLI-agent connection, or with an agent whose `AGENT.md` names a `command`, a headless run now drives that agent over ACP as a panel does, served termide's prompt and tools, and reports it the same way, `--output stream-json` included. It used to refuse such an agent.

@@ -2,20 +2,24 @@
 //! answer on stdout.
 
 use std::path::Path;
+use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use std::time::Duration;
 
+use termide_agent_acp::AcpRuntime;
 use termide_agent_core::{
-    build_system_prompt, discover_context_files, ensure_global_layout, subject_of, Agent,
-    AgentDirs, AgentEvent, AutoDenyPrompter, CancelToken, IntentLog, Message, Mode, ModelSpec,
-    PermissionHooks, PromptOptions, SessionView, StopReason, StreamEvent, ToolContext, Usage,
-    UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    build_system_prompt, discover_context_files, ensure_global_layout, permission_channel,
+    subject_of, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, Backend, BackendSetup, CancelToken,
+    HostTools, IntentLog, Message, Mode, ModeHandle, ModelSpec, PermissionAnswer,
+    PermissionEnvelope, PermissionHooks, PromptOptions, SessionView, StopReason, StreamEvent,
+    ToolContext, Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
 };
 use termide_agent_tools::SkillTool;
 use termide_config::AiSettings;
 
 use super::{
-    base_tools, connection_provider, recall_tool, resolve_model, restrict_tools, reviewer_setup,
-    shared_web, usable_connection,
+    base_tools, cli_acp_config, connection_provider, recall_tool, resolve_model, restrict_tools,
+    reviewer_setup, shared_web, usable_connection,
 };
 
 /// How a headless run reports its result.
@@ -111,6 +115,11 @@ fn usage_json(usage: &Usage) -> serde_json::Value {
 /// prompt, so it runs under the configured rules and mode with everything
 /// else refused (as a subagent does); set `mode = "auto"` to have the
 /// reviewer decide, `mode = "all"` or allow rules for unattended use.
+///
+/// On a CLI-agent connection (`claude_code`, `codex`, `gemini_cli`), or for
+/// an agent whose `AGENT.md` names a `command`, the task runs in that
+/// agent's own loop over ACP, served termide's prompt and tools as in a
+/// panel, and reported the same way.
 /// Returns the process exit code.
 pub fn run_agent_headless(
     settings: &AiSettings,
@@ -121,16 +130,10 @@ pub fn run_agent_headless(
     prompt: &str,
     output: HeadlessOutput,
 ) -> i32 {
-    use std::io::Write;
-    // Both JSON forms suppress the plain text/stderr chatter.
-    let quiet = output != HeadlessOutput::Text;
-    let stream = output == HeadlessOutput::StreamJson;
-
-    let Some((name, connection)) = usable_connection(settings) else {
+    let Some((connection_name, connection)) = usable_connection(settings) else {
         eprintln!("termide: AI is not configured (add an [ai.connections] entry)");
         return 1;
     };
-    let provider = connection_provider(name, connection);
 
     let global = termide_config::get_config_dir()
         .ok()
@@ -146,10 +149,23 @@ pub fn run_agent_headless(
         return 2;
     }
     let definition = dirs.agent(name);
-    if definition.spec.acp.is_some() {
-        eprintln!("termide: headless mode cannot drive an external (ACP) agent");
-        return 2;
-    }
+    // An agent of its own `command` runs whatever the connection; else a
+    // CLI-agent connection runs its adapter.
+    let external = definition
+        .spec
+        .acp
+        .clone()
+        .map(|config| (name.to_string(), config, String::new()))
+        .or_else(|| {
+            cli_acp_config(connection).map(|config| {
+                let model = definition
+                    .spec
+                    .model
+                    .clone()
+                    .unwrap_or_else(|| connection.model.trim().to_string());
+                (format!("{connection_name}:{name}"), config, model)
+            })
+        });
 
     super::publish_shell(shell);
     let web = shared_web(&settings.web, &dirs);
@@ -167,6 +183,81 @@ pub fn run_agent_headless(
     options.soul = definition.soul.as_deref();
     let system_prompt = build_system_prompt(&options);
 
+    let mut rules = settings.permissions.clone();
+    if let Some(mode) = definition.spec.mode {
+        rules.mode = mode;
+    }
+    // Plan mode is a UI affordance (it waits for a card); headless has no
+    // one to accept a plan, so the default mode decides instead.
+    if rules.mode == Mode::Plan {
+        eprintln!("termide: plan mode has no meaning without the panel; using auto");
+        rules.mode = Mode::Auto;
+    }
+
+    let cancel = CancelToken::new();
+    let refusals = dirs.refusals();
+    let reviewer = reviewer_setup(settings, &dirs, name);
+    let permissions = PermissionHooks::new(
+        rules.clone(),
+        Box::new(AutoDenyPrompter::new(refusals.unattended_headless.clone())),
+    )
+    .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
+    .with_refusals(refusals.clone());
+    // The approved command hooks run around the calls as in a panel; a
+    // project's hook never approved there does not run here either.
+    let approvals = termide_agent_core::approvals::Approvals::new(
+        termide_project::approvals_path(project_root).ok(),
+    );
+    let mut chain: Vec<Box<dyn termide_agent_core::Hooks>> = Vec::new();
+    if let Some(factory) = super::command_hooks(&dirs, &approvals, cwd) {
+        chain.push(factory());
+    }
+    chain.push(Box::new(permissions));
+    let mut hooks = termide_agent_core::ChainedHooks::new(chain);
+
+    let mut reporter = Reporter::new(output, cwd);
+    if let Some((agent, config, model)) = external {
+        let setup = BackendSetup {
+            cwd: cwd.to_path_buf(),
+            // The agent's own permission requests the rules leave open come
+            // on this channel, and are refused: nobody watches.
+            prompter: {
+                let (prompter, rx) = permission_channel(cancel.clone());
+                reporter.refused = Some((rx, refusals.unattended_headless.clone()));
+                prompter
+            },
+            cancel: cancel.clone(),
+            mode: ModeHandle::new(rules.mode),
+            rules,
+            persist: None,
+            system_prompt,
+            plan: dirs.plan_prompt(),
+            plan_seen: false,
+            goal: dirs.goal_prompt(),
+            handoff: dirs.handoff_prompt(),
+            reviewer,
+            host_tools: Some(HostTools {
+                tools,
+                hooks: Box::new(hooks),
+                context: ToolContext::new(cwd.to_path_buf()),
+                skills,
+                session_id: None,
+            }),
+            resume: None,
+            history: Vec::new(),
+        };
+        let runtime = match AcpRuntime::start(&agent, &config, setup) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                eprintln!("termide: {error}");
+                return 1;
+            }
+        };
+        let messages = drive_external(&runtime, &model, prompt, &mut reporter);
+        return reporter.finish(&messages);
+    }
+
+    let provider = connection_provider(connection_name, connection);
     let requested = definition
         .spec
         .model
@@ -184,74 +275,152 @@ pub fn run_agent_headless(
         thinking: settings.reasoning,
         reasoning_budget: connection.reasoning_budget(),
     };
-    let mut rules = settings.permissions.clone();
-    if let Some(mode) = definition.spec.mode {
-        rules.mode = mode;
-    }
-    // Plan mode is a UI affordance (it waits for a card); headless has no
-    // one to accept a plan, so the default mode decides instead.
-    if rules.mode == Mode::Plan {
-        eprintln!("termide: plan mode has no meaning without the panel; using auto");
-        rules.mode = Mode::Auto;
-    }
-
     let mut agent = Agent::new(Arc::clone(&provider), tools, model, cwd.to_path_buf())
         .with_system_prompt(system_prompt)
         .with_compaction(settings.compaction)
         .with_compaction_prompts(dirs.compaction_prompts());
-    let cancel = CancelToken::new();
-    let refusals = dirs.refusals();
-    let permissions = PermissionHooks::new(
-        rules,
-        Box::new(AutoDenyPrompter::new(refusals.unattended_headless.clone())),
-    )
-    .with_classifier(Box::new(
-        reviewer_setup(settings, &dirs, name).classifier(cancel.clone()),
-    ))
-    .with_refusals(refusals);
-    // The approved command hooks run around the calls as in a panel; a
-    // project's hook never approved there does not run here either.
-    let approvals = termide_agent_core::approvals::Approvals::new(
-        termide_project::approvals_path(project_root).ok(),
+    agent.run(
+        UserMessage::text(prompt),
+        &mut hooks,
+        &cancel,
+        &mut |event| reporter.event(event),
     );
-    let mut chain: Vec<Box<dyn termide_agent_core::Hooks>> = Vec::new();
-    if let Some(factory) = super::command_hooks(&dirs, &approvals, cwd) {
-        chain.push(factory());
+    reporter.finish(agent.messages())
+}
+
+/// How often the run of an external agent is looked at.
+const EXTERNAL_POLL: Duration = Duration::from_millis(50);
+
+/// Pick `model` (empty for the agent's own), hand the external agent the
+/// task and report what it does until its turn ends; the messages of the
+/// run, as the built-in loop's transcript holds them.
+fn drive_external(
+    backend: &AcpRuntime,
+    model: &str,
+    prompt: &str,
+    reporter: &mut Reporter,
+) -> Vec<Message> {
+    // The model goes before the task does, so the whole task runs on it.
+    if !model.is_empty() {
+        while backend.is_starting() {
+            std::thread::sleep(EXTERNAL_POLL);
+        }
+        let models = backend.available_models();
+        match termide_agent_acp::match_model(model, &models) {
+            Some(id) => {
+                if let Err(error) = backend.select_model(id) {
+                    eprintln!("termide: cannot pick {model}: {error:?}; the agent's default runs");
+                }
+            }
+            None if !models.is_empty() => {
+                eprintln!("termide: the agent has no model {model}; its default runs");
+            }
+            None => {}
+        }
     }
-    chain.push(Box::new(permissions));
-    let mut hooks = termide_agent_core::ChainedHooks::new(chain);
-    let stdout = std::io::stdout();
-    let mut wrote_text = false;
-    // Tool calls in call order: (id, name, subject, is_error), for the JSON
-    // report and, in text mode, the stderr activity lines.
-    let mut tools: Vec<(String, String, String, bool)> = Vec::new();
-    // Every stream event carries the time since the run began, so a slow
-    // turn or a long tool call shows in the log.
-    let started = std::time::Instant::now();
-    let mut thinking = ThinkingChunks::default();
-    let mut drafts: std::collections::HashMap<String, (String, ThinkingChunks)> =
-        std::collections::HashMap::new();
-    let elapsed_ms = || u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    {
-        let line = |value: serde_json::Value| {
-            let mut value = value;
-            value["elapsed_ms"] = serde_json::json!(elapsed_ms());
-            let mut out = stdout.lock();
-            let _ = writeln!(out, "{value}");
-            let _ = out.flush();
-        };
-        let mut emit = |event: AgentEvent| match event {
+    let mut messages = vec![Message::User(UserMessage::text(prompt))];
+    if let Err(error) = backend.prompt(UserMessage::text(prompt)) {
+        eprintln!("termide: the agent did not start: {error:?}");
+        return messages;
+    }
+    // An agent that went away without saying its turn ended is over too.
+    let mut idle = 0;
+    loop {
+        reporter.refuse_requests();
+        let mut ended = false;
+        for event in backend.drain() {
+            if let AgentEvent::MessageEnd(message) = &event {
+                messages.push(message.clone());
+            }
+            ended |= matches!(event, AgentEvent::AgentEnd);
+            reporter.event(event);
+        }
+        idle = if backend.is_busy() { 0 } else { idle + 1 };
+        if ended || idle > 1 {
+            return messages;
+        }
+        std::thread::sleep(EXTERNAL_POLL);
+    }
+}
+
+/// Reports a run as it goes, in the form `--output` asked for, and its
+/// result at the end: the same for termide's loop and an external agent.
+struct Reporter {
+    quiet: bool,
+    stream: bool,
+    cwd: std::path::PathBuf,
+    wrote_text: bool,
+    /// Tool calls in call order: (id, name, subject, is_error), for the
+    /// JSON report and, in text mode, the stderr activity lines.
+    tools: Vec<(String, String, String, bool)>,
+    /// Every stream event carries the time since the run began, so a slow
+    /// turn or a long tool call shows in the log.
+    started: std::time::Instant,
+    thinking: ThinkingChunks,
+    drafts: std::collections::HashMap<String, (String, ThinkingChunks)>,
+    /// An external agent's permission requests, refused with the reason.
+    refused: Option<(Receiver<PermissionEnvelope>, String)>,
+}
+
+impl Reporter {
+    fn new(output: HeadlessOutput, cwd: &Path) -> Self {
+        Self {
+            // Both JSON forms suppress the plain text/stderr chatter.
+            quiet: output != HeadlessOutput::Text,
+            stream: output == HeadlessOutput::StreamJson,
+            cwd: cwd.to_path_buf(),
+            wrote_text: false,
+            tools: Vec::new(),
+            started: std::time::Instant::now(),
+            thinking: ThinkingChunks::default(),
+            drafts: std::collections::HashMap::new(),
+            refused: None,
+        }
+    }
+
+    fn elapsed_ms(&self) -> u64 {
+        u64::try_from(self.started.elapsed().as_millis()).unwrap_or(u64::MAX)
+    }
+
+    fn line(&self, mut value: serde_json::Value) {
+        use std::io::Write;
+        value["elapsed_ms"] = serde_json::json!(self.elapsed_ms());
+        let mut out = std::io::stdout().lock();
+        let _ = writeln!(out, "{value}");
+        let _ = out.flush();
+    }
+
+    fn flush_thinking(&mut self) {
+        if let Some(text) = self.thinking.finish() {
+            self.line(serde_json::json!({ "type": "thinking", "text": text }));
+        }
+    }
+
+    fn refuse_requests(&self) {
+        if let Some((rx, reason)) = &self.refused {
+            for envelope in rx.try_iter() {
+                let _ = envelope
+                    .reply
+                    .send(PermissionAnswer::DenyWithReason(reason.clone()));
+            }
+        }
+    }
+
+    fn event(&mut self, event: AgentEvent) {
+        let stream = self.stream;
+        match event {
             AgentEvent::MessageUpdate(StreamEvent::TextDelta(text)) => {
-                if !quiet {
-                    let mut out = stdout.lock();
+                if !self.quiet {
+                    use std::io::Write;
+                    let mut out = std::io::stdout().lock();
                     let _ = out.write_all(text.as_bytes());
                     let _ = out.flush();
-                    wrote_text = true;
+                    self.wrote_text = true;
                 }
             }
             AgentEvent::MessageUpdate(StreamEvent::ThinkingDelta(delta)) if stream => {
-                if let Some(text) = thinking.push(&delta) {
-                    line(serde_json::json!({ "type": "thinking", "text": text }));
+                if let Some(text) = self.thinking.push(&delta) {
+                    self.line(serde_json::json!({ "type": "thinking", "text": text }));
                 }
             }
             // A call's arguments show only when they run long — a big file
@@ -262,25 +431,25 @@ pub fn run_agent_headless(
                     raw: true,
                     ..ThinkingChunks::default()
                 };
-                drafts.insert(id, (name, chunks));
+                self.drafts.insert(id, (name, chunks));
             }
             AgentEvent::MessageUpdate(StreamEvent::ToolCallDelta { id, arguments }) if stream => {
-                if let Some((name, chunks)) = drafts.get_mut(&id) {
-                    if let Some(text) = chunks.push(&arguments) {
-                        line(
-                            serde_json::json!({ "type": "tool_input", "name": name, "text": text }),
-                        );
-                    }
+                let pushed = self
+                    .drafts
+                    .get_mut(&id)
+                    .and_then(|(name, chunks)| Some((name.clone(), chunks.push(&arguments)?)));
+                if let Some((name, text)) = pushed {
+                    self.line(
+                        serde_json::json!({ "type": "tool_input", "name": name, "text": text }),
+                    );
                 }
             }
             AgentEvent::MessageUpdate(StreamEvent::ToolCallEnd { id }) if stream => {
-                drafts.remove(&id);
+                self.drafts.remove(&id);
             }
             AgentEvent::ThinkingLoop { report, retrying } if stream => {
-                if let Some(text) = thinking.finish() {
-                    line(serde_json::json!({ "type": "thinking", "text": text }));
-                }
-                line(serde_json::json!({
+                self.flush_thinking();
+                self.line(serde_json::json!({
                     "type": "loop",
                     "retrying": retrying,
                     "repeats": report.repeats,
@@ -288,36 +457,30 @@ pub fn run_agent_headless(
                 }));
             }
             AgentEvent::EmptyCutOff { retrying } if stream => {
-                line(serde_json::json!({ "type": "cut_off", "retrying": retrying }));
+                self.line(serde_json::json!({ "type": "cut_off", "retrying": retrying }));
             }
             AgentEvent::MalformedToolCall if stream => {
-                if let Some(text) = thinking.finish() {
-                    line(serde_json::json!({ "type": "thinking", "text": text }));
-                }
-                line(serde_json::json!({ "type": "malformed_call" }));
+                self.flush_thinking();
+                self.line(serde_json::json!({ "type": "malformed_call" }));
             }
             AgentEvent::ReasoningBudget { budget, retrying } if stream => {
-                if let Some(text) = thinking.finish() {
-                    line(serde_json::json!({ "type": "thinking", "text": text }));
-                }
-                line(serde_json::json!({
+                self.flush_thinking();
+                self.line(serde_json::json!({
                     "type": "reasoning_budget",
                     "budget": budget,
                     "retrying": retrying,
                 }));
             }
             AgentEvent::MessageEnd(Message::Assistant(message)) if stream => {
-                if let Some(text) = thinking.finish() {
-                    line(serde_json::json!({ "type": "thinking", "text": text }));
-                }
+                self.flush_thinking();
                 let text = message.plain_text();
                 if !text.trim().is_empty() {
-                    line(serde_json::json!({ "type": "message", "text": text }));
+                    self.line(serde_json::json!({ "type": "message", "text": text }));
                 }
             }
             AgentEvent::ToolExecutionStart { call } => {
-                let subject = subject_of(&call, &ToolContext::new(cwd.to_path_buf()));
-                if !quiet {
+                let subject = subject_of(&call, &ToolContext::new(self.cwd.clone()));
+                if !self.quiet {
                     if subject.is_empty() {
                         eprintln!("· {}", call.name);
                     } else {
@@ -325,16 +488,18 @@ pub fn run_agent_headless(
                     }
                 }
                 if stream {
-                    line(serde_json::json!({
+                    self.line(serde_json::json!({
                         "type": "tool_use",
                         "name": call.name,
                         "subject": subject,
                     }));
                 }
-                tools.push((call.id.clone(), call.name.clone(), subject, false));
+                self.tools
+                    .push((call.id.clone(), call.name.clone(), subject, false));
             }
             AgentEvent::ToolExecutionEnd { result } => {
-                let name = tools
+                let name = self
+                    .tools
                     .iter_mut()
                     .find(|t| t.0 == result.tool_call_id)
                     .map(|entry| {
@@ -342,11 +507,11 @@ pub fn run_agent_headless(
                         entry.1.clone()
                     })
                     .unwrap_or_default();
-                if !quiet && result.is_error {
+                if !self.quiet && result.is_error {
                     eprintln!("  ! {}", result.plain_text());
                 }
                 if stream {
-                    line(serde_json::json!({
+                    self.line(serde_json::json!({
                         "type": "tool_result",
                         "name": name,
                         "error": result.is_error,
@@ -355,61 +520,60 @@ pub fn run_agent_headless(
                 }
             }
             _ => {}
-        };
-        agent.run(UserMessage::text(prompt), &mut hooks, &cancel, &mut emit);
-    }
-    if wrote_text {
-        println!();
+        }
     }
 
-    let last = agent
-        .messages()
-        .iter()
-        .rev()
-        .find_map(|message| match message {
+    /// Report the result of the run whose transcript is `messages`; the
+    /// process exit code.
+    fn finish(self, messages: &[Message]) -> i32 {
+        if self.wrote_text {
+            println!();
+        }
+        let last = messages.iter().rev().find_map(|message| match message {
             Message::Assistant(assistant) => Some(assistant),
             _ => None,
         });
-    let code = match last {
-        Some(last) if last.error_message.is_some() => 1,
-        Some(last) if last.stop_reason == StopReason::Aborted => 130,
-        Some(_) => 0,
-        None => 1,
-    };
-    if quiet {
-        let mut report = serde_json::json!({
-            "ok": code == 0,
-            "answer": last.map(termide_agent_core::AssistantMessage::plain_text).unwrap_or_default(),
-            "stop_reason": last.map(|m| stop_label(m.stop_reason)),
-            "model": last.map(|m| m.model.clone()),
-            "provider": last.map(|m| m.provider.clone()),
-            "usage": last.map(|m| usage_json(&m.usage)),
-            "usage_total": usage_json(&total_usage(agent.messages())),
-            "elapsed_ms": elapsed_ms(),
-            "tools": tools.iter().map(|(_, name, subject, is_error)| serde_json::json!({
-                "name": name,
-                "subject": subject,
-                "error": is_error,
-            })).collect::<Vec<_>>(),
-            "error": last.and_then(|m| m.error_message.clone())
-                .or_else(|| (last.is_none()).then(|| "the agent produced no answer".to_string())),
-        });
-        // In stream mode the report is the terminal event; tag it.
-        if stream {
-            report["type"] = serde_json::json!("result");
+        let code = match last {
+            Some(last) if last.error_message.is_some() => 1,
+            Some(last) if last.stop_reason == StopReason::Aborted => 130,
+            Some(_) => 0,
+            None => 1,
+        };
+        if self.quiet {
+            let mut report = serde_json::json!({
+                "ok": code == 0,
+                "answer": last.map(termide_agent_core::AssistantMessage::plain_text).unwrap_or_default(),
+                "stop_reason": last.map(|m| stop_label(m.stop_reason)),
+                "model": last.map(|m| m.model.clone()),
+                "provider": last.map(|m| m.provider.clone()),
+                "usage": last.map(|m| usage_json(&m.usage)),
+                "usage_total": usage_json(&total_usage(messages)),
+                "elapsed_ms": self.elapsed_ms(),
+                "tools": self.tools.iter().map(|(_, name, subject, is_error)| serde_json::json!({
+                    "name": name,
+                    "subject": subject,
+                    "error": is_error,
+                })).collect::<Vec<_>>(),
+                "error": last.and_then(|m| m.error_message.clone())
+                    .or_else(|| (last.is_none()).then(|| "the agent produced no answer".to_string())),
+            });
+            // In stream mode the report is the terminal event; tag it.
+            if self.stream {
+                report["type"] = serde_json::json!("result");
+            }
+            println!("{report}");
+        } else {
+            match last {
+                Some(last) if last.error_message.is_some() => eprintln!(
+                    "termide: {}",
+                    last.error_message.as_deref().unwrap_or("the run failed")
+                ),
+                None => eprintln!("termide: the agent produced no answer"),
+                _ => {}
+            }
         }
-        println!("{report}");
-    } else {
-        match last {
-            Some(last) if last.error_message.is_some() => eprintln!(
-                "termide: {}",
-                last.error_message.as_deref().unwrap_or("the run failed")
-            ),
-            None => eprintln!("termide: the agent produced no answer"),
-            _ => {}
-        }
+        code
     }
-    code
 }
 
 /// The wire label for a stop reason, for the JSON report.
