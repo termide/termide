@@ -73,6 +73,23 @@ the task container from npm or PyPI at their latest version unless
 `--ak version=…` pins one; the version it ran is in each trial's
 `result.json` and heads the report's column.
 
+`AGENT=claude-code` runs Claude Code on a Claude subscription rather than an
+endpoint: `MODEL` is a Claude model (`claude-sonnet-5`), and the login is the
+OAuth token `claude setup-token` prints, taken from `CLAUDE_CODE_OAUTH_TOKEN`
+or the login keychain (`security add-generic-password -a "$USER" -s
+termide-bench-claude-oauth -w`, which asks for it). The model is not on this
+machine, so several trials can run at once (`CONCURRENT=4`); the
+subscription's limits are then what may cut a run short.
+
+`AGENT=termide-claude-code` runs termide on the same subscription the way the
+app does: termide drives Claude Code over ACP (the
+`@agentclientprotocol/claude-agent-acp` adapter, installed in the container
+with Node), so the model works through termide's system prompt and tools
+inside Claude Code's loop. The job records the harness as `termide`, the
+connection as `claude subscription`, and the reasoning as `agent-default`:
+termide sets no effort on an ACP agent, so the pair with `claude-code`
+compares the harnesses at Claude Code's default effort.
+
 Everything after the set name goes to `harbor run` as is
 (`--agent-timeout-multiplier`, `--verifier-timeout-multiplier`, `-k` for
 several attempts, `-i`/`-x` for more filters).
