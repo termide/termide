@@ -237,10 +237,14 @@ and their speed only while OMLX keeps its logs (a few days).
   their downloads (`env`); with it, `--verifier-timeout-multiplier` still
   covers a slow `apt-get`. Agents lose minutes in `pip`/`apt` either way: the
   mirror serves the verifiers, not the agents. Harbor's own agents
-  install Node.js and their CLI in every container, which overruns the 6-minute
-  setup limit on such a network: run them with
-  `--agent-setup-timeout-multiplier 4` (termide is uploaded as one binary
-  and needs no installing). Setup time does not count against the agent.
+  install Node.js and their CLI in every container, which overruns the
+  6-minute setup limit on such a network: run them with
+  `--agent-setup-timeout-multiplier 8` (termide is uploaded as one binary
+  and needs no installing). Setup time does not count against the agent —
+  Harbor times the agent from its own start, after the install — but a setup
+  that expires leaves the task with no verdict at all (`env`), so the limit
+  is generous everywhere rather than tuned per image: only the wall clock
+  pays. Rerun the tasks it did cost as a `-r` job with the same multiplier.
 - **Harbor leaves a timed-out agent running.** On the agent timeout Harbor
   cancels its side and starts the verifier, but the agent's process in the
   container runs on: it keeps changing files while the tests run and keeps
