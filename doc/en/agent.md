@@ -1701,7 +1701,9 @@ comes with the repository may make the agent ask or refuse, but its `mode`
 and its `allow` rules are ignored, so that no repository can let the agent
 through on its own.
 
-Every call keeps who decided it, in the session log and so across a resume:
+Every call keeps who decided it, in the session log and so across a resume —
+an external agent's too, for the calls termide judges (its requests to run
+its own tools, and Claude Code's calls of termide's tools):
 the rules, plan mode, a hook, the auto mode reviewer with its reason, no one
 (a headless run, or a subagent with no one to put a card to), or you — with the
 answer you gave and how long it holds. An unfolded call shows it on a line

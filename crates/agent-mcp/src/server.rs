@@ -110,6 +110,8 @@ pub struct Finished {
     pub details: Option<Value>,
     /// As `(media type, base64 data)`.
     pub images: Vec<(String, String)>,
+    /// How the call came to run or not, for the session log.
+    pub permission: Option<Box<termide_agent_core::PermissionNote>>,
 }
 
 /// A running server; dropping it stops it.
@@ -766,6 +768,7 @@ fn call_tool(shared: &Shared, id: &Value, params: &Value, cancel: CancelToken) -
             .images()
             .map(|(media_type, data)| (media_type.to_string(), data.to_string()))
             .collect(),
+        permission: result.permission.clone(),
     };
     if finished != Finished::default() {
         let mut kept = shared
@@ -973,7 +976,42 @@ mod tests {
             Some(Finished {
                 details: None,
                 images: vec![("image/png".into(), "AAAA".into())],
+                permission: None,
             })
+        );
+    }
+
+    /// Lets every call through and says the rules did.
+    struct ByRules;
+
+    impl Hooks for ByRules {
+        fn take_permission(&mut self) -> Option<termide_agent_core::PermissionNote> {
+            Some(termide_agent_core::PermissionNote::new(
+                termide_agent_core::DecidedBy::Rules,
+                true,
+            ))
+        }
+    }
+
+    /// Who let a call run is kept with it for termide's log, as its
+    /// details are.
+    #[test]
+    fn a_call_keeps_who_decided_it_for_termide_to_take() {
+        let mut tools = ToolRegistry::new();
+        tools.insert(Arc::new(Picture));
+        let server = McpServer::start(tools, Box::new(ByRules), ToolContext::new("/tmp")).unwrap();
+        let token = server.token().to_string();
+        post(
+            &server,
+            &token,
+            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                     "params": { "name": "picture", "arguments": {} } }),
+        );
+        let finished = server.take_finished("picture", &json!({})).unwrap();
+        let note = finished.permission.expect("the decision is kept");
+        assert_eq!(
+            (note.by, note.allowed),
+            (termide_agent_core::DecidedBy::Rules, true)
         );
     }
 

@@ -1,0 +1,1 @@
+- **An external agent's calls say who decided them.** A call Claude Code, Codex or Gemini CLI asked permission for, and a Claude Code call of termide's own tools, now keep in the session log whether the rules, the reviewer or you let it run, as the built-in agent's calls do; an unfolded call shows the line (`✓ you allowed it for this session`).

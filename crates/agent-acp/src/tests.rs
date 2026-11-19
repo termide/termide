@@ -3578,3 +3578,46 @@ fn stopping_the_agent_working_by_itself_ends_its_run() {
     events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
     assert!(!runtime.is_busy());
 }
+
+/// What decided an agent's own call — here the edit `edit` mode lets
+/// through — is kept with its result in the log, as for the built-in agent.
+#[test]
+fn the_decision_on_an_agents_own_call_is_logged_with_its_result() {
+    let dir = tempfile::tempdir().unwrap();
+    let (runtime, _seen) = recording_agent_with(
+        dir.path().to_path_buf(),
+        AcpFlavor::ClaudeCode,
+        None,
+        ModeHandle::new(Mode::Edit),
+        false,
+    );
+    let shared = &runtime.shared;
+    let answer = shared.ask_permission(&json!({
+        "toolCall": { "toolCallId": "e1", "kind": "edit", "title": "Write notes.md",
+                      "rawInput": { "path": "notes.md" } },
+        "options": [
+            { "kind": "allow_once", "optionId": "yes" },
+            { "kind": "reject_once", "optionId": "no" },
+        ],
+    }));
+    assert_eq!(answer["outcome"]["optionId"], "yes");
+    shared.on_update(&json!({
+        "sessionUpdate": "tool_call", "toolCallId": "e1", "kind": "edit",
+        "title": "Write notes.md", "status": "in_progress", "rawInput": { "path": "notes.md" },
+    }));
+    shared.on_update(&json!({
+        "sessionUpdate": "tool_call_update", "toolCallId": "e1", "status": "completed",
+        "content": [{ "type": "content", "content": { "type": "text", "text": "ok" } }],
+    }));
+    let logged = runtime
+        .drain()
+        .into_iter()
+        .find_map(|e| match e {
+            AgentEvent::MessageEnd(Message::ToolResult(r)) => Some(r),
+            _ => None,
+        })
+        .expect("the result is logged");
+    let note = logged.permission.expect("the decision is kept");
+    assert!(note.allowed);
+    assert_eq!(note.by, termide_agent_core::DecidedBy::Rules);
+}
