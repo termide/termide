@@ -3007,7 +3007,7 @@ fn words_change_outside(
     let scratch = scratch_places();
     let allowed = |path: &Path| {
         let path = real_path(path);
-        project.holds(&path) || scratch.iter().any(|s| path.starts_with(s))
+        project.holds(&path) || in_scratch(&path, &scratch)
     };
     let Some(dir) = dir else {
         return true;
@@ -3247,12 +3247,14 @@ fn expand_known(raw: &str, values: &[(&str, &str)]) -> Option<String> {
     }
 }
 
-/// Whether a redirection of `part` writes a file outside `project`. A
-/// here-document's body is data, so only the line that opens it counts.
+/// Whether a redirection of `part` writes a file outside `project` and the
+/// system's temporary directories. A here-document's body is data, so only
+/// the line that opens it counts.
 fn writes_outside(part: &ShellPart, project: &Project) -> bool {
     let line = part.text.lines().next().unwrap_or("");
     let line = without_harmless_redirections(line);
     let words: Vec<&str> = line.split_whitespace().collect();
+    let scratch = scratch_places();
     words.iter().enumerate().any(|(i, word)| {
         let Some(rest) = word
             .trim_start_matches(|c: char| c.is_ascii_digit() || c == '&')
@@ -3271,10 +3273,17 @@ fn writes_outside(part: &ShellPart, project: &Project) -> bool {
             return false;
         }
         match expand_known(target, &single_values(part)) {
-            Some(target) => path_outside(&target, part.dir.as_deref(), project),
+            Some(target) => path_leads_beyond(&target, part.dir.as_deref(), |path| {
+                project.holds(path) || in_scratch(path, &scratch)
+            }),
             None => true,
         }
     })
+}
+
+/// Whether the real path `path` lies in one of the `scratch` places.
+fn in_scratch(path: &Path, scratch: &[std::path::PathBuf]) -> bool {
+    scratch.iter().any(|s| path.starts_with(s))
 }
 
 /// Whether a rule's pattern names a place outside the project: a word that
@@ -3565,6 +3574,12 @@ fn follows_symlinks(head: &str, args: &[&str]) -> bool {
 /// Whether the shell word `word`, a path run from `dir`, leads outside
 /// `project` (a real path); `/dev/null` and `-` (standard input) do not.
 fn path_outside(word: &str, dir: Option<&Path>, project: &Project) -> bool {
+    path_leads_beyond(word, dir, |path| project.holds(path))
+}
+
+/// Whether the path `word`, taken in `dir`, leads to a real path `allowed`
+/// does not hold, or to one that cannot be told: see [`path_outside`].
+fn path_leads_beyond(word: &str, dir: Option<&Path>, allowed: impl Fn(&Path) -> bool) -> bool {
     if word.is_empty() || word == "-" || word == "/dev/null" {
         return false;
     }
@@ -3591,7 +3606,7 @@ fn path_outside(word: &str, dir: Option<&Path>, project: &Project) -> bool {
             None => return true,
         }
     };
-    !project.holds(&real_path(&path))
+    !allowed(&real_path(&path))
 }
 
 /// The home directory, for `~`.
