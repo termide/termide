@@ -5,7 +5,11 @@
 # alike, since Harbor's agents install Node in each container.
 #
 # Claude first: it shows the queue working within a day or two.
-tb21-claude-code-sonnet55     all  AGENT=claude-code MODEL=claude-sonnet-5-5 --agent-setup-timeout-multiplier 4
+# The first job of the pair was cut off at 54 of 89 on 2026-11-19 and its
+# config cannot be resumed (harbor masks the token it was passed, and the
+# job's lock covers that config), so its 35 remaining tasks run as -r and
+# the report merges the two: tb21-claude-code-sonnet55+tb21-claude-code-sonnet55-r.
+tb21-claude-code-sonnet55-r  tb21-claude-rest  AGENT=claude-code MODEL=claude-sonnet-5-5 --agent-setup-timeout-multiplier 4
 tb21-termide-acp-sonnet55     all  AGENT=termide-claude-code MODEL=claude-sonnet-5-5 --agent-setup-timeout-multiplier 4
 # Then each local model with the three harnesses in turn, so OMLX loads it
 # once.

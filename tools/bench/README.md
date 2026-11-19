@@ -260,6 +260,16 @@ and their speed only while OMLX keeps its logs (a few days).
   the model's reasoning back with the turn (`preserve_thinking`), which is
   the harness's own doing. On the Claude subscription neither harness sets an
   effort (`agent-default`).
+- **Secrets and resume.** Harbor writes the agent's env into the job's
+  `config.json`, masking a key it does not recognize: a literal token becomes
+  `sk-a****gAA`, and `CLAUDE_FORCE_OAUTH=1` — its name matches `AUTH` —
+  becomes `****`, which then fails to parse as a bool. `run.sh` therefore
+  exports its secrets and passes them as `${VAR}`, which harbor keeps as a
+  reference and pulls from the host environment, at the run and at every
+  resume; `resume.sh` puts them back from the keychain and `~/.omlx`. A job
+  started with literals cannot be resumed at all: its lock covers the masked
+  config, so editing it fails too — rerun its remaining tasks as a `-r` job
+  and merge it in the report.
 - **Runaway reasoning.** The model sometimes reasons for tens of thousands
   of tokens in one turn (12 minutes with no output, or up to OMLX's
   32768-token cap, `stop` = `length`). One such turn uses up a task's whole

@@ -81,15 +81,19 @@ esac
 case "$AGENT" in claude-code | termide-claude-code)
   # Claude Code on the user's subscription, bare or driven by termide over
   # ACP: the OAuth token of `claude setup-token`, from the environment or
-  # the login keychain.
+  # the login keychain. Exported, and passed to harbor as `${VAR}`, so that
+  # the job's config holds the reference and a resume pulls it again.
   token=${CLAUDE_CODE_OAUTH_TOKEN:-$(security find-generic-password -s termide-bench-claude-oauth -w 2>/dev/null || true)}
   [ -n "$token" ] || { echo "no Claude token: claude setup-token, then keep it in the keychain as termide-bench-claude-oauth" >&2; exit 2; }
+  export CLAUDE_CODE_OAUTH_TOKEN=$token
   BASE_URL=claude-subscription://
   ;;
 esac
 if [ "$AGENT" = claude-code ]; then
   provider=anthropic
-  set -- -a claude-code --ae "CLAUDE_CODE_OAUTH_TOKEN=$token" --ae CLAUDE_FORCE_OAUTH=1 "$@"
+  export CLAUDE_FORCE_OAUTH=1
+  set -- -a claude-code --ae 'CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}' \
+    --ae 'CLAUDE_FORCE_OAUTH=${CLAUDE_FORCE_OAUTH}' "$@"
 elif [ "$AGENT" = termide-claude-code ]; then
   # termide's prompt and tools in Claude Code's loop: the harness is termide,
   # the connection the subscription.
@@ -102,14 +106,15 @@ elif [ "$AGENT" = termide-claude-code ]; then
     --ae TERMIDE_PROVIDER=claude_code \
     --ae "TERMIDE_ACP_ADAPTER_VERSION=$AGENT_VERSION" \
     --ae "TERMIDE_MODEL=$MODEL" \
-    --ae "CLAUDE_CODE_OAUTH_TOKEN=$token" \
+    --ae 'CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}' \
     "$@"
 elif [ "$AGENT" = termide ]; then
   [ -x "$bench/bin/termide" ] || { echo "run $bench/build.sh first" >&2; exit 2; }
+  export TERMIDE_API_KEY="$API_KEY"
   set -- -a harbor_termide.agent:TermideAgent \
     --ae "TERMIDE_MODEL=$MODEL" \
     --ae "TERMIDE_BASE_URL=$BASE_URL" \
-    --ae "TERMIDE_API_KEY=$API_KEY" \
+    --ae 'TERMIDE_API_KEY=${TERMIDE_API_KEY}' \
     --ae "TERMIDE_REASONING=$REASONING" \
     --ae "TERMIDE_REASONING_BUDGET=$REASONING_BUDGET" \
     "$@"

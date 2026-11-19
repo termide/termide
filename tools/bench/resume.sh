@@ -42,10 +42,11 @@ for trial in "$dir"/*__*/; do
   rm -rf "$trial"
 done
 
-# Harbor scrubs the API key out of the files of a trial a resumed job ran,
-# leaving `[REDACTED]` in its config.json where the job's config keeps its own
-# mask; a further resume then finds the trial unlike the plan and refuses the
-# job. Put the job's value back.
+# Harbor scrubs the secrets out of the config of a trial once it ran, leaving
+# `[REDACTED]` or `sk-a****gAA` where the job's config keeps its `${VAR}`
+# reference; a further resume then finds the trial unlike the plan and refuses
+# the job ("Existing trial config does not match planned job config"). Put
+# the job's value back.
 python3 -I - "$dir" <<'EOF'
 import json, sys
 from pathlib import Path
@@ -54,12 +55,29 @@ planned = (json.loads((job / "config.json").read_text()).get("agents") or [{}])[
 for path in job.glob("*__*/config.json"):
     config = json.loads(path.read_text())
     env = (config.get("agent") or {}).get("env") or {}
-    fixed = {k: planned[k] for k, v in env.items() if v == "[REDACTED]" and k in planned}
+    fixed = {k: planned[k] for k, v in env.items()
+             if k in planned and ("[REDACTED]" in v or "****" in v)}
     if fixed:
         env.update(fixed)
         path.write_text(json.dumps(config, indent=4))
         print(f"resume.sh: restored {', '.join(fixed)} in {path.parent.name}")
 EOF
+
+# Harbor keeps a secret in the job's config as `${VAR}` and pulls the value
+# from the host environment: put them back here, from the sources run.sh
+# used. Without them harbor resumes with an empty key and every trial fails.
+cfg="$dir/config.json"
+case "$(cat "$cfg")" in *'${CLAUDE_CODE_OAUTH_TOKEN}'*)
+  export CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN:-$(security find-generic-password -s termide-bench-claude-oauth -w 2>/dev/null || true)}
+  [ -n "$CLAUDE_CODE_OAUTH_TOKEN" ] || { echo "no Claude token in the keychain (termide-bench-claude-oauth)" >&2; exit 2; }
+  ;;
+esac
+case "$(cat "$cfg")" in *'${CLAUDE_FORCE_OAUTH}'*) export CLAUDE_FORCE_OAUTH=1 ;; esac
+case "$(cat "$cfg")" in *'${TERMIDE_API_KEY}'*)
+  export TERMIDE_API_KEY=${TERMIDE_API_KEY:-$(python3 -I -c 'import json,os;print(json.load(open(os.path.expanduser("~/.omlx/settings.json")))["auth"]["api_key"])' 2>/dev/null || true)}
+  [ -n "$TERMIDE_API_KEY" ] || { echo "no OMLX key in ~/.omlx/settings.json" >&2; exit 2; }
+  ;;
+esac
 
 port=${MIRROR_PORT:-10001}
 if [ -d "$bench/mirror" ] && ! curl -sf -o /dev/null "http://127.0.0.1:$port/simple/pytest/"; then
