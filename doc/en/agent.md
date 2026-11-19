@@ -876,7 +876,14 @@ something to show. Every row reads the same way: its glyph and what it is in
 the accent, then, dim, short facts about its state and what it works on, and at
 the right edge how long it has gone on and, where it can be called off, `✕`;
 when a row is short, what it works on gives way first. No row spins: the
-transcript's live line shows that the agent works. In order: a retry waited
+transcript's live line shows that the agent works. In order: the agent's
+checklist, when it keeps one, under its title and progress on the strip's rule
+(`╌╌ Checklist 2/5 ╌╌╌`), a row per step (`✓` done, dim; `▸` in progress, in the
+accent; `○` still to do), a long one showing the last step done and what
+follows it, the rest folded into `✓ +N` and `○ +N` — Codex and other ACP
+agents report theirs as their plan; a list carried through stays in sight,
+every step checked, until your next request, and a reopened session shows the
+list as it stood; then a retry waited
 for (`↻ Usage limit reached  trying again at 21:40 (in 3m12s)`) or a pause
 asked for (`‖ Pausing  after the current step`; once it takes effect the
 transcript's `‖` line takes over, and a click anywhere on the row withdraws
@@ -885,7 +892,8 @@ and how long it has waited, with a `✕`; after three, a count of the rest); an 
 (`◎ Heading for the goal · checking  …` while the judge decides) and loop
 (`↺ Repeating every 5m · 3/100 · next in 3m12s  …`), for as long as either
 goes on, with how long it has run — a click elsewhere on the row brings its
-latest run into view; and, closest to the input, each subagent still running
+latest run into view; and, closest to the input,
+each subagent still running
 (`& Delegating to · agent  task`, worded as its block, with what it did last
 or its wait for a slot before its time; after three, `& +N`, which a click
 unfolds into all of them, with a `& ▴` row after them that folds them back) and each command

@@ -1,6 +1,7 @@
 //! The state strip above the input: what holds right now rather than what
-//! happened — a pause asked for or a retry waited for, the queued messages,
-//! an active `/goal` or `/loop`, the running subagents and the commands the
+//! happened — the agent's checklist, under its title on the strip's rule, a
+//! pause asked for or a retry waited for, the queued messages, an active
+//! `/goal` or `/loop`, the running subagents and the commands the
 //! agent moved to the background, and the session's terminals. Every row reads the same way: its glyph
 //! and what it is, in the accent; what it works on, dim; at the right edge
 //! how long it has gone on and, where it can be called off, `✕`. No row
@@ -10,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use termide_agent_core::{TerminalState, ToolCall};
+use termide_agent_core::{ChecklistStatus, TerminalState, ToolCall};
 use termide_core::ThemeColors;
 
 use crate::render::{capitalized, Autorun, GOAL_GLYPH, LOOP_GLYPH, STATE_QUEUED_ROWS};
@@ -42,6 +43,9 @@ pub(crate) enum StripTarget {
     /// among the panel's restored delegates: the row above the input, which
     /// opens that session, where its own card asks to carry it on.
     DelegateSession(usize),
+    /// A step of the agent's checklist, or a count of its steps left out:
+    /// it only shows.
+    Checklist,
     /// The count of rows left out.
     More,
     /// The count of subagents' rows left out, which shows them all; or,
@@ -68,6 +72,17 @@ pub(crate) struct StripRow {
     /// Whether `✕` calls it off.
     pub stop: bool,
     pub target: StripTarget,
+    pub look: RowLook,
+}
+
+/// How a row is coloured.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RowLook {
+    /// The glyph and label in the accent, the rest dim.
+    Accent,
+    /// A step of the checklist: the step in progress in the accent, the
+    /// pending ones plain, the done ones dim behind a green check.
+    Checklist(ChecklistStatus),
 }
 
 impl StripRow {
@@ -81,6 +96,7 @@ impl StripRow {
             time: None,
             stop: false,
             target,
+            look: RowLook::Accent,
         }
     }
 
@@ -142,6 +158,85 @@ pub(crate) fn delegate_row(
     row
 }
 
+/// How many rows the checklist takes at most: a longer one shows the steps
+/// around the first one not done, the rest folded into counts.
+pub(crate) const STRIP_CHECKLIST_ROWS: usize = 6;
+
+/// The glyph of a checklist step.
+fn checklist_glyph(status: ChecklistStatus) -> &'static str {
+    match status {
+        ChecklistStatus::Done => "✓",
+        ChecklistStatus::InProgress => "▸",
+        ChecklistStatus::Pending => "○",
+    }
+}
+
+/// The rows of the checklist `items`: one per step, at most
+/// [`STRIP_CHECKLIST_ROWS`]. A longer list keeps in sight the last step done and
+/// what follows it, the steps before and after folded into `+N` counts.
+pub(crate) fn checklist_rows(items: &[termide_agent_core::ChecklistItem]) -> Vec<StripRow> {
+    let row = |glyph: &str, body: String, status: ChecklistStatus| {
+        let mut row = StripRow::new(glyph, String::new(), body, StripTarget::Checklist);
+        row.look = RowLook::Checklist(status);
+        row
+    };
+    let step = |item: &termide_agent_core::ChecklistItem| {
+        row(
+            checklist_glyph(item.status),
+            single_line(&item.text),
+            item.status,
+        )
+    };
+    if items.len() <= STRIP_CHECKLIST_ROWS {
+        return items.iter().map(step).collect();
+    }
+    let shown = STRIP_CHECKLIST_ROWS - 2;
+    let open = items
+        .iter()
+        .position(|item| item.status != ChecklistStatus::Done)
+        .unwrap_or(items.len());
+    let start = open.saturating_sub(1).min(items.len() - shown);
+    let after = items.len() - start - shown;
+    let mut rows = Vec::new();
+    if start > 0 {
+        rows.push(row("✓", format!("+{start}"), ChecklistStatus::Done));
+    }
+    rows.extend(items[start..start + shown].iter().map(step));
+    if after > 0 {
+        rows.push(row("○", format!("+{after}"), ChecklistStatus::Pending));
+    }
+    rows
+}
+
+/// The strip's rule carrying the checklist's title and how many of its
+/// `total` steps are `done`: `╌╌ Tasks 2/5 ╌╌╌…`, as wide as the plain rule.
+fn checklist_rule(
+    title: &str,
+    done: usize,
+    total: usize,
+    width: u16,
+    colors: &ThemeColors,
+) -> Line<'static> {
+    let dim = Style::default().fg(colors.disabled);
+    let accent = Style::default()
+        .fg(colors.info)
+        .add_modifier(Modifier::BOLD);
+    let width = width.saturating_sub(1) as usize;
+    let lead = "╌╌ ";
+    let count = format!(" {done}/{total} ");
+    let title = termide_ui::path_utils::truncate_right(
+        title,
+        width.saturating_sub(lead.chars().count() + count.chars().count()),
+    );
+    let used = lead.chars().count() + termide_ui::str_display_width(&title) + count.chars().count();
+    Line::from(vec![
+        Span::styled(lead, dim),
+        Span::styled(title, accent),
+        Span::styled(count, dim),
+        Span::styled("╌".repeat(width.saturating_sub(used)), dim),
+    ])
+}
+
 /// The first line of `text` that holds anything, trimmed.
 fn first_line(text: &str) -> String {
     text.lines()
@@ -185,6 +280,16 @@ pub(crate) fn strip_lines(
     let w = termide_ui::str_display_width;
     rows.iter()
         .map(|row| {
+            let (head_style, body_style) = match row.look {
+                RowLook::Accent => (accent, dim),
+                RowLook::Checklist(ChecklistStatus::InProgress) => (accent, accent),
+                RowLook::Checklist(ChecklistStatus::Pending) => {
+                    (dim, Style::default().fg(colors.fg))
+                }
+                RowLook::Checklist(ChecklistStatus::Done) => {
+                    (Style::default().fg(colors.success), dim)
+                }
+            };
             let head = if row.label.is_empty() {
                 format!("{} ", row.glyph)
             } else {
@@ -218,9 +323,9 @@ pub(crate) fn strip_lines(
             let body = cut(&row.body, width.saturating_sub(fixed));
             let used = fixed - 1 + w(&body);
             let mut spans = vec![
-                Span::styled(head, accent),
+                Span::styled(head, head_style),
                 Span::styled(notes, dim),
-                Span::styled(format!("{gap}{body}"), dim),
+                Span::styled(format!("{gap}{body}"), body_style),
                 Span::raw(" ".repeat(width.saturating_sub(used + 1))),
                 Span::styled(status, dim),
                 Span::styled(time, dim),
@@ -236,13 +341,14 @@ pub(crate) fn strip_lines(
 }
 
 impl AgentPanel {
-    /// The strip's rows, in order: a retry waited for or a pause asked for,
-    /// the queued messages (oldest first, as the agent takes them), the goal
-    /// and the loop, then the subagents, the background commands and the
+    /// The strip's rows, in order: the agent's checklist (first, under the
+    /// title its rule carries), a retry waited for or a pause asked for, the
+    /// queued messages (oldest first, as the agent takes them), the goal and
+    /// the loop, then the subagents, the background commands and the
     /// terminals (each newest first). Empty when nothing holds.
     pub(crate) fn strip_rows(&mut self, width: u16) -> Vec<StripRow> {
         let t = termide_i18n::t();
-        let mut rows = Vec::new();
+        let mut rows = checklist_rows(&self.checklist);
         if let Some(wait) = &self.retry_wait {
             rows.push(
                 StripRow::new(
@@ -559,11 +665,29 @@ impl AgentPanel {
         self.strip_with_rule(&rows, width)
     }
 
+    /// The strip's lines: its rule, titled with the checklist's name and
+    /// progress when the list heads the strip, then its rows.
     pub(crate) fn strip_with_rule(&self, rows: &[StripRow], width: u16) -> Vec<Line<'static>> {
         if rows.is_empty() {
             return Vec::new();
         }
-        let mut lines = vec![transcript::separator(width, &self.colors)];
+        let rule = if self.checklist.is_empty() {
+            transcript::separator(width, &self.colors)
+        } else {
+            let done = self
+                .checklist
+                .iter()
+                .filter(|item| item.status == ChecklistStatus::Done)
+                .count();
+            checklist_rule(
+                termide_i18n::t().agent_strip_checklist(),
+                done,
+                self.checklist.len(),
+                width,
+                &self.colors,
+            )
+        };
+        let mut lines = vec![rule];
         lines.extend(strip_lines(rows, width, &self.colors));
         lines
     }
@@ -737,7 +861,10 @@ impl AgentPanel {
             }
             // `+N` shows the subagents left out, `▴` folds them back.
             StripTarget::MoreTasks => self.strip_tasks_open = !self.strip_tasks_open,
-            StripTarget::RetryWait | StripTarget::Queued | StripTarget::More => {}
+            StripTarget::RetryWait
+            | StripTarget::Queued
+            | StripTarget::Checklist
+            | StripTarget::More => {}
         }
         vec![PanelEvent::NeedsRedraw]
     }

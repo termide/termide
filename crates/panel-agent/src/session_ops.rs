@@ -261,6 +261,7 @@ impl AgentPanel {
         // says it spent so far and how full it last stood.
         self.seed_spent();
         self.seed_context();
+        self.seed_checklist();
         // What the previous agent stated is not this one's.
         self.acp_has_models = false;
         self.acp_options.clear();

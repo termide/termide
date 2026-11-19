@@ -23,6 +23,7 @@ pub mod agent;
 pub mod approvals;
 pub mod ask;
 pub mod cancel;
+pub mod checklist;
 pub mod checkpoints;
 pub mod classifier;
 pub mod commands;
@@ -70,6 +71,7 @@ pub use ask::{
     UserAsker,
 };
 pub use cancel::{CancelToken, PauseGate};
+pub use checklist::{ChecklistItem, ChecklistStatus};
 pub use checkpoints::{Checkpoint, CheckpointHooks, CheckpointStore, SavedFile, Undone};
 pub use classifier::{
     parse_classification, Classifier, ClassifyPrompt, IntentEntry, IntentLog, ModelChoice,

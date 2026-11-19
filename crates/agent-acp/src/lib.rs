@@ -2946,6 +2946,12 @@ impl Shared {
                 }
             }
             "compaction_update" => self.on_compaction_update(update),
+            // The agent's plan, the whole of it each time: the panel's task
+            // list.
+            "plan" => {
+                let items = termide_agent_core::checklist::from_acp_entries(&update["entries"]);
+                let _ = self.events.send(AgentEvent::Checklist { items });
+            }
             "compaction_summary_chunk" => {
                 let text = update["content"]["text"].as_str().unwrap_or("");
                 let Some(id) = update["compactionId"].as_str() else {

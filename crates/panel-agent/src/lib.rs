@@ -1300,6 +1300,9 @@ pub struct AgentPanel {
     /// from the log on opening it, so it is logged only when it changed and
     /// a reopened session shows it before the agent reports again.
     context_logged: Option<(u64, u64)>,
+    /// The agent's checklist as it last reported it, shown in the state
+    /// strip; see [`AgentPanel::set_checklist`].
+    checklist: Vec<termide_agent_core::ChecklistItem>,
     /// What the agent is doing right now; `None` when idle.
     activity: Option<Activity>,
     /// Session token totals from `Usage`: input (prefill) and output.
@@ -1657,6 +1660,7 @@ impl AgentPanel {
             queued: (0, 0),
             context_tokens: 0,
             context_logged: None,
+            checklist: Vec::new(),
             activity: None,
             session_input: 0,
             session_cached: 0,
@@ -1685,6 +1689,7 @@ impl AgentPanel {
         panel.refresh_recent_sessions();
         panel.seed_spent();
         panel.seed_context();
+        panel.seed_checklist();
         // The other termide's run may be going on right now: none is offered
         // to carry on here until this panel takes the session up.
         if panel.held.is_some() {

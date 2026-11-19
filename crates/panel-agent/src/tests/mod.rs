@@ -10,12 +10,12 @@ use ratatui::style::Modifier;
 use ratatui::text::Line;
 use termide_agent_core::{
     now_millis, permission_channel, question_channel, suggestion_channel, Agent, AgentEvent,
-    AssistantContent, AssistantMessage, Autorun, CancelToken, CompactionCall, CompactionReason,
-    EntryKind, Failure, FailureKind, GoalRecord, LastRun, LimitPolicy, LoopRecord, Message,
-    PermissionAnswer, PermissionPrompter, QuestionAnswer, QuestionReply, Request, ShellOutput,
-    ShellRunner, StopReason, StreamEvent, Suggestion, SuggestionKind, SuggestionReply,
-    ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision, ToolResultMessage, ToolUpdate,
-    Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION,
+    AssistantContent, AssistantMessage, Autorun, CancelToken, ChecklistItem, ChecklistStatus,
+    CompactionCall, CompactionReason, EntryKind, Failure, FailureKind, GoalRecord, LastRun,
+    LimitPolicy, LoopRecord, Message, PermissionAnswer, PermissionPrompter, QuestionAnswer,
+    QuestionReply, Request, ShellOutput, ShellRunner, StopReason, StreamEvent, Suggestion,
+    SuggestionKind, SuggestionReply, ThinkingLevel, Timing, ToolCall, ToolContext, ToolDecision,
+    ToolResultMessage, ToolUpdate, Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION,
 };
 use termide_core::{
     AgentSnippet, ConfirmAction, LinkTarget, PanelConfig, SegmentKind, SnippetSource,

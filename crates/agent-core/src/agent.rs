@@ -8,6 +8,7 @@ use serde_json::Value;
 
 use crate::ask::UserAsker;
 use crate::cancel::{CancelToken, PauseGate};
+use crate::checklist::ChecklistItem;
 use crate::classifier::{IntentEntry, IntentLog, SessionView, SideModels};
 use crate::compaction::{
     context_tokens, is_context_overflow_error, should_compact, split_point, CompactionCall,
@@ -662,6 +663,11 @@ pub enum AgentEvent {
     ExternalSession {
         agent: String,
         session_id: String,
+    },
+    /// The agent's checklist as it now stands, the whole of it; empty when
+    /// it was cleared. See [`crate::checklist`].
+    Checklist {
+        items: Vec<ChecklistItem>,
     },
 }
 

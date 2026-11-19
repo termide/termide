@@ -448,6 +448,11 @@ impl AgentPanel {
             match self.runtime.prompt(message) {
                 Ok(()) => {
                     self.busy = true;
+                    // A list carried through to its end stayed in sight
+                    // until the next request: this one.
+                    if termide_agent_core::checklist::all_done(&self.checklist) {
+                        self.set_checklist(Vec::new());
+                    }
                     // The answers of the delegates stopped with the last run
                     // go with this one, as messages queued to it.
                     let held = std::mem::take(&mut self.held_reports);

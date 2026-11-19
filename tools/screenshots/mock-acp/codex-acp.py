@@ -140,6 +140,22 @@ def allowed(session_id, call):
     return outcome.get("outcome") == "selected" and outcome.get("optionId", "").startswith("approved")
 
 
+STEPS = ["Read the report module", "Flag the critical items", "Run the tests"]
+
+
+def plan(session_id, done, working=True):
+    """Report the plan as Codex's `update_plan` does: the whole of it, the
+    first `done` steps completed and, with `working`, the next in progress."""
+    def status(index):
+        if index < done:
+            return "completed"
+        return "in_progress" if working and index == done else "pending"
+    update(session_id, {"sessionUpdate": "plan", "entries": [
+        {"content": step, "priority": "medium", "status": status(i)}
+        for i, step in enumerate(STEPS)
+    ]})
+
+
 def run_task(session_id, request_id):
     cwd = state["cwd"]
     path = os.path.join(cwd, REPORT)
@@ -151,6 +167,7 @@ def run_task(session_id, request_id):
         update(session_id, {"sessionUpdate": "usage_update", "used": used, "size": WINDOW})
 
     time.sleep(0.5)
+    plan(session_id, 0)
     stream(session_id, "agent_thought_chunk",
            "The reorder report is built in inventory/report.py; reading it first.")
     stream(session_id, "agent_message_chunk", "I'll start with the report module.\n\n")
@@ -165,6 +182,7 @@ def run_task(session_id, request_id):
     update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call_read",
                         "status": "completed"})
     step_done()
+    plan(session_id, 1)
 
     time.sleep(0.5)
     stream(session_id, "agent_thought_chunk",
@@ -191,6 +209,7 @@ def run_task(session_id, request_id):
         update(session_id, {"sessionUpdate": "tool_call_update", "toolCallId": "call_patch",
                             "status": "failed"})
     step_done()
+    plan(session_id, 2)
 
     time.sleep(0.5)
     stream(session_id, "agent_thought_chunk",
@@ -207,6 +226,7 @@ def run_task(session_id, request_id):
                             "status": "completed" if done.returncode == 0 else "failed",
                             "content": text_content((done.stdout + done.stderr).strip())})
     step_done()
+    plan(session_id, len(STEPS))
 
     time.sleep(0.4)
     stream(session_id, "agent_message_chunk",

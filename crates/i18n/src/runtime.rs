@@ -738,6 +738,7 @@ impl Translation for RuntimeTranslation {
         agent_strip_paused,
         agent_strip_terminal,
         agent_strip_idle,
+        agent_strip_checklist,
         agent_strip_ended,
         agent_notice_no_parent_panel,
         agent_hop_limit_header,

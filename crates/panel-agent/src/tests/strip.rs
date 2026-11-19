@@ -265,3 +265,133 @@ fn the_stop_control_is_red_only_while_a_stop_is_under_way() {
         colors.border
     );
 }
+
+fn steps(list: &[(&str, ChecklistStatus)]) -> Vec<ChecklistItem> {
+    list.iter()
+        .map(|(text, status)| ChecklistItem::new(*text, *status))
+        .collect()
+}
+
+#[test]
+fn the_agents_checklist_shows_in_the_state_strip() {
+    let mut panel = AgentPanel::new(setup(vec![]));
+    panel.apply(AgentEvent::Checklist {
+        items: steps(&[
+            ("Read the code", ChecklistStatus::Done),
+            ("Fix the bug", ChecklistStatus::InProgress),
+            ("Run the tests", ChecklistStatus::Pending),
+        ]),
+    });
+    // Queued behind it, a message: the list heads the strip, under its
+    // title on the rule.
+    panel.apply(AgentEvent::AgentStart);
+    panel.send("and the docs".to_string());
+    let lines = strip_text(&panel.state_lines(40));
+    let title = termide_i18n::t().agent_strip_checklist();
+    assert!(
+        lines[0].starts_with(&format!("╌╌ {title} 1/3 ╌")),
+        "{lines:?}"
+    );
+    assert_eq!(
+        termide_ui::str_display_width(&lines[0]),
+        termide_ui::str_display_width(
+            &strip_text(&[crate::transcript::separator(40, &panel.colors)])[0]
+        )
+    );
+    assert!(lines[1].starts_with("✓ Read the code"), "{lines:?}");
+    assert!(lines[2].starts_with("▸ Fix the bug"), "{lines:?}");
+    assert!(lines[3].starts_with("○ Run the tests"), "{lines:?}");
+    assert!(lines[4].starts_with("› Queued  and the docs"), "{lines:?}");
+    // An empty list clears it, and the rule its title.
+    panel.apply(AgentEvent::Checklist { items: Vec::new() });
+    let lines = strip_text(&panel.state_lines(40));
+    assert!(lines[0].chars().all(|c| c == '╌'), "{lines:?}");
+    assert!(lines[1].starts_with("› Queued"), "{lines:?}");
+}
+
+#[test]
+fn a_long_checklist_keeps_the_work_at_hand_in_sight() {
+    let mut list: Vec<(String, ChecklistStatus)> = (1..=10)
+        .map(|n| (format!("step {n}"), ChecklistStatus::Pending))
+        .collect();
+    for step in &mut list[..5] {
+        step.1 = ChecklistStatus::Done;
+    }
+    list[5].1 = ChecklistStatus::InProgress;
+    let items: Vec<ChecklistItem> = list
+        .iter()
+        .map(|(text, status)| ChecklistItem::new(text.clone(), *status))
+        .collect();
+    let rows = crate::strip::checklist_rows(&items);
+    let bodies: Vec<&str> = rows.iter().map(|row| row.body.as_str()).collect();
+    // The last step done, the one in progress and what follows; the rest
+    // folded into counts.
+    assert_eq!(bodies, ["+4", "step 5", "step 6", "step 7", "step 8", "+2"]);
+    assert_eq!(rows.len(), crate::strip::STRIP_CHECKLIST_ROWS);
+    // At the start nothing is folded before it.
+    let fresh: Vec<ChecklistItem> = (1..=10)
+        .map(|n| ChecklistItem::new(format!("step {n}"), ChecklistStatus::Pending))
+        .collect();
+    let bodies: Vec<String> = crate::strip::checklist_rows(&fresh)
+        .into_iter()
+        .map(|row| row.body)
+        .collect();
+    assert_eq!(bodies, ["step 1", "step 2", "step 3", "step 4", "+6"]);
+}
+
+#[test]
+fn a_finished_checklist_stays_until_the_next_request_and_reopens_as_it_stood() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        session: Some(Session::create(dir.path(), Path::new("/tmp")).unwrap()),
+        ..setup(vec![reply("next")])
+    });
+    let list = steps(&[
+        ("one", ChecklistStatus::Done),
+        ("two", ChecklistStatus::InProgress),
+    ]);
+    panel.apply(AgentEvent::Checklist {
+        items: list.clone(),
+    });
+    let path = {
+        let session = panel.session.as_mut().unwrap();
+        session
+            .append_message(&Message::User(UserMessage::text("do it")))
+            .unwrap();
+        session.path().to_path_buf()
+    };
+    drop(panel);
+
+    // A reopened session shows the list as the agent last reported it.
+    let mut panel = reopen(&path, dir.path(), vec![reply("next")]);
+    assert_eq!(panel.checklist, list);
+    let done = steps(&[
+        ("one", ChecklistStatus::Done),
+        ("two", ChecklistStatus::Done),
+    ]);
+    panel.apply(AgentEvent::Checklist {
+        items: done.clone(),
+    });
+    // Carried through, it stays in sight with every step checked...
+    let lines = strip_text(&panel.state_lines(40));
+    assert!(lines[2].starts_with("✓ two"), "{lines:?}");
+    // ...until the next request, which clears it, in the log too.
+    panel.send("something else".to_string());
+    assert!(panel.checklist.is_empty());
+    assert!(Session::open(&path).unwrap().checklist().is_empty());
+}
+
+#[test]
+fn an_unfinished_checklist_stays_through_the_next_request() {
+    let mut panel = AgentPanel::new(setup(vec![reply("ok")]));
+    let list = steps(&[
+        ("one", ChecklistStatus::Done),
+        ("two", ChecklistStatus::Pending),
+    ]);
+    panel.apply(AgentEvent::Checklist {
+        items: list.clone(),
+    });
+    panel.send("go on".to_string());
+    assert_eq!(panel.checklist, list);
+}

@@ -876,6 +876,9 @@ pub trait Translation: Send + Sync {
     fn agent_strip_terminal(&self) -> &str;
     /// Agent panel state strip: a terminal running nothing.
     fn agent_strip_idle(&self) -> &str;
+    /// Agent panel state strip: the title of the agent's checklist, on the
+    /// strip's top rule.
+    fn agent_strip_checklist(&self) -> &str;
     /// Agent panel state strip: a terminal whose shell has exited.
     fn agent_strip_ended(&self) -> &str;
     /// Agent panel state strip: the delegates held at the panel's pause.

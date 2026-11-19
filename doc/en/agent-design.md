@@ -779,6 +779,54 @@ first denial. The refusal texts themselves — rule, plan mode, reviewer, the
 user's denials, an unattended run — are `ai/system/permissions.md`, one
 front-matter key each (`Refusals`), so no text the model reads is code.
 
+## 4c. Checklist
+
+| Agent | Tool | Shape |
+|---|---|---|
+| Claude Code | `TodoWrite` (task tools in later versions *(unverified)*) | the whole list rewritten each call, shown under the prompt; reminders when it goes stale |
+| Codex | `update_plan` | steps with `pending`/`in_progress`/`completed`, sent over ACP as `plan` updates |
+| OpenCode | `todowrite` / `todoread` | the same, with a separate read |
+| Gemini CLI | `write_todos` | the same |
+| pi | none | a `TODO.md` file, if wanted |
+
+What it buys: the user sees how far a long run is without reading the
+transcript; the model gets its own plan back at the end of the context on
+every update, which keeps the steps of a long task in sight; and the list
+can outlive a compaction. What it costs: a call and the list's tokens per
+update, a list of two steps for a task with one, and a turn's worth of
+overhead a small local model feels. Claude and GPT were trained on their
+own harness's tool, so the habit is there.
+
+Decision, the panel first: ACP `plan` updates (each the whole plan) become
+`AgentEvent::Checklist`, the panel shows the list at the head of the state
+strip, its title and progress set into the strip's rule, a row per step, and
+logs it (`EntryKind::Checklist`) so a reopened session or an undo shows it as
+it stood. A list carried through stays, every step checked, until the
+next request is sent, which clears it; an unfinished one stays through it.
+A long list folds around the step at hand. termide used to drop the updates.
+
+Named a checklist, not tasks or a plan: `task` is delegation to a subagent
+and `plan` is plan mode, and a third meaning of either would blur both.
+
+Planned, a `checklist` tool for the built-in loop and the MCP tools served to
+Claude Code (whose own `TodoWrite` goes with its built-in tools), feeding the
+same list:
+
+- **One tool writing the whole list**, not add/update/remove: no ids for the
+  model to get wrong, reordering and splitting in one call, and the empty
+  list clears it. The shape every agent above uses.
+- **Not in the system prompt.** A section that changes with each check
+  breaks the prompt cache from the first token, and Claude Code takes the
+  system prompt once per session (the plan-mode lesson of 4a). The tool's
+  result carries the list back; after a compaction an unfinished list comes
+  back as a `<system-reminder>` note, as plan mode's does. No stale-list
+  nagging.
+- Read-only, so plan mode allows it; its description keeps it to tasks of
+  three steps or more, one step in progress at a time; a subagent's list is
+  its own panel's.
+- To be measured on the Terminal-Bench subset with and without it, on the
+  local model and on Claude, before it is on by default for small models.
+
 ## 5. Hooks and extension mechanism
 
 | Mechanism | Who uses it |

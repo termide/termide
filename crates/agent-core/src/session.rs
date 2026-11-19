@@ -18,6 +18,7 @@ use std::sync::{Mutex, OnceLock};
 use serde::{Deserialize, Serialize};
 
 use crate::acp::ACP_PROVIDER;
+use crate::checklist::ChecklistItem;
 use crate::compaction::{context_tokens, CompactionCall, CompactionPrompts};
 use crate::context::file_timestamp;
 use crate::failure::Failure;
@@ -282,6 +283,13 @@ pub enum EntryKind {
     /// they spent, not the fill, so a reopened session reads it from here.
     /// Changes nothing on the branch; see [`Session::context_fill`].
     ContextFill { used: u64, size: u64 },
+    /// The agent's checklist from here, the whole of it; empty once it was
+    /// cleared. Changes nothing on the branch; a reopened session shows the
+    /// list from here, see [`Session::checklist`].
+    Checklist {
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        items: Vec<ChecklistItem>,
+    },
 }
 
 /// How much of a judge's answer a [`EntryKind::GoalVerdict`] keeps.
@@ -1173,6 +1181,7 @@ impl Session {
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
                 | EntryKind::ContextFill { .. }
+                | EntryKind::Checklist { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1224,6 +1233,7 @@ impl Session {
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
                 | EntryKind::ContextFill { .. }
+                | EntryKind::Checklist { .. }
                 | EntryKind::CompactionFailed { .. } => {}
                 EntryKind::Compaction {
                     summary, keep_last, ..
@@ -1345,6 +1355,7 @@ impl Session {
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
                 | EntryKind::ContextFill { .. }
+                | EntryKind::Checklist { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
         }
@@ -1500,6 +1511,7 @@ impl Session {
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
                 | EntryKind::ContextFill { .. }
+                | EntryKind::Checklist { .. }
                 | EntryKind::Fitted { .. } => None,
             })
     }
@@ -1667,6 +1679,7 @@ impl Session {
                 | EntryKind::GoalVerdict { .. }
                 | EntryKind::Spent { .. }
                 | EntryKind::ContextFill { .. }
+                | EntryKind::Checklist { .. }
                 | EntryKind::CompactionFailed { .. } => {}
             }
         }
@@ -1726,6 +1739,28 @@ impl Session {
     /// [`EntryKind::ContextFill`].
     pub fn append_context_fill(&mut self, used: u64, size: u64) -> std::io::Result<String> {
         self.append(EntryKind::ContextFill { used, size })
+    }
+
+    /// Record the agent's checklist as it stands (empty: cleared), see
+    /// [`EntryKind::Checklist`].
+    pub fn append_checklist(&mut self, items: &[ChecklistItem]) -> std::io::Result<String> {
+        self.append(EntryKind::Checklist {
+            items: items.to_vec(),
+        })
+    }
+
+    /// The agent's checklist as the branch last left it: empty when it
+    /// never had one or it was cleared.
+    #[must_use]
+    pub fn checklist(&self) -> Vec<ChecklistItem> {
+        self.branch()
+            .into_iter()
+            .rev()
+            .find_map(|entry| match &entry.kind {
+                EntryKind::Checklist { items } => Some(items.clone()),
+                _ => None,
+            })
+            .unwrap_or_default()
     }
 
     /// How full the context stood when the branch was last written to, as
@@ -2257,6 +2292,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::GoalVerdict { .. }
             | EntryKind::Spent { .. }
             | EntryKind::ContextFill { .. }
+            | EntryKind::Checklist { .. }
             | EntryKind::Fitted { .. } => None,
         });
         let first_prompt = messages.clone().find_map(|m| match m {
@@ -2348,6 +2384,33 @@ mod lock_tests {
         drop(session);
         assert!(!Session::is_open(&path));
         assert_ne!(Session::open_generation(), claimed);
+    }
+
+    /// The checklist reads back as last logged; an undo goes back past it.
+    #[test]
+    fn the_checklist_reads_back_from_the_log() {
+        use crate::checklist::ChecklistStatus;
+        let dir = tempfile::tempdir().unwrap();
+        let mut session = Session::create(dir.path(), Path::new("/work")).unwrap();
+        assert!(session.checklist().is_empty());
+        session
+            .append_message(&Message::User(UserMessage::text("one")))
+            .unwrap();
+        let first = vec![ChecklistItem::new("step", ChecklistStatus::Pending)];
+        session.append_checklist(&first).unwrap();
+        let undo = session.undo_point().map(str::to_string);
+        session
+            .append_message(&Message::User(UserMessage::text("two")))
+            .unwrap();
+        session
+            .append_checklist(&[ChecklistItem::new("step", ChecklistStatus::Done)])
+            .unwrap();
+        let reopened = Session::open(session.path()).unwrap();
+        assert_eq!(reopened.checklist()[0].status, ChecklistStatus::Done);
+        session.rewind_to(undo.as_deref()).unwrap();
+        assert_eq!(session.checklist(), first);
+        session.append_checklist(&[]).unwrap();
+        assert!(session.checklist().is_empty());
     }
 
     /// The context's fill reads back from the latest that tells it: an

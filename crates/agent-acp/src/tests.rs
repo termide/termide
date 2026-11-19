@@ -1,7 +1,8 @@
 use super::*;
 use std::io::pipe;
 use termide_agent_core::{
-    permission_channel, PermissionAnswer, PermissionEnvelope, PermissionRules,
+    permission_channel, ChecklistItem, ChecklistStatus, PermissionAnswer, PermissionEnvelope,
+    PermissionRules,
 };
 
 /// `fs/read_text_file` serves a range of a file without loading it whole
@@ -672,6 +673,48 @@ fn the_agents_own_compaction_reaches_the_panel_as_a_compaction() {
     assert!(!events
         .iter()
         .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+}
+
+#[test]
+fn the_agents_plan_reaches_the_panel_as_its_checklist() {
+    let dir = tempfile::tempdir().unwrap();
+    let (runtime, _seen) = recording_agent(
+        dir.path().to_path_buf(),
+        AcpFlavor::Codex,
+        None,
+        ModeHandle::new(Mode::default()),
+    );
+    let shared = &runtime.shared;
+    runtime.drain();
+    shared.on_update(&json!({
+        "sessionUpdate": "plan",
+        "entries": [
+            { "content": "Read", "priority": "high", "status": "completed" },
+            { "content": "Fix", "priority": "medium", "status": "in_progress" },
+        ],
+    }));
+    // A load replays the conversation: its old plans are not the list now.
+    shared.replaying.store(true, Ordering::Release);
+    shared.on_update(&json!({
+        "sessionUpdate": "plan",
+        "entries": [{ "content": "Old", "priority": "low", "status": "pending" }],
+    }));
+    shared.replaying.store(false, Ordering::Release);
+    let lists: Vec<Vec<ChecklistItem>> = runtime
+        .drain()
+        .into_iter()
+        .filter_map(|e| match e {
+            AgentEvent::Checklist { items } => Some(items),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        lists,
+        [vec![
+            ChecklistItem::new("Read", ChecklistStatus::Done),
+            ChecklistItem::new("Fix", ChecklistStatus::InProgress),
+        ]]
+    );
 }
 
 #[test]

@@ -623,6 +623,7 @@ impl AgentPanel {
                 }
             }
             AgentEvent::Spent { by, model, usage } => self.log_spent(by, &model, usage),
+            AgentEvent::Checklist { items } => self.set_checklist(items),
             AgentEvent::ExternalSession { agent, session_id } => {
                 if let Some(session) = &mut self.session {
                     if let Err(error) = session.append_external_session(&agent, &session_id) {
@@ -1029,6 +1030,29 @@ impl AgentPanel {
                 log::warn!("agent session write failed: {error}");
             }
         }
+    }
+
+    /// Take `items` as the agent's checklist, logged when it changed, so a
+    /// reopened session shows it as it stood.
+    pub(crate) fn set_checklist(&mut self, items: Vec<termide_agent_core::ChecklistItem>) {
+        if items == self.checklist {
+            return;
+        }
+        if let Some(session) = &mut self.session {
+            if let Err(error) = session.append_checklist(&items) {
+                log::warn!("agent session write failed: {error}");
+            }
+        }
+        self.checklist = items;
+    }
+
+    /// Start the checklist at what the log says it last was.
+    pub(crate) fn seed_checklist(&mut self) {
+        self.checklist = self
+            .session
+            .as_ref()
+            .map(crate::Session::checklist)
+            .unwrap_or_default();
     }
 
     /// Start the context's fill at how full the log says it last stood, an

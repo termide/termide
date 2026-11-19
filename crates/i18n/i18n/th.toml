@@ -653,6 +653,7 @@ agent_strip_after_step = "หลังขั้นตอนปัจจุบั
 agent_strip_paused = "หยุดชั่ วคราว"
 agent_strip_terminal = "เทอร์มินัล"
 agent_strip_idle = "ว่าง"
+agent_strip_checklist = "รายการตรวจสอบ"
 agent_strip_ended = "สิ้นสุดแล้ว"
 agent_notice_no_parent_panel = "ไม่มีที่ส่งคำตอบกลับ: ไม่มีแผงไหนเปิดเซสชันที่มอบหมายงานนี้"
 agent_hop_limit_header = "เอเจนต์"

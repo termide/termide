@@ -1,7 +1,8 @@
 # Codex over the Agent Client Protocol, played by the stand-in adapter in
 # tools/screenshots/mock-acp (its `npx` comes first on PATH). termide's rules
 # allow the edit (inventory/** in config.toml); its permission card answers
-# Codex's request to run the tests.
+# Codex's request to run the tests. Codex's plan shows as the checklist
+# above the input, checked off as it goes, and stays once done.
 mock-acp codex
 start
 wait "README.md"
@@ -14,9 +15,14 @@ wait "I'll start with the report module." 20
 file-contains inventory/report.py "critical" 20
 wait "Agent wants to run shell" 20
 expect "python3 -m unittest -q"
+expect "╌╌ Checklist 2/3 ╌"
+expect "✓ Flag the critical items"
+expect "▸ Run the tests"
 snapshot permission
 type "1"
 wait "Done: reorder_rows now returns a fifth column" 30
 wait-gone "[■]" 15
+expect "╌╌ Checklist 3/3 ╌"
+expect "✓ Run the tests"
 snapshot done
 quit
