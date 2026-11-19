@@ -1139,6 +1139,7 @@ impl PermissionHooks {
     fn judge_command(&self, command: &str, ctx: &ToolContext) -> CommandVerdict {
         let mode = self.mode.get();
         let parts = shell_parts_in(command, ctx.tool.shell, &ctx.cwd);
+        let project = Project::of(&ctx.cwd);
         let mut verdict = Decision::Allow;
         let mut forced = false;
         if parts.len() > 1 {
@@ -1169,7 +1170,7 @@ impl PermissionHooks {
                 // and a read or a write beyond the project asks unless the
                 // rule names the place itself.
                 Some(Decision::Allow)
-                    if reaches_beyond(&part, &ctx.cwd) && !self.allow_names_the_place(&part) =>
+                    if reaches_beyond(&part, &project) && !self.allow_names_the_place(&part) =>
                 {
                     reads_out = true;
                     Decision::Ask
@@ -1179,7 +1180,7 @@ impl PermissionHooks {
                 // A look-only command reading beyond the project asks, as
                 // the `read` tool does there, in plan mode too.
                 None if !part.substituted && is_read_only_command(&part.text) => {
-                    if reads_outside(&part, &ctx.cwd) {
+                    if reads_outside(&part, &project) {
                         reads_out = true;
                         Decision::Ask
                     } else {
@@ -1725,6 +1726,81 @@ fn real_path(path: &Path) -> std::path::PathBuf {
     out
 }
 
+/// Where a project lies, as real paths: its directory and, when that is
+/// the top of a git worktree, the other worktrees of the same repository,
+/// which hold the same project.
+#[derive(Debug)]
+struct Project {
+    roots: Vec<std::path::PathBuf>,
+}
+
+impl Project {
+    fn of(dir: &Path) -> Self {
+        let top = real_path(dir);
+        let mut roots = vec![top.clone()];
+        roots.extend(worktrees(&top).into_iter().filter(|w| *w != top));
+        Self { roots }
+    }
+
+    /// Whether the real path `path` lies in the project.
+    fn holds(&self, path: &Path) -> bool {
+        self.roots.iter().any(|root| path.starts_with(root))
+    }
+}
+
+/// The most worktrees of a repository [`worktrees`] reads.
+const MAX_WORKTREES: usize = 64;
+
+/// The worktrees, as real paths, of the repository whose worktree `top` (a
+/// real path) is the top of; none when it is not one. A worktree counts
+/// only when git's record of it and its own `.git` point at each other, so
+/// a line written into `.git/worktrees` alone names no directory; nor does
+/// one holding the home directory.
+fn worktrees(top: &Path) -> Vec<std::path::PathBuf> {
+    let gitdir_of = |worktree: &Path| -> Option<std::path::PathBuf> {
+        let dot = worktree.join(".git");
+        if dot.is_dir() {
+            return Some(real_path(&dot));
+        }
+        let text = std::fs::read_to_string(&dot).ok()?;
+        let target = text.trim().strip_prefix("gitdir:")?.trim();
+        Some(real_path(&worktree.join(target)))
+    };
+    let Some(gitdir) = gitdir_of(top) else {
+        return Vec::new();
+    };
+    let common = match std::fs::read_to_string(gitdir.join("commondir")) {
+        Ok(text) => real_path(&gitdir.join(text.trim())),
+        Err(_) => gitdir,
+    };
+    let home = home().map(|h| real_path(&h));
+    let mut found = Vec::new();
+    let mut consider = |worktree: std::path::PathBuf, record: &Path| {
+        let holds_home = home.as_deref().is_some_and(|h| h.starts_with(&worktree));
+        if !holds_home && gitdir_of(&worktree).as_deref() == Some(record) {
+            found.push(worktree);
+        }
+    };
+    if common.file_name().is_some_and(|n| n == ".git") {
+        if let Some(main) = common.parent() {
+            consider(main.to_path_buf(), &common);
+        }
+    }
+    let Ok(entries) = std::fs::read_dir(common.join("worktrees")) else {
+        return found;
+    };
+    for entry in entries.flatten().take(MAX_WORKTREES) {
+        let record = real_path(&entry.path());
+        let Ok(text) = std::fs::read_to_string(record.join("gitdir")) else {
+            continue;
+        };
+        if let Some(worktree) = Path::new(text.trim()).parent() {
+            consider(real_path(worktree), &record);
+        }
+    }
+    found
+}
+
 /// Resolve `.` and `..` lexically; the file need not exist.
 fn normalize(path: &Path) -> std::path::PathBuf {
     let mut out = std::path::PathBuf::new();
@@ -1750,9 +1826,12 @@ fn writes_git_dir(call: &ToolCall, subject: &str) -> bool {
             .any(|c| c.as_os_str().eq_ignore_ascii_case(".git"))
 }
 
+/// Whether the file `call` acts on lies in the project, another worktree
+/// of its repository included.
 fn inside_project(call: &ToolCall, ctx: &ToolContext) -> bool {
     let subject = subject_of(call, ctx);
-    !Path::new(&subject).is_absolute() && !subject.starts_with("..")
+    (!Path::new(&subject).is_absolute() && !subject.starts_with(".."))
+        || Project::of(&ctx.cwd).holds(&real_path(&ctx.cwd.join(&subject)))
 }
 
 /// Pattern offered when the user allows a call for longer than once: the
@@ -1913,8 +1992,43 @@ struct ParsedShell {
     loops: Vec<Option<(String, Vec<ShellWord>)>>,
     /// The loops open where the reading has got to.
     open_loops: Vec<usize>,
+    /// Every segment of the line between two separators, in order, the
+    /// ones that leave no part (`done`, a `for` header) included.
+    segments: Vec<Segment>,
+    /// How deep in compound commands and subshells the reading has got.
+    depth: usize,
+    /// How deep in compound commands alone.
+    blocks: usize,
+    /// The subshells the segment being read opens and closes.
+    opening: usize,
+    closing: usize,
+    /// The separator that ended the last segment.
+    last_join: Join,
+    /// Whether the line has a `case`, whose clauses run or not by its
+    /// patterns.
+    has_case: bool,
     /// The `case` commands open where the reading has got to.
     open_cases: usize,
+}
+
+/// Whether a `)` after `current`, the segment read so far, ends a `case`
+/// pattern: the header's (`case $x in a)`) or, with `in_case`, a later
+/// clause's, its first word.
+fn in_case_pattern(current: &str, in_case: bool) -> bool {
+    let mut rest = current.trim_start();
+    loop {
+        let word = rest.split_whitespace().next().unwrap_or("");
+        if !matches!(
+            word,
+            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
+        ) {
+            break;
+        }
+        rest = rest[word.len()..].trim_start();
+    }
+    let header = rest.split_whitespace().next() == Some("case") && !rest.contains(')');
+    header
+        || (in_case && !current.trim().is_empty() && !current.trim().contains(char::is_whitespace))
 }
 
 /// The command a segment of a `case` runs: what follows the pattern's `)`
@@ -1945,6 +2059,42 @@ fn case_command(segment: &str, in_case: bool) -> &str {
         return segment.trim_start()[first.len()..].trim();
     }
     segment
+}
+
+/// What joins a segment of a shell line to the one before it.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum Join {
+    /// The line starts with it.
+    #[default]
+    Start,
+    /// `;` or a newline: it runs whatever came before did.
+    Sequence,
+    And,
+    Or,
+    Pipe,
+    /// A lone `&` sent the one before to the background.
+    Background,
+}
+
+/// One segment of a shell line: a simple command, possibly with reserved
+/// words or subshell parentheses around it.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct Segment {
+    /// The separator before it, and the one after.
+    join: Join,
+    ends: Join,
+    /// How deep in compound commands and subshells it starts.
+    depth: usize,
+    /// How deep in compound commands (`if`, loops, `case`, `{ }`) alone.
+    blocks: usize,
+    /// The subshells it opens before its command and closes after it.
+    opens: usize,
+    closes: usize,
+    /// The index of the part it leaves, if any.
+    part: Option<usize>,
+    /// Whether it is its command alone: no reserved word or parenthesis
+    /// before it.
+    plain: bool,
 }
 
 /// `command` as the POSIX reading takes it — the text itself, or the POSIX a
@@ -2047,6 +2197,24 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
                 open.pop();
                 current.push(c);
             }
+            // A subshell opens where a command starts, and ends at a `)`
+            // nothing in the command opened; a `case` pattern's parentheses
+            // are no subshell's.
+            ')' if open.is_empty() => {
+                if !in_case_pattern(&current, parsed.open_cases > 0) {
+                    parsed.closing += 1;
+                }
+                current.push(c);
+            }
+            '(' if open.is_empty()
+                && (current.trim().is_empty()
+                    || (!zsh && current.trim().chars().all(|c| c == '('))) =>
+            {
+                if !(parsed.open_cases > 0 && current.trim().is_empty()) {
+                    parsed.opening += 1;
+                }
+                current.push(c);
+            }
             '}' if open.last() == Some(&'{') => {
                 open.pop();
                 current.push(c);
@@ -2065,7 +2233,7 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
                 continue;
             }
             '&' if chars.get(i + 1) == Some(&'&') && open.is_empty() => {
-                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+                expands = !push_part(&mut parsed, &mut current, expands, Join::And) && expands;
                 i += 1;
             }
             // A lone `&` sends the command before it to the background and
@@ -2075,10 +2243,16 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
                 && chars.get(i + 1) != Some(&'>')
                 && !matches!(i.checked_sub(1).map(|p| chars[p]), Some('>' | '<')) =>
             {
-                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+                expands =
+                    !push_part(&mut parsed, &mut current, expands, Join::Background) && expands;
             }
             '|' if open.is_empty() => {
-                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+                let join = if chars.get(i + 1) == Some(&'|') {
+                    Join::Or
+                } else {
+                    Join::Pipe
+                };
+                expands = !push_part(&mut parsed, &mut current, expands, join) && expands;
                 // `||`, and `|&`, which pipes standard error too.
                 if matches!(chars.get(i + 1), Some('|' | '&')) {
                     i += 1;
@@ -2088,17 +2262,17 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
                 // The bodies feed the command just ended, so they are read
                 // while its segment is still open and mark it when they expand.
                 i = skip_heredocs(&chars, i + 1, &mut heredocs, flags, &mut expands);
-                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+                expands = !push_part(&mut parsed, &mut current, expands, Join::Sequence) && expands;
                 continue;
             }
             ';' | '\n' if open.is_empty() => {
-                expands = !push_part(&mut parsed, &mut current, expands) && expands;
+                expands = !push_part(&mut parsed, &mut current, expands, Join::Sequence) && expands;
             }
             _ => current.push(c),
         }
         i += 1;
     }
-    push_part(&mut parsed, &mut current, expands);
+    push_part(&mut parsed, &mut current, expands, Join::Sequence);
     if parsed.parts.is_empty() {
         parsed.parts.push(command.trim().to_string());
         parsed.substituted.push(false);
@@ -2230,7 +2404,7 @@ pub struct ShellPart {
     /// on the line can give that variable another value or move the loop
     /// to another directory between its turns. A word that is a pattern
     /// takes, as in the shell, the paths it matches.
-    pub loop_values: Vec<(String, Vec<ShellWord>)>,
+    pub known_values: Vec<(String, Vec<ShellWord>)>,
 }
 
 /// [`shell_parts_in`] for bash and the POSIX shells.
@@ -2255,23 +2429,42 @@ pub fn shell_parts_in(command: &str, shell: ShellSyntax, cwd: &Path) -> Vec<Shel
             savable: false,
             substituted: true,
             dir: None,
-            loop_values: Vec::new(),
+            known_values: Vec::new(),
         }];
     };
     let command = command.as_ref();
     let mut dir = Some(normalize(cwd));
     let mut stack: Vec<Option<std::path::PathBuf>> = Vec::new();
+    // The directory each open subshell started in, which its end restores,
+    // with the doubt then on it.
+    let mut subshells: Vec<(Option<std::path::PathBuf>, Option<usize>)> = Vec::new();
+    // Whether the last change of directory may not have happened — a `cd`
+    // that runs only on a condition, or to a directory that does not exist
+    // yet — so that only what follows it through `&&` surely runs there:
+    // the depth in compound commands it happened at.
+    let mut doubt: Option<usize> = None;
+    // The segment of the last change of directory that surely happened.
+    let mut surely_moved: Option<usize> = None;
     let bindings = loop_bindings(command, &parsed);
+    let assigned = assignments(command, &parsed);
     let moving = moving_loops(&parsed);
-    parsed
-        .parts
-        .iter()
-        .zip(parsed.substituted.iter())
-        .zip(parsed.enclosing.iter())
-        .map(|((text, &substituted), enclosing)| {
-            let mut words = text.split_whitespace();
-            let head = words.next().unwrap_or("");
+    let mut parts = Vec::new();
+    for (index, segment) in parsed.segments.iter().enumerate() {
+        // What a compound command after it runs, entered through `&&`,
+        // follows it too.
+        if doubt.is_some_and(|at| segment.blocks <= at) && segment.join != Join::And {
+            dir = None;
+            doubt = None;
+        }
+        subshells.extend(std::iter::repeat_n((dir.clone(), doubt), segment.opens));
+        if let Some(at) = segment.part {
+            let text = &parsed.parts[at];
+            let enclosing = &parsed.enclosing[at];
+            let head = text.split_whitespace().next().unwrap_or("");
             let rest = &text.trim_start()[head.len()..];
+            // A subshell's own `cd` counts inside it.
+            let mut words = text.trim_start_matches('(').split_whitespace();
+            let command_name = words.next().unwrap_or("");
             // A loop that changes directory runs each turn but the first
             // somewhere else, and leaves after any number of turns: from
             // its first part on the directory, and every one `pushd` kept,
@@ -2287,36 +2480,258 @@ pub fn shell_parts_in(command: &str, shell: ShellSyntax, cwd: &Path) -> Vec<Shel
                 None if head.contains('/') => (text.clone(), false),
                 None => (text.clone(), true),
             };
-            match head {
-                "cd" => dir = change_dir(dir.as_deref(), words.next()),
+            let known_values: Vec<(String, Vec<ShellWord>)> = enclosing
+                .iter()
+                .filter_map(|&l| bindings[l].clone())
+                .chain(
+                    assigned
+                        .iter()
+                        .filter(|a| reaches(&parsed, a.segment, index))
+                        .map(|a| (a.name.clone(), vec![a.value.clone()])),
+                )
+                .collect();
+            // A `cd` to a variable whose one value is known goes there.
+            let target = words.next().map(|target| {
+                if !target.contains('$') {
+                    return Cow::Borrowed(target);
+                }
+                let values: Vec<(&str, &str)> = known_values
+                    .iter()
+                    .filter_map(|(name, words)| match words.as_slice() {
+                        [only] if only.glob.is_none() => Some((name.as_str(), only.text.as_str())),
+                        _ => None,
+                    })
+                    .collect();
+                match expand_known(target, &values) {
+                    // Quoted again, so a space in it is not taken for a
+                    // split word.
+                    Some(path) if !path.contains(['\'', '$', '`']) => {
+                        Cow::Owned(format!("'{path}'"))
+                    }
+                    _ => Cow::Borrowed(target),
+                }
+            });
+            let moves = matches!(command_name, "cd" | "pushd" | "popd");
+            match command_name {
+                "cd" => dir = change_dir(dir.as_deref(), target.as_deref()),
                 "pushd" => {
                     stack.push(dir.clone());
-                    dir = change_dir(dir.as_deref(), words.next());
+                    dir = change_dir(dir.as_deref(), target.as_deref());
                 }
                 "popd" => dir = stack.pop().flatten(),
                 _ => {}
             }
-            // A subshell's `cd` may or may not last; do not guess. Its end is
-            // a `)` nothing in the part opened: the one closing `$(date)`
-            // ends a substitution, not a subshell.
-            let closes_subshell =
-                text.ends_with(')') && text.matches(')').count() > text.matches('(').count();
-            if text.starts_with('(') || closes_subshell || in_moving_loop {
+            if moves {
+                // In a pipeline or the background it runs in a subshell of
+                // its own; after `||` or within a compound command, on a
+                // condition.
+                let alone = segment.blocks == 0
+                    && !matches!(segment.ends, Join::Pipe | Join::Background)
+                    && (matches!(segment.join, Join::Start | Join::Sequence)
+                        || (segment.join == Join::And && surely_moved == index.checked_sub(1)));
+                if alone && dir.as_deref().is_some_and(Path::is_dir) {
+                    surely_moved = Some(index);
+                } else {
+                    doubt = Some(segment.blocks);
+                }
+            }
+            if in_moving_loop {
                 dir = None;
             }
-            ShellPart {
+            let substituted = parsed.substituted[at];
+            parts.push(ShellPart {
                 savable: known && !substituted,
                 substituted,
                 text: text.clone(),
                 resolved,
                 dir: runs_in,
-                loop_values: enclosing
-                    .iter()
-                    .filter_map(|&l| bindings[l].clone())
-                    .collect(),
-            }
+                known_values,
+            });
+        }
+        for _ in 0..segment.closes {
+            // A `)` no subshell opened: where it leads is not known.
+            (dir, doubt) = subshells.pop().unwrap_or((None, None));
+        }
+    }
+    parts
+}
+
+/// The value an assignment's word `raw` (what follows its `=`) gives, with
+/// the variables of `known` put in and a leading `~` taken for the home
+/// directory, as the shell does: `None` when that cannot be seen
+/// beforehand or is no single plain word — empty, with a space or a
+/// pattern character, which an unquoted `$NAME` would split or expand
+/// further.
+fn assigned_value(raw: &str, known: &[(&str, &str)]) -> Option<String> {
+    let (home_prefix, rest) = if raw == "~" || raw.starts_with("~/") {
+        (Some(home()?), &raw[1..])
+    } else {
+        (None, raw)
+    };
+    if rest.contains('~') {
+        return None;
+    }
+    let value = match globbing_words(rest, known)?.as_slice() {
+        [] => String::new(),
+        [only] if only.glob.is_none() => only.text.clone(),
+        _ => return None,
+    };
+    let value = match home_prefix {
+        Some(home) => home
+            .join(value.trim_start_matches('/'))
+            .display()
+            .to_string(),
+        None => value,
+    };
+    let plain = !value.is_empty()
+        && !value.contains(char::is_whitespace)
+        && !value.contains(['*', '?', '[']);
+    plain.then_some(value)
+}
+
+/// A plain assignment `NAME=value` a later part of a line can rely on.
+struct Assignment {
+    /// The index of its segment.
+    segment: usize,
+    name: String,
+    value: ShellWord,
+}
+
+/// The assignments of `parsed` whose value the parts after them can rely
+/// on: a segment of its own at the top of the line, run in the shell
+/// itself (not in a pipeline or in the background), whose value is one
+/// word — no pattern, no space, `~` only at its start, no expansion but
+/// of a variable assigned so before it — of a variable `command` names
+/// nowhere else but as a plain `$NAME` or `${NAME}`. A line that touches `IFS` or reads a script into
+/// the shell (`source`, `.`, `eval`) relies on none.
+fn assignments(command: &str, parsed: &ParsedShell) -> Vec<Assignment> {
+    let opaque = parsed.parts.iter().any(|part| {
+        matches!(
+            part.split_whitespace().next(),
+            Some("source" | "." | "eval")
+        )
+    });
+    if command.contains("IFS") || opaque || parsed.has_case {
+        return Vec::new();
+    }
+    let mut found = Vec::new();
+    for (index, segment) in parsed.segments.iter().enumerate() {
+        let Some(at) = segment.part else { continue };
+        if !segment.plain
+            || segment.depth > 0
+            || segment.opens > 0
+            || matches!(segment.ends, Join::Pipe | Join::Background)
+            || parsed.substituted[at]
+        {
+            continue;
+        }
+        let Some(raw) = raw_words(&parsed.parts[at]) else {
+            continue;
+        };
+        let mut pairs = Vec::new();
+        for raw in raw {
+            let Some((name, value)) = raw
+                .split_once('=')
+                .filter(|(name, _)| is_shell_name(name))
+                .and_then(|(name, raw_value)| {
+                    let known: Vec<(&str, &str)> = found
+                        .iter()
+                        .filter(|a: &&Assignment| reaches(parsed, a.segment, index))
+                        .filter(|a| names_only_as_assigned(command, &a.name))
+                        .map(|a| (a.name.as_str(), a.value.text.as_str()))
+                        .collect();
+                    Some((name, assigned_value(raw_value, &known)?))
+                })
+            else {
+                pairs.clear();
+                break;
+            };
+            pairs.push((name.to_string(), value));
+        }
+        for (name, value) in pairs {
+            found.push(Assignment {
+                segment: index,
+                name,
+                value: ShellWord {
+                    text: value,
+                    glob: None,
+                },
+            });
+        }
+    }
+    let once: Vec<bool> = found
+        .iter()
+        .map(|a| {
+            found.iter().filter(|b| b.name == a.name).count() == 1
+                && names_only_as_assigned(command, &a.name)
         })
+        .collect();
+    found
+        .into_iter()
+        .zip(once)
+        .filter_map(|(a, once)| once.then_some(a))
         .collect()
+}
+
+/// Whether the variable `name` appears in `command` only once as an
+/// assignment `NAME=` starting a word and otherwise as `$NAME` or
+/// `${NAME}`, so nothing else on the line gives it a value.
+fn names_only_as_assigned(command: &str, name: &str) -> bool {
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    let mut assignments = 0;
+    let plain = command.match_indices(name).all(|(at, _)| {
+        let before = &command[..at];
+        let after = &command[at + name.len()..];
+        if before.ends_with(is_name_char) || after.starts_with(is_name_char) {
+            return true; // part of a longer word
+        }
+        if (before.is_empty() || before.ends_with([' ', '\t', '\n', ';', '&', '|']))
+            && after.starts_with('=')
+        {
+            assignments += 1;
+            return true;
+        }
+        (before.ends_with('$') && !after.starts_with('='))
+            || (before.ends_with("${") && after.starts_with('}'))
+    });
+    plain && assignments == 1
+}
+
+/// Whether an assignment in the segment `from` has run whenever the
+/// segment `to` runs: it comes first, and either it runs whatever came
+/// before — it starts the line, follows a `;`, or follows only `cd`s
+/// joined by `&&`, whose success the directory they lead to is taken on
+/// already — or every segment at the top of the line from it to `to`
+/// follows an `&&`.
+fn reaches(parsed: &ParsedShell, from: usize, to: usize) -> bool {
+    let segments = &parsed.segments;
+    let changes_dir = |segment: &Segment| {
+        segment.plain
+            && segment.depth == 0
+            && segment.part.is_some_and(|at| {
+                matches!(
+                    parsed.parts[at].split_whitespace().next(),
+                    Some("cd" | "pushd")
+                )
+            })
+    };
+    let after_cds = || {
+        let mut at = from;
+        while segments[at].join == Join::And {
+            at -= 1;
+            if !changes_dir(&segments[at]) {
+                return false;
+            }
+        }
+        at < from && matches!(segments[at].join, Join::Start | Join::Sequence)
+    };
+    from < to
+        && (matches!(segments[from].join, Join::Start | Join::Sequence)
+            || after_cds()
+            || segments[from + 1..=to]
+                .iter()
+                .filter(|s| s.depth == 0)
+                .all(|s| s.join == Join::And))
 }
 
 /// Whether each loop of `parsed` runs a `cd`, `pushd` or `popd`, in its
@@ -2335,8 +2750,9 @@ fn moving_loops(parsed: &ParsedShell) -> Vec<bool> {
 }
 
 /// The binding of each loop of `parsed` that a part in it can rely on: its
-/// header's, while every part the loop runs is a look-only command of its
-/// own (no `cd`, no substitution, no subshell) and `command` names the
+/// header's, while no part the loop runs changes directory, expands a
+/// substitution, opens a subshell or reads a script into the shell
+/// (`source`, `.`, `eval`), and `command` names the
 /// variable nowhere but in a `for` header and as a plain `$NAME` or
 /// `${NAME}`, so no assignment, `read`, `${NAME:=…}` or function changes
 /// it. A line that touches `IFS` binds nothing, its words splitting
@@ -2357,10 +2773,9 @@ fn loop_bindings(command: &str, parsed: &ParsedShell) -> Vec<Option<(String, Vec
                 .all(|((text, &substituted), _)| {
                     let head = text.split_whitespace().next().unwrap_or("");
                     !substituted
-                        && !matches!(head, "cd" | "pushd" | "popd")
+                        && !matches!(head, "cd" | "pushd" | "popd" | "source" | "." | "eval")
                         && !text.starts_with('(')
                         && !text.ends_with(')')
-                        && is_read_only_command(text)
                 });
             (body_looks_only
                 && !command.contains("IFS")
@@ -2405,11 +2820,10 @@ const FILE_READERS: [&str; 20] = [
 /// a directory outside it or in one that cannot be told, a variable whose
 /// value cannot be seen, or the whole environment dumped (`env`,
 /// `printenv`), secrets and all.
-fn reads_outside(part: &ShellPart, project: &Path) -> bool {
+fn reads_outside(part: &ShellPart, project: &Project) -> bool {
     let text = without_harmless_redirections(&part.text);
     let head = text.split_whitespace().next().unwrap_or("");
     let reader = FILE_READERS.contains(&head);
-    let project = real_path(project);
     let dir = part.dir.as_deref();
     let reads_files = reader || text.contains('<');
     // The globs take the paths they match, as the shell expands them, each
@@ -2419,7 +2833,7 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
     // could name itself: a path inside the project, no option, nothing the
     // shell would split. The command is then judged with every value in.
     let mut loop_values: Vec<(&str, Vec<String>)> = Vec::new();
-    for (name, words) in &part.loop_values {
+    for (name, words) in &part.known_values {
         let values: Option<Vec<String>> = words.iter().try_fold(Vec::new(), |mut all, word| {
             all.extend(globs.expand(word)?);
             Some(all)
@@ -2429,7 +2843,7 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
             !value.is_empty()
                 && !value.starts_with('-')
                 && !value.contains(char::is_whitespace)
-                && !path_outside(value, dir, &project)
+                && !path_outside(value, dir, project)
         });
         if usable {
             loop_values.push((name.as_str(), values));
@@ -2464,24 +2878,380 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
                 None => return true,
             }
         }
-        words_read_outside(head, reader, &expanded, dir, &project)
+        words_read_outside(head, reader, &expanded, dir, project)
     })
 }
 
 /// Whether `part` reaches beyond `project`: a look-only command that reads
-/// there ([`reads_outside`]), or a redirection that writes a file there or
-/// to a path no one can see beforehand (`> $OUT`).
-fn reaches_beyond(part: &ShellPart, project: &Path) -> bool {
-    (is_read_only_command(&part.text) && reads_outside(part, project))
-        || writes_outside(part, project)
+/// there ([`reads_outside`]), another that names a place there
+/// ([`changes_outside`]), or a redirection that writes a file there or to
+/// a path no one can see beforehand (`> $OUT`).
+fn reaches_beyond(part: &ShellPart, project: &Project) -> bool {
+    let reaches = if is_read_only_command(&part.text) {
+        reads_outside(part, project)
+    } else {
+        changes_outside(part, project)
+    };
+    reaches || writes_outside(part, project)
+}
+
+/// The places beyond the project a command may change unasked: the
+/// system's temporary directories, as real paths, and the devices that
+/// hold no data.
+fn scratch_places() -> Vec<std::path::PathBuf> {
+    let mut places: Vec<std::path::PathBuf> = ["/tmp", "/var/tmp"]
+        .iter()
+        .map(|p| real_path(Path::new(p)))
+        .collect();
+    if let Some(tmp) = std::env::var_os("TMPDIR").filter(|t| !t.is_empty()) {
+        let tmp = real_path(Path::new(&tmp));
+        // A `TMPDIR` set to the home directory or above it is no scratch
+        // place.
+        if tmp.parent().is_some() && !home().is_some_and(|h| real_path(&h).starts_with(&tmp)) {
+            places.push(tmp);
+        }
+    }
+    places
+}
+
+/// The devices a command may name beyond the project: they hold no data.
+const HARMLESS_DEVICES: [&str; 8] = [
+    "/dev/null",
+    "/dev/zero",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/stdin",
+    "/dev/stdout",
+    "/dev/stderr",
+    "/dev/tty",
+];
+
+/// Whether `part`, a command that is not look-only, names a place beyond
+/// `project` and the temporary directories that it may read or change:
+/// it runs in a directory there or one that cannot be told, or one of its
+/// words — a path, an option's `=value`, an input redirection's target —
+/// leads there: absolute, from a home directory, stepping out with `..` or
+/// through a symlink, or through a variable whose value cannot be seen.
+/// Words a program takes as data are not paths ([`data_words`]): an
+/// `awk` program, a commit message, a forge's API path. What a program
+/// reaches on its own (its configuration, its caches) is not seen.
+fn changes_outside(part: &ShellPart, project: &Project) -> bool {
+    let line = part
+        .text
+        .trim_start_matches(|c: char| c == '(' || c.is_whitespace());
+    let Some(mut raw) = raw_words(line) else {
+        return true;
+    };
+    // A `)` that ends a subshell is no word of the command.
+    if let Some(last) = raw.last_mut() {
+        *last = last.trim_end_matches(')');
+    }
+    raw.retain(|w| !w.is_empty());
+    // The assignments before the program set its environment, not paths
+    // it acts on.
+    let raw: Vec<&str> = raw
+        .into_iter()
+        .skip_while(|w| {
+            w.split_once('=')
+                .is_some_and(|(name, _)| is_shell_name(name))
+        })
+        .collect();
+    let Some(&head) = raw.first() else {
+        return false;
+    };
+    if PLACELESS.contains(&head) {
+        return false;
+    }
+    // Each value a loop variable takes, the paths a pattern among them
+    // matches; a variable whose values cannot be told stays unknown.
+    let mut globs = GlobExpansion::new(part.dir.as_deref());
+    let mut known: Vec<(&str, Vec<String>)> = Vec::new();
+    for (name, words) in &part.known_values {
+        let values = words.iter().try_fold(Vec::new(), |mut all, word| {
+            all.extend(globs.expand(word)?);
+            Some(all)
+        });
+        if let Some(values) = values.filter(|v| !v.is_empty()) {
+            known.push((name.as_str(), values));
+        }
+    }
+    let turns: usize = known.iter().map(|(_, v)| v.len()).product();
+    if turns > MAX_LOOP_TURNS {
+        return true;
+    }
+    (0..turns).any(|turn| {
+        let mut rest = turn;
+        let values: Vec<(&str, &str)> = known
+            .iter()
+            .map(|(name, values)| {
+                let value = values[rest % values.len()].as_str();
+                rest /= values.len();
+                (*name, value)
+            })
+            .collect();
+        let words: Vec<Option<String>> = raw.iter().map(|w| expand_known(w, &values)).collect();
+        words_change_outside(head, &words, part.dir.as_deref(), project)
+    })
+}
+
+/// Whether the words of a command run by `head` in `dir`, expanded (`None`
+/// where that cannot be seen), name a place beyond `project` and the
+/// temporary directories: see [`changes_outside`].
+fn words_change_outside(
+    head: &str,
+    words: &[Option<String>],
+    dir: Option<&Path>,
+    project: &Project,
+) -> bool {
+    let data = data_words(head, words);
+    let scratch = scratch_places();
+    let allowed = |path: &Path| {
+        let path = real_path(path);
+        project.holds(&path) || scratch.iter().any(|s| path.starts_with(s))
+    };
+    let Some(dir) = dir else {
+        return true;
+    };
+    if !allowed(dir) {
+        return true;
+    }
+    let leads_out = |word: &str| {
+        let word = word.trim_start_matches(|c: char| c.is_ascii_digit());
+        let word = match word.strip_prefix('<') {
+            Some(target) if !target.starts_with(['<', '&']) => target,
+            Some(_) => return false,
+            None => word,
+        };
+        if word.is_empty() || HARMLESS_DEVICES.contains(&word) {
+            return false;
+        }
+        let path = if word == "~" || word.starts_with("~/") {
+            match home() {
+                Some(home) => home.join(word[1..].trim_start_matches('/')),
+                None => return true,
+            }
+        } else if word.starts_with('~') {
+            return true;
+        } else if word.contains('/') || word == ".." {
+            dir.join(word)
+        } else {
+            return false;
+        };
+        !allowed(&path)
+    };
+    words.iter().enumerate().skip(1).any(|(index, word)| {
+        if data.contains(&index) {
+            return false;
+        }
+        let Some(word) = word else {
+            return true;
+        };
+        // A redirection that writes is judged by `writes_outside`.
+        if word
+            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '&')
+            .starts_with('>')
+        {
+            return false;
+        }
+        leads_out(word)
+            || word
+                .split_once('=')
+                .is_some_and(|(_, value)| leads_out(value))
+    })
+}
+
+/// Programs that act on no file of their own; only their redirections
+/// reach a place.
+const PLACELESS: [&str; 12] = [
+    "echo", "printf", "true", "false", ":", "sleep", "kill", "pkill", "export", "test", "[", "wait",
+];
+
+/// The indices of the words of a command run by `head` that it takes as
+/// data rather than as paths: the program an `awk`, `sed` or `jq` runs,
+/// the message, format or search of a `git` command, what a forge CLI
+/// (`gh`, `tea`) sends or asks its API for, the command `ssh` runs on the
+/// remote host, and every argument of a program that acts on no file.
+/// A word whose value cannot be seen is `None`.
+fn data_words(head: &str, words: &[Option<String>]) -> Vec<usize> {
+    let count = words.len();
+    if PLACELESS.contains(&head) {
+        return (1..count).collect();
+    }
+    let word = |i: usize| words[i].as_deref().unwrap_or("");
+    // The options whose next word is data.
+    let valued: &[&str] = match head {
+        "awk" | "gawk" => &["-F", "-v"],
+        "sed" => &["-e", "--expression", "-i"],
+        "git" => &[
+            "-m",
+            "--message",
+            "--format",
+            "--pretty",
+            "--grep",
+            "-S",
+            "-G",
+            "--author",
+        ],
+        "gh" | "tea" => &[
+            "--jq",
+            "-q",
+            "--body",
+            "-b",
+            "--title",
+            "-t",
+            "-f",
+            "-F",
+            "--raw-field",
+            "--field",
+            "--json",
+            "--template",
+            "-H",
+            "--header",
+            "--search",
+            "-X",
+            "--method",
+            "--login",
+            "-l",
+            "-R",
+            "--repo",
+        ],
+        "jq" => &["--arg", "--argjson"],
+        "ssh" => &[
+            "-o", "-p", "-l", "-J", "-L", "-R", "-D", "-b", "-B", "-c", "-e", "-I", "-m", "-O",
+            "-P", "-Q", "-W", "-w",
+        ],
+        "curl" => &[
+            "-w",
+            "--write-out",
+            "-H",
+            "--header",
+            "-X",
+            "--request",
+            "-A",
+        ],
+        _ => &[],
+    };
+    // Whether the first operand is a program rather than a file.
+    let mut program_first = matches!(head, "awk" | "gawk" | "jq")
+        || (head == "sed"
+            && !words
+                .iter()
+                .any(|w| matches!(w.as_deref(), Some("-e" | "-f" | "--expression"))));
+    // The options whose next word is a path, which stays judged.
+    let path_valued: &[&str] = match head {
+        "ssh" => &["-i", "-F", "-E", "-S"],
+        _ => &[],
+    };
+    let mut data = Vec::new();
+    let mut i = 1;
+    while i < count {
+        let current = word(i);
+        if path_valued.contains(&current) {
+            i += 2;
+            continue;
+        }
+        if valued.contains(&current) {
+            data.push(i + 1);
+            if head == "jq" {
+                // `--arg NAME VALUE`
+                data.push(i + 2);
+                i += 1;
+            }
+            i += 2;
+            continue;
+        }
+        let option = current.split_once('=').map_or(current, |(name, _)| name);
+        if current.starts_with("--") && current.contains('=') && valued.contains(&option) {
+            data.push(i);
+        } else if !current.starts_with('-') {
+            if program_first {
+                data.push(i);
+                program_first = false;
+            } else if head == "ssh" {
+                // The host, and the command it runs there.
+                data.extend(i..count);
+                break;
+            } else if matches!(head, "gh" | "tea") && current == "api" {
+                program_first = true;
+            }
+        }
+        i += 1;
+    }
+    data
+}
+
+/// The words of `line` as written, quotes kept, split where the shell
+/// splits them, up to the first line's end outside quotes (a
+/// here-document's body is data); `None` for an unclosed quote.
+fn raw_words(line: &str) -> Option<Vec<&str>> {
+    let mut words = Vec::new();
+    let mut start = None;
+    let mut quote: Option<char> = None;
+    let mut chars = line.char_indices();
+    while let Some((at, c)) = chars.next() {
+        match quote {
+            Some(q) => {
+                if c == q {
+                    quote = None;
+                } else if c == '\\' && q == '"' {
+                    chars.next();
+                }
+            }
+            None if c.is_whitespace() => {
+                if let Some(from) = start.take() {
+                    words.push(&line[from..at]);
+                }
+                if c == '\n' {
+                    return Some(words);
+                }
+            }
+            None => {
+                start.get_or_insert(at);
+                match c {
+                    '\'' | '"' => quote = Some(c),
+                    '\\' => {
+                        chars.next();
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+    if quote.is_some() {
+        return None;
+    }
+    words.extend(start.map(|from| &line[from..]));
+    Some(words)
+}
+
+/// The variables of `part` that hold one known value, a word that is no
+/// pattern.
+fn single_values(part: &ShellPart) -> Vec<(&str, &str)> {
+    part.known_values
+        .iter()
+        .filter_map(|(name, words)| match words.as_slice() {
+            [only] if only.glob.is_none() => Some((name.as_str(), only.text.as_str())),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The shell word `raw` as the shell passes it, quotes off and the
+/// variables in `values` put in; `None` when it expands to what cannot be
+/// seen beforehand, or to more than one word.
+fn expand_known(raw: &str, values: &[(&str, &str)]) -> Option<String> {
+    match globbing_words(raw, values)?.as_slice() {
+        [only] => Some(only.text.clone()),
+        [] => Some(String::new()),
+        _ => None,
+    }
 }
 
 /// Whether a redirection of `part` writes a file outside `project`. A
 /// here-document's body is data, so only the line that opens it counts.
-fn writes_outside(part: &ShellPart, project: &Path) -> bool {
+fn writes_outside(part: &ShellPart, project: &Project) -> bool {
     let line = part.text.lines().next().unwrap_or("");
     let line = without_harmless_redirections(line);
-    let project = real_path(project);
     let words: Vec<&str> = line.split_whitespace().collect();
     words.iter().enumerate().any(|(i, word)| {
         let Some(rest) = word
@@ -2500,7 +3270,10 @@ fn writes_outside(part: &ShellPart, project: &Path) -> bool {
         if target.starts_with('&') {
             return false;
         }
-        target.contains(['$', '`']) || path_outside(target, part.dir.as_deref(), &project)
+        match expand_known(target, &single_values(part)) {
+            Some(target) => path_outside(&target, part.dir.as_deref(), project),
+            None => true,
+        }
     })
 }
 
@@ -2589,7 +3362,7 @@ fn words_read_outside(
     reader: bool,
     words: &[String],
     dir: Option<&Path>,
-    project: &Path,
+    project: &Project,
 ) -> bool {
     if matches!(head, "env" | "printenv") && words.len() == 1 {
         return true;
@@ -2705,7 +3478,7 @@ fn words_read_outside(
         }
         _ => false,
     };
-    reads_dir && dir.is_none_or(|dir| !real_path(dir).starts_with(project))
+    reads_dir && dir.is_none_or(|dir| !project.holds(&real_path(dir)))
 }
 
 /// Whether `find` with `args` reads beyond the project by `outside`: at
@@ -2791,7 +3564,7 @@ fn follows_symlinks(head: &str, args: &[&str]) -> bool {
 
 /// Whether the shell word `word`, a path run from `dir`, leads outside
 /// `project` (a real path); `/dev/null` and `-` (standard input) do not.
-fn path_outside(word: &str, dir: Option<&Path>, project: &Path) -> bool {
+fn path_outside(word: &str, dir: Option<&Path>, project: &Project) -> bool {
     if word.is_empty() || word == "-" || word == "/dev/null" {
         return false;
     }
@@ -2818,7 +3591,7 @@ fn path_outside(word: &str, dir: Option<&Path>, project: &Path) -> bool {
             None => return true,
         }
     };
-    !real_path(&path).starts_with(project)
+    !project.holds(&real_path(&path))
 }
 
 /// The home directory, for `~`.
@@ -2875,17 +3648,13 @@ fn resolve_program(head: &str, dir: Option<&Path>, project: &Path) -> Option<Str
 /// dropped word — a `for … in` header in particular — is not a command, but
 /// what it expanded is still run, so `expands` is left set for the command
 /// that follows it to carry.
-fn push_part(parsed: &mut ParsedShell, current: &mut String, expands: bool) -> bool {
+fn push_part(parsed: &mut ParsedShell, current: &mut String, expands: bool, ends: Join) -> bool {
     let text = current.trim();
-    // The words that open and close a `case`, as `without_shell_keywords`
-    // finds them.
-    let head = without_shell_keywords_at(text);
-    let body = case_command(text, parsed.open_cases > 0);
-    match head {
-        Some("case") => parsed.open_cases += 1,
-        Some("esac") => parsed.open_cases = parsed.open_cases.saturating_sub(1),
-        _ => {}
+    if text.is_empty() {
+        current.clear();
+        return false;
     }
+    let body = case_command(without_subshell_parens(text, parsed), parsed.open_cases > 0);
     track_loops(parsed, body);
     let kept = match without_shell_keywords(body) {
         Some(part) => {
@@ -2896,8 +3665,68 @@ fn push_part(parsed: &mut ParsedShell, current: &mut String, expands: bool) -> b
         }
         None => false,
     };
+    // The compound commands it opens and closes, as `track_loops` reads
+    // them: reserved words before its command, or a header or closing word
+    // as its command.
+    let words: Vec<&str> = text.trim_start_matches('(').split_whitespace().collect();
+    let leading = words
+        .iter()
+        .take_while(|w| {
+            matches!(
+                **w,
+                "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
+            )
+        })
+        .count();
+    let mut opened = words[..leading]
+        .iter()
+        .filter(|w| matches!(**w, "if" | "while" | "until" | "{"))
+        .count();
+    let mut closed = 0;
+    match words.get(leading).copied() {
+        Some("for" | "select") => opened += 1,
+        Some("case") => {
+            opened += 1;
+            parsed.has_case = true;
+            parsed.open_cases += 1;
+        }
+        Some("esac") => {
+            closed += 1;
+            parsed.open_cases = parsed.open_cases.saturating_sub(1);
+        }
+        Some("fi" | "done" | "}") => closed += 1,
+        _ => {}
+    }
+    let segment = Segment {
+        join: parsed.last_join,
+        ends,
+        depth: parsed.depth,
+        blocks: parsed.blocks,
+        opens: std::mem::take(&mut parsed.opening),
+        closes: std::mem::take(&mut parsed.closing),
+        part: kept.then(|| parsed.parts.len() - 1),
+        plain: leading == 0 && !text.starts_with('('),
+    };
+    parsed.depth = (parsed.depth + segment.opens + opened).saturating_sub(segment.closes + closed);
+    parsed.blocks = (parsed.blocks + opened).saturating_sub(closed);
+    parsed.segments.push(segment);
+    parsed.last_join = ends;
     current.clear();
     kept
+}
+
+/// `text` without the parentheses of the subshells it opens and closes, so
+/// a command in one is judged, and matched against rules, as it runs: the
+/// `(`s it starts with and the `)`s it ends with, as many as were counted.
+fn without_subshell_parens<'a>(text: &'a str, parsed: &ParsedShell) -> &'a str {
+    let mut rest = text;
+    for _ in 0..parsed.opening {
+        rest = rest.trim_start().strip_prefix('(').unwrap_or(rest);
+    }
+    for _ in 0..parsed.closing {
+        rest = rest.trim_end().strip_suffix(')').unwrap_or(rest);
+    }
+    rest.trim()
 }
 
 /// Open the loops the segment `part` starts — a `while` or `until` among its
@@ -2951,16 +3780,6 @@ fn track_loops(parsed: &mut ParsedShell, part: &str) {
 fn is_shell_name(word: &str) -> bool {
     word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
         && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-/// The first word of `part` after the reserved words that lead it.
-fn without_shell_keywords_at(part: &str) -> Option<&str> {
-    part.split_whitespace().find(|word| {
-        !matches!(
-            *word,
-            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
-        )
-    })
 }
 
 /// `part` without the shell's reserved words, which run nothing of their

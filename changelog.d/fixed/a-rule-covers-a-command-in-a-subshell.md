@@ -1,0 +1,1 @@
+- **A rule covers a command in a subshell.** `(make)` or `(cd src && make)` asked even with a rule for `make *` allowing it, since the parentheses were taken as part of the command; they no longer are.

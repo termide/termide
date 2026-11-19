@@ -1771,19 +1771,33 @@ matched as the resolved path — project-relative inside the project, absolute
 outside — as well as as written, so `cd /tmp && ./venv/bin/pip install x`
 matches `/tmp/venv/bin/pip *`. The card asks only about the parts no rule or
 look-only default settles, lists them under the command, and an answer for
-the session or for always records a rule for each. A part whose directory
-cannot be told (after `cd $DIR`, `cd -` or a subshell) or that runs a
-substitution is marked "this time only": no rule is recorded for it, and
-when no part can have one, the card offers only allow once and deny.
+the session or for always records a rule for each. A `cd` counts only where
+it surely ran: one that may not have — into a directory that does not exist,
+after `&&` or `||`, in a pipeline, in the background or inside an `if` or a
+loop — holds for the commands chained to it with `&&` and leaves the
+directory unknown after that; a subshell's `cd` ends with it
+(`(cd src && make); ls` lists the starting directory). A part whose directory
+cannot be told (after `cd -`, a `cd` that may not have run, or `cd $DIR`
+with a value the line does not show) or that runs a substitution is marked
+"this time only": no rule is recorded for it, and when no part can have one,
+the card offers only allow once and deny.
 
 A rule with a wildcard vouches for the program, not for every path handed
 to it. `cat *` lets `cat src/main.rs` and `cat > notes.md` through, but a
 look-only command reading outside the project (`cat ~/.ssh/id_rsa`) and a
 redirection writing a file there or to a path no one can see beforehand
 (`> /tmp/out`, `> $OUT`) still ask, as if no rule matched; an answer to such
-a card records that one command. A rule counts for them when it states the
-place itself: one without a wildcard, which names the whole command, or one
-naming a path outside (`head /var/log/*`).
+a card records that one command. So does any other command reaching out of
+the project with such a rule: `cp *` copies inside it, but
+`cp ~/.ssh/id_rsa .`, `rm -rf ../sibling`, `git -C ../other commit` and
+`cd /etc && make` ask, as do a variable whose value cannot be seen
+(`cp $SRC .`) and a directory that cannot be told. The system's scratch
+places — `/tmp`, `/var/tmp` and `$TMPDIR` — and `/dev/null` count as inside
+for them, and the words a program takes as data rather than paths are not
+judged: `awk`'s and `sed`'s program, `jq`'s filter, a commit message, the
+host and remote command of `ssh`, the endpoint of `gh api`. A rule counts for
+them when it states the place itself: one without a wildcard, which names
+the whole command, or one naming a path outside (`head /var/log/*`).
 
 An answer that outlasts the call is a decision made without seeing the calls
 it will cover, so the card offers it only where the rule says enough to trust.
@@ -1845,7 +1859,9 @@ answers for the session count in every mode but `all`.
 A file counts as inside or outside the project by where its symlinks lead,
 not by how its path is spelled: with a link `docs` pointing at your home
 directory, writing `docs/.zshrc` is an edit outside the project, and a rule
-for `.env` also covers a link to it.
+for `.env` also covers a link to it. The project takes in the other
+worktrees of its git repository: from one worktree, reading or changing a
+file in another or in the main checkout is no step outside.
 
 An edit or a write under a `.git` directory, or to a worktree's `.git` file,
 asks in every mode but `all`, whatever the `allow` rules say: git's config
@@ -1919,10 +1935,15 @@ names and patterns, so `find . -not -path '*/.git*'` does not ask.
 The variable of a `for` loop over words that each name a path inside the
 project — literals or globs, as a path argument would — reads inside it:
 `for f in *.rs src/*.toml; do wc -l $f; done` does not ask. The loop's body
-must hold only look-only commands, without a `cd`, and nothing on the line
+must not change directory or read code into the shell (`cd`, `pushd`,
+`popd`, `source`, `.`, `eval`), and nothing on the line
 may set that variable some other way; a list that cannot be seen
 (`for f in $(ls ~)`, `while read f`), a word outside the project
-(`for f in ~/*`) or a word with an option or a space still asks. The rule
+(`for f in ~/*`) or a word with an option or a space still asks. A variable
+set earlier on the line is judged by its value the same way
+(`R=src; cat $R/main.rs`), when that value is one plain word, set once,
+outside any subshell, block or pipeline, by a command that surely ran before
+the use, and the line reads no code into the shell nor sets `IFS`. The rule
 "allow always" keeps for such a read names that one command, not `cat *`. Loading a skill never asks.
 
 ### Plan mode
