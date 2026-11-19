@@ -33,9 +33,9 @@ use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
     BackgroundCall, CancelToken, ExternalSessionRef, Failure, FailureKind, Hooks, HostTools,
-    Message, Mode, ModeHandle, PermissionHooks, PlanPrompt, PromptError, StopReason, StreamEvent,
-    ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage,
-    ACP_PROVIDER, RECAP_LIMIT,
+    Message, Mode, ModeHandle, PermissionHooks, PermissionNote, PlanPrompt, PromptError,
+    StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage,
+    Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_core::{CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
@@ -235,6 +235,9 @@ struct Shared {
     /// and the details the server kept for the UI are found by them. The
     /// server knows each call it runs by its id here.
     host_calls: Arc<Mutex<HashMap<String, (String, Value)>>>,
+    /// How each of the agent's own calls asked about was decided, by id,
+    /// until its result is logged with it.
+    decided: Mutex<HashMap<String, PermissionNote>>,
     /// The calls on their way into the session log.
     calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
@@ -575,6 +578,7 @@ impl AcpRuntime {
             mcp_settled_changed: Condvar::new(),
             announced: Mutex::new(HashMap::new()),
             host_calls: Arc::default(),
+            decided: Mutex::new(HashMap::new()),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             context_limit: AtomicU64::new(0),
@@ -2789,11 +2793,18 @@ impl Shared {
         // unknown one reaches the user, and a session or always grant is
         // recorded so it is asked only once. The user is never troubled with
         // anything the built-in agent would have let through silently.
-        let decision = self
-            .hooks
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .before_tool_call(&call, &ctx);
+        let (decision, note) = {
+            let mut hooks = self.hooks.lock().unwrap_or_else(PoisonError::into_inner);
+            let decision = hooks.before_tool_call(&call, &ctx);
+            (decision, hooks.take_permission())
+        };
+        // Kept for the call's result, so the log says who decided it.
+        if let Some(note) = note.filter(|_| !id.is_empty()) {
+            self.decided
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .insert(id.to_string(), note);
+        }
         // Always answer "once": termide stays the source of truth for grants,
         // so the agent keeps asking and termide keeps deciding silently,
         // rather than the agent remembering a rule of its own.
@@ -3341,6 +3352,11 @@ impl Shared {
     /// it did not finish, so the log holds no call left unanswered.
     fn close_unfinished_calls(&self) {
         self.close_open_calls("The turn ended before this call finished.");
+        // A call decided and never run, a refused one, leaves no result.
+        self.decided
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
     }
 
     /// Give each call still open a result saying `why` it has none.
@@ -3411,10 +3427,16 @@ impl Shared {
             }
             server.take_finished(&call.name, &arguments)
         });
-        let (host_details, mut images) = match host_finished {
-            Some(finished) => (finished.details, finished.images),
-            None => (None, Vec::new()),
+        let decided = self
+            .decided
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&call.id);
+        let (host_details, mut images, permission) = match host_finished {
+            Some(finished) => (finished.details, finished.images, finished.permission),
+            None => (None, Vec::new(), None),
         };
+        let permission = permission.or(decided.map(Box::new));
         if images.is_empty() {
             images = content_images(&update["content"]);
         }
@@ -3441,6 +3463,7 @@ impl Shared {
         } else if let Some(path) = update["locations"][0]["path"].as_str() {
             result = result.with_details(json!({ "path": absolute(&self.cwd, path) }));
         }
+        result.permission = permission;
         let _ = self.events.send(AgentEvent::ToolExecutionEnd {
             result: result.clone(),
         });
