@@ -227,7 +227,7 @@ impl App {
     }
 
     /// Open the menu bar at project button `index`, its menu open, or at the
-    /// last one when fewer are left, after a project was closed from it.
+    /// last one when fewer are left: back where a project action was asked.
     pub(in crate::app) fn reopen_menu_bar_at_button(&mut self, index: usize) {
         let count = self.open_projects.count();
         if count == 0 {

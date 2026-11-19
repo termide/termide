@@ -48,6 +48,20 @@ wait "Copy project…"
 expect-not "Switch to project"
 key Right
 wait "Switch to project"
-key Esc
-wait-gone "Switch to project"
+
+# F8 asks before closing that project; No brings its menu back.
+key F8
+wait "Close the project?"
+key n
+wait "Switch to project"
+# Yes closes it, and the menu with it: it does not open again on the
+# button left in its place.
+key F8
+wait "Close the project?"
+key y
+wait-gone "project2 | project"
+sleep 0.3
+expect-not "Copy project…"
+expect-not "Close the project?"
+snapshot closed
 quit

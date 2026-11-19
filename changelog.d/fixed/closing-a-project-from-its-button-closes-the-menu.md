@@ -1,0 +1,1 @@
+- **Closing a project from its button's menu closes the menu.** The menu used to open again at once on the button of another project, as if that one were about to be closed next.

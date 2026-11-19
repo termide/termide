@@ -774,6 +774,11 @@ impl App {
             log::info!("Closed project {:?}", root);
         }
         self.sync_open_projects();
+        // A project button left with its project: its menu is not
+        // reopened on whichever button took its place.
+        if matches!(from, ProjectsOrigin::Button(_)) {
+            return Ok(());
+        }
         self.return_to_projects(from)
     }
 
