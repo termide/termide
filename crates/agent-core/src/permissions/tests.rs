@@ -1739,6 +1739,9 @@ fn always_is_offered_only_for_a_bounded_routine_command() {
         "touch newfile",
         "mkdir -p out",
         "git stash push -m wip",
+        // Edits the manifest only; a build runs what it fetches.
+        "cargo add serde",
+        "cargo remove serde",
     ] {
         assert!(offered(c), "{c} should be persistable");
     }
@@ -1754,7 +1757,7 @@ fn always_is_offered_only_for_a_bounded_routine_command() {
         "git branch -D old",
         "cargo publish",
         "cargo install ripgrep",
-        "cargo add serde",
+        "npm add left-pad",
         "dd if=x of=/dev/disk9",
         "kubectl delete pod x",
         "docker rm x",
@@ -3264,4 +3267,38 @@ fn a_project_rule_stays_in_the_project_and_edit_rules_cover_writes() {
     );
     assert_eq!(old.evaluate("edit", "notes/a.md"), Some(Decision::Allow));
     assert_eq!(old.evaluate("write", "notes/a.md"), Some(Decision::Allow));
+}
+
+#[test]
+fn what_a_toolchain_is_and_where_a_program_lives_is_look_only() {
+    for c in [
+        "printf '%s\\n' a b",
+        "command -v cargo",
+        "command -V rg",
+        "type ls",
+        "rustup show",
+        "rustup toolchain list",
+        "rustup target list --installed",
+        "rustup --version",
+        "node --version",
+        "python3 --version",
+        "go version",
+    ] {
+        assert!(is_read_only_command(c), "{c} only looks");
+    }
+    for c in [
+        // Assigns a variable a later command reads.
+        "printf -v x '%s' y",
+        // Runs the program it names.
+        "command cargo build",
+        "rustup update",
+        "rustup target add wasm32-unknown-unknown",
+        // A project's toolchain file may name a toolchain inside it.
+        "cargo --version",
+        "rustc --version",
+        "node --version script.js",
+        "go version -m ./bin",
+    ] {
+        assert!(!is_read_only_command(c), "{c} is not look-only");
+    }
 }

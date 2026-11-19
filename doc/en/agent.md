@@ -1788,7 +1788,8 @@ it will cover, so the card offers it only where the rule says enough to trust.
 **Allow always** appears for one command whose pattern states its scope: not
 for a command made of several parts, which you answered as a whole; not for
 one that destroys what it touches (`rm`, `git clean`, `git push`, `git stash
-drop`, installing or publishing a package); not for one that runs some *other*
+drop`, installing or publishing a package — `cargo add` and `cargo remove`,
+which only edit the manifest, are not); not for one that runs some *other*
 program, whose name the pattern would not show (`env rm`, `xargs rm`,
 `./deploy.sh`, `sh -c …`, `python3 -c …`, `make`, `nix run`). **Allow for
 this session** is withheld only from a command that destroys: it is short
@@ -1872,6 +1873,13 @@ substitution asks), `find` only without `-delete`, `-exec`, `-ok`, `-fprint` or 
 `sort -o` and `sort --compress-program`, `uniq` with an output file,
 `tree -o`/`-R`, `rg --pre`, `--pre-glob` and `--hostname-bin`, and
 `git diff --output` ask, abbreviated long options (`--out=`) included.
+Asking what is installed is look-only too: `printf` without `-v`, which sets
+a variable, `command -v` and `-V`, `type`, `rustup show` and its `toolchain`,
+`target` and `component list`, `go version`, and a bare `--version` of
+common toolchains and tools (`node`, `python3`, `npm`, `uv`, `git`,
+`docker`, …). Not `cargo --version` or `rustc --version`: rustup runs the
+toolchain a project's `rust-toolchain.toml` names, which may be a path
+inside the project.
 A variable's value that bash takes as code asks too, since it runs the
 substitutions in it and a terminal session keeps what an earlier command
 set: an operand of a test's arithmetic comparison that is not a number
