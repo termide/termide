@@ -1031,6 +1031,78 @@ fn look_only_commands_reading_outside_the_project_ask() {
     assert_eq!(request.patterns(), vec!["cat /etc/hosts"]);
 }
 
+/// A wildcard rule such as `cat *` — the one the card offers for a `cat`
+/// that writes a file — vouches for the program, not for every path it is
+/// handed: a read beyond the project, or a redirection writing there, still
+/// asks, unless the rule itself names a place outside.
+#[test]
+fn a_wildcard_allow_vouches_for_the_program_not_for_paths_beyond_the_project() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let configured = "[shell]\n\"cat *\" = \"allow\"\n\"echo *\" = \"allow\"\n\
+                      \"cat /etc/hosts\" = \"allow\"\n\"head /var/log/*\" = \"allow\"\n";
+    let beyond = [
+        "cat /etc/passwd",
+        "cat ~/.ssh/id_rsa",
+        "cat ../other/.env",
+        "cd /etc && cat passwd",
+        "cat notes > /tmp/out",
+        "cat notes >> ~/.zshrc",
+        "echo x >../other/file",
+        "echo x 2> /etc/err",
+        "echo x &>/tmp/log",
+        "echo x > $OUT",
+    ];
+    let inside = [
+        "cat src/main.rs",
+        "cat notes > out.md",
+        "cat > crates/x/Cargo.toml <<'EOF'\n[package]\nEOF",
+        "echo x 2>&1",
+        "echo x > /dev/null",
+        // Rules that name the place outside.
+        "cat /etc/hosts",
+        "head /var/log/system.log",
+    ];
+    for mode in [Mode::Configured, Mode::Auto] {
+        let mut configured = rules(configured);
+        configured.mode = mode;
+        let (hooks, _) = hooks(configured, vec![]);
+        for command in beyond {
+            if home.is_empty() && command.contains('~') {
+                continue;
+            }
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Ask,
+                "{mode:?} {command}"
+            );
+        }
+        for command in inside {
+            assert_eq!(
+                hooks.decide(&bash(command), &ctx()),
+                Decision::Allow,
+                "{mode:?} {command}"
+            );
+        }
+    }
+
+    // An answer for the session is a rule like any other.
+    let mut session = rules("mode = \"ask\"");
+    session.add_session("shell", "cat *", Decision::Allow);
+    let (hooks, asked) = hooks(session, vec![]);
+    assert_eq!(
+        hooks.decide(&bash("cat src/lib.rs"), &ctx()),
+        Decision::Allow
+    );
+    assert_eq!(
+        hooks.decide(&bash("cat /etc/passwd"), &ctx()),
+        Decision::Ask
+    );
+    // What it then asks about is that one read, not `cat *` again.
+    let mut hooks = hooks;
+    hooks.before_tool_call(&bash("cat /etc/passwd"), &ctx());
+    assert_eq!(asked.lock().unwrap()[0].patterns(), vec!["cat /etc/passwd"]);
+}
+
 /// A `$` expands only before a name, a parameter, a brace, a parenthesis
 /// or a bracket (and outside double quotes before a quote, `$'…'` being a
 /// quote of its own); anywhere else it is a plain character, so a pattern
