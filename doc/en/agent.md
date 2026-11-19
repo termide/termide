@@ -1759,6 +1759,15 @@ cannot be told (after `cd $DIR`, `cd -` or a subshell) or that runs a
 substitution is marked "this time only": no rule is recorded for it, and
 when no part can have one, the card offers only allow once and deny.
 
+A rule with a wildcard vouches for the program, not for every path handed
+to it. `cat *` lets `cat src/main.rs` and `cat > notes.md` through, but a
+look-only command reading outside the project (`cat ~/.ssh/id_rsa`) and a
+redirection writing a file there or to a path no one can see beforehand
+(`> /tmp/out`, `> $OUT`) still ask, as if no rule matched; an answer to such
+a card records that one command. A rule counts for them when it states the
+place itself: one without a wildcard, which names the whole command, or one
+naming a path outside (`head /var/log/*`).
+
 An answer that outlasts the call is a decision made without seeing the calls
 it will cover, so the card offers it only where the rule says enough to trust.
 **Allow always** appears for one command whose pattern states its scope: not

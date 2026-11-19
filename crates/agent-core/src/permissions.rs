@@ -1015,6 +1015,30 @@ impl PermissionHooks {
         configured.into_iter().chain(session).max()
     }
 
+    /// Whether an `allow` rule that counts in the mode and matches `part`
+    /// states where it may reach: a rule without a wildcard, which names
+    /// one command whole, or one that names a place outside the project
+    /// (`head /var/log/*`).
+    fn allow_names_the_place(&self, part: &ShellPart) -> bool {
+        let mode = self.mode.get();
+        let rules = &self.rules;
+        let configured = [&rules.tools, &rules.granted]
+            .into_iter()
+            .filter(|_| matches!(mode, Mode::Configured | Mode::Auto));
+        let session = std::iter::once(&rules.session).filter(|_| mode != Mode::All);
+        configured
+            .chain(session)
+            .flat_map(|tables| tool_tables(tables, SHELL_TOOL))
+            .flatten()
+            .filter(|(pattern, decision)| {
+                **decision == Decision::Allow
+                    && !(mode == Mode::Auto && broad_allow(SHELL_TOOL, pattern))
+                    && (wildcard_match(pattern, &part.text)
+                        || wildcard_match(pattern, &part.resolved))
+            })
+            .any(|(pattern, _)| !pattern.contains('*') || names_a_place_outside(pattern))
+    }
+
     /// A shell command's verdict, and the parts it asks about. Each part is
     /// judged on its own, as written and with its program's path resolved;
     /// a whole-command rule can tighten a multi-part command but never
@@ -1047,6 +1071,16 @@ impl PermissionHooks {
                 // whose directory is unknown; the parts beside them, which a
                 // rule does cover, are not dragged into it.
                 Some(Decision::Allow) if part.substituted || !part.savable => Decision::Ask,
+                // A wildcard rule vouches for the program, not for each path
+                // it is handed: `cat *` covers `cat src/x` and `cat > notes`,
+                // and a read or a write beyond the project asks unless the
+                // rule names the place itself.
+                Some(Decision::Allow)
+                    if reaches_beyond(&part, &ctx.cwd) && !self.allow_names_the_place(&part) =>
+                {
+                    reads_out = true;
+                    Decision::Ask
+                }
                 Some(decision) => decision,
                 None if mode == Mode::All => Decision::Allow,
                 // A look-only command reading beyond the project asks, as
@@ -2005,8 +2039,12 @@ pub fn shell_parts_in(command: &str, shell: ShellSyntax, cwd: &Path) -> Vec<Shel
                 "popd" => dir = stack.pop().flatten(),
                 _ => {}
             }
-            // A subshell's `cd` may or may not last; do not guess.
-            if text.starts_with('(') || text.ends_with(')') || in_moving_loop {
+            // A subshell's `cd` may or may not last; do not guess. Its end is
+            // a `)` nothing in the part opened: the one closing `$(date)`
+            // ends a substitution, not a subshell.
+            let closes_subshell =
+                text.ends_with(')') && text.matches(')').count() > text.matches('(').count();
+            if text.starts_with('(') || closes_subshell || in_moving_loop {
                 dir = None;
             }
             ShellPart {
@@ -2170,6 +2208,55 @@ fn reads_outside(part: &ShellPart, project: &Path) -> bool {
             }
         }
         words_read_outside(head, reader, &expanded, dir, &project)
+    })
+}
+
+/// Whether `part` reaches beyond `project`: a look-only command that reads
+/// there ([`reads_outside`]), or a redirection that writes a file there or
+/// to a path no one can see beforehand (`> $OUT`).
+fn reaches_beyond(part: &ShellPart, project: &Path) -> bool {
+    (is_read_only_command(&part.text) && reads_outside(part, project))
+        || writes_outside(part, project)
+}
+
+/// Whether a redirection of `part` writes a file outside `project`. A
+/// here-document's body is data, so only the line that opens it counts.
+fn writes_outside(part: &ShellPart, project: &Path) -> bool {
+    let line = part.text.lines().next().unwrap_or("");
+    let line = without_harmless_redirections(line);
+    let project = real_path(project);
+    let words: Vec<&str> = line.split_whitespace().collect();
+    words.iter().enumerate().any(|(i, word)| {
+        let Some(rest) = word
+            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '&')
+            .strip_prefix('>')
+        else {
+            return false;
+        };
+        let rest = rest.trim_start_matches(['>', '|']);
+        let target = if rest.is_empty() {
+            words.get(i + 1).copied().unwrap_or("")
+        } else {
+            rest
+        };
+        let target = target.trim_matches(['"', '\'']);
+        if target.starts_with('&') {
+            return false;
+        }
+        target.contains(['$', '`']) || path_outside(target, part.dir.as_deref(), &project)
+    })
+}
+
+/// Whether a rule's pattern names a place outside the project: a word that
+/// is an absolute path, starts at a home directory or steps up with `..`,
+/// a redirection's target included.
+fn names_a_place_outside(pattern: &str) -> bool {
+    pattern.split_whitespace().any(|word| {
+        let word = word
+            .trim_start_matches(|c: char| c.is_ascii_digit() || c == '&')
+            .trim_start_matches(['>', '<', '|'])
+            .trim_matches(['"', '\'']);
+        word.starts_with(['/', '~']) || word.split('/').any(|c| c == "..")
     })
 }
 
