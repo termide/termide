@@ -678,6 +678,8 @@ impl Translation for RuntimeTranslation {
         agent_perm_allow_always_global,
         agent_perm_deny,
         agent_perm_deny_session,
+        agent_perm_scope_title,
+        agent_perm_scope_project,
         agent_perm_part_once,
         agent_perm_deny_reason,
         agent_perm_stop,

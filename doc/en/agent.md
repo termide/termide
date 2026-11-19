@@ -1671,7 +1671,17 @@ for this session, in `configured` and `auto` also allow always in this project a
 allow always everywhere, then deny, deny for this session, **deny and tell the
 agent why** (a sentence you type, returned to the model as the reason, so it
 can take another way), and **stop the run**. The rows that outlast the call
-name the pattern they record (`cargo build *`, a site, a path). `↑`/`↓` and
+name the pattern they record (`cargo build *`, a site, a path). Where a rule
+could reach further than this one call — a file, or a single command — those
+rows end in `…` instead, and picking one turns the card to a second step that
+lists how far the rule reaches, narrow to broad: for a file the file itself,
+up to three of its folders (`src/app/**`) and, inside the project, the whole
+project (`./**`), the nearest folder selected; for a command the command as
+written and its subcommand (`cargo build *`) or its program (`ls *`), the
+broader one selected. A program that runs other programs (`env`, `sudo`,
+`./deploy.sh`) is offered as written only, and a folder outside the project
+stops short of your home directory. `Esc` or `←` there goes back to the
+first step. `↑`/`↓` and
 `Enter`, or the row's digit, answer it; a click picks a row and a second click
 (or `Enter`) confirms it, so a stray click cannot answer; `Esc` stops the run.
 The status line announces the question too, so a panel that is not in focus
@@ -1725,7 +1735,12 @@ mode = "auto"       # ask | plan | edit | configured | auto (default) | all — 
 ```
 
 In a pattern, `*` stands for any text and a leading `**/` is optional, so
-`**/.env*` also matches `.env` in the project root. Shell commands are matched
+`**/.env*` also matches `.env` in the project root. For the file tools a
+pattern starting with `./` matches only inside the project, so `./**` is the
+whole project and nothing outside it, where `**` would match any path. The
+`edit` rules cover `write` too, the tool that writes a whole file: a rule
+recorded for either is kept under `edit`, and a `[ai.permissions.write]`
+table still counts for both. Shell commands are matched
 per part: `cargo build && rm -rf target` needs both halves allowed, and a deny
 on either half stops the whole command. A background `&` separates parts as
 `;` does, so `cargo test & rm -rf src` is two commands, while the `&` of a

@@ -3206,7 +3206,7 @@ impl CliDrive<'_> {
             for envelope in self.permission_rx.into_iter().flat_map(|rx| rx.try_iter()) {
                 let _ = envelope
                     .reply
-                    .send(PermissionAnswer::DenyWithReason(self.refusal.to_string()));
+                    .send(PermissionAnswer::DenyWithReason(self.refusal.to_string()).into());
             }
             let mut ended = false;
             for event in backend.drain() {

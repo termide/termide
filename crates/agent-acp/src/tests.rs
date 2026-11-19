@@ -262,7 +262,7 @@ fn drain_until_end(
             // The subject is derived from the call, as for the built-in
             // agent: the project-relative path, not the ACP title.
             assert_eq!(envelope.request.subject, "notes.md");
-            envelope.reply.send(answer.clone()).unwrap();
+            envelope.reply.send(answer.clone().into()).unwrap();
         }
         if events.iter().any(|e| matches!(e, AgentEvent::AgentEnd)) {
             return events;
@@ -2544,7 +2544,10 @@ fn without_a_model_to_review_with_the_user_is_asked() {
         assert!(Instant::now() < deadline, "nobody was asked");
         std::thread::sleep(Duration::from_millis(5));
     };
-    envelope.reply.send(PermissionAnswer::AllowOnce).unwrap();
+    envelope
+        .reply
+        .send(PermissionAnswer::AllowOnce.into())
+        .unwrap();
     let events = events_until(&runtime, |e| matches!(e, AgentEvent::AgentEnd));
     assert!(logged(&events).contains(&"assistant:yes".to_string()));
 }
