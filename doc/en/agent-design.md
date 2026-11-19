@@ -808,8 +808,8 @@ A long list folds around the step at hand. termide used to drop the updates.
 Named a checklist, not tasks or a plan: `task` is delegation to a subagent
 and `plan` is plan mode, and a third meaning of either would blur both.
 
-Planned, a `checklist` tool for the built-in loop and the MCP tools served to
-Claude Code (whose own `TodoWrite` goes with its built-in tools), feeding the
+The `checklist` tool, for the built-in loop and the MCP tools served to
+Claude Code (whose own `TodoWrite` goes with its built-in tools), feeds the
 same list:
 
 - **One tool writing the whole list**, not add/update/remove: no ids for the
@@ -818,12 +818,15 @@ same list:
 - **Not in the system prompt.** A section that changes with each check
   breaks the prompt cache from the first token, and Claude Code takes the
   system prompt once per session (the plan-mode lesson of 4a). The tool's
-  result carries the list back; after a compaction an unfinished list comes
-  back as a `<system-reminder>` note, as plan mode's does. No stale-list
-  nagging.
-- Read-only, so plan mode allows it; its description keeps it to tasks of
-  three steps or more, one step in progress at a time; a subagent's list is
-  its own panel's.
+  result carries the list back to the panel; while a step is left, the list
+  rides each model call as an end-of-request `<system-reminder>` note, as the
+  open terminal sessions do — after the cached prefix, so it costs no cache,
+  and it outlives a compaction. No stale-list nagging. Claude Code, which
+  takes no such note, has the list in its tool results only.
+- Read-only, so plan mode allows it, but run alone, so two writes in one
+  reply keep their order; its description keeps it to tasks of three steps
+  or more, one step in progress at a time; a subagent keeps a list of its
+  own, reminded of it but not shown.
 - To be measured on the Terminal-Bench subset with and without it, on the
   local model and on Claude, before it is on by default for small models.
 

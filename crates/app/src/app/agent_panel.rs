@@ -2694,6 +2694,7 @@ impl Subagents {
                 terminals::agent_terminals().clone();
             agent = agent
                 .with_session_id(terminals_owner.clone())
+                .with_context_note(termide_agent_core::checklist::context_note())
                 .with_context_note(termide_agent_core::terminals::context_note(terminals));
         }
 

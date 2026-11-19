@@ -395,3 +395,39 @@ fn an_unfinished_checklist_stays_through_the_next_request() {
     panel.send("go on".to_string());
     assert_eq!(panel.checklist, list);
 }
+
+/// The built-in agent's `checklist` call sets the strip's list from what its
+/// result carries, and the reminder of each model call reads the same list;
+/// a call that failed leaves both as they were.
+#[test]
+fn the_checklist_tool_sets_the_list_the_strip_shows_and_the_agent_is_reminded_of() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![reply("ok")])
+    });
+    panel.send("plan it".to_string());
+    let list = steps(&[
+        ("Read", ChecklistStatus::Done),
+        ("Fix", ChecklistStatus::InProgress),
+    ]);
+    let call = ToolCall {
+        id: "c1".into(),
+        name: "checklist".into(),
+        arguments: serde_json::json!({ "items": list }),
+        extra_content: None,
+    };
+    panel.apply(AgentEvent::ToolExecutionEnd {
+        result: ToolResultMessage::text(&call, "Checklist")
+            .with_details(serde_json::json!({ "checklist": list })),
+    });
+    assert_eq!(panel.checklist, list);
+    let id = panel.session.as_ref().expect("a session").id().to_string();
+    assert_eq!(termide_agent_core::checklist::current(&id), list);
+
+    panel.apply(AgentEvent::ToolExecutionEnd {
+        result: ToolResultMessage::error(&call, "bad status")
+            .with_details(serde_json::json!({ "checklist": [] })),
+    });
+    assert_eq!(panel.checklist, list);
+}

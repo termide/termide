@@ -2301,7 +2301,7 @@ fn the_catalog_turns_definitions_into_profiles() {
     assert_eq!(review.mode, Some(termide_agent_core::Mode::Auto));
 
     let default = catalog.resolve(DEFAULT_AGENT).unwrap();
-    // The built-in four and `terminals`, plus the two that speak to the
+    // The built-in four, `checklist` and `terminals`, plus the two that speak to the
     // user watching the panel, `question` and the `suggest_*` cards, and
     // the two that speak to the agents of the other panels, `fork`, and
     // the debugger.
@@ -2312,6 +2312,7 @@ fn the_catalog_turns_definitions_into_profiles() {
             "edit",
             "write",
             "shell",
+            "checklist",
             "terminals",
             "question",
             "suggest_command",

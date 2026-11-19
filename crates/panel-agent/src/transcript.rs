@@ -2238,6 +2238,30 @@ fn tool_headline(
             let first = prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
             action("&", t.agent_tool_fork(), first.trim().to_string())
         }
+        // The checklist written: how far it stands and the step at hand, as
+        // its rule in the state strip counts; cleared, nothing.
+        "checklist" => {
+            fn status(item: &serde_json::Value) -> &str {
+                item["status"].as_str().unwrap_or("")
+            }
+            let items = call.arguments["items"].as_array();
+            let total = items.map_or(0, Vec::len);
+            let done = items.map_or(0, |list| {
+                list.iter()
+                    .filter(|i| matches!(status(i), "done" | "completed"))
+                    .count()
+            });
+            let current = items
+                .and_then(|list| list.iter().find(|i| status(i) == "in_progress"))
+                .and_then(|i| i["text"].as_str())
+                .map(crate::single_line);
+            let subject = match (total, current) {
+                (0, _) => String::new(),
+                (_, Some(step)) => format!("{done}/{total} · {}", step.trim()),
+                (_, None) => format!("{done}/{total}"),
+            };
+            action("✓", t.agent_tool_checklist(), subject)
+        }
         // What the agent set going: listed, or one of it stopped by its id.
         "jobs" => match arg("stop").trim() {
             "" => action("&", t.agent_tool_jobs(), String::new()),

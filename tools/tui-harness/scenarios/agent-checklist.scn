@@ -1,0 +1,20 @@
+# The built-in agent's `checklist` tool: each call's headline counts the
+# list, the state strip shows it under its titled rule, and the note at the
+# end of the next request reminds the model of the unfinished list.
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "keep a checklist"
+key Enter
+wait "Reminded:" 20
+expect "Updating the checklist ▸ 0/3 · Read the report"
+expect "Updating the checklist ▸ 2/3 · Run the tests"
+expect "╌╌ Checklist 2/3 ╌"
+expect "✓ Flag the critical items"
+expect "▸ Run the tests"
+expect "Reminded: yes."
+snapshot checklist
+quit

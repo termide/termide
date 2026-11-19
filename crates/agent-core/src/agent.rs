@@ -360,7 +360,8 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
 pub fn runs_alongside(call: &ToolCall, tools: &ToolRegistry) -> bool {
     match call.name.as_str() {
         "task" => true,
-        "question" | "suggest_command" | "suggest_goal" | "suggest_loop" => false,
+        // A checklist written twice in one reply keeps the later list.
+        "question" | "suggest_command" | "suggest_goal" | "suggest_loop" | "checklist" => false,
         _ => {
             let shell = tools
                 .get(&call.name)
@@ -720,9 +721,9 @@ pub struct Agent {
     /// or none when nothing else holds it. The loop waits at its step
     /// boundaries while it is set, and goes on where it stood once lifted.
     pause_gate: Option<PauseGate>,
-    /// A note for the model at each call, about the session's state; see
+    /// Notes for the model at each call, about the session's state; see
     /// [`ContextNote`].
-    context_note: Option<ContextNote>,
+    context_notes: Vec<ContextNote>,
 }
 
 /// What the model is told at each of its calls about the state of the
@@ -781,14 +782,14 @@ impl Agent {
             session_id: None,
             panel: None,
             pause_gate: None,
-            context_note: None,
+            context_notes: Vec::new(),
         }
     }
 
     /// Tell the model what `note` says at each of its calls.
     #[must_use]
     pub fn with_context_note(mut self, note: ContextNote) -> Self {
-        self.context_note = Some(note);
+        self.context_notes.push(note);
         self
     }
 
@@ -1530,11 +1531,12 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) -> (AssistantMessage, Option<CallCut>) {
-        let noted = self
-            .context_note
-            .as_ref()
-            .and_then(|note| note(self.session_id.as_deref()))
-            .map(|note| with_note(&self.messages, &note));
+        let notes: Vec<String> = self
+            .context_notes
+            .iter()
+            .filter_map(|note| note(self.session_id.as_deref()))
+            .collect();
+        let noted = (!notes.is_empty()).then(|| with_note(&self.messages, &notes.join("\n\n")));
         let request = Request {
             model: &self.model,
             system_prompt: &self.system_prompt,

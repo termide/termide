@@ -2212,6 +2212,7 @@ fn the_calls_that_ask_no_one_pass_every_mode_and_the_plan_guard() {
         call("agents", json!({})),
         call("jobs", json!({})),
         call("jobs", json!({ "stop": "t1" })),
+        call("checklist", json!({ "items": [] })),
         call("suggest_command", json!({ "command": "make" })),
         call("terminals", json!({})),
         call("terminals", json!({ "action": "read", "session": "dev" })),

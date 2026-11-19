@@ -3,6 +3,7 @@
 //! Four tools cover what a coding agent needs on a local checkout: `read`,
 //! `edit`, `write` and `shell`; `skill` joins them when the project or the
 //! user defines skills, `question` when someone watches the run to answer.
+//! `checklist` keeps the steps of the work at hand.
 //! The tools that reach the rest of termide (`terminals`, `debug`, `task`,
 //! `jobs`, `agents`, `send_message`, `fork`, `suggest_*`) live here too, but
 //! the app registers them, since it owns what they reach.
@@ -16,6 +17,7 @@
 mod args;
 mod autorun;
 mod capture;
+mod checklist;
 mod clean;
 mod debug;
 mod edit;
@@ -39,6 +41,7 @@ use std::sync::Arc;
 use termide_agent_core::ToolRegistry;
 
 pub use autorun::{SuggestGoalTool, SuggestLoopTool};
+pub use checklist::ChecklistTool;
 pub use clean::{clean_output, Cleaned};
 pub use debug::{parse_action as parse_debug_action, DebugAction, DebugCheck, DebugRun, DebugTool};
 pub use edit::EditTool;
@@ -59,7 +62,8 @@ pub use task::{SubagentOutcome, SubagentRun, SubagentTask, TaskTool};
 pub use terminals::TerminalsTool;
 pub use write::WriteTool;
 
-/// The default registry: `read`, `edit`, `write`, `shell`, in prompt order.
+/// The default registry: `read`, `edit`, `write`, `shell`, `checklist`, in
+/// prompt order.
 /// `shim_path` is the command-shim directory prepended to `shell`'s `PATH`
 /// (the configuration-level `shims/`); `None` leaves `PATH` untouched.
 #[must_use]
@@ -72,5 +76,6 @@ pub fn builtin_tools(shim_path: Option<PathBuf>) -> ToolRegistry {
         shim_path,
         ..ShellTool::default()
     }));
+    registry.insert(Arc::new(ChecklistTool));
     registry
 }

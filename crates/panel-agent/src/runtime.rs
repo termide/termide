@@ -384,6 +384,8 @@ pub(crate) fn spawn_runtime(
         // middle of the call that asked.
         agent = agent.with_shell_run(run);
     }
+    // The agent hears of its unfinished checklist at each model call.
+    agent = agent.with_context_note(termide_agent_core::checklist::context_note());
     if let Some(terminals) = terminals {
         // The agent hears of its open terminal sessions at each model call.
         agent = agent.with_context_note(termide_agent_core::terminals::context_note(Arc::clone(

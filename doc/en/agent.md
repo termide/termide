@@ -1249,7 +1249,8 @@ and **send_message** (see
 [Debugging](#debugging)), and **task**, which hands a job to another agent,
 with **jobs**, which lists and stops what the agent set going (see
 [Subagents](#subagents) and
-[What the agent set going](#what-the-agent-set-going)).
+[What the agent set going](#what-the-agent-set-going)), and **checklist**,
+described after the list.
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
 `fetch`, `web_search`, `skill`, `agents`, `jobs` listing, `debug` reading the
@@ -1370,6 +1371,18 @@ the goal or loop is yours, stopped as any other. Offering costs no permission,
 in plan mode too, where the goal's turns run under plan mode like a request
 you type. Like `question`, these tools belong to the panel's agent alone,
 Claude Code included.
+
+**checklist** keeps the steps of the work at hand, which you see heading the state
+strip as they are ticked off. Each call writes the
+whole list — every step with `pending`, `in_progress` or `done` — and an
+empty list clears it; the call's headline counts it
+(`✓ Updating the checklist 2/3 · Run the tests`). The agent keeps one for work
+of three steps or more, with one step in progress at a time. The list is not
+in the system prompt: while a step is left, it rides at the end of each
+request to the model, as the open terminal sessions do, so it outlives a
+compaction. Writing it needs no permission, in plan mode too. Claude Code on
+termide's tools has it in place of its own `TodoWrite`; a subagent keeps a
+list of its own, which its panel's strip does not show.
 
 ### Terminal sessions
 
@@ -2770,8 +2783,8 @@ to change how the answer is drawn or cited.
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `shell`, `question`,
 `suggest_command`, `suggest_goal`, `suggest_loop`, `task`, `skill`, `fetch`,
-`web_search`, `recall`, `agents`, `send_message`, `fork`, `debug`, `jobs` and
-`terminals`, seeded
+`web_search`, `recall`, `agents`, `send_message`, `fork`, `debug`, `jobs`,
+`checklist` and `terminals`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list

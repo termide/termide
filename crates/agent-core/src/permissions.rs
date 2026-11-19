@@ -171,8 +171,9 @@ fn not_read_only(call: &ToolCall, shell: ShellSyntax) -> Option<String> {
         // The web tools read the web; nothing on this machine changes. A
         // question to the user changes nothing either, nor does `recall`,
         // which only reads the project's history and code, or `agents`,
-        // which lists the panels.
-        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "agents" => None,
+        // which lists the panels, nor `checklist`, the agent's own notes.
+        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "agents"
+        | "checklist" => None,
         // Listing what the agent set going changes nothing; stopping it does.
         "jobs" if call.arguments.get("stop").is_none() => None,
         // Reading the debug session changes nothing; every other action runs
@@ -233,7 +234,7 @@ fn asks_no_one(call: &ToolCall) -> bool {
         // `recall` reads the project's own session logs (under the
         // configuration directory), its git history and its code; `agents`
         // lists the panels; a skill's text may live outside the project.
-        "skill" | "question" | "recall" | "agents" | "jobs" | "suggest_command"
+        "skill" | "question" | "recall" | "agents" | "jobs" | "checklist" | "suggest_command"
         | "suggest_goal" | "suggest_loop" => true,
         // Typing into a terminal is judged by what it types.
         "terminals" => call.arguments["action"].as_str() != Some("send"),

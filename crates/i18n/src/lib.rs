@@ -1341,6 +1341,9 @@ pub trait Translation: Send + Sync {
     fn agent_tool_skill(&self) -> &str;
     /// Agent transcript: the action words for a `task` call (a subagent).
     fn agent_tool_task(&self) -> &str;
+    /// Agent transcript: the action words for a `checklist` call, before how
+    /// far the list stands and its step at hand.
+    fn agent_tool_checklist(&self) -> &str;
     /// Agent transcript: the action words for a `jobs` call listing what the
     /// agent set going.
     fn agent_tool_jobs(&self) -> &str;

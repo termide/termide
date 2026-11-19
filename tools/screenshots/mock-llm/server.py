@@ -205,6 +205,33 @@ NOTES_SCRIPT = [
 ]
 
 
+# A sixth, played when the user asks to "keep a checklist" (the TUI
+# harness's agent-checklist): the agent writes its checklist, ticks a step,
+# then says whether the end-of-request note reminded it of the list.
+CHECKLIST = "keep a checklist"
+CHECKLIST_NOTE = "Your checklist (keep it current with `checklist`)"
+
+
+def checklist_step(done, messages):
+    steps = ["Read the report", "Flag the critical items", "Run the tests"]
+
+    def items(finished):
+        return [
+            {
+                "text": text,
+                "status": "done" if i < finished else "in_progress" if i == finished else "pending",
+            }
+            for i, text in enumerate(steps)
+        ]
+
+    if done == 0:
+        return {"reasoning": "", "text": "A checklist first.", "tool": ("checklist", {"items": items(0)})}
+    if done == 1:
+        return {"reasoning": "", "text": "One step done.", "tool": ("checklist", {"items": items(2)})}
+    reminded = any(CHECKLIST_NOTE in content_of(m) for m in messages)
+    return {"reasoning": "", "text": "Reminded: %s." % ("yes" if reminded else "no"), "tool": None}
+
+
 def lsp_echo(messages):
     """The final step of BREAK: the first lines of the edit's LSP note."""
     for message in messages:
@@ -289,6 +316,8 @@ class Handler(BaseHTTPRequestHandler):
             main = any(DELEGATE in u for u in users)
             if any(BREAK in u for u in users):
                 step = BREAK_SCRIPT[done] if done < len(BREAK_SCRIPT) else lsp_echo(messages)
+            elif any(CHECKLIST in u for u in users):
+                step = checklist_step(done, messages)
             elif any(NOTES in u for u in users):
                 step = NOTES_SCRIPT[min(done, len(NOTES_SCRIPT) - 1)]
             elif any(MESSAGE in u for u in users):

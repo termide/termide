@@ -465,6 +465,9 @@ impl AgentPanel {
                     self.pending_events
                         .push(PanelEvent::FileChangedOnDisk(path));
                 }
+                if let Some(items) = termide_agent_core::checklist::of_result(&result) {
+                    self.set_checklist(items);
+                }
                 let id = result.tool_call_id.clone();
                 let finished = now_hms();
                 // A wait on a permission answer is the call's pause, not its
@@ -1042,6 +1045,8 @@ impl AgentPanel {
             if let Err(error) = session.append_checklist(&items) {
                 log::warn!("agent session write failed: {error}");
             }
+            // The agent's reminder reads the same list.
+            termide_agent_core::checklist::remember(session.id(), &items);
         }
         self.checklist = items;
     }
@@ -1053,6 +1058,9 @@ impl AgentPanel {
             .as_ref()
             .map(crate::Session::checklist)
             .unwrap_or_default();
+        if let Some(session) = &self.session {
+            termide_agent_core::checklist::remember(session.id(), &self.checklist);
+        }
     }
 
     /// Start the context's fill at how full the log says it last stood, an

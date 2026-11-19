@@ -867,6 +867,7 @@ impl Translation for RuntimeTranslation {
         agent_tool_recall,
         agent_tool_skill,
         agent_tool_task,
+        agent_tool_checklist,
         agent_tool_jobs,
         agent_tool_jobs_stop,
         agent_tool_fork,
