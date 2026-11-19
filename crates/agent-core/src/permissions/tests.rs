@@ -1068,7 +1068,8 @@ fn look_only_commands_reading_outside_the_project_ask() {
 /// A wildcard rule such as `cat *` — the one the card offers for a `cat`
 /// that writes a file — vouches for the program, not for every path it is
 /// handed: a read beyond the project, or a redirection writing there, still
-/// asks, unless the rule itself names a place outside.
+/// asks, unless the rule itself names a place outside. The system's
+/// temporary directories take a redirection as the project does.
 #[test]
 fn a_wildcard_allow_vouches_for_the_program_not_for_paths_beyond_the_project() {
     let home = std::env::var("HOME").unwrap_or_default();
@@ -1079,11 +1080,11 @@ fn a_wildcard_allow_vouches_for_the_program_not_for_paths_beyond_the_project() {
         "cat ~/.ssh/id_rsa",
         "cat ../other/.env",
         "cd /etc && cat passwd",
-        "cat notes > /tmp/out",
         "cat notes >> ~/.zshrc",
+        "cat notes > /tmp/../etc/out",
+        "cat notes > /tmp/.*",
         "echo x >../other/file",
         "echo x 2> /etc/err",
-        "echo x &>/tmp/log",
         "echo x > $OUT",
     ];
     let inside = [
@@ -1092,6 +1093,9 @@ fn a_wildcard_allow_vouches_for_the_program_not_for_paths_beyond_the_project() {
         "cat > crates/x/Cargo.toml <<'EOF'\n[package]\nEOF",
         "echo x 2>&1",
         "echo x > /dev/null",
+        "cat notes > /tmp/out",
+        "echo x &>/tmp/log",
+        "echo x >> /var/tmp/log",
         // Rules that name the place outside.
         "cat /etc/hosts",
         "head /var/log/system.log",

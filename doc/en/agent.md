@@ -1787,14 +1787,14 @@ A rule with a wildcard vouches for the program, not for every path handed
 to it. `cat *` lets `cat src/main.rs` and `cat > notes.md` through, but a
 look-only command reading outside the project (`cat ~/.ssh/id_rsa`) and a
 redirection writing a file there or to a path no one can see beforehand
-(`> /tmp/out`, `> $OUT`) still ask, as if no rule matched; an answer to such
+(`> ~/.zshrc`, `> $OUT`) still ask, as if no rule matched; an answer to such
 a card records that one command. So does any other command reaching out of
 the project with such a rule: `cp *` copies inside it, but
 `cp ~/.ssh/id_rsa .`, `rm -rf ../sibling`, `git -C ../other commit` and
 `cd /etc && make` ask, as do a variable whose value cannot be seen
 (`cp $SRC .`) and a directory that cannot be told. The system's scratch
 places — `/tmp`, `/var/tmp` and `$TMPDIR` — and `/dev/null` count as inside
-for them, and the words a program takes as data rather than paths are not
+for them and for redirections, and the words a program takes as data rather than paths are not
 judged: `awk`'s and `sed`'s program, `jq`'s filter, a commit message, the
 host and remote command of `ssh`, the endpoint of `gh api`. A rule counts for
 them when it states the place itself: one without a wildcard, which names
