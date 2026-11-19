@@ -1379,6 +1379,54 @@ fn a_loop_that_changes_directory_leaves_it_unknown() {
     assert_eq!(dirs, vec![Some(PathBuf::from("/proj")), None, None, None]);
 }
 
+/// What follows `find`'s starting points is an expression: its values are
+/// names and patterns, read as no path, save those of the tests that name
+/// a file. A pattern spelled like a dotfile or a parent stays inside.
+#[test]
+fn find_patterns_are_not_paths() {
+    let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+    let (edit, _) = hooks(rules("mode = \"edit\""), vec![]);
+    for command in [
+        "find . -maxdepth 3 -not -path '*/.git*'",
+        "find . -maxdepth 3 -not -path '*/.git*' | head -100",
+        "ls -la; find . -not -path './target*' -not -path '*/.git*'",
+        "find . -name '.env*'",
+        "find src -iname '.*rc' -o -path '*/.cache/*'",
+        "find . -path '../x' -prune",
+        "find . \\( -name '.*' ! -name . \\) -type f",
+        "find . -newermt '2 days ago'",
+        "find -x . -name '.git*'",
+    ] {
+        assert_eq!(
+            plan.decide(&bash(command), &ctx()),
+            Decision::Allow,
+            "{command}"
+        );
+        assert_eq!(
+            edit.decide(&bash(command), &ctx()),
+            Decision::Allow,
+            "{command}"
+        );
+    }
+    // Starting points and the files the tests compare with are read.
+    for command in [
+        "find .. -name x",
+        "find src /etc -name x",
+        "find -f /etc -name x",
+        "find -x /etc",
+        "find . -newer /etc/passwd",
+        "find . -anewer ../other/x",
+        "find . -samefile /etc/hosts",
+        "find . -files0-from /etc/list",
+    ] {
+        assert_eq!(
+            plan.decide(&bash(command), &ctx()),
+            Decision::Ask,
+            "{command}"
+        );
+    }
+}
+
 /// The tree walks that follow symlinks can be led out of the project by
 /// one inside it, so they ask wherever an outside read asks.
 #[test]

@@ -1879,6 +1879,9 @@ can lead it anywhere. So do `env` and `printenv`
 without arguments, which print every secret in the environment. A grep or
 `rg` pattern is not taken for a path (`rg /api/ src` does not ask), nor is a
 `$` that starts no expansion a variable (`rg "foo$" src` does not ask).
+`find` reads its starting points and the files `-newer`, `-anewer`,
+`-cnewer`, `-samefile` and `-files0-from` name; the rest of its expression is
+names and patterns, so `find . -not -path '*/.git*'` does not ask.
 The variable of a `for` loop over words that each name a path inside the
 project — literals or globs, as a path argument would — reads inside it:
 `for f in *.rs src/*.toml; do wc -l $f; done` does not ask. The loop's body

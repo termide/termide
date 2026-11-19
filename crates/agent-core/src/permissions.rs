@@ -2288,6 +2288,7 @@ fn words_read_outside(
     };
     let mut operands_only = false;
     let mut operands = 0;
+    let mut find_words = Vec::new();
     let mut i = 0;
     while i < args.len() {
         let word = args[i];
@@ -2315,6 +2316,10 @@ fn words_read_outside(
         if !reader {
             continue;
         }
+        if head == "find" {
+            find_words.push(word);
+            continue;
+        }
         if !operands_only && word == "--" {
             operands_only = true;
             continue;
@@ -2339,6 +2344,9 @@ fn words_read_outside(
         }
         operands += 1;
     }
+    if find_reads_outside(&find_words, outside) {
+        return true;
+    }
     // Without a file to read the others read standard input; these read
     // the directory they run in, and `git` that repository's config.
     let reads_dir = match head {
@@ -2354,6 +2362,60 @@ fn words_read_outside(
         _ => false,
     };
     reads_dir && dir.is_none_or(|dir| !real_path(dir).starts_with(project))
+}
+
+/// Whether `find` with `args` reads beyond the project by `outside`: at
+/// its starting points (BSD's `-f path` among them), or at a file one of
+/// its tests compares with or takes the starting points from. The rest of
+/// the expression is names and patterns (`-path '*/.git*'`), no path.
+fn find_reads_outside(args: &[&str], outside: impl Fn(&str) -> bool) -> bool {
+    let mut i = 0;
+    // Leading options: GNU `-H -L -P -D debug -O3`, BSD `-E -H -L -P -X -d
+    // -s -x` and `-f path`.
+    while let Some(&arg) = args.get(i) {
+        i += 1;
+        match arg {
+            "-D" => i += 1,
+            "-f" => match args.get(i) {
+                Some(path) if outside(path) => return true,
+                _ => i += 1,
+            },
+            "--" => break,
+            _ if arg.starts_with("-O")
+                || arg.len() > 1
+                    && arg
+                        .strip_prefix('-')
+                        .is_some_and(|flags| flags.chars().all(|c| "EHLPXdsx".contains(c))) => {}
+            _ => {
+                i -= 1;
+                break;
+            }
+        }
+    }
+    // The starting points, up to the expression.
+    while let Some(&arg) = args.get(i) {
+        if arg.starts_with('-') || matches!(arg, "(" | ")" | "!" | ",") {
+            break;
+        }
+        if outside(arg) {
+            return true;
+        }
+        i += 1;
+    }
+    // `-newerXY` compares with a file too, save the `t` form's time.
+    let names_file = |test: &str| {
+        matches!(test, "-samefile" | "-anewer" | "-cnewer" | "-files0-from")
+            || test
+                .strip_prefix("-newer")
+                .is_some_and(|xy| xy.is_empty() || !xy.ends_with('t'))
+    };
+    let mut expression = args[i.min(args.len())..].iter();
+    while let Some(arg) = expression.next() {
+        if names_file(arg) && expression.next().is_some_and(|file| outside(file)) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Whether the look-only command `head` with `args` follows the symlinks it
