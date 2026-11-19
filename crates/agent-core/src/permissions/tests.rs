@@ -3075,3 +3075,193 @@ fn critical_removals_are_the_root_the_home_and_the_project() {
         assert!(!critical_removal(command, cwd), "{command}");
     }
 }
+
+/// Replays scripted answers, each with the scope the user picked.
+struct ScopedScripted {
+    replies: Vec<PermissionReply>,
+    asked: Arc<Mutex<Vec<PermissionRequest>>>,
+}
+
+impl PermissionPrompter for ScopedScripted {
+    fn ask(&mut self, request: &PermissionRequest) -> PermissionAnswer {
+        self.ask_scoped(request, None).answer
+    }
+
+    fn ask_scoped(
+        &mut self,
+        request: &PermissionRequest,
+        _withdrawn: Option<&CancelToken>,
+    ) -> PermissionReply {
+        self.asked.lock().unwrap().push(request.clone());
+        if self.replies.is_empty() {
+            PermissionAnswer::Deny.into()
+        } else {
+            self.replies.remove(0)
+        }
+    }
+}
+
+type Persisted = Arc<Mutex<Vec<(String, String)>>>;
+
+fn scoped_hooks(
+    mode: Mode,
+    replies: Vec<(PermissionAnswer, Option<&str>)>,
+) -> (
+    PermissionHooks,
+    Arc<Mutex<Vec<PermissionRequest>>>,
+    Persisted,
+) {
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let persisted: Persisted = Arc::new(Mutex::new(Vec::new()));
+    let sink = persisted.clone();
+    let hooks = PermissionHooks::new(
+        PermissionRules {
+            mode,
+            ..PermissionRules::default()
+        },
+        Box::new(ScopedScripted {
+            replies: replies
+                .into_iter()
+                .map(|(answer, scope)| PermissionReply {
+                    answer,
+                    scope: scope.map(str::to_string),
+                })
+                .collect(),
+            asked: asked.clone(),
+        }),
+    )
+    .with_persist(Box::new(move |tool, pattern, _, _| {
+        sink.lock()
+            .unwrap()
+            .push((tool.to_string(), pattern.to_string()));
+    }));
+    (hooks, asked, persisted)
+}
+
+#[test]
+fn a_file_card_offers_the_file_its_folders_and_the_project() {
+    assert_eq!(
+        file_scopes("src/app/panel/view.rs"),
+        [
+            "src/app/panel/view.rs",
+            "src/app/panel/**",
+            "src/app/**",
+            "src/**",
+            "./**"
+        ]
+    );
+    assert_eq!(file_scopes("README.md"), ["README.md", "./**"]);
+    assert_eq!(file_scopes(""), Vec::<String>::new());
+    // Outside the project the ladder stops short of the root.
+    assert_eq!(
+        file_scopes("/opt/site/conf/a.conf"),
+        [
+            "/opt/site/conf/a.conf",
+            "/opt/site/conf/**",
+            "/opt/site/**",
+            "/opt/**"
+        ]
+    );
+    assert_eq!(file_scopes("/etc/hosts"), ["/etc/hosts", "/etc/**"]);
+}
+
+#[test]
+fn a_command_card_offers_the_command_its_subcommand_or_its_program() {
+    assert_eq!(
+        command_scopes("cargo build --release"),
+        ["cargo build --release", "cargo build *"]
+    );
+    assert_eq!(
+        command_scopes("rustup target list"),
+        ["rustup target list", "rustup target *"]
+    );
+    assert_eq!(command_scopes("ls -la src"), ["ls -la src", "ls *"]);
+    // A program that runs its arguments is offered only as typed.
+    assert!(command_scopes("env FOO=1 make").is_empty());
+    assert!(command_scopes("sudo ls").is_empty());
+    assert!(command_scopes("cargo --version").is_empty());
+}
+
+#[test]
+fn the_folder_is_preselected_and_the_chosen_scope_is_recorded() {
+    let (mut hooks, asked, persisted) = scoped_hooks(
+        Mode::Configured,
+        vec![(PermissionAnswer::AllowAlways, Some("src/**"))],
+    );
+    let edit = call("edit", json!({ "path": "src/lib.rs" }));
+    assert_eq!(hooks.before_tool_call(&edit, &ctx()), ToolDecision::Allow);
+    {
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked[0].scopes, ["src/lib.rs", "src/**", "./**"]);
+        assert_eq!(asked[0].preferred_scope, 1);
+    }
+    assert_eq!(
+        *persisted.lock().unwrap(),
+        [("edit".to_string(), "src/**".to_string())]
+    );
+    // The rule covers its folder, and a write as well as an edit.
+    let write = call("write", json!({ "path": "src/new.rs" }));
+    assert_eq!(hooks.before_tool_call(&write, &ctx()), ToolDecision::Allow);
+    assert_eq!(asked.lock().unwrap().len(), 1);
+}
+
+#[test]
+fn a_scope_the_card_did_not_offer_is_not_recorded() {
+    let (mut hooks, _, persisted) = scoped_hooks(
+        Mode::Configured,
+        vec![(PermissionAnswer::AllowSession, Some("**"))],
+    );
+    let edit = call("edit", json!({ "path": "src/lib.rs" }));
+    assert_eq!(hooks.before_tool_call(&edit, &ctx()), ToolDecision::Allow);
+    assert!(persisted.lock().unwrap().is_empty());
+    // The suggested pattern, the file, is what the session keeps.
+    let other = call("edit", json!({ "path": "src/main.rs" }));
+    assert_ne!(hooks.before_tool_call(&other, &ctx()), ToolDecision::Allow);
+}
+
+#[test]
+fn a_command_scope_is_recorded_as_chosen() {
+    let (mut hooks, asked, persisted) = scoped_hooks(
+        Mode::Configured,
+        vec![(PermissionAnswer::AllowAlways, Some("cargo build *"))],
+    );
+    assert_eq!(
+        hooks.before_tool_call(&bash("cargo build --release"), &ctx()),
+        ToolDecision::Allow
+    );
+    {
+        let asked = asked.lock().unwrap();
+        assert_eq!(asked[0].scopes, ["cargo build --release", "cargo build *"]);
+        assert_eq!(asked[0].preferred_scope, 1);
+    }
+    assert_eq!(
+        *persisted.lock().unwrap(),
+        [("shell".to_string(), "cargo build *".to_string())]
+    );
+    assert_eq!(
+        hooks.before_tool_call(&bash("cargo build -p x"), &ctx()),
+        ToolDecision::Allow
+    );
+}
+
+#[test]
+fn a_project_rule_stays_in_the_project_and_edit_rules_cover_writes() {
+    let mut rules = PermissionRules::default();
+    rules.add("edit", "./**", Decision::Allow);
+    assert_eq!(rules.evaluate("edit", "src/a.rs"), Some(Decision::Allow));
+    assert_eq!(rules.evaluate("write", "a.rs"), Some(Decision::Allow));
+    assert_eq!(rules.evaluate("edit", "/etc/hosts"), None);
+    assert_eq!(rules.evaluate("edit", "../other/a.rs"), None);
+    // A `write` rule is kept as an `edit` rule; an old `[write]` table
+    // still counts for both.
+    rules.add("write", "docs/**", Decision::Deny);
+    assert_eq!(rules.evaluate("edit", "docs/a.md"), Some(Decision::Deny));
+    let old = super::tests::rules(
+        r#"
+            [write]
+            "notes/**" = "allow"
+            "#,
+    );
+    assert_eq!(old.evaluate("edit", "notes/a.md"), Some(Decision::Allow));
+    assert_eq!(old.evaluate("write", "notes/a.md"), Some(Decision::Allow));
+}

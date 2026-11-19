@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use termide_agent_core::{
     shell_parts, CommandScript, Decision, Failure, Mode, PermissionAnswer, PermissionEnvelope,
-    PersistScope, QuestionAnswer, QuestionEnvelope, QuestionReply, SuggestionEnvelope,
-    SuggestionKind, SuggestionReply,
+    PermissionReply, PersistScope, QuestionAnswer, QuestionEnvelope, QuestionReply,
+    SuggestionEnvelope, SuggestionKind, SuggestionReply,
 };
 use termide_core::PanelEvent;
 use termide_ui::{ChoiceAction, ChoiceForm};
@@ -21,10 +21,14 @@ use crate::{millis, AgentPanel, Item, NoticeKind};
 /// the project may run.
 pub(crate) enum Pending {
     Permission {
-        envelope: PermissionEnvelope,
+        envelope: Box<PermissionEnvelope>,
         form: ChoiceForm,
         /// What each of the form's rows answers, in their order.
         answers: Vec<PermissionAnswer>,
+        /// The second step, picking how far a lasting answer reaches: the
+        /// answer picked, and the first step's form to go back to. `form`
+        /// then lists the request's scopes.
+        scoping: Option<Box<(PermissionAnswer, ChoiceForm)>>,
     },
     /// The model's questions, asked one card at a time; `answers` holds one
     /// slot per question, filled as they are answered, and `form` asks
@@ -324,7 +328,7 @@ impl AgentPanel {
         let mut cards: Vec<Card> = self.cards_in.drain(..).collect();
         let shown = match self.pending.take() {
             Some(Pending::Permission { envelope, .. }) if envelope.delegate.is_some() => {
-                Some(Card::Permission(Box::new(envelope)))
+                Some(Card::Permission(envelope))
             }
             Some(Pending::Question { envelope, .. }) if envelope.task.is_some() => {
                 Some(Card::Question(envelope))
@@ -378,17 +382,17 @@ impl AgentPanel {
                 .iter()
                 .position(|card| matches!(card, Card::Permission(_)));
             let envelope = match handed.and_then(|index| self.cards_in.remove(index)) {
-                Some(Card::Permission(envelope)) => *envelope,
+                Some(Card::Permission(envelope)) => envelope,
                 _ => {
                     let Ok(envelope) = self.permission_rx.try_recv() else {
                         break;
                     };
+                    let envelope = Box::new(envelope);
                     // A panel follows the delegate that asks: the card is
                     // its to show.
                     if let Some(call) = envelope.task.clone() {
                         if crate::live::is_viewed(self.panel_id, &call) {
-                            self.cards_out
-                                .push((call, Card::Permission(Box::new(envelope))));
+                            self.cards_out.push((call, Card::Permission(envelope)));
                             continue;
                         }
                     }
@@ -430,7 +434,15 @@ impl AgentPanel {
             // when there is one to record; "always" only where the
             // configured rules count, and neither "session" nor "always" for
             // a command too broad or too destructive to trust sight unseen.
-            let pattern = &request.suggested_pattern;
+            // When the request offers a choice of how far the rule reaches,
+            // the rows name none: the second step lists them.
+            let named = |label: &str| {
+                if request.scopes.len() > 1 {
+                    format!("{label}…")
+                } else {
+                    format!("{label} ({})", request.suggested_pattern)
+                }
+            };
             let remember = request.can_remember();
             let mut rows: Vec<(PermissionAnswer, String)> = vec![(
                 PermissionAnswer::AllowOnce,
@@ -439,24 +451,24 @@ impl AgentPanel {
             if remember && request.can_allow_session {
                 rows.push((
                     PermissionAnswer::AllowSession,
-                    format!("{} ({pattern})", t.agent_perm_allow_session()),
+                    named(t.agent_perm_allow_session()),
                 ));
             }
             if remember && request.can_persist {
                 rows.push((
                     PermissionAnswer::AllowAlways,
-                    format!("{} ({pattern})", t.agent_perm_allow_always()),
+                    named(t.agent_perm_allow_always()),
                 ));
                 rows.push((
                     PermissionAnswer::AllowAlwaysGlobal,
-                    format!("{} ({pattern})", t.agent_perm_allow_always_global()),
+                    named(t.agent_perm_allow_always_global()),
                 ));
             }
             rows.push((PermissionAnswer::Deny, t.agent_perm_deny().to_string()));
             if remember {
                 rows.push((
                     PermissionAnswer::DenySession,
-                    format!("{} ({pattern})", t.agent_perm_deny_session()),
+                    named(t.agent_perm_deny_session()),
                 ));
             }
             let (answers, options): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
@@ -474,6 +486,7 @@ impl AgentPanel {
                 envelope,
                 form,
                 answers,
+                scoping: None,
             });
             self.raise_attention(true);
             // The question pauses the running call until it is answered.
@@ -777,8 +790,83 @@ impl AgentPanel {
         }
     }
 
+    /// An answer outlasting the call, on a request that offers a choice of
+    /// how far its rule reaches: turn the card to its second step, the
+    /// scopes from narrow to broad with the request's preferred one
+    /// selected. `false` when there is nothing to choose.
+    fn ask_scope(&mut self, answer: &PermissionAnswer, row: usize) -> bool {
+        let lasting = matches!(
+            answer,
+            PermissionAnswer::AllowSession
+                | PermissionAnswer::AllowAlways
+                | PermissionAnswer::AllowAlwaysGlobal
+                | PermissionAnswer::DenySession
+        );
+        let Some(Pending::Permission {
+            envelope,
+            form,
+            scoping,
+            ..
+        }) = &mut self.pending
+        else {
+            return false;
+        };
+        let request = &envelope.request;
+        if !lasting || request.scopes.len() < 2 {
+            return false;
+        }
+        let t = termide_i18n::t();
+        let picked = form
+            .options()
+            .get(row)
+            .map(|label| label.trim_end_matches('…').to_string())
+            .unwrap_or_default();
+        let options = request
+            .scopes
+            .iter()
+            .map(|scope| {
+                if scope == "./**" {
+                    format!("{scope} ({})", t.agent_perm_scope_project())
+                } else {
+                    scope.clone()
+                }
+            })
+            .collect();
+        let mut step = ChoiceForm::new(
+            format!("{picked} · {}", t.agent_perm_scope_title()),
+            options,
+        )
+        .with_steps(true, false)
+        .with_selected(request.preferred_scope.min(request.scopes.len() - 1));
+        if !request.subject.is_empty() {
+            step = step.with_detail(permission_detail(request));
+        }
+        let first = std::mem::replace(form, step);
+        *scoping = Some(Box::new((answer.clone(), first)));
+        true
+    }
+
+    /// `Esc` or `←` on the second step: back to the first.
+    fn leave_scope_step(&mut self) {
+        if let Some(Pending::Permission { form, scoping, .. }) = &mut self.pending {
+            if let Some(step) = scoping.take() {
+                *form = step.1;
+            }
+        }
+    }
+
     /// Answer the outstanding question; `false` when there is none.
     pub fn answer_permission(&mut self, answer: PermissionAnswer) -> bool {
+        self.answer_permission_scoped(answer, None)
+    }
+
+    /// [`Self::answer_permission`] with the scope picked on the card's
+    /// second step; one the request did not offer records its suggestion.
+    pub fn answer_permission_scoped(
+        &mut self,
+        answer: PermissionAnswer,
+        scope: Option<String>,
+    ) -> bool {
         let Some(Pending::Permission { envelope, .. }) = self.pending.take() else {
             return false;
         };
@@ -794,7 +882,7 @@ impl AgentPanel {
         let patterns = if envelope.delegate.is_some() {
             Vec::new()
         } else {
-            request.patterns()
+            request.patterns_for(scope.as_deref())
         };
         for pattern in patterns {
             match answer {
@@ -818,7 +906,7 @@ impl AgentPanel {
             }
         }
         self.end_permission_wait();
-        let _ = envelope.reply.send(answer);
+        let _ = envelope.reply.send(PermissionReply { answer, scope });
         true
     }
 
@@ -923,12 +1011,33 @@ impl AgentPanel {
         match (&self.pending, action) {
             (_, ChoiceAction::Handled) => {}
             (_, ChoiceAction::NotHandled) => return false,
+            (
+                Some(Pending::Permission {
+                    envelope,
+                    scoping: Some(step),
+                    ..
+                }),
+                ChoiceAction::Chosen(index),
+            ) => {
+                let scope = envelope.request.scopes.get(index).cloned();
+                let answer = step.0.clone();
+                self.answer_permission_scoped(answer, scope);
+            }
+            // Back from the second step to the first.
+            (
+                Some(Pending::Permission {
+                    scoping: Some(_), ..
+                }),
+                ChoiceAction::Cancelled | ChoiceAction::Back | ChoiceAction::Custom(_),
+            ) => self.leave_scope_step(),
             (Some(Pending::Permission { answers, .. }), ChoiceAction::Chosen(index)) => {
                 let answer = answers
                     .get(index)
                     .cloned()
                     .unwrap_or(PermissionAnswer::Deny);
-                self.answer_permission(answer);
+                if !self.ask_scope(&answer, index) {
+                    self.answer_permission(answer);
+                }
             }
             (Some(Pending::Permission { .. }), ChoiceAction::Custom(reason)) => {
                 self.answer_permission(PermissionAnswer::DenyWithReason(reason));

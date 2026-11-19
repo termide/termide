@@ -684,6 +684,11 @@ pub trait Translation: Send + Sync {
     fn agent_perm_deny(&self) -> &str;
     /// Permission card: deny for the rest of this session.
     fn agent_perm_deny_session(&self) -> &str;
+    /// Permission card, second step: title of the list of how far a
+    /// lasting rule reaches.
+    fn agent_perm_scope_title(&self) -> &str;
+    /// Permission card, second step: what `./**` stands for.
+    fn agent_perm_scope_project(&self) -> &str;
     /// Permission card: a part of a command answered for this call only,
     /// since no rule can stand for it.
     fn agent_perm_part_once(&self) -> &str;

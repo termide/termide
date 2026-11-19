@@ -416,7 +416,7 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
         .insert("c".into(), Instant::now() - Duration::from_secs(7));
     let (reply, _rx) = std::sync::mpsc::channel();
     panel.pending = Some(Pending::Permission {
-        envelope: PermissionEnvelope {
+        envelope: Box::new(PermissionEnvelope {
             id: 1,
             request: termide_agent_core::PermissionRequest {
                 tool: "shell".into(),
@@ -425,18 +425,22 @@ fn a_permission_wait_is_timed_apart_from_the_call() {
                 suggested_pattern: "cat *".into(),
                 can_persist: true,
                 can_allow_session: true,
+                scopes: Vec::new(),
+                preferred_scope: 0,
                 parts: vec![termide_agent_core::AskedPart {
                     text: "cat notes.txt".into(),
                     pattern: Some("cat *".into()),
+                    scopes: Vec::new(),
                 }],
             },
             reply,
             withdrawn: termide_agent_core::CancelToken::default(),
             delegate: None,
             task: None,
-        },
+        }),
         form: ChoiceForm::new("", vec![]),
         answers: Vec::new(),
+        scoping: None,
     });
     panel.permission_wait = Some((Instant::now() - Duration::from_secs(5), 0));
     panel.tick();
@@ -477,7 +481,7 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
     let pending_from = |panel: &mut AgentPanel, delegate: Option<&str>| {
         let (reply, _rx) = std::sync::mpsc::channel();
         panel.pending = Some(Pending::Permission {
-            envelope: PermissionEnvelope {
+            envelope: Box::new(PermissionEnvelope {
                 id: 1,
                 request: termide_agent_core::PermissionRequest {
                     tool: "shell".into(),
@@ -491,18 +495,22 @@ fn a_grant_reaches_the_panel_rules_so_it_survives_a_rebuild() {
                     suggested_pattern: "cat *".into(),
                     can_persist: true,
                     can_allow_session: true,
+                    scopes: Vec::new(),
+                    preferred_scope: 0,
                     parts: vec![termide_agent_core::AskedPart {
                         text: "cat notes.txt".into(),
                         pattern: Some("cat *".into()),
+                        scopes: Vec::new(),
                     }],
                 },
                 reply,
                 withdrawn: termide_agent_core::CancelToken::default(),
                 delegate: delegate.map(str::to_string),
                 task: None,
-            },
+            }),
             form: ChoiceForm::new("", vec![]),
             answers: Vec::new(),
+            scoping: None,
         });
     };
     let pending = |panel: &mut AgentPanel| pending_from(panel, None);

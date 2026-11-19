@@ -404,7 +404,7 @@ impl Reporter {
             for envelope in rx.try_iter() {
                 let _ = envelope
                     .reply
-                    .send(PermissionAnswer::DenyWithReason(reason.clone()));
+                    .send(PermissionAnswer::DenyWithReason(reason.clone()).into());
             }
         }
     }

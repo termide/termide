@@ -1206,6 +1206,8 @@ fn a_delegates_cards_follow_the_view_of_its_task() {
             suggested_pattern: String::new(),
             can_persist: false,
             can_allow_session: false,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: Vec::new(),
         })
     });

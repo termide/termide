@@ -299,6 +299,8 @@ fn a_withdrawn_permission_question_comes_down() {
         suggested_pattern: String::new(),
         can_persist: false,
         can_allow_session: true,
+        scopes: Vec::new(),
+        preferred_scope: 0,
         parts: Vec::new(),
     };
     let wait_for = |panel: &mut AgentPanel, subject: &str| {
@@ -351,6 +353,8 @@ fn delegates_asking_at_once_take_turns_on_the_card() {
             suggested_pattern: String::new(),
             can_persist: false,
             can_allow_session: false,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: Vec::new(),
         };
         std::thread::spawn(move || delegate.ask(&request))
@@ -402,9 +406,12 @@ fn permission_prompt_is_answered_in_the_panel() {
             suggested_pattern: "git push *".into(),
             can_persist: true,
             can_allow_session: true,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: vec![termide_agent_core::AskedPart {
                 text: "git push".into(),
                 pattern: Some("git push *".into()),
+                scopes: Vec::new(),
             }],
         })
     });
@@ -465,6 +472,8 @@ fn permission_prompt_is_answered_in_the_panel() {
         suggested_pattern: "src/x.rs".into(),
         can_persist: true,
         can_allow_session: true,
+        scopes: Vec::new(),
+        preferred_scope: 0,
         parts: Vec::new(),
     };
     let asked = request.clone();
@@ -525,14 +534,18 @@ fn a_compound_command_card_lists_the_parts_it_asks_about() {
             suggested_pattern: "make install *".into(),
             can_persist: true,
             can_allow_session: true,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: vec![
                 termide_agent_core::AskedPart {
                     text: "./run".into(),
                     pattern: None,
+                    scopes: Vec::new(),
                 },
                 termide_agent_core::AskedPart {
                     text: "make install".into(),
                     pattern: Some("make install *".into()),
+                    scopes: Vec::new(),
                 },
             ],
         })
@@ -584,9 +597,12 @@ fn a_compound_command_card_lists_the_parts_it_asks_about() {
             suggested_pattern: String::new(),
             can_persist: true,
             can_allow_session: true,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: vec![termide_agent_core::AskedPart {
                 text: "./run".into(),
                 pattern: None,
+                scopes: Vec::new(),
             }],
         })
     });
@@ -618,9 +634,12 @@ fn always_is_not_offered_where_the_configured_rules_do_not_count() {
             suggested_pattern: "make *".into(),
             can_persist: false,
             can_allow_session: true,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: vec![termide_agent_core::AskedPart {
                 text: "make".into(),
                 pattern: Some("make *".into()),
+                scopes: Vec::new(),
             }],
         })
     });
@@ -662,9 +681,12 @@ fn a_single_click_selects_and_a_double_click_answers_a_permission() {
             suggested_pattern: "git push *".into(),
             can_persist: true,
             can_allow_session: true,
+            scopes: Vec::new(),
+            preferred_scope: 0,
             parts: vec![termide_agent_core::AskedPart {
                 text: "git push".into(),
                 pattern: Some("git push *".into()),
+                scopes: Vec::new(),
             }],
         })
     });
@@ -702,4 +724,70 @@ fn a_single_click_selects_and_a_double_click_answers_a_permission() {
     click(&mut panel, y);
     assert!(panel.pending.is_none());
     assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
+}
+
+#[test]
+fn a_lasting_answer_picks_its_scope_on_a_second_step() {
+    let mut panel = panel(vec![]);
+    let (mut prompter, rx) = permission_channel(CancelToken::new());
+    panel.permission_rx = rx;
+    let request = termide_agent_core::PermissionRequest {
+        tool: "edit".into(),
+        subject: "src/x.rs".into(),
+        call: termide_agent_core::ToolCall {
+            id: "c".into(),
+            name: "edit".into(),
+            arguments: serde_json::json!({ "path": "src/x.rs" }),
+            extra_content: None,
+        },
+        suggested_pattern: "src/x.rs".into(),
+        can_persist: true,
+        can_allow_session: true,
+        scopes: vec!["src/x.rs".into(), "src/**".into(), "./**".into()],
+        preferred_scope: 1,
+        parts: Vec::new(),
+    };
+    let worker = std::thread::spawn(move || prompter.ask_scoped(&request, None));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while panel.pending.is_none() {
+        panel.tick();
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    // The first step names no pattern: the second lists them.
+    assert_eq!(
+        panel.pending.as_ref().unwrap().form().options()[2],
+        "Allow always in this project…"
+    );
+    panel.handle_key(chord(KeyCode::Char('3'), KeyModifiers::NONE));
+    {
+        let form = panel.pending.as_ref().unwrap().form();
+        assert_eq!(
+            form.title(),
+            "Allow always in this project · What the rule covers"
+        );
+        assert_eq!(
+            form.options(),
+            ["src/x.rs", "src/**", "./** (the whole project)"]
+        );
+        // The folder is preselected.
+        assert_eq!(form.selected(), 1);
+    }
+    // Esc goes back to the first step, not out of the card.
+    panel.handle_key(chord(KeyCode::Esc, KeyModifiers::NONE));
+    assert_eq!(
+        panel.pending.as_ref().unwrap().form().options()[2],
+        "Allow always in this project…"
+    );
+    panel.handle_key(chord(KeyCode::Char('3'), KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Enter, KeyModifiers::NONE));
+    assert!(panel.pending.is_none());
+    let reply = worker.join().unwrap();
+    assert_eq!(reply.answer, PermissionAnswer::AllowAlways);
+    assert_eq!(reply.scope.as_deref(), Some("src/**"));
+    // The panel keeps the rule it recorded, for a rebuilt agent.
+    assert_eq!(
+        panel.rules.evaluate("write", "src/y.rs"),
+        Some(termide_agent_core::Decision::Allow)
+    );
 }

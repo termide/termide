@@ -433,7 +433,7 @@ impl PermissionRules {
             .filter(|(pattern, decision)| {
                 **decision != Decision::Allow || !broad_allow(tool, pattern)
             })
-            .filter(|(pattern, _)| wildcard_match(pattern, subject))
+            .filter(|(pattern, _)| rule_matches(tool, pattern, subject))
             .map(|(_, decision)| *decision)
             .max()
     }
@@ -462,23 +462,58 @@ fn broad_allow(tool: &str, pattern: &str) -> bool {
 
 fn add_rule(tables: &mut RuleTables, tool: &str, pattern: &str, decision: Decision) {
     tables
-        .entry(tool.to_string())
+        .entry(rule_tool(tool).to_string())
         .or_default()
         .insert(pattern.to_string(), decision);
 }
 
-/// The rule table of `tool`, when it has one.
+/// The table a rule about `tool` is recorded in: a `write` creates or
+/// replaces what an `edit` changes, so both are `edit` rules.
+fn rule_tool(tool: &str) -> &str {
+    if tool == "write" {
+        "edit"
+    } else {
+        tool
+    }
+}
+
+/// The rule tables that count for `tool`: its own, and for `edit` and
+/// `write` both, a configuration may still keep `write` rules of its own.
 fn tool_tables<'a>(
     tables: &'a RuleTables,
     tool: &'a str,
 ) -> impl Iterator<Item = &'a BTreeMap<String, Decision>> {
-    tables.get(tool).into_iter()
+    let edits = matches!(tool, "edit" | "write");
+    tables
+        .iter()
+        .filter(move |(name, _)| {
+            if edits {
+                matches!(name.as_str(), "edit" | "write")
+            } else {
+                name.as_str() == tool
+            }
+        })
+        .map(|(_, table)| table)
+}
+
+/// Whether the rule `pattern` of `tool` matches `subject`. For a file tool
+/// a pattern starting with `./` is held to the project: `./**` is every
+/// file in it and none outside, whose paths are absolute.
+fn rule_matches(tool: &str, pattern: &str, subject: &str) -> bool {
+    if matches!(tool, "read" | "edit" | "write") {
+        if let Some(rest) = pattern.strip_prefix("./") {
+            return !Path::new(subject).is_absolute()
+                && !subject.starts_with("..")
+                && wildcard_match(rest, subject);
+        }
+    }
+    wildcard_match(pattern, subject)
 }
 
 fn evaluate_rules(tables: &RuleTables, tool: &str, subject: &str) -> Option<Decision> {
     tool_tables(tables, tool)
         .flatten()
-        .filter(|(pattern, _)| wildcard_match(pattern, subject))
+        .filter(|(pattern, _)| rule_matches(tool, pattern, subject))
         .map(|(_, decision)| *decision)
         .max()
 }
@@ -542,6 +577,13 @@ pub struct PermissionRequest {
     /// or safe default settles — each with the rule an answer can record for
     /// it; empty for other tools, whose `suggested_pattern` is the rule.
     pub parts: Vec<AskedPart>,
+    /// The rules an answer outlasting the call may record instead, narrowest
+    /// first, `suggested_pattern` among them: a file, its folders, the whole
+    /// project; a command whole, with its subcommand, with its program. The
+    /// user picks one; fewer than two leaves nothing to pick.
+    pub scopes: Vec<String>,
+    /// The scope offered first, an index into `scopes`.
+    pub preferred_scope: usize,
 }
 
 /// A part of a command line the user is asked about.
@@ -552,6 +594,10 @@ pub struct AskedPart {
     /// stand for it (its program's directory is unknown, or it runs a
     /// command substitution), so it is answered for this call only.
     pub pattern: Option<String>,
+    /// The rules the user may pick instead of `pattern`, narrowest first;
+    /// empty when only `pattern` can stand for it (a read beyond the
+    /// project names that one command).
+    pub scopes: Vec<String>,
 }
 
 impl PermissionRequest {
@@ -566,6 +612,17 @@ impl PermissionRequest {
                 .collect()
         } else {
             vec![self.suggested_pattern.clone()]
+        }
+    }
+
+    /// The rules an answer recording `scope` stands for: that scope when it
+    /// is one the request offers, [`Self::patterns`] otherwise, so an answer
+    /// cannot carry a rule the card did not show.
+    #[must_use]
+    pub fn patterns_for(&self, scope: Option<&str>) -> Vec<String> {
+        match scope {
+            Some(scope) if self.scopes.iter().any(|s| s == scope) => vec![scope.to_string()],
+            _ => self.patterns(),
         }
     }
 
@@ -593,6 +650,23 @@ pub enum PermissionAnswer {
     DenyWithReason(String),
 }
 
+/// An answer, and for one outlasting the call the scope the user picked
+/// among the request's `scopes`; `None` keeps the rules it suggested.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PermissionReply {
+    pub answer: PermissionAnswer,
+    pub scope: Option<String>,
+}
+
+impl From<PermissionAnswer> for PermissionReply {
+    fn from(answer: PermissionAnswer) -> Self {
+        Self {
+            answer,
+            scope: None,
+        }
+    }
+}
+
 /// Where an "allow always" rule is written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PersistScope {
@@ -617,6 +691,17 @@ pub trait PermissionPrompter: Send {
     ) -> PermissionAnswer {
         let _ = withdrawn;
         self.ask(request)
+    }
+
+    /// [`Self::ask_for_call`] with the scope the user picked for an answer
+    /// outlasting the call; a prompter that offers no pick keeps the rules
+    /// the request suggested.
+    fn ask_scoped(
+        &mut self,
+        request: &PermissionRequest,
+        withdrawn: Option<&CancelToken>,
+    ) -> PermissionReply {
+        self.ask_for_call(request, withdrawn).into()
     }
 
     /// Whether a person answers; a prompter that answers alone is recorded
@@ -661,7 +746,7 @@ impl PermissionPrompter for AutoDenyPrompter {
 pub struct PermissionEnvelope {
     pub id: u64,
     pub request: PermissionRequest,
-    pub reply: Sender<PermissionAnswer>,
+    pub reply: Sender<PermissionReply>,
     /// Cancelled once no one waits for the answer any more — the call was
     /// given up — so the panel takes the card down.
     pub withdrawn: CancelToken,
@@ -758,6 +843,14 @@ impl PermissionPrompter for ChannelPrompter {
         request: &PermissionRequest,
         withdrawn: Option<&CancelToken>,
     ) -> PermissionAnswer {
+        self.ask_scoped(request, withdrawn).answer
+    }
+
+    fn ask_scoped(
+        &mut self,
+        request: &PermissionRequest,
+        withdrawn: Option<&CancelToken>,
+    ) -> PermissionReply {
         let (reply, answer) = mpsc::channel();
         self.next_id += 1;
         // Cancelled here too when the run stops, so the card goes either way.
@@ -772,17 +865,17 @@ impl PermissionPrompter for ChannelPrompter {
         };
         if self.tx.send(envelope).is_err() {
             // The panel is gone; nobody can approve anything.
-            return PermissionAnswer::Deny;
+            return PermissionAnswer::Deny.into();
         }
         loop {
             match answer.recv_timeout(Duration::from_millis(100)) {
-                Ok(answer) => return answer,
+                Ok(reply) => return reply,
                 Err(RecvTimeoutError::Timeout) if self.stopped() || withdrawn.is_cancelled() => {
                     withdrawn.cancel();
-                    return PermissionAnswer::Deny;
+                    return PermissionAnswer::Deny.into();
                 }
                 Err(RecvTimeoutError::Timeout) => {}
-                Err(RecvTimeoutError::Disconnected) => return PermissionAnswer::Deny,
+                Err(RecvTimeoutError::Disconnected) => return PermissionAnswer::Deny.into(),
             }
         }
     }
@@ -1100,6 +1193,11 @@ impl PermissionHooks {
             if decision == Decision::Ask {
                 // A rule for a read beyond the project names that one
                 // command: `cat *` would let every file on the machine out.
+                let scopes = if part.savable && !reads_out {
+                    command_scopes(&part.resolved)
+                } else {
+                    Vec::new()
+                };
                 asked.push(AskedPart {
                     pattern: part.savable.then(|| {
                         if reads_out {
@@ -1109,6 +1207,7 @@ impl PermissionHooks {
                         }
                     }),
                     text: part.text,
+                    scopes,
                 });
             }
             verdict = verdict.max(decision);
@@ -1170,26 +1269,36 @@ impl PermissionHooks {
         }
     }
 
-    /// Record `decision` for every rule `request`'s answer stands for, for
-    /// the session or (`scope`) in the configuration.
+    /// Record `decision` for every rule `request`'s answer stands for — the
+    /// `chosen` scope when the request offers it — for the session or
+    /// (`scope`) in the configuration; whether it went to the configuration.
     fn remember(
         &mut self,
         request: &PermissionRequest,
         decision: Decision,
         scope: Option<PersistScope>,
-    ) {
-        for pattern in request.patterns() {
+        chosen: Option<&str>,
+    ) -> bool {
+        let tool = rule_tool(&request.tool);
+        let patterns = request.patterns_for(chosen);
+        // `auto` sets a broad configured `allow` aside, so a broad scope
+        // picked there lasts for the session, where it counts.
+        let persists = scope.is_some()
+            && request.can_persist
+            && !(self.mode.get() == Mode::Auto && patterns.iter().any(|p| broad_allow(tool, p)));
+        for pattern in patterns {
             match scope {
-                Some(scope) if request.can_persist => {
-                    self.rules.add(&request.tool, &pattern, decision);
+                Some(scope) if persists => {
+                    self.rules.add(tool, &pattern, decision);
                     if let Some(persist) = &mut self.persist {
-                        persist(&request.tool, &pattern, decision, scope);
+                        persist(tool, &pattern, decision, scope);
                     }
                 }
                 // "Always" not on offer here: it lasts for the session.
-                _ => self.rules.add_session(&request.tool, &pattern, decision),
+                _ => self.rules.add_session(tool, &pattern, decision),
             }
         }
+        persists
     }
 }
 
@@ -1309,6 +1418,24 @@ impl PermissionHooks {
                 if mode == Mode::Auto && broad {
                     can_persist = false;
                 }
+                // What the user may pick instead of the suggested rule: for
+                // one command, or a file tool's path. A bundle keeps a rule
+                // per part, an MCP tool is trusted whole.
+                let scopes = match parts.as_slice() {
+                    [part] if command_line => part.scopes.clone(),
+                    _ if command_line || ctx.tool.mcp => Vec::new(),
+                    _ if matches!(call.name.as_str(), "read" | "edit" | "write") => {
+                        file_scopes(&subject)
+                    }
+                    _ => Vec::new(),
+                };
+                // A command is offered as suggested; a file with its folder,
+                // the narrowest rule that spares asking about its neighbours.
+                let preferred_scope = if command_line {
+                    scopes.iter().position(|s| *s == suggested).unwrap_or(0)
+                } else {
+                    usize::from(scopes.len() > 1)
+                };
                 let request = PermissionRequest {
                     tool,
                     suggested_pattern: suggested,
@@ -1317,8 +1444,12 @@ impl PermissionHooks {
                     can_persist,
                     can_allow_session,
                     parts,
+                    scopes,
+                    preferred_scope,
                 };
-                let answer = self.prompter.ask_for_call(&request, ctx.withdrawn.as_ref());
+                let PermissionReply { answer, scope } =
+                    self.prompter.ask_scoped(&request, ctx.withdrawn.as_ref());
+                let scope = scope.as_deref();
                 // Allowing what the paused reviewer sent to the user hands
                 // the decisions back to it.
                 if matches!(
@@ -1349,12 +1480,17 @@ impl PermissionHooks {
                         (ToolDecision::Allow, user(true, Lasting::Once))
                     }
                     PermissionAnswer::AllowSession => {
-                        self.remember(&request, Decision::Allow, None);
+                        self.remember(&request, Decision::Allow, None, scope);
                         (ToolDecision::Allow, user(true, Lasting::Session))
                     }
                     PermissionAnswer::AllowAlways => {
-                        self.remember(&request, Decision::Allow, Some(PersistScope::Project));
-                        let lasting = if request.can_persist {
+                        let persisted = self.remember(
+                            &request,
+                            Decision::Allow,
+                            Some(PersistScope::Project),
+                            scope,
+                        );
+                        let lasting = if persisted {
                             Lasting::Project
                         } else {
                             Lasting::Session
@@ -1362,8 +1498,13 @@ impl PermissionHooks {
                         (ToolDecision::Allow, user(true, lasting))
                     }
                     PermissionAnswer::AllowAlwaysGlobal => {
-                        self.remember(&request, Decision::Allow, Some(PersistScope::Global));
-                        let lasting = if request.can_persist {
+                        let persisted = self.remember(
+                            &request,
+                            Decision::Allow,
+                            Some(PersistScope::Global),
+                            scope,
+                        );
+                        let lasting = if persisted {
                             Lasting::Global
                         } else {
                             Lasting::Session
@@ -1377,7 +1518,7 @@ impl PermissionHooks {
                         user(false, Lasting::Once),
                     ),
                     PermissionAnswer::DenySession => {
-                        self.remember(&request, Decision::Deny, None);
+                        self.remember(&request, Decision::Deny, None, scope);
                         (
                             ToolDecision::Block {
                                 reason: self.refusals.user_denied_session.clone(),
@@ -1656,15 +1797,100 @@ pub fn suggested_pattern(tool: &str, subject: &str) -> String {
     let Some(head) = words.next() else {
         return "*".to_string();
     };
-    const SUBCOMMAND_TOOLS: [&str; 14] = [
-        "git", "cargo", "npm", "pnpm", "yarn", "go", "docker", "kubectl", "make", "python", "pip",
-        "uv", "brew", "gh",
-    ];
     match words.next() {
         Some(sub) if SUBCOMMAND_TOOLS.contains(&head) && !sub.starts_with('-') => {
             format!("{head} {sub} *")
         }
         _ => format!("{head} *"),
+    }
+}
+
+/// Programs whose first word picks what they do, so that a rule trusts one
+/// of their subcommands rather than all of them.
+const SUBCOMMAND_TOOLS: [&str; 20] = [
+    "git",
+    "cargo",
+    "npm",
+    "pnpm",
+    "yarn",
+    "go",
+    "docker",
+    "kubectl",
+    "make",
+    "python",
+    "pip",
+    "uv",
+    "brew",
+    "gh",
+    "rustup",
+    "bun",
+    "deno",
+    "helm",
+    "terraform",
+    "systemctl",
+];
+
+/// How far a rule about one shell command may reach, narrow to broad: the
+/// command itself, its subcommand for a program with subcommands, or the
+/// program for one without, unless the program hands its arguments on to
+/// another or acts as another account. Empty when there is nothing to
+/// choose.
+#[must_use]
+pub fn command_scopes(command: &str) -> Vec<String> {
+    let command = command.trim();
+    let mut words = command.split_whitespace();
+    let Some(head) = words.next() else {
+        return Vec::new();
+    };
+    let mut scopes = vec![command.to_string()];
+    if SUBCOMMAND_TOOLS.contains(&head) {
+        if let Some(sub) = words.next().filter(|sub| !sub.starts_with('-')) {
+            scopes.push(format!("{head} {sub} *"));
+        }
+    } else if !delegating_command(&format!("{head} x"))
+        && !destructive_command(&format!("{head} x"))
+    {
+        scopes.push(format!("{head} *"));
+    }
+    scopes.dedup();
+    if scopes.len() < 2 {
+        Vec::new()
+    } else {
+        scopes
+    }
+}
+
+/// How far a rule about one file may reach, narrow to broad: the file, its
+/// nearest folders, and inside the project the whole project (`./**`).
+/// Outside it the ladder stops short of the home directory and of what
+/// holds it. Empty when there is nothing to choose.
+#[must_use]
+pub fn file_scopes(path: &str) -> Vec<String> {
+    const FOLDERS: usize = 3;
+    if path.is_empty() {
+        return Vec::new();
+    }
+    let file = Path::new(path);
+    let inside = !file.is_absolute() && !path.starts_with("..");
+    let home = home();
+    let mut scopes = vec![path.to_string()];
+    for dir in file.ancestors().skip(1).take(FOLDERS) {
+        let shown = dir.to_string_lossy();
+        if shown.is_empty() || shown == "/" {
+            break;
+        }
+        if !inside && home.as_deref().is_some_and(|home| home.starts_with(dir)) {
+            break;
+        }
+        scopes.push(format!("{}/**", shown.trim_end_matches('/')));
+    }
+    if inside {
+        scopes.push("./**".to_string());
+    }
+    if scopes.len() < 2 {
+        Vec::new()
+    } else {
+        scopes
     }
 }
 
@@ -3779,6 +4005,8 @@ mod prompter_tests {
             can_persist: true,
             can_allow_session: true,
             parts: Vec::new(),
+            scopes: Vec::new(),
+            preferred_scope: 0,
         }
     }
 
@@ -3794,7 +4022,10 @@ mod prompter_tests {
         let envelope = rx.recv().unwrap();
         assert_eq!(envelope.id, 1);
         assert_eq!(envelope.request.subject, "git push");
-        envelope.reply.send(PermissionAnswer::AllowSession).unwrap();
+        envelope
+            .reply
+            .send(PermissionAnswer::AllowSession.into())
+            .unwrap();
         assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowSession);
 
         let (mut prompter, rx) = permission_channel(cancel.clone());
@@ -3821,7 +4052,10 @@ mod prompter_tests {
         let worker = std::thread::spawn(move || delegate.ask(&request()));
         let envelope = rx.recv().unwrap();
         assert_eq!(envelope.delegate.as_deref(), Some("search"));
-        envelope.reply.send(PermissionAnswer::AllowOnce).unwrap();
+        envelope
+            .reply
+            .send(PermissionAnswer::AllowOnce.into())
+            .unwrap();
         assert_eq!(worker.join().unwrap(), PermissionAnswer::AllowOnce);
 
         // The task stopped, the panel's run did not: the card is withdrawn.

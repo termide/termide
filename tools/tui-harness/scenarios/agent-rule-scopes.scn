@@ -1,0 +1,34 @@
+# A lasting answer picks how far its rule reaches. Without an edit rule the
+# mock model's edit of inventory/report.py asks; "Allow always in this
+# project…" turns the card to a second step listing the file, its folder
+# and the whole project, the folder selected. Esc goes back to the first
+# step, not out of the card; picking the folder lets the edit through.
+config agent-rule-scopes.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Agent wants to run edit" 20
+expect "Allow always in this project…"
+key 3
+wait "What the rule covers"
+expect "inventory/report.py"
+expect "inventory/**"
+expect "./** (the whole project)"
+snapshot scopes
+key Esc
+wait-gone "What the rule covers"
+expect "Allow always in this project…"
+key 3
+wait "What the rule covers"
+key Enter
+file-contains inventory/report.py "critical = item.on_hand" 20
+wait "Agent wants to run shell" 20
+type "1"
+wait "Want me to highlight critical rows" 30
+wait-gone "[■]" 15
+quit
