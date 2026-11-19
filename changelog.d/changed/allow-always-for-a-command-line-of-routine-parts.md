@@ -1,0 +1,1 @@
+- **"Allow always" for a command line of routine parts.** A line such as `cargo fmt && cargo clippy -p x` is now offered "Allow always", recording a rule for each part as "for this session" does. It is still withheld when any part destroys what it touches or runs some other program.

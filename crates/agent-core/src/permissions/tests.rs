@@ -1714,11 +1714,12 @@ fn a_substitution_in_a_dropped_header_marks_the_command_it_feeds() {
     );
 }
 
-/// "Allow always" is on offer only for the one command whose rule states
-/// enough to trust: a bundle, a destructive command and a command that
-/// runs some other program leave no rule behind.
+/// "Allow always" is on offer only where each rule it records states
+/// enough to trust: a destructive command and a command that runs some
+/// other program leave no rule behind, and either one in a bundle
+/// withholds it from the whole line.
 #[test]
-fn always_is_offered_only_for_a_bounded_routine_command() {
+fn always_is_offered_only_for_bounded_routine_commands() {
     let (hooks, asked) = hooks(
         PermissionRules::default(),
         vec![PermissionAnswer::AllowOnce; 40],
@@ -1779,9 +1780,11 @@ fn always_is_offered_only_for_a_bounded_routine_command() {
     ] {
         assert!(!offered(c), "{c} runs a program the rule cannot name");
     }
-    // A bundle answered as one is never a blanket rule.
-    assert!(!offered("cargo build && cargo test"));
-    assert!(!offered("make && make install"));
+    // A bundle of routine parts gets a rule per part; one destructive or
+    // delegating part withholds it.
+    assert!(offered("cargo build && cargo test"));
+    assert!(!offered("cargo build && rm -rf target"));
+    assert!(!offered("cargo build && make install"));
 }
 
 /// A destructive call allowed "for the session" stands for this call only:
@@ -3301,4 +3304,38 @@ fn what_a_toolchain_is_and_where_a_program_lives_is_look_only() {
     ] {
         assert!(!is_read_only_command(c), "{c} is not look-only");
     }
+}
+
+#[test]
+fn always_for_a_bundle_records_a_rule_for_each_part() {
+    let (hooks, _) = hooks(
+        PermissionRules {
+            mode: Mode::Configured,
+            ..PermissionRules::default()
+        },
+        vec![PermissionAnswer::AllowAlways],
+    );
+    let persisted = Arc::new(Mutex::new(Vec::new()));
+    let sink = persisted.clone();
+    let mut hooks = hooks.with_persist(Box::new(move |tool, pattern, _, _| {
+        sink.lock()
+            .unwrap()
+            .push((tool.to_string(), pattern.to_string()));
+    }));
+    assert_eq!(
+        hooks.before_tool_call(&bash("cargo fmt && cargo clippy -p x"), &ctx()),
+        ToolDecision::Allow
+    );
+    assert_eq!(
+        *persisted.lock().unwrap(),
+        [
+            ("shell".to_string(), "cargo fmt *".to_string()),
+            ("shell".to_string(), "cargo clippy *".to_string())
+        ]
+    );
+    // Each part now passes on its own, and so does the line again.
+    assert_eq!(
+        hooks.before_tool_call(&bash("cargo clippy --fix"), &ctx()),
+        ToolDecision::Allow
+    );
 }
