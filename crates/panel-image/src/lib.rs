@@ -22,7 +22,7 @@ use ratatui::{
     style::{Color, Style},
     widgets::Paragraph,
 };
-use ratatui_image::{picker::Picker, protocol::StatefulProtocol, Resize, StatefulImage};
+use ratatui_image::{protocol::StatefulProtocol, Resize, StatefulImage};
 
 use termide_core::{
     CommandResult, Config, Panel, PanelCommand, PanelEvent, PanelState, RenderContext, SegmentKind,
@@ -37,8 +37,8 @@ pub struct ImagePanel {
     file_path: PathBuf,
     /// Display title (filename)
     title: String,
-    /// Graphics protocol picker (detects best available protocol)
-    picker: Option<Picker>,
+    /// The terminal's graphics protocol and cell size.
+    graphics: Option<inline::Graphics>,
     /// Decoded image; crops of it are handed to the protocol as the view moves.
     source: Option<DynamicImage>,
     /// Encoded protocol for the source window it was built from `(x, y, w, h)`.
@@ -66,7 +66,7 @@ impl ImagePanel {
         let mut panel = Self {
             file_path: path.clone(),
             title,
-            picker: None,
+            graphics: None,
             source: None,
             encoded: None,
             view: Viewport::default(),
@@ -105,9 +105,9 @@ impl ImagePanel {
     /// Load image from file path.
     fn load_image(&mut self, path: &Path) {
         // Initialize picker if not already done
-        if self.picker.is_none() {
+        if self.graphics.is_none() {
             match inline::Graphics::detect() {
-                Some(graphics) => self.picker = Some(graphics.into_picker()),
+                Some(graphics) => self.graphics = Some(graphics),
                 None => {
                     let t = termide_i18n::t();
                     self.error = Some(t.image_error_fmt(t.image_no_graphics_reply()));
@@ -137,9 +137,9 @@ impl ImagePanel {
 
     /// Cell size in pixels reported by the terminal.
     fn font(&self) -> (u16, u16) {
-        self.picker
+        self.graphics
             .as_ref()
-            .map(|p| p.font_size())
+            .map(inline::Graphics::cell_px)
             .unwrap_or((1, 1))
     }
 
@@ -207,9 +207,17 @@ impl Panel for ImagePanel {
             return;
         }
 
-        let (Some(picker), Some(source)) = (self.picker.as_ref(), self.source.as_ref()) else {
+        // The cell size changes with the font or the screen; the picture
+        // encoded for the old one would take the wrong number of cells.
+        if let Some(graphics) = self.graphics.as_mut() {
+            if graphics.refresh_cell_px() {
+                self.encoded = None;
+            }
+        }
+        let (Some(graphics), Some(source)) = (self.graphics.as_ref(), self.source.as_ref()) else {
             return;
         };
+        let picker = graphics.picker();
         let dims = (source.width(), source.height());
         let Some(layout) = self.view.layout(dims, area, picker.font_size()) else {
             return;
@@ -276,10 +284,10 @@ impl Panel for ImagePanel {
 
     fn status_segments(&self) -> Vec<StatusSegment> {
         let t = termide_i18n::t();
-        let (Some(dims), Some(picker)) = (self.dims(), self.picker.as_ref()) else {
+        let Some(dims) = self.dims().filter(|_| self.graphics.is_some()) else {
             return vec![];
         };
-        let Some(layout) = self.view.layout(dims, self.last_area, picker.font_size()) else {
+        let Some(layout) = self.view.layout(dims, self.last_area, self.font()) else {
             return vec![];
         };
         let fit_kind = if self.view.is_fit() {

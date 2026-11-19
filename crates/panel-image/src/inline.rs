@@ -24,6 +24,9 @@ const KEPT: usize = 8;
 #[derive(Clone)]
 pub struct Graphics {
     picker: Picker,
+    /// Whether the cell size follows the terminal: false for the made-up
+    /// graphics of tests, whose cell size is fixed.
+    live: bool,
 }
 
 impl Graphics {
@@ -40,16 +43,44 @@ impl Graphics {
     #[must_use]
     pub fn detect() -> Option<Self> {
         static DETECTED: OnceLock<Option<Picker>> = OnceLock::new();
-        DETECTED
+        let mut graphics = DETECTED
             .get_or_init(|| Picker::from_query_stdio().ok())
             .clone()
-            .map(|picker| Self { picker })
+            .map(|picker| Self { picker, live: true })?;
+        graphics.refresh_cell_px();
+        Some(graphics)
+    }
+
+    /// Take the cell size the terminal reports now, when it differs from
+    /// the one asked at first: a font size change or a move to a screen of
+    /// another density changes it, and a stale size draws the picture on
+    /// more or fewer cells than it is given, cut or shrunk. Read from the
+    /// window size, which reads no input, unlike the query. Returns whether
+    /// it changed.
+    pub fn refresh_cell_px(&mut self) -> bool {
+        if !self.live {
+            return false;
+        }
+        let Some(cell) = current_cell_px() else {
+            return false;
+        };
+        if cell == self.picker.font_size() {
+            return false;
+        }
+        let protocol = self.picker.protocol_type();
+        // The only constructor that takes a cell size; it detects tmux from
+        // the environment as the query does, and the protocol is set back.
+        #[allow(deprecated)]
+        let mut picker = Picker::from_fontsize(cell);
+        picker.set_protocol_type(protocol);
+        self.picker = picker;
+        true
     }
 
     /// The picker, for a widget that draws through `ratatui-image` itself.
     #[must_use]
-    pub fn into_picker(self) -> Picker {
-        self.picker
+    pub fn picker(&self) -> &Picker {
+        &self.picker
     }
 
     /// Half-block pictures, without asking the terminal.
@@ -57,6 +88,7 @@ impl Graphics {
     pub fn halfblocks() -> Self {
         Self {
             picker: Picker::halfblocks(),
+            live: false,
         }
     }
 
@@ -83,8 +115,21 @@ impl Graphics {
     pub fn sixel() -> Self {
         let mut picker = Picker::halfblocks();
         picker.set_protocol_type(ProtocolType::Sixel);
-        Self { picker }
+        Self {
+            picker,
+            live: false,
+        }
     }
+}
+
+/// The cell size in pixels from the terminal's window size; `None` where
+/// the terminal reports no pixel size (tmux, some Windows consoles).
+fn current_cell_px() -> Option<(u16, u16)> {
+    let size = crossterm::terminal::window_size().ok()?;
+    if size.columns == 0 || size.rows == 0 || size.width == 0 || size.height == 0 {
+        return None;
+    }
+    Some((size.width / size.columns, size.height / size.rows)).filter(|(w, h)| *w > 0 && *h > 0)
 }
 
 fn decode_bytes(data: &str) -> Option<Vec<u8>> {
@@ -156,6 +201,11 @@ impl InlinePictures {
     /// Start a frame: what is drawn from now on counts as drawn in it.
     pub fn next_frame(&mut self) {
         self.frame += 1;
+    }
+
+    /// Forget every encoded picture, so each is encoded again when drawn.
+    pub fn clear(&mut self) {
+        self.entries.clear();
     }
 
     /// Draw the picture in base64 `data`, keyed `key`, fitted into `area`.

@@ -1022,6 +1022,13 @@ impl AgentPanel {
         // input and the strip change as one types.
         self.transcript
             .set_artifact_rows(Some((area.height / 2).max(1)));
+        // The cell size changes with the font or the screen; pictures
+        // encoded for the old one would take the wrong number of cells.
+        if let Some(graphics) = self.graphics.as_mut() {
+            if graphics.refresh_cell_px() {
+                self.pictures.clear();
+            }
+        }
         let layout = self.graphics.as_ref().map(|graphics| PictureLayout {
             cell_px: graphics.cell_px(),
             max_rows: picture_max_rows(area, graphics.cell_px()),
