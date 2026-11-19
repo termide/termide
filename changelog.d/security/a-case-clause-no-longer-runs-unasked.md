@@ -1,0 +1,1 @@
+- **A `case` clause no longer runs its command unasked.** In `case $x in a) rm -rf ~;; esac` the permission check skipped the header's segment as a whole, the command after the pattern with it, so the line passed in every mode — plan mode too. Each clause's command is now judged like any other part of the line.

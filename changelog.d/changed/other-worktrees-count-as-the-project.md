@@ -1,0 +1,1 @@
+- **The repository's other worktrees count as the project.** Working in a git worktree, the agent reads and changes files in the main checkout and in sibling worktrees without being asked as if it stepped outside the project; each worktree is taken only when it and the repository point at each other.

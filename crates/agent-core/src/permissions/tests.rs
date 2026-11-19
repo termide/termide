@@ -313,6 +313,40 @@ fn shell_commands_are_split_and_each_part_judged() {
     );
 }
 
+/// A `case` clause runs the command after its pattern, in the header's
+/// segment as in the ones after it.
+#[test]
+fn a_case_clause_is_judged_by_the_command_it_runs() {
+    let (asking, _) = hooks(rules("mode = \"ask\""), vec![]);
+    let decide = |cmd: &str| asking.decide(&bash(cmd), &ctx());
+    for unsafe_clause in [
+        "case x in a) rm -rf ~;; esac",
+        "case x in (a) rm -rf ~;; esac",
+        "if true; then case x in a) rm -rf ~;; esac; fi",
+        "case x in a) ls;; b) rm -rf ~;; esac",
+        "case x in\na) rm -rf ~;;\nesac",
+    ] {
+        assert_eq!(decide(unsafe_clause), Decision::Ask, "{unsafe_clause}");
+    }
+    assert_eq!(
+        decide("case x in a) ls;; b) wc -l x;; esac"),
+        Decision::Allow
+    );
+    assert_eq!(decide("case x in a) ;; esac"), Decision::Allow);
+    // A pattern's alternatives read as a pipe: the one before the `|` is
+    // left as a command of its own, which asks unless a rule allows it.
+    assert_eq!(
+        split_shell("case $x in a) rm a;; b|c) rm b;; esac").parts,
+        vec!["rm a", "b", "rm b"]
+    );
+
+    let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+    assert_eq!(
+        plan.decide(&bash("case x in a) rm -rf ~;; esac"), &ctx()),
+        Decision::Deny
+    );
+}
+
 #[test]
 fn commands_run_through_a_back_door_are_not_look_only() {
     let (hooks, _) = hooks(PermissionRules::default(), vec![]);
@@ -1103,6 +1137,73 @@ fn a_wildcard_allow_vouches_for_the_program_not_for_paths_beyond_the_project() {
     assert_eq!(asked.lock().unwrap()[0].patterns(), vec!["cat /etc/passwd"]);
 }
 
+/// A wildcard rule for a command that is not look-only vouches for it in
+/// the project and the temporary directories: a path beyond them among its
+/// words, a variable whose value cannot be seen, or a directory beyond
+/// them to run in asks — but not a word the program takes as data.
+#[test]
+fn a_wildcard_allow_lets_a_command_change_nothing_beyond_the_project() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let mut configured = PermissionRules::default();
+    for program in [
+        "cp", "tee", "mkdir", "rm", "git", "awk", "sed", "ssh", "gh", "make", "R=",
+    ] {
+        configured.add("shell", &format!("{program}*"), Decision::Allow);
+    }
+    configured.mode = Mode::Configured;
+    let (hooks, _) = hooks(configured, vec![]);
+    let beyond = [
+        "cp ~/.ssh/id_rsa .",
+        "cp notes ../other/",
+        "cp --target-directory=/etc notes",
+        "tee /etc/hosts",
+        "mkdir -p ~/scratch",
+        "rm -rf ../sibling",
+        "git -C ../other commit -m x",
+        "awk '{print}' ~/.netrc",
+        "sed -i '' s/a/b/ /etc/hosts",
+        "ssh -i ~/.ssh/key host",
+        "make < ~/.netrc",
+        "cp $UNKNOWN .",
+        "R=~/.ssh; cp $R/id_rsa .",
+        "cd /etc && make",
+        "for f in /etc/hosts notes; do cp $f /tmp/; done",
+    ];
+    let inside = [
+        "cp notes copy",
+        "cp notes /tmp/notes",
+        "cp notes /dev/null",
+        "rm -rf target",
+        "git commit -m '/etc/hosts is read'",
+        "git checkout origin/main",
+        "awk '/^x/ {print $1}' notes",
+        "sed -n '/^a/,/^b/p' notes",
+        "ssh host 'cat /etc/hosts'",
+        "gh api /repos/o/r/pulls --jq '.[].title'",
+        "R=src; cp $R/a.rs b.rs",
+        "for f in a b; do cp $f /tmp/; done",
+        "cd /tmp && make",
+        "(cd src && make)",
+    ];
+    for command in beyond {
+        if home.is_empty() && command.contains('~') {
+            continue;
+        }
+        assert_eq!(
+            hooks.decide(&bash(command), &ctx()),
+            Decision::Ask,
+            "{command}"
+        );
+    }
+    for command in inside {
+        assert_eq!(
+            hooks.decide(&bash(command), &ctx()),
+            Decision::Allow,
+            "{command}"
+        );
+    }
+}
+
 /// A `$` expands only before a name, a parameter, a brace, a parenthesis
 /// or a bracket (and outside double quotes before a quote, `$'…'` being a
 /// quote of its own); anywhere else it is a plain character, so a pattern
@@ -1247,7 +1348,7 @@ fn loop_variables_over_paths_in_the_project_read_inside_it() {
     let values = |command: &str| -> Vec<Vec<(String, Vec<ShellWord>)>> {
         shell_parts(command, Path::new("/proj"))
             .into_iter()
-            .map(|p| p.loop_values)
+            .map(|p| p.known_values)
             .collect()
     };
     let bound = |name: &str, words: &[&str]| {
@@ -1269,8 +1370,14 @@ fn loop_variables_over_paths_in_the_project_read_inside_it() {
             vec![bound("f", &["a"])]
         ]
     );
+    // A command that is not look-only keeps the binding; one that changes
+    // directory or reads a script into the shell does not.
     assert_eq!(
         values("for f in a; do while read g; do cat $f; done; done"),
+        vec![vec![bound("f", &["a"])], vec![bound("f", &["a"])]]
+    );
+    assert_eq!(
+        values("for f in a; do source x; cat $f; done"),
         vec![vec![], vec![]]
     );
 }
@@ -1295,6 +1402,198 @@ fn a_look_only_read_through_a_symlink_out_of_the_project_asks() {
         );
     }
     assert_eq!(hooks.decide(&bash("cat notes"), &ctx), Decision::Allow);
+}
+
+/// A subshell's `cd` lasts until its end; a `cd` that may not have
+/// happened — on a condition, or to a directory that does not exist — is
+/// relied on only by what follows it through `&&`.
+#[test]
+fn the_directory_a_part_runs_in_follows_what_surely_ran() {
+    let project = tempfile::tempdir().unwrap();
+    let root = dunce::canonicalize(project.path()).unwrap();
+    std::fs::create_dir_all(root.join("a/b")).unwrap();
+    let dirs = |command: &str| -> Vec<Option<PathBuf>> {
+        shell_parts(command, &root)
+            .into_iter()
+            .map(|p| p.dir.map(|d| d.strip_prefix(&root).unwrap().to_path_buf()))
+            .collect()
+    };
+    let at = |dir: &str| Some(PathBuf::from(dir));
+    assert_eq!(dirs("(cd a && make) ; ls"), vec![at(""), at("a"), at("")]);
+    assert_eq!(
+        dirs("(cd a; (cd b; x); y); z"),
+        vec![at(""), at("a"), at("a/b"), at("a"), at("")]
+    );
+    // Arithmetic and `case` patterns open no subshell.
+    assert_eq!(dirs("((i++)); cd a; ls"), vec![at(""), at(""), at("a")]);
+    assert_eq!(
+        dirs("case $x in y) ls;; esac; cd a; ls"),
+        vec![at(""), at(""), at("a")]
+    );
+    // On a condition, or to a directory not there yet.
+    assert_eq!(dirs("false && cd a; ls"), vec![at(""), at(""), None]);
+    assert_eq!(
+        dirs("make && cd a && ls; ls"),
+        vec![at(""), at(""), at("a"), None]
+    );
+    assert_eq!(dirs("cd new; ls"), vec![at(""), None]);
+    assert_eq!(
+        dirs("mkdir -p new && cd new && ls"),
+        vec![at(""), at(""), at("new")]
+    );
+    assert_eq!(dirs("if x; then cd a; fi; ls"), vec![at(""), at(""), None]);
+    assert_eq!(
+        dirs("cd a && for f in x; do ls; done"),
+        vec![at(""), at("a")]
+    );
+    assert_eq!(dirs("cd a | ls; ls"), vec![at(""), None, None]);
+    assert_eq!(dirs("cd a && cd b; ls"), vec![at(""), at("a"), at("a/b")]);
+
+    let ctx = ToolContext::new(root.clone());
+    let (hooks, _) = hooks(rules("mode = \"ask\""), vec![]);
+    // `../x` from `a` is in the project; from the project, beyond it.
+    assert_eq!(
+        hooks.decide(&bash("cd a && cat ../x"), &ctx),
+        Decision::Allow
+    );
+    for command in ["cd nope; cat ../x", "false && cd a; cat ../x"] {
+        assert_eq!(
+            hooks.decide(&bash(command), &ctx),
+            Decision::Ask,
+            "{command}"
+        );
+    }
+}
+
+/// A plain assignment earlier on the line gives a variable a value the
+/// parts after it are judged with, where nothing else can change it.
+#[test]
+fn a_variable_assigned_on_the_line_is_judged_by_its_value() {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let values = |command: &str| -> Vec<Vec<(String, String)>> {
+        shell_parts(command, Path::new("/proj"))
+            .into_iter()
+            .map(|p| {
+                p.known_values
+                    .into_iter()
+                    .map(|(name, words)| (name, words[0].text.clone()))
+                    .collect()
+            })
+            .collect()
+    };
+    let r = |value: &str| vec![("R".to_string(), value.to_string())];
+    assert_eq!(values("R=src; cat $R/a"), vec![vec![], r("src")]);
+    assert_eq!(
+        values("cd src && R=x; cat $R"),
+        vec![vec![], vec![], r("x")]
+    );
+    assert_eq!(
+        values("R=src && cat $R && wc $R"),
+        vec![vec![], r("src"), r("src")]
+    );
+    assert_eq!(
+        values("R=src; F=$R/a; cat $F"),
+        vec![
+            vec![],
+            r("src"),
+            vec![("R".into(), "src".into()), ("F".into(), "src/a".into())]
+        ]
+    );
+    if !home.is_empty() {
+        assert_eq!(
+            values("R=~/x; cat $R"),
+            vec![vec![], r(&format!("{home}/x"))]
+        );
+    }
+    for unknown in [
+        "false && R=src; cat $R",
+        "R=src | true; cat $R",
+        "R=src & cat $R",
+        "R=a; R=b; cat $R",
+        "if x; then R=src; fi; cat $R",
+        "R=src; read R; cat $R",
+        "R=src; source env.sh; cat $R",
+        "R=$(pwd); cat $R",
+        "R='a b'; cat $R",
+        "R=*.rs; cat $R",
+        "R=src; IFS=/; cat $R",
+    ] {
+        let last = values(unknown).pop().unwrap();
+        assert!(
+            last.iter().all(|(name, _)| name != "R"),
+            "{unknown}: {last:?}"
+        );
+    }
+
+    // An assignment is no look-only command — the variable may be one the
+    // environment passes on — so a rule lets it through here.
+    let (hooks, _) = hooks(
+        rules("mode = \"configured\"\n[shell]\n\"R=*\" = \"allow\"\n\"D=*\" = \"allow\""),
+        vec![],
+    );
+    let decide = |command: &str| hooks.decide(&bash(command), &ctx());
+    assert_eq!(decide("R=src; cat $R/lib.rs"), Decision::Allow);
+    assert_eq!(decide("D=/etc; cat $D/passwd"), Decision::Ask);
+    assert_eq!(decide("false && R=src; cat $R/lib.rs"), Decision::Ask);
+}
+
+/// The other worktrees of the project's repository are the project too,
+/// when git's record of each and its own `.git` point at each other.
+#[test]
+fn another_worktree_of_the_repository_is_in_the_project() {
+    let base = tempfile::tempdir().unwrap();
+    let base = dunce::canonicalize(base.path()).unwrap();
+    let main = base.join("main");
+    let records = main.join(".git/worktrees");
+    let worktree = |name: &str, points_back: bool| {
+        std::fs::create_dir_all(records.join(name)).unwrap();
+        std::fs::create_dir_all(base.join(name)).unwrap();
+        std::fs::write(base.join(name).join("notes"), "x").unwrap();
+        std::fs::write(
+            records.join(name).join("gitdir"),
+            format!("{}\n", base.join(name).join(".git").display()),
+        )
+        .unwrap();
+        let record = if points_back {
+            records.join(name)
+        } else {
+            base.join("elsewhere")
+        };
+        std::fs::write(
+            base.join(name).join(".git"),
+            format!("gitdir: {}\n", record.display()),
+        )
+        .unwrap();
+    };
+    worktree("wt", true);
+    // A record git keeps that the directory does not answer.
+    worktree("forged", false);
+    std::fs::write(records.join("wt/commondir"), "../..\n").unwrap();
+
+    let project = Project::of(&main);
+    assert!(project.holds(&base.join("wt/notes")));
+    assert!(!project.holds(&base.join("forged/notes")));
+    // From a linked worktree, the main one and the others count.
+    let linked = Project::of(&base.join("wt"));
+    assert!(linked.holds(&main.join("src")));
+    assert!(!linked.holds(&base.join("forged")));
+    // A directory that is no worktree's top keeps to itself.
+    std::fs::create_dir_all(main.join("sub")).unwrap();
+    assert!(!Project::of(&main.join("sub")).holds(&base.join("wt")));
+
+    let ctx = ToolContext::new(main.clone());
+    let (hooks, _) = hooks(rules("mode = \"edit\""), vec![]);
+    assert_eq!(
+        hooks.decide(&bash("cat ../wt/notes"), &ctx),
+        Decision::Allow
+    );
+    assert_eq!(
+        hooks.decide(&bash("cat ../forged/notes"), &ctx),
+        Decision::Ask
+    );
+    let edit = |path: &str| call("edit", json!({ "path": path }));
+    assert_eq!(hooks.decide(&edit("../wt/notes"), &ctx), Decision::Allow);
+    assert_eq!(hooks.decide(&edit("../forged/notes"), &ctx), Decision::Ask);
 }
 
 /// A glob in a look-only command reads what it matches, as the shell
@@ -1433,7 +1732,7 @@ fn a_loop_that_changes_directory_leaves_it_unknown() {
         // No directory change in the loop, or an absolute one after it.
         "for x in a b; do cat src/lib.rs; done; cat f",
         "for x in a b; do cd ..; done; cd /proj && cat f",
-        "cd src; for f in a b; do cat $f; done",
+        "cd src && for f in a b; do cat $f; done",
     ] {
         assert_eq!(
             hooks.decide(&bash(command), &ctx()),
