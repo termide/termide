@@ -91,6 +91,38 @@ fn the_connection_picker_switches_the_endpoint_and_its_model() {
     );
 }
 
+/// A switch the rebuild refuses (a background task still answers into the
+/// session) leaves the panel whole on the connection it has: the endpoint,
+/// the model and the log, not the new connection's name and model over the
+/// old agent, which then reports its own model back into the chip.
+#[test]
+fn a_refused_connection_switch_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = connected_panel(dir.path());
+    assert!(panel.switch_connection("cli"));
+    let (kind, model) = (panel.provider_kind.clone(), panel.model.id.clone());
+    let background = crate::live::register(crate::live::LiveTask {
+        panel: Some(panel.panel_id()),
+        call: "call-bg",
+        from: "default",
+        agent: "search",
+        task: "find the loader",
+        session: None,
+        background: true,
+    });
+    assert!(!panel.switch_connection("local"));
+    assert_eq!(panel.connection, "cli");
+    assert_eq!(panel.provider_kind, kind);
+    assert_eq!(panel.model.id, model);
+    assert!(panel.external);
+    let session = Session::open(panel.session_path().unwrap()).unwrap();
+    assert_eq!(session.current_connection(), Some("cli".to_string()));
+    drop(background);
+    assert!(panel.switch_connection("local"));
+    assert_eq!(panel.connection, "local");
+    assert!(!panel.external);
+}
+
 #[test]
 fn a_connection_switch_keeps_the_typed_prompt() {
     let dir = tempfile::tempdir().unwrap();

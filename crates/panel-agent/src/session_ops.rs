@@ -52,18 +52,7 @@ impl AgentPanel {
     /// where the conversation itself may change, they are given up: the
     /// request stays with the log it failed on.
     pub fn switch_session(&mut self, session: Option<Session>) -> bool {
-        if self.is_busy() {
-            self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
-            return false;
-        }
-        // Tasks handed over in the background ask through this session's
-        // channels and answer into it: they finish first, as a run does.
-        let delegates = crate::live::background_of(self.panel_id).len();
-        if delegates > 0 {
-            self.notice(
-                termide_i18n::t().agent_notice_delegates_running_fmt(delegates),
-                NoticeKind::Warn,
-            );
+        if self.rebuild_refused() {
             return false;
         }
         // A search in the banner's list ends with the banner it searched,
@@ -275,6 +264,27 @@ impl AgentPanel {
         );
         self.refresh_recent_sessions();
         true
+    }
+
+    /// Whether the runtime cannot be rebuilt now, told in a notice: a run is
+    /// in flight, or tasks handed over in the background still ask through
+    /// this session's channels and answer into it — they finish first, as a
+    /// run does. A switch asks before it changes anything, so a refusal
+    /// leaves the panel whole on what it had.
+    pub(crate) fn rebuild_refused(&mut self) -> bool {
+        if self.is_busy() {
+            self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
+            return true;
+        }
+        let delegates = crate::live::background_of(self.panel_id).len();
+        if delegates > 0 {
+            self.notice(
+                termide_i18n::t().agent_notice_delegates_running_fmt(delegates),
+                NoticeKind::Warn,
+            );
+            return true;
+        }
+        false
     }
 
     /// Rebuild the agent on the session it runs — after a connection or

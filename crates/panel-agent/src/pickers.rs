@@ -434,8 +434,7 @@ impl AgentPanel {
         // An external agent, or leaving one: the runtime is rebuilt on the
         // same session log, which is replayed into the transcript only.
         if profile.backend.is_some() || self.external {
-            if self.is_busy() {
-                self.notice(termide_i18n::t().agent_notice_busy(), NoticeKind::Warn);
+            if self.rebuild_refused() {
                 return false;
             }
             if let Some(session) = &mut self.session {
@@ -547,8 +546,7 @@ impl AgentPanel {
         let Some(connections) = self.connections.clone() else {
             return false;
         };
-        if self.is_busy() {
-            self.notice(t.agent_notice_busy(), NoticeKind::Warn);
+        if self.rebuild_refused() {
             return false;
         }
         let Some(choice) = connections.build(name, &self.agent) else {
@@ -559,6 +557,9 @@ impl AgentPanel {
         self.provider = Arc::clone(&choice.provider);
         self.provider_kind = choice.kind.clone();
         self.connection = choice.name.clone();
+        // What a later settings edit is measured against.
+        self.connection_settings = choice.settings.clone();
+        self.connection_refresh = false;
         // The connection's model replaces the one in use: another endpoint seldom
         // serves the same id.
         let model = ModelSpec {
@@ -620,7 +621,9 @@ impl AgentPanel {
         if self.is_delegate() {
             return false;
         }
-        if self.is_busy() {
+        // Background tasks hold the runtime as a run does: the rebuild would
+        // be refused after the panel took the new settings.
+        if self.is_busy() || !crate::live::background_of(self.panel_id).is_empty() {
             self.connection_refresh = true;
             return false;
         }
