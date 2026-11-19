@@ -33,8 +33,8 @@ pub use keybindings::{
 use layer_rules::Layer;
 pub use overrides::{RuntimeOverrides, CONSOLE_THEME};
 pub use placeholders::{
-    expand_placeholder_line, expand_placeholders, placeholder_names, PlaceholderValue, Quoting,
-    CONTEXT_PLACEHOLDERS,
+    expand_placeholder_line, expand_placeholder_text, expand_placeholders, placeholder_names,
+    PlaceholderValue, Quoting, CONTEXT_PLACEHOLDERS,
 };
 pub use plugins::{builtin_plugin_enabled, plugin_enabled, PluginMode, PluginSettings};
 pub use settings::{attribution_of, url_host, ATTRIBUTION_HOSTS};

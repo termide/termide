@@ -1,5 +1,5 @@
 //! The project environment `direnv export json` gives a directory, for the
-//! background and report commands.
+//! background and report commands and the launches of a debug adapter.
 //!
 //! direnv can take seconds — nix-direnv evaluates a flake — so it never runs
 //! on the UI thread. A lookup answers from the cache while the answer is
@@ -10,11 +10,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 /// Variables to set (`Some`) and to unset (`None`).
-pub(super) type DirenvEnv = HashMap<String, Option<String>>;
+pub(in crate::app) type DirenvEnv = HashMap<String, Option<String>>;
 
 /// Where a lookup stands.
 #[derive(Debug, Clone, PartialEq)]
-pub(super) enum Lookup {
+pub(in crate::app) enum Lookup {
     /// The environment to apply; `None` when direnv has none for the
     /// directory or is not installed.
     Ready(Option<DirenvEnv>),
@@ -29,7 +29,7 @@ const TTL: std::time::Duration = std::time::Duration::from_secs(60);
 /// The environment for commands run in `cwd`, starting direnv in the
 /// background when the cache has no fresh answer.
 #[cfg(unix)]
-pub(super) fn lookup(cwd: &Path) -> Lookup {
+pub(in crate::app) fn lookup(cwd: &Path) -> Lookup {
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Mutex, PoisonError};
@@ -94,7 +94,7 @@ pub(super) fn lookup(cwd: &Path) -> Lookup {
 }
 
 #[cfg(not(unix))]
-pub(super) fn lookup(_cwd: &Path) -> Lookup {
+pub(in crate::app) fn lookup(_cwd: &Path) -> Lookup {
     Lookup::Ready(None)
 }
 

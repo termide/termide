@@ -466,8 +466,10 @@ impl App {
                 spec.console = Console::Panel;
             }
         }
-        *self.debug_session.lock().unwrap_or_else(|e| e.into_inner()) =
-            Some(Session::start(spec, set));
+        // It starts once direnv has given the environment of its directory.
+        let mut session = Session::waiting(spec, set);
+        begin_with_direnv(&mut session);
+        *self.debug_session.lock().unwrap_or_else(|e| e.into_inner()) = Some(session);
         self.debug_breakpoints_version = version;
         self.debug_revealed = None;
 
@@ -525,12 +527,24 @@ impl App {
         use termide_panel_terminal::Terminal;
         let rows = self.state.terminal.height.saturating_sub(3);
         let cols = self.state.terminal.width.saturating_sub(2);
+        // The launch's environment, which an adapter need not hand on in its
+        // request, under what the request sets.
+        let env: Vec<(String, String)> = self
+            .debug_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+            .map(|session| session.spec().env.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .chain(request.env.iter().cloned())
+            .collect();
         let pid = match Terminal::new_with_program(
             rows,
             cols,
             &request.args,
             request.cwd.clone(),
-            &request.env,
+            &env,
         ) {
             Ok(terminal) => {
                 let pid = terminal.child_pid();
@@ -590,6 +604,9 @@ impl App {
                 return;
             };
             let mut changed = session.poll();
+            if session.is_waiting() {
+                changed |= begin_with_direnv(session);
+            }
             let terminal = session.take_terminal_request();
             if session.is_active() {
                 let store = breakpoints::store();
@@ -687,6 +704,26 @@ impl App {
             panels.extend(parked.panels_mut());
         }
         panels
+    }
+}
+
+/// Begin `session` with the variables direnv sets for its directory, once
+/// direnv has answered; whether it began. Variables direnv would unset stay:
+/// the program and its adapter get termide's environment under them.
+fn begin_with_direnv(session: &mut Session) -> bool {
+    use super::menu_actions::direnv;
+    match direnv::lookup(&session.spec().cwd) {
+        direnv::Lookup::Ready(env) => {
+            let mut env: Vec<(String, String)> = env
+                .into_iter()
+                .flatten()
+                .filter_map(|(name, value)| value.map(|v| (name, v)))
+                .collect();
+            env.sort();
+            session.begin(env);
+            true
+        }
+        direnv::Lookup::Pending => false,
     }
 }
 

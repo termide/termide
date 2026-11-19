@@ -25,7 +25,7 @@ The project file belongs to the current project root, so it can be committed and
 
 The two files do not override each other: a project command and a global command with the same identifier are two separate menu entries. Project commands are listed first and drawn in bold.
 
-Since the project file comes with the repository, a project command runs only once you have seen it. The first time one is started — from the menu, the palette, its hotkey or `F5` — a window shows what it runs (its `build`, then the command) and asks; agreeing runs it and approves it as it is, in termide's data directory under the project (`projects/<name>-<hash>/trust.toml`). If the repository changes the command, its mode, `build`, debugger or key, it asks again. Until a project command is approved, its hotkey asks only if it is held with `Ctrl` or `Alt` or is an F-key: pressing it shows the same window as the menu. A key text is typed with — a plain letter, `Shift`+letter, `Enter` — is bound only once the command is approved: start it once from the menu, and the key works from then on. A command you write in the `Add command...` or **Set up debugging** form is approved as you save it.
+Since the project file comes with the repository, a project command runs only once you have seen it. The first time one is started — from the menu, the palette, its hotkey or `F5` — a window shows what it runs (its `build`, then the command with its `env`) and asks; agreeing runs it and approves it as it is, in termide's data directory under the project (`projects/<name>-<hash>/trust.toml`). If the repository changes the command, its mode, `build`, debugger, `env` or key, it asks again. Until a project command is approved, its hotkey asks only if it is held with `Ctrl` or `Alt` or is an F-key: pressing it shows the same window as the menu. A key text is typed with — a plain letter, `Shift`+letter, `Enter` — is bound only once the command is approved: start it once from the menu, and the key works from then on. A command you write in the `Add command...` or **Set up debugging** form is approved as you save it.
 
 ## File format
 
@@ -61,6 +61,7 @@ mode = "background"
 | `group` | no | Puts the command into a submenu with this name |
 | `key` | no | Hotkey that runs the command, e.g. `Ctrl+Shift+D`, see [Hotkeys](#hotkeys) |
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
+| `env` | no | Environment variables for the command, as a table: `env = { RUST_LOG = "debug" }`; values may hold [placeholders](#placeholders) |
 | `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
 | `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
 | `console` | no | With a debug adapter: `terminal` (the default) runs the program in a terminal panel, where it reads the keyboard; `panel` shows its output in the debug panel |
@@ -116,7 +117,7 @@ A command with a `debugger` runs in the project root, in the debug panel or a te
 | `background` | `sh -c "<command>"` without a panel | Discarded |
 | `report` | `sh -c "<command>"` without a panel | Captured and shown in a window when the command ends |
 
-Background and report commands appear in the [Operations](operations.md) panel, which opens when such a command starts. The entry disappears when the process exits; cancelling it there kills the process together with its children. A background command gives no other signal on completion, so redirect its output to a file if you need it. On Unix, when `direnv` is installed, background and report commands also get the environment that `direnv export json` returns for the working directory.
+Background and report commands appear in the [Operations](operations.md) panel, which opens when such a command starts. The entry disappears when the process exits; cancelling it there kills the process together with its children. A background command gives no other signal on completion, so redirect its output to a file if you need it. On Unix, when `direnv` is installed, background and report commands also get the environment that `direnv export json` returns for the working directory; the command's `env` and parameters take precedence over it.
 
 ### Report window
 
@@ -174,7 +175,7 @@ The form is shown however the command is started: from the `Commands` menu, by i
 
 ## Placeholders
 
-`{name}` in `command` (and in `build`) is replaced before the command runs: by the value of the parameter `name`, or by something of the focused panel's or the project's. A parameter of the same name takes precedence.
+`{name}` in `command` (and in `build` and the values of `env`) is replaced before the command runs: by the value of the parameter `name`, or by something of the focused panel's or the project's. A parameter of the same name takes precedence.
 
 | Placeholder | Value |
 |-------------|-------|
@@ -195,6 +196,7 @@ key = "Shift+F5"
 
 Each value is quoted for whatever reads the line, so a path with spaces, quotes or `;` stays one argument and is never run as a command:
 
+- A value of `env` gets the value as it is: no shell reads it.
 - `background` and `report` commands run through `sh -c`: POSIX quoting.
 - `terminal` commands are quoted for the terminal's shell: POSIX for sh, bash, zsh and the like, fish's own rules for fish, `'…'` for PowerShell, `"…"` for cmd. cmd has no literal quoting, so a `%name%` in a value is still expanded there. A control character in a value (a file name holding a tab, a newline or a Ctrl+U) would act as a key once typed, so bash, zsh and ksh get it as a `$'\NNN'` escape and fish as `\xHH`; for sh and other shells without such escapes, PowerShell and cmd, the command is not typed at all, and an error message names the shell.
 - A debug command's line is split into words first and the values put into them, each one word (`{files}` as many); its `build` gets POSIX quoting.
@@ -250,6 +252,18 @@ They go where the debugger reads its options, before the program: an adapter get
 For a debug adapter, `command` is split into words as a shell would split it (quotes and backslashes work) but no shell runs it: variables, `~` and globs are not expanded. `build` runs first, its output going to the debug panel; the adapter starts only if it succeeds. A command-line debugger reads its breakpoints from a script — a `breakpoint set` or `break` for each, then `run` (lldb, gdb) or `continue` (Delve) — written to `termide-debug` in the system's temporary directory; breakpoints set while it runs reach it only on the next launch, so set them in the debugger itself meanwhile.
 
 Only breakpoints in files under the project root go in, each to the debugger for its language: Python files to debugpy and pdb, Go files to Delve and dlv-dap, the rest to lldb and gdb. Debug commands run in the project root, so a relative program path such as `target/debug/app` means the same wherever the focus is. Parameters work as for other commands; for a debug adapter they reach the build and the adapter as environment variables.
+
+Since no shell runs a debug adapter's `command`, `RUST_LOG=debug target/debug/app` would take `RUST_LOG=debug` for the program; the program's environment goes in `env` instead:
+
+```toml
+[debug-server]
+command = "target/debug/server"
+debugger = "lldb-dap"
+env = { RUST_LOG = "debug", PORT = "{port}" }
+params = [{ name = "port", default = "8080" }]
+```
+
+`env` reaches the build, the adapter and the program, and a command-line debugger's terminal. A launch through a debug adapter, with a command or without one, also gets the variables that `direnv export json` sets for its directory when `direnv` is installed (on Unix), under its own `env` and parameters; until direnv answers — evaluating a Nix flake can take a while — the session shows as building. A command-line debugger's terminal runs your shell, so there direnv applies only through your shell's direnv hook, as in any terminal.
 
 `F5` in the editor (`start_debug`), or **Start debugging** in the command palette, starts debugging: with one launch available it starts at once, with several it offers them as a list. The launches are the debug commands of the project and the global file and, when the focused editor holds a Python, Go or Rust file, that file itself, which needs no command:
 

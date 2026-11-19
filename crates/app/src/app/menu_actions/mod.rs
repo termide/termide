@@ -9,7 +9,7 @@ mod bookmarks;
 mod command_palette;
 mod commands;
 mod commands_exec;
-mod direnv;
+pub(in crate::app) mod direnv;
 mod operation_action;
 mod outline;
 mod panel_action;

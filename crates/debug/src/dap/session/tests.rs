@@ -613,3 +613,68 @@ fn a_program_asked_for_in_a_terminal_is_started_by_the_app() {
     assert_eq!(sent[0]["success"], true);
     assert_eq!(sent[0]["body"]["processId"], 4242);
 }
+
+fn waiting_spec(build: &str, env: &[(&str, &str)]) -> LaunchSpec {
+    LaunchSpec {
+        adapter: Adapter::LldbDap,
+        debugger_settings: Default::default(),
+        adapter_args: Vec::new(),
+        program: "target/debug/app".into(),
+        args: Vec::new(),
+        cwd: std::env::temp_dir(),
+        build: Some(build.into()),
+        env: env
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect(),
+        label: "app".into(),
+        console: Console::Panel,
+        tty: None,
+    }
+}
+
+// The directory's environment (direnv's) goes under the launch's own: what
+// `commands.toml` and the parameters say wins.
+#[cfg(unix)]
+#[test]
+fn a_waiting_session_begins_with_the_environment_under_its_own() {
+    let mut session = Session::waiting(
+        waiting_spec(
+            "echo \"$TERMIDE_T_A-$TERMIDE_T_B\"; exit 1",
+            &[("TERMIDE_T_B", "own")],
+        ),
+        Vec::new(),
+    );
+    assert!(session.is_waiting());
+    assert!(session.is_busy(), "an agent waits for it as for a build");
+    session.begin(vec![
+        ("TERMIDE_T_A".into(), "dir".into()),
+        ("TERMIDE_T_B".into(), "dir".into()),
+    ]);
+    assert!(!session.is_waiting());
+    for _ in 0..500 {
+        session.poll();
+        if !session.is_active() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let lines: Vec<&str> = session.output.iter().map(|l| l.text.as_str()).collect();
+    assert!(lines.contains(&"dir-own"), "{lines:?}");
+    assert!(matches!(session.status, Status::Failed(_)));
+}
+
+#[test]
+fn a_waiting_session_stopped_never_begins() {
+    let mut session = Session::waiting(waiting_spec("exit 0", &[]), Vec::new());
+    session.stop();
+    assert_eq!(session.status, Status::Ended);
+    assert!(!session.is_waiting());
+    session.begin(Vec::new());
+    assert_eq!(
+        session.status,
+        Status::Ended,
+        "begin after stop does nothing"
+    );
+    assert!(session.output.iter().all(|l| l.kind != OutputKind::Build));
+}

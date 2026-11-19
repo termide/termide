@@ -1,0 +1,16 @@
+# A debug command's `env` (doc/en/actions.md, Debugging): a program under
+# lldb-dap, whose command line no shell reads, gets the command's variables,
+# a placeholder filled in, over the ones direnv sets for the project.
+# Needs a C compiler, lldb-dap and direnv.
+project empty
+setup "printf '%s\n' '#include <stdio.h>' '#include <stdlib.h>' 'int main(void) { printf(\"seen direnv=%s both=%s cmd=%s\\n\", getenv(\"FROM_DIRENV\"), getenv(\"BOTH\"), getenv(\"FROM_CMD\")); return 0; }' > envprint.c"
+setup "printf 'export FROM_DIRENV=yes\nexport BOTH=direnv\n' > .envrc && direnv allow ."
+setup "mkdir -p \"$TERMIDE_CONFIG\" && printf '[debug-envprint]\nname = \"Debug envprint\"\ncommand = \"./envprint\"\nbuild = \"cc -g -o envprint envprint.c\"\ndebugger = \"lldb-dap\"\nconsole = \"panel\"\nenv = { FROM_CMD = \"in {project}\", BOTH = \"command\" }\n' > \"$TERMIDE_CONFIG/commands.toml\""
+start
+key Ctrl+P
+wait "Command palette"
+type "Start debugging"
+key Enter
+wait "seen direnv=yes both=command cmd=in " 60
+snapshot output
+quit --force

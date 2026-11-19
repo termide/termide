@@ -439,14 +439,8 @@ fn agent_debug_command(
         params.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
     let values = termide_config::commands::param_values(declared, &given)
         .map_err(|e| format!("`{}`: {e}", command.name))?;
-    let texts = [
-        command.command.as_deref(),
-        command.metadata.as_ref().and_then(|m| m.build.as_deref()),
-    ];
-    if let Some(name) = texts
+    if let Some(name) = App::command_placeholder_names(command)
         .into_iter()
-        .flatten()
-        .flat_map(termide_config::placeholder_names)
         // A parameter named like a panel placeholder takes its
         // place, as it does for the user.
         .find(|name| {

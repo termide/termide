@@ -314,6 +314,13 @@ pub fn expand_placeholder_line(
     Some(expand_placeholder_words(&words, values))
 }
 
+/// `text`, which nothing parses further (an environment variable's value),
+/// with each `{name}` that `values` has replaced by its value as it is; the
+/// words of a `Many` value are joined by spaces.
+pub fn expand_placeholder_text(text: &str, values: &HashMap<String, PlaceholderValue>) -> String {
+    expand_placeholder_words(&[text.to_string()], values).join(" ")
+}
+
 /// Words already split, with the placeholders in them replaced as they
 /// are: a word that is a `Many` placeholder alone becomes as many words.
 fn expand_placeholder_words(

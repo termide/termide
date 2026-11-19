@@ -128,7 +128,7 @@ impl App {
                 return Ok(());
             }
         };
-        let env = param_env(params);
+        let env = command_env(command, &values, params);
         if command.debugger().is_some() {
             return self.run_debug_command(&expand_debug_command(command, &values), &env);
         }
@@ -363,7 +363,16 @@ impl App {
             .iter()
             .map(|(name, value)| (name.clone(), PlaceholderValue::One(value.clone())))
             .collect();
-        (expand_debug_command(command, &values), param_env(params))
+        let env = command_env(command, &values, params);
+        (expand_debug_command(command, &values), env)
+    }
+
+    /// The names of the placeholders `command` uses anywhere: its line, its
+    /// build and its `env`.
+    pub(in crate::app) fn command_placeholder_names(command: &CommandItem) -> Vec<&str> {
+        placeholder_texts(command)
+            .flat_map(termide_config::placeholder_names)
+            .collect()
     }
 
     /// The values of the placeholders `command` uses: its parameters', then
@@ -374,18 +383,11 @@ impl App {
         command: &CommandItem,
         params: &HashMap<String, String>,
     ) -> Result<HashMap<String, PlaceholderValue>, String> {
-        let meta = command.metadata.as_ref();
-        let texts = [
-            command.command.as_deref(),
-            meta.and_then(|m| m.build.as_deref()),
-        ];
         let mut values: HashMap<String, PlaceholderValue> = params
             .iter()
             .map(|(name, value)| (name.clone(), PlaceholderValue::One(value.clone())))
             .collect();
-        let used: Vec<&str> = texts
-            .into_iter()
-            .flatten()
+        let used: Vec<&str> = placeholder_texts(command)
             .flat_map(termide_config::placeholder_names)
             .filter(|name| CONTEXT_PLACEHOLDERS.contains(name) && !values.contains_key(*name))
             .collect();
@@ -457,10 +459,27 @@ fn command_label(command: &CommandItem) -> String {
         .unwrap_or_else(|| command.name.clone())
 }
 
-/// The environment variables a command's parameters become:
-/// `TERMIDE_PARAM_<NAME>`, upper-cased, with `-` as `_`.
-fn param_env(params: &HashMap<String, String>) -> Vec<(String, String)> {
-    let mut env: Vec<(String, String)> = params
+/// The texts of `command` that may hold placeholders: its line, its build
+/// and the values of its `env`.
+fn placeholder_texts(command: &CommandItem) -> impl Iterator<Item = &str> {
+    let meta = command.metadata.as_ref();
+    command
+        .command
+        .as_deref()
+        .into_iter()
+        .chain(meta.and_then(|m| m.build.as_deref()))
+        .chain(command.env().map(|(_, value)| value))
+}
+
+/// The environment `command` runs with: its `env`, the placeholders in its
+/// values filled from `values`, then its parameters as `TERMIDE_PARAM_<NAME>`
+/// (upper-cased, with `-` as `_`).
+fn command_env(
+    command: &CommandItem,
+    values: &HashMap<String, PlaceholderValue>,
+    params: &HashMap<String, String>,
+) -> Vec<(String, String)> {
+    let mut param_env: Vec<(String, String)> = params
         .iter()
         .map(|(name, value)| {
             (
@@ -469,8 +488,17 @@ fn param_env(params: &HashMap<String, String>) -> Vec<(String, String)> {
             )
         })
         .collect();
-    env.sort();
-    env
+    param_env.sort();
+    command
+        .env()
+        .map(|(name, value)| {
+            (
+                name.to_string(),
+                termide_config::expand_placeholder_text(value, values),
+            )
+        })
+        .chain(param_env)
+        .collect()
 }
 
 /// The parameters `command` declares, with no values yet: what its
@@ -564,7 +592,7 @@ fn build_command_command(
 /// Everything a command runs, as one line: what its approval is for.
 fn command_spec(command: &CommandItem) -> String {
     let meta = command.metadata.as_ref();
-    serde_json::json!({
+    let mut spec = serde_json::json!({
         "command": command.command,
         "mode": command.mode.as_str(),
         // Where it runs is part of what was approved: the same line in another
@@ -575,8 +603,13 @@ fn command_spec(command: &CommandItem) -> String {
         "debugger_args": meta.map(|m| &m.debugger_args),
         // A key bound later is asked about again: it decides what a press runs.
         "key": meta.and_then(|m| m.key.as_ref()),
-    })
-    .to_string()
+    });
+    // The environment changes what runs (`LD_PRELOAD`, `PATH`); left out when
+    // empty, so the approvals given before it existed still hold.
+    if let Some(env) = meta.map(|m| &m.env).filter(|env| !env.is_empty()) {
+        spec["env"] = serde_json::json!(env);
+    }
+    spec.to_string()
 }
 
 /// What a command runs, for a person to read: its build first, if any.
@@ -589,6 +622,14 @@ fn command_text(command: &CommandItem) -> String {
     let mut run = command.command.clone().unwrap_or_default();
     if let Some(debugger) = meta.and_then(|m| m.debugger.as_deref()) {
         run = format!("{debugger}: {run}");
+    }
+    // As a shell would read it, before what runs with it.
+    let env: Vec<String> = command
+        .env()
+        .map(|(name, value)| format!("{name}={}", Quoting::Posix.quote(value)))
+        .collect();
+    if !env.is_empty() {
+        run = format!("{} {run}", env.join(" "));
     }
     lines.push(run);
     lines.join("\n")
@@ -652,6 +693,23 @@ mod approval_tests {
             command_text(&command("./run", Some("cargo build"))),
             "cargo build\n./run"
         );
+    }
+
+    // An environment is part of what runs (`LD_PRELOAD`); none at all keeps
+    // the approvals given before `env` existed.
+    #[test]
+    fn the_environment_is_approved_with_the_command() {
+        let plain = command("./run", None);
+        let mut with_env = command("./run", None);
+        with_env
+            .metadata
+            .as_mut()
+            .unwrap()
+            .env
+            .insert("LD_PRELOAD".into(), "/tmp/x.so".into());
+        assert!(!command_spec(&plain).contains("env"));
+        assert_ne!(command_spec(&plain), command_spec(&with_env));
+        assert_eq!(command_text(&with_env), "LD_PRELOAD='/tmp/x.so' ./run");
     }
 }
 
@@ -729,6 +787,34 @@ mod placeholder_tests {
         assert_eq!(
             expanded.metadata.unwrap().build.as_deref(),
             Some(r"make 'a b'\''s.py'")
+        );
+    }
+
+    // A value goes into a variable as it is, with no shell to quote for; the
+    // parameters come after, as `TERMIDE_PARAM_<NAME>`.
+    #[test]
+    fn env_values_take_placeholders_literally() {
+        let mut command = debug_command("app", None);
+        let env = &mut command.metadata.as_mut().unwrap().env;
+        env.insert("TARGET".into(), "{file}:{port}".into());
+        env.insert("PLAIN".into(), "$HOME {other}".into());
+        let v = values(&[
+            ("file", PlaceholderValue::One("a b's.py".into())),
+            ("port", PlaceholderValue::One("8091".into())),
+        ]);
+        let params = HashMap::from([("port".to_string(), "8091".to_string())]);
+        assert_eq!(
+            command_env(&command, &v, &params),
+            [
+                ("PLAIN".to_string(), "$HOME {other}".to_string()),
+                ("TARGET".to_string(), "a b's.py:8091".to_string()),
+                ("TERMIDE_PARAM_PORT".to_string(), "8091".to_string()),
+            ]
+        );
+        assert_eq!(
+            App::command_placeholder_names(&command),
+            ["other", "file", "port"],
+            "a panel placeholder in `env` is asked of the panel too"
         );
     }
 

@@ -2,10 +2,10 @@
 //!
 //! Each TOML section key is a command identifier. The `command` field is the
 //! shell command to run. Optional metadata: `name` (display name),
-//! `mode`, `key` (hotkey), `group`, `params`.
+//! `mode`, `key` (hotkey), `group`, `params`, `env`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use super::get_config_dir;
@@ -269,6 +269,10 @@ pub struct CommandMetadata {
     /// in the debug panel.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub console: Option<String>,
+    /// Environment variables the command, its build and the program it
+    /// debugs get, on top of termide's; values may hold placeholders.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
 }
 
 /// Parsed contents of a commands.toml file.
@@ -362,6 +366,7 @@ impl CommandsMetadata {
             let build = text("build");
             let console = text("console");
             let cwd = Self::parse_cwd(section, section_name);
+            let env = Self::parse_env(section, section_name);
 
             entries.insert(
                 section_name.clone(),
@@ -377,6 +382,7 @@ impl CommandsMetadata {
                     debugger_args,
                     build,
                     console,
+                    env,
                 },
             );
         }
@@ -426,6 +432,41 @@ impl CommandsMetadata {
             );
             Vec::new()
         })
+    }
+
+    /// `env` of a section: a table of strings. A variable whose value is not
+    /// a string, or a name no environment can hold, is reported and left
+    /// out; anything but a table leaves out the whole `env`.
+    fn parse_env(
+        section: &toml::map::Map<String, toml::Value>,
+        command: &str,
+    ) -> BTreeMap<String, String> {
+        let Some(value) = section.get("env") else {
+            return BTreeMap::new();
+        };
+        let Some(table) = value.as_table() else {
+            log::warn!(
+                "commands.toml: `env` of `{command}` must be a table of strings, \
+                 such as {{ RUST_LOG = \"debug\" }}; ignored"
+            );
+            return BTreeMap::new();
+        };
+        table
+            .iter()
+            .filter_map(|(name, value)| {
+                let fits = !name.is_empty() && !name.contains(['=', '\0']);
+                match value.as_str() {
+                    Some(v) if fits && !v.contains('\0') => Some((name.clone(), v.to_string())),
+                    _ => {
+                        log::warn!(
+                            "commands.toml: `env.{name}` of `{command}` must be a string \
+                             under a name without `=`; ignored"
+                        );
+                        None
+                    }
+                }
+            })
+            .collect()
     }
 
     fn parse_params(section: &toml::map::Map<String, toml::Value>) -> Vec<CommandParam> {
@@ -598,6 +639,31 @@ fn write_fields(
     }
     set(table, "build", meta.build.as_deref());
     set(table, "console", meta.console.as_deref());
+    let old_env: BTreeMap<&str, &str> = table
+        .get("env")
+        .and_then(toml_edit::Item::as_table_like)
+        .map(|t| {
+            t.iter()
+                .filter_map(|(k, v)| v.as_str().map(|v| (k, v)))
+                .collect()
+        })
+        .unwrap_or_default();
+    let new_env: BTreeMap<&str, &str> = meta
+        .env
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
+    if old_env != new_env {
+        if meta.env.is_empty() {
+            table.remove("env");
+        } else {
+            let mut env = toml_edit::InlineTable::new();
+            for (name, value) in &meta.env {
+                env.insert(name, value.as_str().into());
+            }
+            table.insert("env", toml_edit::value(env));
+        }
+    }
 
     if old_params == Some(&meta.params) {
         return;
@@ -669,6 +735,14 @@ impl CommandItem {
             .as_ref()
             .map(|m| m.debugger_args.as_slice())
             .unwrap_or_default()
+    }
+
+    /// The variables of its `env`, as written in `commands.toml`.
+    pub fn env(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.metadata
+            .iter()
+            .flat_map(|m| &m.env)
+            .map(|(k, v)| (k.as_str(), v.as_str()))
     }
 }
 
@@ -1194,6 +1268,42 @@ debugger_args = ["--only-same-user=false", "--log"]
         assert!(CommandsMetadata::parse(wrong).entries["go"]
             .debugger_args
             .is_empty());
+    }
+
+    #[test]
+    fn env_is_a_table_of_strings() {
+        let original = r#"[app]
+command = "target/debug/app"
+debugger = "lldb-dap"
+env = { RUST_LOG = "debug", PORT = "{port}" }
+"#;
+        let mut meta = CommandsMetadata::parse(original);
+        let env: Vec<(&str, &str)> = meta.entries["app"]
+            .env
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+        assert_eq!(env, [("PORT", "{port}"), ("RUST_LOG", "debug")]);
+        assert_eq!(meta.render_over(original), original, "unchanged, untouched");
+
+        let entry = meta.entries.get_mut("app").unwrap();
+        entry.env.remove("PORT");
+        let changed = meta.render_over(original);
+        assert!(
+            changed.contains("env = { RUST_LOG = \"debug\" }"),
+            "{changed}"
+        );
+        meta.entries.get_mut("app").unwrap().env.clear();
+        assert!(!meta.render_over(original).contains("env"));
+
+        // A value that is not a string, or a name with `=`, is left out alone;
+        // anything but a table leaves out the whole `env`.
+        let mixed = "[a]\ncommand = \"x\"\nenv = { N = 1, OK = \"y\", \"A=B\" = \"z\" }\n";
+        let env = &CommandsMetadata::parse(mixed).entries["a"].env;
+        assert_eq!(env.len(), 1);
+        assert_eq!(env["OK"], "y");
+        let wrong = "[a]\ncommand = \"x\"\nenv = \"RUST_LOG=debug\"\n";
+        assert!(CommandsMetadata::parse(wrong).entries["a"].env.is_empty());
     }
 
     #[test]

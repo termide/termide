@@ -223,6 +223,8 @@ pub struct Session {
     inbox_tx: Sender<Incoming>,
     adapter: Option<Child>,
     build: Option<Arc<Mutex<Child>>>,
+    /// Made by [`Session::waiting`] and not begun yet.
+    waiting: bool,
 }
 
 impl Session {
@@ -230,13 +232,42 @@ impl Session {
     /// launches the program with `breakpoints` set. A failure shows as the
     /// session's status.
     pub fn start(spec: LaunchSpec, breakpoints: Vec<Breakpoint>) -> Self {
+        let mut session = Self::waiting(spec, breakpoints);
+        session.begin(Vec::new());
+        session
+    }
+
+    /// A session waiting for the environment of its directory (direnv can
+    /// take seconds) before [`Session::begin`] starts it as
+    /// [`Session::start`] does. It shows as building meanwhile, and can be
+    /// stopped.
+    pub fn waiting(spec: LaunchSpec, breakpoints: Vec<Breakpoint>) -> Self {
         let (inbox_tx, inbox) = mpsc::channel();
         let mut session = Self::new(spec, breakpoints, inbox, inbox_tx);
-        match session.spec.build.clone().filter(|b| !b.trim().is_empty()) {
-            Some(build) => session.start_build(&build),
-            None => session.start_adapter(),
-        }
+        session.status = Status::Building;
+        session.waiting = true;
         session
+    }
+
+    /// Whether the session waits for [`Session::begin`].
+    pub fn is_waiting(&self) -> bool {
+        self.waiting && self.status == Status::Building
+    }
+
+    /// Start a waiting session, `env` under the variables of its launch,
+    /// which take precedence; nothing for a session already started or
+    /// stopped.
+    pub fn begin(&mut self, env: Vec<(String, String)>) {
+        if !self.is_waiting() {
+            return;
+        }
+        self.waiting = false;
+        let own = std::mem::take(&mut self.spec.env);
+        self.spec.env = env.into_iter().chain(own).collect();
+        match self.spec.build.clone().filter(|b| !b.trim().is_empty()) {
+            Some(build) => self.start_build(&build),
+            None => self.start_adapter(),
+        }
     }
 
     /// A session with no adapter behind it, whose state is set by hand: for
@@ -284,6 +315,7 @@ impl Session {
             inbox_tx,
             adapter: None,
             build: None,
+            waiting: false,
         }
     }
 
