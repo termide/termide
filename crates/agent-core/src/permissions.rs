@@ -3015,6 +3015,14 @@ pub fn is_read_only_command(part: &str) -> bool {
     if PLAIN.contains(&head) {
         return true;
     }
+    // Not `cargo` or `rustc`: rustup runs them from the toolchain a
+    // project's `rust-toolchain.toml` names, which may be a path into the
+    // project itself.
+    const VERSIONED: [&str; 24] = [
+        "rustup", "node", "npm", "pnpm", "yarn", "bun", "deno", "python", "python3", "pip", "pip3",
+        "uv", "ruby", "java", "gcc", "clang", "make", "cmake", "git", "docker", "kubectl", "gh",
+        "brew", "tsc",
+    ];
     match head {
         // `env <command>` runs that command.
         "env" => args.is_empty(),
@@ -3041,6 +3049,19 @@ pub fn is_read_only_command(part: &str) -> bool {
         "find" => !["-delete", "-exec", "-ok", "-fprint", "-fls"]
             .iter()
             .any(|action| bare.contains(action)),
+        // A toolchain's version: none of these reads a project file or runs
+        // a script to answer it.
+        _ if args == ["--version"] && VERSIONED.contains(&head) => true,
+        // `-v` assigns the output to a variable a later command reads.
+        "printf" => !args.iter().any(|a| a.starts_with("-v")),
+        // `command NAME` runs NAME; `-v` and `-V` only say what it is.
+        "command" => matches!(args.first().copied(), Some("-v" | "-V")),
+        "type" => true,
+        "rustup" => matches!(
+            args,
+            ["show", ..] | ["toolchain" | "target" | "component", "list", ..]
+        ),
+        "go" => args == ["version"],
         "git" => is_read_only_git(args),
         "gh" | "glab" | "tea" => is_read_only_forge(head, args),
         "sed" => shell_words(&part).is_some_and(|words| is_print_only_sed(&words[1..])),
@@ -3632,6 +3653,10 @@ fn destructive_command(part: &str) -> bool {
             ),
             _ => false,
         },
+        // `cargo add` and `cargo remove` only edit the manifest, which the
+        // repository gets back, and run nothing they fetch: a build does
+        // that, and a rule for it says so.
+        "cargo" if matches!(sub, "add" | "remove" | "rm") => false,
         // Installing, removing and publishing change what is on the machine
         // or put something on it from outside.
         "cargo" | "npm" | "pnpm" | "yarn" | "bun" | "uv" | "pip" | "pip3" => matches!(
