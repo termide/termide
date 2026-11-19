@@ -196,6 +196,46 @@ fn find_repos_recursive(dir: &Path, depth: usize, max_depth: usize, repos: &mut 
             }
         }
     }
+
+    // Same depth: the depth bounds directory reads, and git bounds this one.
+    for nested in untracked_nested_repos(dir) {
+        find_repos_recursive(&nested, depth, max_depth, repos);
+    }
+}
+
+/// Repositories nested in the working tree of the repository at `repo` without
+/// being its submodules: clones it ignores (`/vendor-clone/` in `.gitignore`) or
+/// merely does not track.
+///
+/// A nested repository is never tracked content of the outer one, so it can only
+/// sit at a path git reports as untracked. `ls-files --others --directory`
+/// reports each untracked or ignored directory as one entry without descending
+/// into it, so a `node_modules/` or `target/` costs one line however large it
+/// is, and the walk over the tracked tree is git's own, as for `git status`.
+/// Only the entries themselves are checked for a `.git`: a repository deeper
+/// inside an ignored directory is not sought, since reaching it means walking
+/// that directory. Entries under a dot directory are skipped, as the plain
+/// directory walk skips them.
+fn untracked_nested_repos(repo: &Path) -> Vec<PathBuf> {
+    let Some(out) = crate::command::git_command_stdout_bytes(
+        repo,
+        &[
+            "ls-files",
+            "-z",
+            "--others",
+            "--directory",
+            "--no-empty-directory",
+        ],
+    ) else {
+        return Vec::new();
+    };
+    out.split(|&b| b == 0)
+        .filter_map(|entry| std::str::from_utf8(entry).ok())
+        .filter_map(|entry| entry.strip_suffix('/'))
+        .filter(|entry| !entry.split('/').any(|part| part.starts_with('.')))
+        .map(|entry| repo.join(entry))
+        .filter(|path| path.join(".git").exists())
+        .collect()
 }
 
 /// Whether `dir` is a linked worktree: its `.git` is a file pointing into
@@ -290,6 +330,45 @@ mod tests {
         let kept = without_ancestor_repos(&[repo_a.clone(), sibling.clone()], &proj);
         let _ = fs::remove_dir_all(&tmp);
         assert_eq!(kept, vec![repo_a, sibling], "a sibling repo was dropped");
+    }
+
+    fn git(dir: &Path, args: &[&str]) {
+        let out = std::process::Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    // Clones inside a repository that it ignores or does not track are listed,
+    // at any depth; nothing inside an ignored directory is looked for, and a
+    // dot directory is passed over as the plain walk passes it.
+    #[test]
+    fn finds_repositories_the_outer_one_ignores_or_does_not_track() {
+        use std::fs;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = dunce::canonicalize(tmp.path()).unwrap();
+        git(&root, &["init", "-q"]);
+        fs::write(root.join(".gitignore"), "/ignored/\nnode_modules/\n").unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("src/main.rs"), "").unwrap();
+        git(&root, &["add", ".gitignore", "src/main.rs"]);
+        for nested in ["ignored", "src/untracked", "node_modules/pkg", ".hidden"] {
+            fs::create_dir_all(root.join(nested)).unwrap();
+            git(&root.join(nested), &["init", "-q"]);
+        }
+
+        let mut repos = find_all_repos(&root, 3);
+        repos.sort();
+        assert_eq!(
+            repos,
+            vec![
+                root.clone(),
+                root.join("ignored"),
+                root.join("src/untracked")
+            ]
+        );
     }
 
     #[test]

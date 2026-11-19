@@ -1546,8 +1546,9 @@ as well as one of code.
   linked to its commit.
 - **Git**: commits whose message holds a word of the query, and commits that
   added or removed an identifier it names (`git log -S`), in every repository
-  the project holds — the one it is in, its submodules, or the repositories of
-  a folder that only contains them, as the git panels find them. A project that
+  the project holds — the one it is in, its submodules and the clones inside it
+  that it ignores or does not track, or the repositories of a folder that only
+  contains them, as the git panels find them. A project that
   is one directory of a larger repository sees that directory's history.
 - **Files**: notes, documents and code under the project with a word of the
   query. Text files (Markdown, plain text, reStructuredText, Org, AsciiDoc) are

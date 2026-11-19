@@ -11,7 +11,9 @@ use crate::{find_all_repos, find_toplevel_repo, find_toplevel_repos};
 /// `0` would skip the submodule walk entirely. Matches [`NESTED_REPO_DEPTH`]:
 /// a project root is one plane for everything it holds, so the same number of
 /// levels applies down a repo (only `.gitmodules` paths are followed, so the
-/// extra level costs nothing) as down a plain container directory.
+/// extra level costs nothing) as down a plain container directory. Clones a
+/// repo ignores or does not track are found apart from this depth, from what
+/// git reports as untracked (see `discovery::untracked_nested_repos`).
 const SUBMODULE_DEPTH: usize = 3;
 
 /// Order repositories by display name (case-insensitive), with the full path
@@ -32,9 +34,11 @@ fn sort_by_display_name(repos: &mut [PathBuf]) {
 /// Three levels, because a project root is usually a wide container plane rather
 /// than the repository itself: a host-grouped checkout layout puts its repos at
 /// `<project>/<host>/<group>/<repo>`, and a shallower scan lists an empty panel
-/// for such a project. The walk stops at every repository it finds (it does not
-/// descend into a repo's working tree), so the extra level only costs directory
-/// reads on the container's own levels, and it runs off the UI thread.
+/// for such a project. The walk does not read directories inside a repository it
+/// finds: the repos nested there come from one `git ls-files`, which reports an
+/// untracked or ignored directory without entering it. So the extra level only
+/// costs directory reads on the container's own levels, and it runs off the UI
+/// thread.
 const NESTED_REPO_DEPTH: usize = 3;
 
 /// The repositories a project at `project_root` holds, by the git panels'
