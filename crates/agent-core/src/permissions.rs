@@ -565,9 +565,9 @@ pub struct PermissionRequest {
     pub suggested_pattern: String,
     /// Whether "allow always" is on offer: in `configured` and `auto`, the
     /// modes the configured rules count in, with somewhere to write the rule,
-    /// and only for the one command whose scope its pattern states — a bundle
-    /// of parts and a command that destroys or runs some other program leave
-    /// no rule behind.
+    /// and only where every part's pattern states its scope — a command that
+    /// destroys or runs some other program, alone or in a bundle, leaves no
+    /// rule behind.
     pub can_persist: bool,
     /// Whether "allow for the session" is on offer: not for a command that
     /// destroys, which is allowed once at a time. Denying for the session is
@@ -1352,11 +1352,11 @@ impl PermissionHooks {
                 }
                 // A rule outliving this call is an answer given without seeing
                 // the calls it will cover, so it is on offer only where it
-                // states enough to trust: one command, not a bundle answered
-                // without being picked apart, not one that destroys what it
-                // touches, and not one that runs some other program a rule for
-                // it would vouch for blindly.
-                let bundle = parts.len() > 1;
+                // states enough to trust: not for a command that destroys what
+                // it touches, nor for one that runs some other program a rule
+                // for it would vouch for blindly. A bundle's parts are picked
+                // apart and each gets a rule of its own, so any part failing
+                // either test withholds it from the whole line.
                 // An edit under `.git` asks every time, so no answer outlasts it.
                 // Keys typed into a program the shell runs, or that edit the
                 // line unseen, are read by no check: the same keys mean
@@ -1374,13 +1374,12 @@ impl PermissionHooks {
                 let mut can_persist = (matches!(mode, Mode::Configured | Mode::Auto)
                     || (mode == Mode::Plan && ctx.tool.mcp))
                     && self.persist.is_some()
-                    && !bundle
                     && !destructive
                     && !delegating
                     // A whole-command `ask` rule can ask about a command
                     // whose every part is settled, which leaves no part, and
                     // so no rule, to record.
-                    && (!command_line || parts.first().is_some_and(|p| p.pattern.is_some()));
+                    && (!command_line || parts.iter().any(|p| p.pattern.is_some()));
                 // A destructive call is allowed once at a time; `all` is the
                 // mode that lets a run through without asking. Denying for the
                 // session stays on offer: it trusts nothing.

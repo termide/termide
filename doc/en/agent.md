@@ -1785,11 +1785,11 @@ naming a path outside (`head /var/log/*`).
 
 An answer that outlasts the call is a decision made without seeing the calls
 it will cover, so the card offers it only where the rule says enough to trust.
-**Allow always** appears for one command whose pattern states its scope: not
-for a command made of several parts, which you answered as a whole; not for
-one that destroys what it touches (`rm`, `git clean`, `git push`, `git stash
+**Allow always** appears where each rule it records states its scope — for a
+command made of several parts, a rule per part, as for the session. It is
+withheld from the whole line when any part is one that destroys what it touches (`rm`, `git clean`, `git push`, `git stash
 drop`, installing or publishing a package — `cargo add` and `cargo remove`,
-which only edit the manifest, are not); not for one that runs some *other*
+which only edit the manifest, are not) or one that runs some *other*
 program, whose name the pattern would not show (`env rm`, `xargs rm`,
 `./deploy.sh`, `sh -c …`, `python3 -c …`, `make`, `nix run`). **Allow for
 this session** is withheld only from a command that destroys: it is short
