@@ -1913,6 +1913,38 @@ struct ParsedShell {
     loops: Vec<Option<(String, Vec<ShellWord>)>>,
     /// The loops open where the reading has got to.
     open_loops: Vec<usize>,
+    /// The `case` commands open where the reading has got to.
+    open_cases: usize,
+}
+
+/// The command a segment of a `case` runs: what follows the pattern's `)`
+/// in its header (`case $x in a) rm x`) or in a later clause (`b) rm y`,
+/// with `in_case`); the segment itself otherwise. A header without a
+/// clause runs nothing.
+fn case_command(segment: &str, in_case: bool) -> &str {
+    let mut rest = segment.trim_start();
+    loop {
+        let word = rest.split_whitespace().next().unwrap_or("");
+        if !matches!(
+            word,
+            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
+        ) {
+            break;
+        }
+        rest = rest[word.len()..].trim_start();
+    }
+    let first = rest.split_whitespace().next().unwrap_or("");
+    if first == "case" {
+        return rest.split_once(')').map_or("", |(_, clause)| clause.trim());
+    }
+    if first == "esac" {
+        return segment;
+    }
+    let first = segment.split_whitespace().next().unwrap_or("");
+    if in_case && first.ends_with(')') && !first.contains('$') {
+        return segment.trim_start()[first.len()..].trim();
+    }
+    segment
 }
 
 /// `command` as the POSIX reading takes it — the text itself, or the POSIX a
@@ -2844,8 +2876,18 @@ fn resolve_program(head: &str, dir: Option<&Path>, project: &Path) -> Option<Str
 /// what it expanded is still run, so `expands` is left set for the command
 /// that follows it to carry.
 fn push_part(parsed: &mut ParsedShell, current: &mut String, expands: bool) -> bool {
-    track_loops(parsed, current.trim());
-    let kept = match without_shell_keywords(current.trim()) {
+    let text = current.trim();
+    // The words that open and close a `case`, as `without_shell_keywords`
+    // finds them.
+    let head = without_shell_keywords_at(text);
+    let body = case_command(text, parsed.open_cases > 0);
+    match head {
+        Some("case") => parsed.open_cases += 1,
+        Some("esac") => parsed.open_cases = parsed.open_cases.saturating_sub(1),
+        _ => {}
+    }
+    track_loops(parsed, body);
+    let kept = match without_shell_keywords(body) {
         Some(part) => {
             parsed.substituted.push(expands);
             parsed.parts.push(part.to_string());
@@ -2909,6 +2951,16 @@ fn track_loops(parsed: &mut ParsedShell, part: &str) {
 fn is_shell_name(word: &str) -> bool {
     word.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
         && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// The first word of `part` after the reserved words that lead it.
+fn without_shell_keywords_at(part: &str) -> Option<&str> {
+    part.split_whitespace().find(|word| {
+        !matches!(
+            *word,
+            "if" | "then" | "else" | "elif" | "do" | "while" | "until" | "!" | "{" | "time"
+        )
+    })
 }
 
 /// `part` without the shell's reserved words, which run nothing of their

@@ -313,6 +313,40 @@ fn shell_commands_are_split_and_each_part_judged() {
     );
 }
 
+/// A `case` clause runs the command after its pattern, in the header's
+/// segment as in the ones after it.
+#[test]
+fn a_case_clause_is_judged_by_the_command_it_runs() {
+    let (asking, _) = hooks(rules("mode = \"ask\""), vec![]);
+    let decide = |cmd: &str| asking.decide(&bash(cmd), &ctx());
+    for unsafe_clause in [
+        "case x in a) rm -rf ~;; esac",
+        "case x in (a) rm -rf ~;; esac",
+        "if true; then case x in a) rm -rf ~;; esac; fi",
+        "case x in a) ls;; b) rm -rf ~;; esac",
+        "case x in\na) rm -rf ~;;\nesac",
+    ] {
+        assert_eq!(decide(unsafe_clause), Decision::Ask, "{unsafe_clause}");
+    }
+    assert_eq!(
+        decide("case x in a) ls;; b) wc -l x;; esac"),
+        Decision::Allow
+    );
+    assert_eq!(decide("case x in a) ;; esac"), Decision::Allow);
+    // A pattern's alternatives read as a pipe: the one before the `|` is
+    // left as a command of its own, which asks unless a rule allows it.
+    assert_eq!(
+        split_shell("case $x in a) rm a;; b|c) rm b;; esac").parts,
+        vec!["rm a", "b", "rm b"]
+    );
+
+    let (plan, _) = hooks(rules("mode = \"plan\""), vec![]);
+    assert_eq!(
+        plan.decide(&bash("case x in a) rm -rf ~;; esac"), &ctx()),
+        Decision::Deny
+    );
+}
+
 #[test]
 fn commands_run_through_a_back_door_are_not_look_only() {
     let (hooks, _) = hooks(PermissionRules::default(), vec![]);
