@@ -1,0 +1,20 @@
+# Ctrl+O in git status (doc/en/ui.md): folds every folder at every depth
+# while any is open, and opens them all again.
+project empty
+start
+run "git init -q && mkdir -p src/deep && touch src/deep/a.txt src/b.txt top.txt && git add -A && git commit -qm init"
+run "echo x > src/deep/a.txt && echo y > src/b.txt && echo z > top.txt"
+key Alt+G
+wait "a.txt"
+wait "deep"
+
+key Ctrl+O
+wait-gone "b.txt"
+wait-gone "deep"
+wait "top.txt"
+snapshot folded
+
+key Ctrl+O
+wait "a.txt"
+wait "b.txt"
+quit --force

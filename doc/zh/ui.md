@@ -197,7 +197,7 @@
 `[Log]` 在同一仓库和分支上打开 Git 日志。日志自己的分支选择器以同样方式标记分支，
 只用于选择显示哪条历史；检出之后，跟随 HEAD 的日志会切换到新分支。
 
-在已更改的文件上，`S` 暂存它（目录也可以），`U` 取消暂存，`F3` 打开查看，`F4` 在编辑器中打开，`Space` 或 `F12` 显示其属性，`Backspace` 或 `Delete` 在确认后丢弃其更改。`Ctrl+R` 重新读取状态并从远程获取。它们是 `[git_status.keybindings]` 下的 `stage`、`unstage`、`view`、`edit`、`info`、`revert` 和 `refresh`。
+在已更改的文件上，`S` 暂存它（目录也可以），`U` 取消暂存，`F3` 打开查看，`F4` 在编辑器中打开，`Space` 或 `F12` 显示其属性，`Backspace` 或 `Delete` 在确认后丢弃其更改。`Ctrl+R` 重新读取状态并从远程获取。只要有任一文件夹展开，`Ctrl+O` 就折叠两个列表中所有层级的文件夹；全部折叠时则全部展开，之后刷新带来的新文件夹也随之。它们是 `[git_status.keybindings]` 下的 `stage`、`unstage`、`view`、`edit`、`info`、`revert`、`refresh` 和 `toggle_folds`。
 
 **Git 日志**面板根据每个提交的父提交，用制表符伪图形（`● │ ├ ╮ ╯`）绘制提交图，
 每条线各有颜色，便于按颜色追踪分支。如需改回 git 原生的 ASCII `--graph`，请在
@@ -230,10 +230,12 @@ unicode_graph = false
 
 面板从 git 当时写出的 diff 中切出每个补丁，因此回车符和缺失的末尾换行符得以保留；若文件
 在绘制之后发生了变化，操作会被拒绝，面板重新加载。`Enter` 折叠文件，`E`/`F4` 打开它。
+只要有任一文件展开，`Ctrl+O` 就折叠所有文件；全部折叠时则全部展开。之后刷新带来的新文件
+也随之，手动折叠的文件在刷新后保持折叠。
 提交或储藏（stash）的 diff 只显示改动，此时 `Space` 与 `Enter` 一样用于折叠。按键位于
 `[git_diff.keybindings]`：`toggle_stage`、`discard`、`undo_discard`、`select_lines`、
-`prev_hunk`、`next_hunk`、`toggle_collapse`、`edit`、`refresh`、`scroll_half_up` 和
-`scroll_half_down`。
+`prev_hunk`、`next_hunk`、`toggle_collapse`、`toggle_folds`、`edit`、`refresh`、
+`scroll_half_up` 和 `scroll_half_down`。
 
 同一个面板也用于审查代理的改动：在代理面板中输入 `/changes`，或在其菜单中选择**审查
 更改**，会打开该面板，显示自你上次接受以来代理所做的改动，且仅此而已——你在两次请求之间

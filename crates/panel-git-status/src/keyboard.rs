@@ -90,6 +90,10 @@ impl GitStatusPanel {
             }
             return vec![];
         }
+        if self.hotkeys.matches("toggle_folds", &key) {
+            self.toggle_all_folds();
+            return vec![];
+        }
         if self.hotkeys.matches("refresh", &key) {
             self.refresh();
             self.status_message = Some((termide_i18n::t().git_refreshed().to_string(), false));

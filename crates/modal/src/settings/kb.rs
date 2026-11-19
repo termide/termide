@@ -167,10 +167,18 @@ pub(super) fn kb_binding_names(section: usize) -> &'static [&'static str] {
             "toggle_hidden",
         ],
         3 => &[
-            "stage", "unstage", "view", "edit", "info", "revert", "refresh",
+            "stage",
+            "unstage",
+            "view",
+            "edit",
+            "info",
+            "revert",
+            "refresh",
+            "toggle_folds",
         ],
         4 => &[
             "toggle_collapse",
+            "toggle_folds",
             "edit",
             "refresh",
             "scroll_half_up",
@@ -352,12 +360,14 @@ pub(super) fn get_kb_value(config: &Config, section: usize, name: &str) -> Strin
             edit,
             info,
             revert,
-            refresh
+            refresh,
+            toggle_folds
         ),
         4 => kb_get!(
             config.git_diff.keybindings,
             name,
             toggle_collapse,
+            toggle_folds,
             edit,
             refresh,
             scroll_half_up,
@@ -602,13 +612,15 @@ pub(super) fn set_kb_value(config: &mut Config, section: usize, name: &str, valu
             edit,
             info,
             revert,
-            refresh
+            refresh,
+            toggle_folds
         ),
         4 => kb_set!(
             config.git_diff.keybindings,
             name,
             value,
             toggle_collapse,
+            toggle_folds,
             edit,
             refresh,
             scroll_half_up,

@@ -1,7 +1,7 @@
 //! Type definitions for Git Status Panel.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::tree;
 
@@ -14,7 +14,10 @@ pub(crate) struct FileTree {
     /// this is the aggregate over descendants, computed once when the tree is
     /// (re)derived so rendering never re-walks the subtree per frame.
     pub node_status: Vec<(char, bool)>,
-    pub collapsed: HashSet<PathBuf>,
+    /// Folders follow this, but for those the user flipped by hand: a
+    /// folder a refresh brings follows the last fold-all.
+    pub all_folded: bool,
+    pub flipped: HashSet<PathBuf>,
 }
 
 impl FileTree {
@@ -24,8 +27,43 @@ impl FileTree {
             visible: Vec::new(),
             prefixes: Vec::new(),
             node_status: Vec::new(),
-            collapsed: HashSet::new(),
+            all_folded: false,
+            flipped: HashSet::new(),
         }
+    }
+
+    /// Whether the folder at `dir` shows what it holds.
+    pub fn is_open(&self, dir: &Path) -> bool {
+        self.all_folded == self.flipped.contains(dir)
+    }
+
+    /// Open or fold the folder at `dir` from now on.
+    pub fn set_open(&mut self, dir: &Path, open: bool) {
+        // Open is the default unless everything is folded.
+        if open != self.all_folded {
+            self.flipped.remove(dir);
+        } else {
+            self.flipped.insert(dir.to_path_buf());
+        }
+    }
+
+    /// Whether any folder in the tree is open.
+    pub fn any_open(&self) -> bool {
+        self.tree
+            .iter()
+            .any(|node| matches!(node.kind, tree::TreeNodeKind::Directory { expanded: true }))
+    }
+
+    /// Open or fold every folder, now and when a refresh brings new ones.
+    pub fn set_all_open(&mut self, open: bool) {
+        self.all_folded = !open;
+        self.flipped.clear();
+        for node in &mut self.tree {
+            if let tree::TreeNodeKind::Directory { expanded } = &mut node.kind {
+                *expanded = open;
+            }
+        }
+        self.recompute_visible();
     }
 
     /// Recompute `visible`, `prefixes`, and `node_status` from the current

@@ -1,6 +1,6 @@
 # Staging part of a file from the diff panel (doc/en/ui.md): a hunk with
 # Space; a discard asks first and the undo key brings it back; then lines
-# of the other hunk.
+# of the other hunk; Ctrl+O folds every file and unfolds them.
 project empty
 start
 run "git init -q && seq 1 30 > nums.txt && git add nums.txt && git commit -qm nums"
@@ -37,4 +37,11 @@ run "grep -qx two nums.txt"
 key Home Down Down Down v Down Space
 run "git diff --cached | grep -qx +two"
 snapshot staged
+
+# Ctrl+O folds every file to its header, and again unfolds them all.
+key Ctrl+O
+wait-gone "+two"
+wait "nums.txt"
+key Ctrl+O
+wait "+two"
 quit --force

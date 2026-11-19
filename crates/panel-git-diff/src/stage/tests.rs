@@ -223,7 +223,7 @@ fn a_diff_that_cannot_be_staged_keeps_space_for_folding() {
     panel.hotkeys = crate::build_git_diff_hotkey_table(&config);
 
     key(&mut panel, ' ');
-    assert!(panel.collapsed.contains(&0));
+    assert!(panel.is_collapsed(0));
     assert!(key(&mut panel, 'd').is_empty());
 }
 

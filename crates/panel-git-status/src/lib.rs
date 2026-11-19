@@ -172,6 +172,7 @@ fn build_git_status_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("info", &kb.info);
     t.insert("revert", &kb.revert);
     t.insert("refresh", &kb.refresh);
+    t.insert("toggle_folds", &kb.toggle_folds);
     t
 }
 

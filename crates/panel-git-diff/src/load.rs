@@ -97,6 +97,7 @@ impl GitDiffPanel {
         if let Some(ref filter) = self.file_filter {
             self.diffs.retain(|d| &d.path == filter);
         }
+        self.folds.retain(&self.diffs);
 
         self.calculate_total_lines();
         self.settle_cursor();
@@ -122,7 +123,7 @@ impl GitDiffPanel {
             // File header line
             total += 1;
             // If not collapsed, add hunk lines
-            if !self.collapsed.contains(&i) {
+            if !self.is_collapsed(i) {
                 for hunk in &diff.hunks {
                     total += 1; // Hunk header
                     total += hunk.lines.len();

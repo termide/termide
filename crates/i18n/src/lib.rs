@@ -324,6 +324,7 @@ pub trait Translation: Send + Sync {
 
     // Git Diff help descriptions (static keys)
     fn help_desc_toggle_collapse(&self) -> &str;
+    fn help_desc_toggle_all_folds(&self) -> &str;
     fn help_desc_open_file_editor(&self) -> &str;
 
     // Git Log help descriptions (static keys)

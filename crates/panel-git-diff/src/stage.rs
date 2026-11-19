@@ -65,7 +65,7 @@ impl GitDiffPanel {
                 return Some(Row::File(f));
             }
             at += 1;
-            if self.collapsed.contains(&f) {
+            if self.is_collapsed(f) {
                 continue;
             }
             for (h, hunk) in diff.hunks.iter().enumerate() {
@@ -86,7 +86,7 @@ impl GitDiffPanel {
     pub(crate) fn file_row(&self, file: usize) -> usize {
         (0..file)
             .map(|i| {
-                1 + if self.collapsed.contains(&i) {
+                1 + if self.is_collapsed(i) {
                     0
                 } else {
                     self.diffs[i].hunks.iter().map(|h| 1 + h.lines.len()).sum()
@@ -101,7 +101,7 @@ impl GitDiffPanel {
         let mut at = 0;
         for (f, diff) in self.diffs.iter().enumerate() {
             at += 1;
-            if self.collapsed.contains(&f) {
+            if self.is_collapsed(f) {
                 continue;
             }
             for hunk in &diff.hunks {

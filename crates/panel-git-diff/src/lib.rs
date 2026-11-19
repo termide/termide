@@ -12,7 +12,6 @@ mod unified;
 
 pub use model::{DiffHunk, DiffLine, FileDiff, FileStatus, LineKind};
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
@@ -46,8 +45,8 @@ pub struct GitDiffPanel {
     diffs: Vec<FileDiff>,
     /// Vertical scroll offset (in lines)
     scroll: usize,
-    /// Set of collapsed file indices
-    collapsed: HashSet<usize>,
+    /// Which files are folded to their header.
+    folds: navigation::Folds,
     /// Selected file index: the file of the cursor's row.
     selected_file: usize,
     /// The row the cursor is on, counting rows as they are drawn.
@@ -114,6 +113,7 @@ fn build_git_diff_hotkey_table(config: &Config) -> HotkeyTable {
     let kb = &config.git_diff.keybindings;
 
     t.insert("toggle_collapse", &kb.toggle_collapse);
+    t.insert("toggle_folds", &kb.toggle_folds);
     t.insert("edit", &kb.edit);
     t.insert("refresh", &kb.refresh);
     t.insert("scroll_half_up", &kb.scroll_half_up);
@@ -179,7 +179,7 @@ impl GitDiffPanel {
             scrollbars: termide_core::ScrollBars::default(),
             is_stale: false,
             scroll: 0,
-            collapsed: HashSet::new(),
+            folds: navigation::Folds::default(),
             selected_file: 0,
             cursor: 0,
             anchor: None,
@@ -255,15 +255,8 @@ impl GitDiffPanel {
             given.title = title;
         }
         let selected = self.diffs.get(self.selected_file).map(|d| d.path.clone());
-        let collapsed: HashSet<String> = self
-            .collapsed
-            .iter()
-            .filter_map(|&i| self.diffs.get(i).map(|d| d.path.clone()))
-            .collect();
         self.diffs = unified::parse_unified(diff);
-        self.collapsed = (0..self.diffs.len())
-            .filter(|&i| collapsed.contains(&self.diffs[i].path))
-            .collect();
+        self.folds.retain(&self.diffs);
         self.selected_file = selected
             .and_then(|path| self.diffs.iter().position(|d| d.path == path))
             .unwrap_or_else(|| self.selected_file.min(self.diffs.len().saturating_sub(1)));
@@ -532,6 +525,10 @@ impl Panel for GitDiffPanel {
         }
         if self.hotkeys.matches("toggle_collapse", &key) {
             self.toggle_collapse();
+            return vec![];
+        }
+        if self.hotkeys.matches("toggle_folds", &key) {
+            self.toggle_all_folds();
             return vec![];
         }
         if self.hotkeys.matches("edit", &key) {
@@ -863,14 +860,67 @@ mod tests {
         let mut panel =
             GitDiffPanel::from_unified(dir.path().to_path_buf(), "diff".into(), TWO_FILES);
         panel.selected_file = 1;
-        panel.collapsed.insert(1);
+        panel.collapse_current();
 
         let reordered = format!("--- a/new.txt\n+++ b/new.txt\n{TWO_FILES}");
         panel.set_unified(Some("diff 3".into()), &reordered);
 
         assert_eq!(panel.diffs[panel.selected_file].path, "b.txt");
-        assert_eq!(panel.collapsed, HashSet::from([2]));
+        let folded: Vec<usize> = (0..3).filter(|&i| panel.is_collapsed(i)).collect();
+        assert_eq!(folded, [2]);
         assert_eq!(panel.title(), "diff 3");
+    }
+
+    fn folded(panel: &GitDiffPanel) -> Vec<usize> {
+        (0..panel.diffs.len())
+            .filter(|&i| panel.is_collapsed(i))
+            .collect()
+    }
+
+    #[test]
+    fn fold_all_folds_everything_while_any_file_is_open_then_unfolds() {
+        let dir = not_a_repo();
+        let mut panel = GitDiffPanel::new(dir.path().to_path_buf());
+        wait_for_result(&mut panel);
+        deliver(&mut panel, None, &["a", "b", "c"]);
+        panel.selected_file = 1;
+        panel.collapse_current();
+
+        panel.toggle_all_folds();
+        assert_eq!(folded(&panel), [0, 1, 2]);
+        assert_eq!(panel.cursor, 1, "the cursor stays on its file's header");
+
+        panel.toggle_all_folds();
+        assert!(folded(&panel).is_empty());
+    }
+
+    #[test]
+    fn files_a_refresh_brings_follow_the_last_fold_all() {
+        let dir = not_a_repo();
+        let mut panel = GitDiffPanel::new(dir.path().to_path_buf());
+        wait_for_result(&mut panel);
+        deliver(&mut panel, None, &["a", "b"]);
+        panel.toggle_all_folds();
+        panel.selected_file = 1;
+        panel.expand_current();
+
+        deliver(&mut panel, None, &["a", "new", "b"]);
+
+        // `new` comes folded; `b`, opened by hand, stays open where it moved.
+        assert_eq!(folded(&panel), [0, 1]);
+    }
+
+    #[test]
+    fn a_fold_stays_with_its_file_when_others_come_before_it() {
+        let dir = not_a_repo();
+        let mut panel = GitDiffPanel::new(dir.path().to_path_buf());
+        wait_for_result(&mut panel);
+        deliver(&mut panel, None, &["a", "b"]);
+        panel.collapse_current();
+
+        deliver(&mut panel, None, &["0", "a", "b"]);
+
+        assert_eq!(folded(&panel), [1]);
     }
 
     #[test]

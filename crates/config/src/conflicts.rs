@@ -283,9 +283,11 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
     push(&mut out, "git_status", "info", &gs.info);
     push(&mut out, "git_status", "revert", &gs.revert);
     push(&mut out, "git_status", "refresh", &gs.refresh);
+    push(&mut out, "git_status", "toggle_folds", &gs.toggle_folds);
 
     let gd = &config.git_diff.keybindings;
     push(&mut out, "git_diff", "toggle_collapse", &gd.toggle_collapse);
+    push(&mut out, "git_diff", "toggle_folds", &gd.toggle_folds);
     push(&mut out, "git_diff", "edit", &gd.edit);
     push(&mut out, "git_diff", "refresh", &gd.refresh);
     push(&mut out, "git_diff", "scroll_half_up", &gd.scroll_half_up);

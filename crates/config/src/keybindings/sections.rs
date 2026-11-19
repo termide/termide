@@ -218,6 +218,8 @@ pub struct GitStatusKeybindings {
     pub revert: Option<KeyBinding>,
     /// Refresh git status
     pub refresh: Option<KeyBinding>,
+    /// Fold every folder when any is open, otherwise unfold them all
+    pub toggle_folds: Option<KeyBinding>,
 }
 
 impl GitStatusKeybindings {
@@ -245,6 +247,7 @@ impl GitStatusKeybindings {
             ]));
         }
         set_default!(refresh, "Ctrl+R");
+        set_default!(toggle_folds, "Ctrl+O");
     }
 }
 
@@ -253,6 +256,8 @@ impl GitStatusKeybindings {
 pub struct GitDiffKeybindings {
     /// Toggle collapse of file diff section
     pub toggle_collapse: Option<KeyBinding>,
+    /// Fold every file when any is open, otherwise unfold them all
+    pub toggle_folds: Option<KeyBinding>,
     /// Edit file in editor
     pub edit: Option<KeyBinding>,
     /// Refresh diff
@@ -292,6 +297,7 @@ impl GitDiffKeybindings {
         }
 
         set_default!(toggle_collapse, "Enter");
+        set_default!(toggle_folds, "Ctrl+O");
         if self.edit.is_none() {
             self.edit = Some(KeyBinding::Multiple(vec!["F4".into(), "E".into()]));
         }

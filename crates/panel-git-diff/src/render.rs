@@ -72,7 +72,7 @@ impl GitDiffPanel {
             // File header line
             if current_line >= self.scroll && y < max_y {
                 let is_selected = is_focused && current_line == cursor;
-                let is_collapsed = self.collapsed.contains(&file_idx);
+                let is_collapsed = self.is_collapsed(file_idx);
 
                 // Use same style for entire line (text + lines) for uniformity
                 // Selected: inverted colors for whole line
@@ -141,7 +141,7 @@ impl GitDiffPanel {
             current_line += 1;
 
             // Skip content if collapsed
-            if self.collapsed.contains(&file_idx) {
+            if self.is_collapsed(file_idx) {
                 continue;
             }
 

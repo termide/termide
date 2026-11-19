@@ -226,9 +226,11 @@ show; after a checkout a log that follows HEAD moves to the new branch.
 On a changed file, `S` stages it (a directory too) and `U` unstages it, `F3`
 opens it to view and `F4` in the editor, `Space` or `F12` shows its
 properties, and `Backspace` or `Delete` discards its changes after asking.
-`Ctrl+R` reloads the status and fetches from the remote. These are `stage`,
-`unstage`, `view`, `edit`, `info`, `revert` and `refresh` under
-`[git_status.keybindings]`.
+`Ctrl+R` reloads the status and fetches from the remote. `Ctrl+O` folds every
+folder of both lists, at every depth, when any is open, and opens them all
+when none is; folders a later refresh brings follow suit. These are `stage`,
+`unstage`, `view`, `edit`, `info`, `revert`, `refresh` and `toggle_folds`
+under `[git_status.keybindings]`.
 
 The **git log** panel draws the commit graph with box-drawing pseudographics
 (`● │ ├ ╮ ╯`) laid out from each commit's parents, with each lane coloured so a
@@ -274,11 +276,13 @@ drops it.
 The panel cuts each patch from a diff git writes at that moment, so carriage
 returns and a missing final newline survive; when the file changed since it
 was drawn, the action is refused and the panel reloads. `Enter` folds a
-file, `E`/`F4` opens it. A commit's or a stash's diff only shows changes, and
-`Space` folds there as `Enter` does. The keys are under
-`[git_diff.keybindings]`: `toggle_stage`, `discard`, `undo_discard`,
-`select_lines`, `prev_hunk`, `next_hunk`, `toggle_collapse`, `edit`,
-`refresh`, `scroll_half_up` and `scroll_half_down`.
+file, `E`/`F4` opens it. `Ctrl+O` folds every file when any is open and
+unfolds them all when none is; files a later refresh brings follow suit, and
+a file folded by hand stays folded across refreshes. A commit's or a stash's
+diff only shows changes, and `Space` folds there as `Enter` does. The keys are
+under `[git_diff.keybindings]`: `toggle_stage`, `discard`, `undo_discard`,
+`select_lines`, `prev_hunk`, `next_hunk`, `toggle_collapse`, `toggle_folds`,
+`edit`, `refresh`, `scroll_half_up` and `scroll_half_down`.
 
 The same panel reviews an agent's changes: `/changes` in the agent panel, or
 **Review changes** in its menu, opens it on what the agent changed since you

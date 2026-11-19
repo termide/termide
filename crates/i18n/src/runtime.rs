@@ -476,6 +476,7 @@ impl Translation for RuntimeTranslation {
         help_desc_move_down,
         help_desc_scroll_half_up,
         help_desc_toggle_collapse,
+        help_desc_toggle_all_folds,
         help_desc_open_file_editor,
         help_desc_view_commit_diff,
         help_desc_tree_search,

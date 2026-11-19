@@ -2,8 +2,7 @@
 //!
 //! Groups files by directory into a collapsible tree, similar to VS Code Source Control.
 
-use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// A single node in the file tree (directory or file).
 #[derive(Debug, Clone)]
@@ -42,8 +41,8 @@ pub struct FileEntry {
 /// Build a flat tree from a sorted list of files.
 ///
 /// For each file, directory nodes are emitted for path segments that haven't been seen yet.
-/// `collapsed_dirs` determines which directories start collapsed.
-pub fn build_tree(files: &[FileEntry], collapsed_dirs: &HashSet<PathBuf>) -> Vec<TreeNode> {
+/// `is_open` says which directories start expanded.
+pub fn build_tree(files: &[FileEntry], is_open: impl Fn(&Path) -> bool) -> Vec<TreeNode> {
     if files.is_empty() {
         return Vec::new();
     }
@@ -95,7 +94,7 @@ pub fn build_tree(files: &[FileEntry], collapsed_dirs: &HashSet<PathBuf>) -> Vec
         for i in common..dir_components.len() {
             let dir_path: PathBuf = dir_components[..=i].iter().collect();
             let depth = i;
-            let expanded = !collapsed_dirs.contains(&dir_path);
+            let expanded = is_open(&dir_path);
             nodes.push(TreeNode {
                 label: dir_components[i].to_string(),
                 full_path: dir_path.clone(),
@@ -239,7 +238,7 @@ mod tests {
     #[test]
     fn test_build_flat_files() {
         let files = vec![make_file("a.rs", 0, 'M'), make_file("b.rs", 1, 'A')];
-        let tree = build_tree(&files, &HashSet::new());
+        let tree = build_tree(&files, |_| true);
         assert_eq!(tree.len(), 2);
         assert_eq!(tree[0].depth, 0);
         assert_eq!(tree[0].label, "a.rs");
@@ -254,7 +253,7 @@ mod tests {
             make_file("src/foo/b.rs", 1, 'M'),
             make_file("src/bar.rs", 2, 'A'),
         ];
-        let tree = build_tree(&files, &HashSet::new());
+        let tree = build_tree(&files, |_| true);
         // src/ (depth 0), foo/ (depth 1), a.rs (depth 2), b.rs (depth 2), bar.rs (depth 1)
         assert_eq!(tree.len(), 5);
         assert_eq!(tree[0].label, "src");
@@ -275,15 +274,12 @@ mod tests {
 
     #[test]
     fn test_visibility_with_collapse() {
-        let mut collapsed = HashSet::new();
-        collapsed.insert(PathBuf::from("src/foo"));
-
         let files = vec![
             make_file("src/foo/a.rs", 0, 'M'),
             make_file("src/foo/b.rs", 1, 'M'),
             make_file("src/bar.rs", 2, 'A'),
         ];
-        let tree = build_tree(&files, &collapsed);
+        let tree = build_tree(&files, |dir| dir != Path::new("src/foo"));
         let visible = compute_visible_nodes(&tree);
         // src/, foo/ (collapsed), bar.rs — a.rs and b.rs are hidden
         assert_eq!(visible.len(), 3);
@@ -299,7 +295,7 @@ mod tests {
             make_file("src/foo/b.rs", 1, 'M'),
             make_file("src/bar.rs", 2, 'A'),
         ];
-        let tree = build_tree(&files, &HashSet::new());
+        let tree = build_tree(&files, |_| true);
         // dir index 0 = src/, should contain all 3 files
         let collected = collect_files_under(&tree, 0);
         assert_eq!(collected.len(), 3);
@@ -311,7 +307,7 @@ mod tests {
     #[test]
     fn test_tree_prefixes() {
         let files = vec![make_file("src/a.rs", 0, 'M'), make_file("src/b.rs", 1, 'M')];
-        let tree = build_tree(&files, &HashSet::new());
+        let tree = build_tree(&files, |_| true);
         let visible = compute_visible_nodes(&tree);
         let prefixes = compute_tree_prefixes(&tree, &visible);
         // src/ (depth 0) -> no prefix
@@ -323,7 +319,7 @@ mod tests {
     }
 
     fn dir_status(files: &[FileEntry]) -> (char, bool) {
-        let tree = build_tree(files, &HashSet::new());
+        let tree = build_tree(files, |_| true);
         let dir = tree
             .iter()
             .position(|node| matches!(node.kind, TreeNodeKind::Directory { .. }))

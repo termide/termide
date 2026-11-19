@@ -1,11 +1,12 @@
 //! Async git-status refresh, state recomputation, and file-tree rebuilding.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use termide_git::{self as git, StagedFile, UnstagedFile};
 
 use crate::tree;
+use crate::types::{FileTree, Selection};
 use crate::GitStatusPanel;
 
 /// Snapshot returned by the background refresh worker. All the git
@@ -227,7 +228,7 @@ impl GitStatusPanel {
     /// Build the node list of a section tree from file entries.
     fn build_section_tree(
         paths: &[(PathBuf, usize, char, bool)],
-        collapsed: &HashSet<PathBuf>,
+        section: &FileTree,
     ) -> Vec<tree::TreeNode> {
         let entries: Vec<tree::FileEntry> = paths
             .iter()
@@ -238,7 +239,7 @@ impl GitStatusPanel {
                 untracked: *untracked,
             })
             .collect();
-        tree::build_tree(&entries, collapsed)
+        tree::build_tree(&entries, |dir| section.is_open(dir))
     }
 
     /// Rebuild tree data structures from current file lists.
@@ -254,7 +255,7 @@ impl GitStatusPanel {
             .enumerate()
             .map(|(i, f)| (f.path.clone(), i, f.status, f.untracked))
             .collect();
-        self.unstaged.tree = Self::build_section_tree(&unstaged_data, &self.unstaged.collapsed);
+        self.unstaged.tree = Self::build_section_tree(&unstaged_data, &self.unstaged);
         self.unstaged.recompute_visible();
 
         let staged_data: Vec<_> = self
@@ -263,41 +264,79 @@ impl GitStatusPanel {
             .enumerate()
             .map(|(i, f)| (f.path.clone(), i, f.status, false))
             .collect();
-        self.staged.tree = Self::build_section_tree(&staged_data, &self.staged.collapsed);
+        self.staged.tree = Self::build_section_tree(&staged_data, &self.staged);
         self.staged.recompute_visible();
     }
 
     /// Toggle expand/collapse for a directory node.
     pub(crate) fn toggle_dir_expand(&mut self, is_unstaged: bool, tree_idx: usize) {
-        let (tree, collapsed) = if is_unstaged {
-            (&mut self.unstaged.tree, &mut self.unstaged.collapsed)
+        let section = if is_unstaged {
+            &mut self.unstaged
         } else {
-            (&mut self.staged.tree, &mut self.staged.collapsed)
+            &mut self.staged
         };
 
-        if matches!(tree[tree_idx].kind, tree::TreeNodeKind::Directory { .. }) {
-            let path = tree[tree_idx].full_path.clone();
-            if let tree::TreeNodeKind::Directory { ref mut expanded } = tree[tree_idx].kind {
-                *expanded = !*expanded;
-                if *expanded {
-                    collapsed.remove(&path);
-                } else {
-                    collapsed.insert(path);
-                }
-            }
+        if let tree::TreeNodeKind::Directory { expanded } = section.tree[tree_idx].kind {
+            let path = section.tree[tree_idx].full_path.clone();
+            section.set_open(&path, !expanded);
+            section.tree[tree_idx].kind = tree::TreeNodeKind::Directory {
+                expanded: !expanded,
+            };
         }
-
-        // Recompute visible nodes and prefixes
-        if is_unstaged {
-            self.unstaged.recompute_visible();
-        } else {
-            self.staged.recompute_visible();
-        }
+        section.recompute_visible();
 
         // Clamp cursor
         let max_cursor = self.total_virtual_lines().saturating_sub(1);
         if self.cursor > max_cursor {
             self.cursor = max_cursor;
         }
+    }
+
+    /// Fold every folder of both lists when any is open, otherwise open
+    /// them all. The cursor keeps its row, or goes to the folder above it
+    /// that now holds it.
+    pub(crate) fn toggle_all_folds(&mut self) {
+        let open = !(self.unstaged.any_open() || self.staged.any_open());
+        let at = self.cursor_anchor();
+        self.unstaged.set_all_open(open);
+        self.staged.set_all_open(open);
+        if let Some(at) = at {
+            self.cursor = self.row_of(at);
+        }
+        let max_cursor = self.total_virtual_lines().saturating_sub(1);
+        self.cursor = self.cursor.min(max_cursor);
+        self.ensure_cursor_visible();
+    }
+
+    /// What the cursor is on: a list's header (`None` path) or a row of it.
+    fn cursor_anchor(&self) -> Option<(bool, Option<PathBuf>)> {
+        Some(match self.get_selection()? {
+            Selection::UnstagedHeader => (true, None),
+            Selection::StagedHeader => (false, None),
+            Selection::UnstagedDir(i) => (true, Some(self.unstaged.tree[i].full_path.clone())),
+            Selection::StagedDir(i) => (false, Some(self.staged.tree[i].full_path.clone())),
+            Selection::UnstagedFile(i) => (true, Some(self.unstaged_files.get(i)?.path.clone())),
+            Selection::StagedFile(i) => (false, Some(self.staged_files.get(i)?.path.clone())),
+        })
+    }
+
+    /// The row showing `path` in its list, or the nearest folder above it
+    /// that is shown; the list's header for no path.
+    fn row_of(&self, (is_unstaged, path): (bool, Option<PathBuf>)) -> usize {
+        let (header, section) = if is_unstaged {
+            (0, &self.unstaged)
+        } else {
+            (1 + self.unstaged_item_count(), &self.staged)
+        };
+        let Some(path) = path else {
+            return header;
+        };
+        section
+            .visible
+            .iter()
+            .enumerate()
+            .filter(|&(_, &node)| path.starts_with(&section.tree[node].full_path))
+            .max_by_key(|&(_, &node)| section.tree[node].depth)
+            .map_or(header, |(row, _)| header + 1 + row)
     }
 }

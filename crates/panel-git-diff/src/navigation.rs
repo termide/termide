@@ -1,34 +1,84 @@
 //! Selection, collapse, and scroll navigation for the Git Diff Panel.
 
+use std::collections::HashSet;
+
 use termide_core::PanelEvent;
 
-use crate::GitDiffPanel;
+use crate::{FileDiff, GitDiffPanel};
+
+/// Which files are folded: each follows `all_folded` but for those the user
+/// flipped by hand. Files are known by path and side rather than position,
+/// so a fold stays with its file when a refresh adds or drops others, and a
+/// file new to the panel follows the last fold-all.
+#[derive(Debug, Default)]
+pub(crate) struct Folds {
+    all_folded: bool,
+    flipped: HashSet<(String, bool)>,
+}
+
+fn fold_key(diff: &FileDiff) -> (String, bool) {
+    (diff.path.clone(), diff.staged)
+}
+
+impl Folds {
+    fn is_folded(&self, diff: &FileDiff) -> bool {
+        self.all_folded != self.flipped.contains(&fold_key(diff))
+    }
+
+    fn set_folded(&mut self, diff: &FileDiff, folded: bool) {
+        if folded == self.all_folded {
+            self.flipped.remove(&fold_key(diff));
+        } else {
+            self.flipped.insert(fold_key(diff));
+        }
+    }
+
+    /// Forget the files no longer shown.
+    pub(crate) fn retain(&mut self, diffs: &[FileDiff]) {
+        let shown: HashSet<_> = diffs.iter().map(fold_key).collect();
+        self.flipped.retain(|key| shown.contains(key));
+    }
+}
 
 impl GitDiffPanel {
-    /// Toggle collapse state for selected file
-    pub(crate) fn toggle_collapse(&mut self) {
-        if self.selected_file < self.diffs.len() {
-            if !self.collapsed.remove(&self.selected_file) {
-                self.collapsed.insert(self.selected_file);
-            }
+    /// Whether file `file` is folded to its header.
+    pub(crate) fn is_collapsed(&self, file: usize) -> bool {
+        self.diffs
+            .get(file)
+            .is_some_and(|diff| self.folds.is_folded(diff))
+    }
+
+    fn set_collapsed(&mut self, file: usize, folded: bool) {
+        if let Some(diff) = self.diffs.get(file) {
+            self.folds.set_folded(diff, folded);
             self.after_fold();
         }
+    }
+
+    /// Toggle collapse state for selected file
+    pub(crate) fn toggle_collapse(&mut self) {
+        self.set_collapsed(self.selected_file, !self.is_collapsed(self.selected_file));
     }
 
     /// Collapse selected file
     pub(crate) fn collapse_current(&mut self) {
-        if self.selected_file < self.diffs.len() {
-            self.collapsed.insert(self.selected_file);
-            self.after_fold();
-        }
+        self.set_collapsed(self.selected_file, true);
     }
 
     /// Expand selected file
     pub(crate) fn expand_current(&mut self) {
-        if self.selected_file < self.diffs.len() {
-            self.collapsed.remove(&self.selected_file);
-            self.after_fold();
-        }
+        self.set_collapsed(self.selected_file, false);
+    }
+
+    /// Fold every file when any is open, otherwise unfold them all. Files
+    /// a later refresh brings follow suit.
+    pub(crate) fn toggle_all_folds(&mut self) {
+        let any_open = (0..self.diffs.len()).any(|i| !self.is_collapsed(i));
+        self.folds = Folds {
+            all_folded: any_open,
+            flipped: HashSet::new(),
+        };
+        self.after_fold();
     }
 
     /// Rows moved: the cursor goes to the folded or unfolded file's header,

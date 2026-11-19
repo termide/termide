@@ -582,6 +582,93 @@ mod tests {
         );
     }
 
+    fn nested_panel() -> (tempfile::TempDir, GitStatusPanel) {
+        let (dir, mut panel) = panel_with_files();
+        panel.unstaged_files = ["src/foo/a.rs", "src/b.rs", "top.rs"]
+            .into_iter()
+            .map(|path| UnstagedFile {
+                path: PathBuf::from(path),
+                status: 'M',
+                untracked: false,
+            })
+            .collect();
+        panel.staged_files = vec![StagedFile {
+            path: PathBuf::from("doc/x.md"),
+            status: 'M',
+        }];
+        panel.rebuild_trees();
+        (dir, panel)
+    }
+
+    /// The labels of the rows shown, headers left out.
+    fn shown(panel: &GitStatusPanel) -> Vec<&str> {
+        [&panel.unstaged, &panel.staged]
+            .into_iter()
+            .flat_map(|ft| ft.visible.iter().map(|&i| ft.tree[i].label.as_str()))
+            .collect()
+    }
+
+    #[test]
+    fn fold_all_closes_every_folder_at_every_depth_then_opens_them() {
+        let (_dir, mut panel) = nested_panel();
+        assert_eq!(shown(&panel).len(), 7);
+
+        panel.toggle_all_folds();
+        assert_eq!(shown(&panel), ["src", "top.rs", "doc"]);
+
+        // A folder opened by hand shows its subfolders still folded.
+        panel.toggle_dir_expand(true, 0);
+        assert_eq!(shown(&panel), ["src", "foo", "b.rs", "top.rs", "doc"]);
+
+        // One folder is open, so the key folds again first.
+        panel.toggle_all_folds();
+        assert_eq!(shown(&panel), ["src", "top.rs", "doc"]);
+        panel.toggle_all_folds();
+        assert_eq!(shown(&panel).len(), 7);
+    }
+
+    #[test]
+    fn fold_all_moves_the_cursor_to_the_folder_that_hides_its_row() {
+        let (_dir, mut panel) = nested_panel();
+        // Rows: 0 header, 1 src, 2 foo, 3 a.rs, 4 b.rs, 5 top.rs,
+        // 6 staged header, 7 doc, 8 x.md.
+        panel.cursor = 3;
+        assert!(matches!(
+            panel.get_selection(),
+            Some(Selection::UnstagedFile(0))
+        ));
+        panel.toggle_all_folds();
+        assert_eq!(panel.cursor, 1);
+        assert!(matches!(
+            panel.get_selection(),
+            Some(Selection::UnstagedDir(0))
+        ));
+
+        panel.toggle_all_folds();
+        panel.cursor = 6;
+        panel.toggle_all_folds();
+        assert!(matches!(
+            panel.get_selection(),
+            Some(Selection::StagedHeader)
+        ));
+        panel.cursor = 2; // `top.rs` once folded
+        panel.toggle_all_folds();
+        assert_eq!(panel.cursor, 5, "top.rs keeps its row by path");
+    }
+
+    #[test]
+    fn folders_a_refresh_brings_follow_the_last_fold_all() {
+        let (_dir, mut panel) = nested_panel();
+        panel.toggle_all_folds();
+        panel.unstaged_files.push(UnstagedFile {
+            path: PathBuf::from("zzz/new.rs"),
+            status: 'M',
+            untracked: false,
+        });
+        panel.rebuild_trees();
+        assert_eq!(shown(&panel), ["src", "top.rs", "zzz", "doc"]);
+    }
+
     /// Enter on a directory row still folds and unfolds it.
     #[test]
     fn enter_on_a_directory_toggles_it() {

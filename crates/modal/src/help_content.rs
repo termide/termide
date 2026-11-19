@@ -692,6 +692,10 @@ impl HelpGenerator {
                 description: t.help_desc_refresh().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.toggle_folds),
+                description: t.help_desc_toggle_all_folds().to_string(),
+            },
+            HelpEntry {
                 keys: "Tab".to_string(),
                 description: t.help_desc_switch_focus().to_string(),
             },
@@ -713,6 +717,10 @@ impl HelpGenerator {
             HelpEntry {
                 keys: Self::format_keys(&kb.toggle_collapse),
                 description: t.help_desc_toggle_collapse().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(&kb.toggle_folds),
+                description: t.help_desc_toggle_all_folds().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.edit),
