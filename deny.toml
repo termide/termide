@@ -40,12 +40,21 @@ version = 2
 yanked = "warn"
 ignore = [
     # RUSTSEC-2023-0071 — Marvin Attack: timing sidechannel in
-    # `rsa` for RSA key decryption. Path: `rsa` ← `russh` ← VFS
-    # SFTP client. Termide is the SFTP *client*, never a server,
-    # so an attacker has no opportunity to feed crafted ciphertext
-    # and measure timing on our process. Re-evaluate when russh
-    # ships a fix or migrates off the rsa crate.
+    # `rsa` for RSA key decryption. Two paths, both clients:
+    # - `rsa 0.10` ← `russh` ← VFS SFTP client. Termide is the SFTP
+    #   *client*, never a server, so an attacker has no opportunity to
+    #   feed crafted ciphertext and measure timing on our process.
+    # - `rsa 0.9` ← `sqlx-mysql` ← termide-db. MySQL's
+    #   `caching_sha2_password`/`sha256_password` only *encrypt* the
+    #   password with the server's public key; no private-key operation
+    #   runs, so there is nothing to time.
+    # Re-evaluate when either ships a fix or migrates off the rsa crate.
     "RUSTSEC-2023-0071",
+    # RUSTSEC-2026-0543 — `chrono` unmaintained; no vulnerability is
+    # reported. `russh-sftp` and `suppaftp` (the VFS's SFTP and FTP
+    # clients) depend on it, so dropping our own uses would not take it
+    # out of the tree. Re-evaluate when they move to `jiff` or `time`.
+    "RUSTSEC-2026-0543",
     # RUSTSEC-2017-0008 — `serial` crate unmaintained.
     # Path: `serial` ← `portable-pty 0.8` ← termide-panel-terminal.
     # serial is used by portable-pty's optional UART backend for
