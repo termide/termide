@@ -1136,6 +1136,7 @@ impl Translation for RuntimeTranslation {
         op_type_trash,
         modal_unpack_title,
         fm_unpack_local_only,
+        fm_search_local_only,
         fm_unpack_no_archive,
         help_desc_select_group,
         help_desc_unselect_group,

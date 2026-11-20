@@ -1904,6 +1904,8 @@ pub trait Translation: Send + Sync {
     fn modal_unpack_title(&self) -> &str;
     /// Shown when unpacking is asked for in a remote or archive panel.
     fn fm_unpack_local_only(&self) -> &str;
+    /// Shown when a file search is asked for in a remote or archive panel.
+    fn fm_search_local_only(&self) -> &str;
     /// Shown when unpacking finds no archive to work on.
     fn fm_unpack_no_archive(&self) -> &str;
     fn help_desc_select_group(&self) -> &str;

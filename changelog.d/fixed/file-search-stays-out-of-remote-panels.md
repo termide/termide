@@ -1,0 +1,1 @@
+- **File search refuses remote panels and archives.** In an SFTP, FTP, SMB or NFS panel, or inside an archive, a file-name or content search took the panel's path for a local folder and searched the local disk instead, and a replace in a remote panel rewrote local files; all three now say they work only in local folders.

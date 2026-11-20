@@ -320,7 +320,14 @@ impl FileManager {
                 }
             }
 
-            // Search
+            // Search walks the local disk: in a remote or archive panel,
+            // `current_path` is not a local directory.
+            FmCommand::Search | FmCommand::SearchContent | FmCommand::SearchReplace
+                if self.vfs.is_remote() =>
+            {
+                let t = termide_i18n::t();
+                self.show_info_modal(t.modal_error_title(), t.fm_search_local_only());
+            }
             FmCommand::Search => {
                 // File-name search is an inline bar docked in the panel.
                 self.open_name_bar();

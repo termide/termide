@@ -394,6 +394,8 @@ the password before starting and asks again after a wrong one.
 
 ## Limitations / known gaps
 
+- File search and replace work only in local folders: in a remote panel
+  or inside an archive they are refused with a notice.
 - NFS version 4 and Kerberos are not spoken, and an export kept to
   privileged ports needs root on Linux; see [SMB and NFS](#smb-and-nfs).
 - No resume-from-byte-offset for interrupted transfers: cancelled

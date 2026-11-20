@@ -1487,6 +1487,49 @@ mod tests {
         );
     }
 
+    /// Inside an archive `current_path` is `/` plus the inner path: a search
+    /// there would walk the local disk from `/`, and a replace rewrite it.
+    #[test]
+    fn searching_inside_an_archive_refuses_and_opens_no_bar() {
+        use std::io::Write;
+        let temp_dir = TempDir::new().unwrap();
+        let archive = temp_dir.path().join("pack.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        zip.start_file("inner.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"x").unwrap();
+        zip.finish().unwrap();
+
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("pack.zip").unwrap();
+        assert!(fm.enter().is_none());
+        wait_for_vfs(&mut fm);
+        assert!(fm.vfs.at_archive_root(), "the panel is inside the archive");
+
+        for command in [
+            keyboard::FmCommand::Search,
+            keyboard::FmCommand::SearchContent,
+            keyboard::FmCommand::SearchReplace,
+        ] {
+            let name = format!("{command:?}");
+            fm.execute_command(command);
+            assert!(fm.search_bar.is_none(), "{name} opened a search bar");
+            let (_, modal) = fm.modal_request.take().expect("the refusal is said");
+            // A replace is refused earlier, as a change to a read-only archive.
+            let expected = if name == "SearchReplace" {
+                termide_i18n::t().fm_archive_read_only()
+            } else {
+                termide_i18n::t().fm_search_local_only()
+            };
+            match modal {
+                ActiveModal::InfoAction(m) => assert_eq!(m.message_text(), expected),
+                other => panic!("expected an info modal, got {other:?}"),
+            }
+        }
+    }
+
     /// A relative path resolves against the process working directory, not
     /// the panel's, so `exists()` can match some unrelated file and paste it
     /// under the wrong name. Only absolute paths are taken as files.
