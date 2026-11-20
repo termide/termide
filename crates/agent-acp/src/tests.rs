@@ -248,6 +248,144 @@ fn fake_agent(dir: PathBuf) -> (AcpRuntime, Receiver<PermissionEnvelope>) {
     (runtime, permissions)
 }
 
+/// An agent that, on each prompt, makes the `fs/` requests `requests`
+/// unasked, one after another, and ends the turn; the replies it got go to
+/// the returned receiver.
+fn file_agent(
+    dir: PathBuf,
+    mode: Mode,
+    rules: PermissionRules,
+    requests: Vec<(&'static str, Value)>,
+) -> (AcpRuntime, Receiver<PermissionEnvelope>, Receiver<Value>) {
+    let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+    let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+    let (replies_tx, replies) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut out = from_agent_tx;
+        let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+        let mut reader = BufReader::new(to_agent_rx).lines();
+        while let Some(Ok(line)) = reader.next() {
+            let message: Value = serde_json::from_str(&line).unwrap();
+            let id = message["id"].clone();
+            let result = match message["method"].as_str() {
+                Some("initialize") => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                Some("session/new") => json!({ "sessionId": "s1" }),
+                Some("session/prompt") => {
+                    for (n, (method, params)) in requests.iter().enumerate() {
+                        let request = 500 + n as u64;
+                        send(
+                            json!({ "jsonrpc": "2.0", "id": request, "method": method, "params": params }),
+                        );
+                        let reply = loop {
+                            let Some(Ok(line)) = reader.next() else {
+                                return;
+                            };
+                            let m: Value = serde_json::from_str(&line).unwrap();
+                            if m["id"] == json!(request) && m.get("method").is_none() {
+                                break m;
+                            }
+                        };
+                        replies_tx.send(reply).unwrap();
+                    }
+                    json!({ "stopReason": "end_turn" })
+                }
+                Some(_) => json!({}),
+                None => continue,
+            };
+            send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        }
+    });
+    let cancel = CancelToken::new();
+    let (prompter, permissions) = permission_channel(cancel.clone());
+    let runtime = AcpRuntime::from_streams(
+        "fake",
+        from_agent_rx,
+        to_agent_tx,
+        BackendSetup {
+            cwd: dir,
+            prompter,
+            cancel,
+            rules,
+            persist: None,
+            mode: ModeHandle::new(mode),
+            system_prompt: String::new(),
+            plan: PlanPrompt::default(),
+            plan_seen: false,
+            goal: GoalPrompt::default(),
+            handoff: HandoffPrompt::default(),
+            reviewer: ReviewerSetup::default(),
+            host_tools: None,
+            resume: None,
+            history: Vec::new(),
+        },
+        5,
+        AcpFlavor::Generic,
+    );
+    (runtime, permissions, replies)
+}
+
+/// The agent's `fs/` requests pass termide's checks as its `read` and
+/// `write` calls would: a read outside the project is asked about, a deny
+/// rule and plan mode refuse, and a file inside is read unasked.
+#[test]
+fn the_agents_file_requests_pass_the_permission_checks() {
+    let project = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::write(project.path().join("notes.md"), "mine\n").unwrap();
+    std::fs::write(project.path().join(".env"), "TOKEN=1\n").unwrap();
+    let secret = outside.path().join("id_rsa");
+    std::fs::write(&secret, "KEY\n").unwrap();
+    let secret = secret.to_str().unwrap().to_string();
+    let mut rules = PermissionRules::default();
+    rules.add("read", ".env", termide_agent_core::Decision::Deny);
+    let read = |path: &str| {
+        (
+            "fs/read_text_file",
+            json!({ "sessionId": "s1", "path": path }),
+        )
+    };
+    let (runtime, permissions, replies) = file_agent(
+        project.path().to_path_buf(),
+        Mode::Configured,
+        rules,
+        vec![read("notes.md"), read(&secret), read(".env")],
+    );
+    runtime.prompt(UserMessage::text("go")).unwrap();
+    let wait = Duration::from_secs(10);
+    let inside = replies.recv_timeout(wait).unwrap();
+    assert_eq!(inside["result"]["content"], "mine\n", "{inside}");
+    // Outside the project: the user is asked, and refuses.
+    let envelope = permissions.recv_timeout(wait).unwrap();
+    assert_eq!(envelope.request.tool, "read");
+    envelope.reply.send(PermissionAnswer::Deny.into()).unwrap();
+    let refused = replies.recv_timeout(wait).unwrap();
+    assert!(refused["error"].is_object(), "{refused}");
+    // A deny rule refuses without asking.
+    let denied = replies.recv_timeout(wait).unwrap();
+    assert!(denied["error"].is_object(), "{denied}");
+    assert!(permissions.try_recv().is_err());
+
+    // Plan mode refuses a write without asking, and leaves the file be.
+    let write = (
+        "fs/write_text_file",
+        json!({ "sessionId": "s1", "path": "notes.md", "content": "changed" }),
+    );
+    let (runtime, permissions, replies) = file_agent(
+        project.path().to_path_buf(),
+        Mode::Plan,
+        PermissionRules::default(),
+        vec![write],
+    );
+    runtime.prompt(UserMessage::text("go")).unwrap();
+    let refused = replies.recv_timeout(wait).unwrap();
+    assert!(refused["error"].is_object(), "{refused}");
+    assert!(permissions.try_recv().is_err());
+    assert_eq!(
+        std::fs::read_to_string(project.path().join("notes.md")).unwrap(),
+        "mine\n"
+    );
+}
+
 fn drain_until_end(
     runtime: &AcpRuntime,
     permissions: &Receiver<PermissionEnvelope>,

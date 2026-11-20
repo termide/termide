@@ -7,8 +7,8 @@
 //! loop emits, so the panel renders both alike. The agent's own requests
 //! are answered here: `session/request_permission` goes to the user through
 //! the shared permission channel, `fs/read_text_file` and
-//! `fs/write_text_file` are served from the working directory, terminals
-//! are not offered.
+//! `fs/write_text_file` are served from the working directory through the
+//! same checks as the `read` and `write` tools, terminals are not offered.
 //!
 //! Starting an agent (`npx …` adapters take seconds) happens on a thread; a
 //! prompt sent before the session exists waits in the queue and goes out as
@@ -32,8 +32,8 @@ use termide_agent_core::{
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
-    BackgroundCall, CancelToken, ExternalSessionRef, Failure, FailureKind, Hooks, HostTools,
-    Message, Mode, ModeHandle, PermissionHooks, PermissionNote, PlanPrompt, PromptError,
+    BackgroundCall, CancelToken, Decision, ExternalSessionRef, Failure, FailureKind, Hooks,
+    HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote, PlanPrompt, PromptError,
     StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage,
     Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
@@ -238,6 +238,9 @@ struct Shared {
     /// How each of the agent's own calls asked about was decided, by id,
     /// until its result is logged with it.
     decided: Mutex<HashMap<String, PermissionNote>>,
+    /// The files the user let the agent read or edit when it asked this
+    /// turn: its `fs/` request for one of them is not asked about again.
+    granted_files: Mutex<BTreeSet<PathBuf>>,
     /// The calls on their way into the session log.
     calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
@@ -579,6 +582,7 @@ impl AcpRuntime {
             announced: Mutex::new(HashMap::new()),
             host_calls: Arc::default(),
             decided: Mutex::new(HashMap::new()),
+            granted_files: Mutex::new(BTreeSet::new()),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             context_limit: AtomicU64::new(0),
@@ -1855,6 +1859,10 @@ impl Shared {
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(prompt.clone());
         self.turn_acted.store(false, Ordering::Release);
+        self.granted_files
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clear();
         self.turn_running.store(true, Ordering::Release);
         let result = self.request_classified(
             "session/prompt",
@@ -2704,31 +2712,17 @@ impl Shared {
                     let _ = this.write(&json!({ "jsonrpc": "2.0", "id": id, "result": result }));
                 });
             }
-            "fs/read_text_file" => {
-                let reply = read_text_file(&self.cwd, params);
-                self.reply(&rpc_reply(id, reply));
-            }
-            "fs/write_text_file" => {
-                let reply = write_text_file(&self.cwd, params);
-                if reply.is_ok() {
-                    if let Some(path) = params["path"].as_str() {
-                        // Surfaces as an edit so an open editor reloads the file.
-                        let call = ToolCall {
-                            id: format!("fs-{id}"),
-                            name: "write".into(),
-                            arguments: json!({ "path": path }),
-                            extra_content: None,
-                        };
-                        let _ = self
-                            .events
-                            .send(AgentEvent::ToolExecutionStart { call: call.clone() });
-                        let _ = self.events.send(AgentEvent::ToolExecutionEnd {
-                            result: ToolResultMessage::text(&call, format!("Wrote {path}"))
-                                .with_details(json!({ "path": absolute(&self.cwd, path) })),
-                        });
-                    }
-                }
-                self.reply(&rpc_reply(id, reply));
+            // The agent reads and writes through these in its own tools'
+            // place, so they pass termide's checks as `read` and `write` do:
+            // a rule or plan mode that refuses refuses here too, and what
+            // would be asked about is asked unless the user just let the
+            // agent at that file. A prompt waits on its own thread, as a
+            // permission request does.
+            "fs/read_text_file" | "fs/write_text_file" => {
+                let this = Arc::clone(self);
+                let method = method.to_string();
+                let params = params.clone();
+                std::thread::spawn(move || this.serve_file(id, &method, &params));
             }
             _ => {
                 self.reply(&json!({
@@ -2737,6 +2731,88 @@ impl Shared {
                 }));
             }
         }
+    }
+
+    /// Whether the permission checks let the agent's `fs/` request for
+    /// `path` through: as a `read`, or as a `write` (judged as an `edit`
+    /// too, whose rules name the same files).
+    fn file_access(&self, write: bool, path: &str) -> Result<(), String> {
+        let ctx = ToolContext {
+            session: Some(self.session_view()),
+            ..ToolContext::new(self.cwd.clone())
+        };
+        let call = |name: &str| ToolCall {
+            id: String::new(),
+            name: name.into(),
+            arguments: json!({ "path": path }),
+            extra_content: None,
+        };
+        let calls = if write {
+            vec![call("write"), call("edit")]
+        } else {
+            vec![call("read")]
+        };
+        let refused = || {
+            let verb = if write { "write" } else { "read" };
+            format!("termide's permission settings do not let the agent {verb} {path}")
+        };
+        let mut hooks = self.hooks.lock().unwrap_or_else(PoisonError::into_inner);
+        let decision = calls
+            .iter()
+            .map(|call| hooks.decide(call, &ctx))
+            .max()
+            .unwrap_or(Decision::Ask);
+        match decision {
+            Decision::Allow => Ok(()),
+            Decision::Deny => Err(refused()),
+            Decision::Ask => {
+                let granted = self
+                    .granted_files
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .contains(&absolute(&self.cwd, path));
+                if granted {
+                    return Ok(());
+                }
+                let decision = hooks.before_tool_call(&calls[0], &ctx);
+                let _ = hooks.take_permission();
+                match decision {
+                    ToolDecision::Block { .. } => Err(refused()),
+                    _ => Ok(()),
+                }
+            }
+        }
+    }
+
+    fn serve_file(self: &Arc<Self>, id: u64, method: &str, params: &Value) {
+        let write = method == "fs/write_text_file";
+        let checked = match params["path"].as_str() {
+            Some(path) => self.file_access(write, path),
+            None => Err("path missing".to_string()),
+        };
+        if !write {
+            let reply = checked.and_then(|()| read_text_file(&self.cwd, params));
+            self.reply(&rpc_reply(id, reply));
+            return;
+        }
+        let reply = checked.and_then(|()| write_text_file(&self.cwd, params));
+        if let (Ok(_), Some(path)) = (&reply, params["path"].as_str()) {
+            // Surfaces as an edit so an open editor reloads the file.
+            let call = ToolCall {
+                id: format!("fs-{id}"),
+                name: "write".into(),
+                arguments: json!({ "path": path }),
+                extra_content: None,
+            };
+            let _ = self
+                .events
+                .send(AgentEvent::ToolExecutionStart { call: call.clone() });
+            let _ = self.events.send(AgentEvent::ToolExecutionEnd {
+                result: ToolResultMessage::text(&call, format!("Wrote {path}"))
+                    .with_details(json!({ "path": absolute(&self.cwd, path) })),
+            });
+        }
+        self.reply(&rpc_reply(id, reply));
     }
 
     fn ask_permission(&self, params: &Value) -> Value {
@@ -2804,6 +2880,23 @@ impl Shared {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(id.to_string(), note);
+        }
+        // The files a let-through read or edit names, so its `fs/` requests
+        // are not asked about a second time.
+        if !matches!(decision, ToolDecision::Block { .. })
+            && matches!(call.name.as_str(), "read" | "edit")
+        {
+            let locations = tool_call["locations"].as_array().into_iter().flatten();
+            let diffs = tool_call["content"].as_array().into_iter().flatten();
+            let paths = std::iter::once(&call.arguments["path"])
+                .chain(locations.map(|location| &location["path"]))
+                .chain(diffs.map(|block| &block["path"]))
+                .filter_map(Value::as_str)
+                .map(|path| absolute(&self.cwd, path));
+            self.granted_files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .extend(paths);
         }
         // Always answer "once": termide stays the source of truth for grants,
         // so the agent keeps asking and termide keeps deciding silently,

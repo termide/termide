@@ -329,6 +329,12 @@ whichever connection it is on:
   plan mode is off, `edit`: `autoEdit`, `all`: `yolo`) and decides what it
   asks.
 
+When Codex or Gemini CLI reads or writes a file through termide rather than
+on its own, the request passes the checks of termide's `read` and `write`:
+a `deny` rule or plan mode refuses it, and a read outside the project or a
+write the mode would ask about is asked about — unless you have just let the
+agent at that file on its own card.
+
 Codex and Gemini CLI also get the tools of termide's MCP servers, served over
 the same local MCP server beside their own and checked as Claude Code's calls
 are; their own MCP configuration still applies. Of termide's own tools they get

@@ -72,6 +72,8 @@ termide 会在这些代理允许的范围内尽量接管它们，使会话无论
 - **Codex** 保留自己的系统提示词和工具；termide 把它置于与面板对应的模式（`ask`、`configured` 和 `auto`：只读，会请求批准；`plan`：同上并加上其计划协作模式；`edit`：工作区访问；`all`：完全访问），并决定它询问的内容；不使用它自己的“Auto review”，在 `auto` 中由 termide 的审查者评判。
 - **Gemini CLI** 同样保留自己的系统提示词和工具；termide 把它的批准模式设为与面板对应的模式（`ask`、`configured` 和 `auto`：`default`，在编辑和执行命令前询问；`plan`：`plan`，若 Gemini 未开启计划模式则为 `default`；`edit`：`autoEdit`；`all`：`yolo`），并决定它询问的内容。
 
+当 Codex 或 Gemini CLI 不是自己、而是通过 termide 读写文件时，该请求要经过 termide 的 `read` 和 `write` 检查：`deny` 规则或计划模式会拒绝它；在项目之外读取，或模式会询问的写入，都会询问——除非你刚刚在代理自己的卡片上允许了它访问该文件。
+
 Codex 和 Gemini CLI 也会获得 termide 的 MCP 服务器的工具：它们通过同一个本地 MCP 服务器提供，与这两个代理自己的工具并存，并像 Claude Code 的调用一样接受检查；它们自己的 MCP 配置仍然有效。它们只在会话启动时读取一次 MCP 服务器的工具列表，因此会话最多等待十秒，让 termide 的 MCP 服务器作出响应。之后才连接或被重新加载的服务器，要到下一个会话才会提供给它们。在 termide 自己的工具中，它们获得自身没有对应工具的那些：`recall`、`skill`（其描述中列出了各个技能，因为它们自己的提示词不会列出）、`question`、`suggest_command`、`suggest_goal` 和 `suggest_loop`——前提是代理定义中包含该工具。
 
 三者都保留自己的对话循环：它们自行压缩上下文（代理报告压缩时——Claude Code 会报告——该压缩会像内置代理的压缩一样显示并记入日志：其摘要取代之前的历史，`recall` 能找到被它移出的内容；较旧的适配器把压缩报告为“Compact conversation”步骤，它同样显示为压缩，但没有摘要，因此日志完整保留历史），运行不能在步骤之间暂停，也没有预填充和生成计时（令牌总数在代理报告时显示，Claude Code 会报告）。**权限** 标签对三者都有效，`auto` 使用 termide 的[审查者](#auto-模式)，默认通过代理自己的订阅。设置模态窗口在连接页面中也有同样的说明。
