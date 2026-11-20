@@ -1706,13 +1706,6 @@ impl Panel for Terminal {
             return result;
         }
         match cmd {
-            PanelCommand::Resize { rows, cols } => {
-                if self.resize(rows, cols).is_ok() {
-                    CommandResult::NeedsRedraw(true)
-                } else {
-                    CommandResult::NeedsRedraw(false)
-                }
-            }
             PanelCommand::SetHostFocus { focused } => {
                 if let Err(e) = self.send_focus_event(focused) {
                     log::debug!("Terminal focus event send failed: {}", e);
@@ -1753,8 +1746,7 @@ impl Panel for Terminal {
                 CommandResult::None
             }
             // Commands not applicable to Terminal
-            PanelCommand::GetRepoRoot
-            | PanelCommand::OnGitUpdate { .. }
+            PanelCommand::OnGitUpdate { .. }
             | PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
             | PanelCommand::GetFsWatchInfo
@@ -1762,7 +1754,6 @@ impl Panel for Terminal {
             | PanelCommand::OnFsUpdate { .. }
             | PanelCommand::Reload
             | PanelCommand::GetModificationStatus
-            | PanelCommand::Save
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }
             | PanelCommand::ChecklistDone { .. }

@@ -749,7 +749,6 @@ impl Panel for FileManager {
         }
         match cmd {
             // Return git repository root (enables registration with watcher)
-            PanelCommand::GetRepoRoot => CommandResult::RepoRoot(self.git_root.clone()),
             PanelCommand::GetFsWatchInfo => CommandResult::FsWatchInfo {
                 watched_root: self.git_root.clone(),
                 current_path: self.current_path.clone(),
@@ -887,10 +886,8 @@ impl Panel for FileManager {
             // Commands not applicable to FileManager
             PanelCommand::CheckPendingGitDiff
             | PanelCommand::CheckGitDiffReceiver
-            | PanelCommand::Resize { .. }
             | PanelCommand::SetHostFocus { .. }
             | PanelCommand::GetModificationStatus
-            | PanelCommand::Save
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::UpdateRepoPaths { .. }
             | PanelCommand::ShowGitLog { .. }
@@ -2120,35 +2117,11 @@ mod tests {
     }
 
     #[test]
-    fn test_handle_command_get_repo_root() {
-        let (mut fm, _temp_dir) = create_file_manager_in_temp();
-
-        // GetRepoRoot returns None when not in git repo
-        let result = fm.handle_command(PanelCommand::GetRepoRoot);
-        assert!(matches!(result, CommandResult::RepoRoot(None)));
-
-        // Set git_root and verify it's returned
-        fm.git_root = Some(PathBuf::from("/test/repo"));
-        let result = fm.handle_command(PanelCommand::GetRepoRoot);
-        if let CommandResult::RepoRoot(Some(root)) = result {
-            assert_eq!(root, PathBuf::from("/test/repo"));
-        } else {
-            panic!("Expected RepoRoot result");
-        }
-    }
-
-    #[test]
     fn test_handle_command_not_applicable() {
         let (mut fm, _temp_dir) = create_file_manager_in_temp();
 
         // Commands not applicable to FileManager should return None
         let result = fm.handle_command(PanelCommand::GetModificationStatus);
-        assert!(matches!(result, CommandResult::None));
-
-        let result = fm.handle_command(PanelCommand::Save);
-        assert!(matches!(result, CommandResult::None));
-
-        let result = fm.handle_command(PanelCommand::Resize { rows: 24, cols: 80 });
         assert!(matches!(result, CommandResult::None));
     }
 

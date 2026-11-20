@@ -54,14 +54,7 @@ fn test_handle_command_get_modification_status_after_edit() {
 fn test_handle_command_save_new_editor() {
     let mut editor = Editor::new();
     // New editor without file path should fail to save
-    let result = editor.handle_command(PanelCommand::Save);
-
-    if let CommandResult::SaveResult { success, error } = result {
-        assert!(!success);
-        assert!(error.is_some());
-    } else {
-        panic!("Expected SaveResult");
-    }
+    assert!(editor.save().is_err());
 }
 
 #[test]
@@ -70,14 +63,7 @@ fn test_handle_command_save_with_file() {
 
     // Modify and save
     let _ = editor.insert_char('!');
-    let result = editor.handle_command(PanelCommand::Save);
-
-    if let CommandResult::SaveResult { success, error } = result {
-        assert!(success);
-        assert!(error.is_none());
-    } else {
-        panic!("Expected SaveResult");
-    }
+    assert!(matches!(editor.save(), Ok(None)));
 
     // Check modification status after save
     let result = editor.handle_command(PanelCommand::GetModificationStatus);
@@ -102,9 +88,6 @@ fn test_handle_command_not_applicable() {
     let mut editor = Editor::new();
 
     // Commands not applicable to Editor should return None
-    let result = editor.handle_command(PanelCommand::Resize { rows: 24, cols: 80 });
-    assert!(matches!(result, CommandResult::None));
-
     let result = editor.handle_command(PanelCommand::SetFsWatchRoot {
         root: None,
         is_git_repo: false,

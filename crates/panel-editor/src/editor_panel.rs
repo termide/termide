@@ -566,10 +566,6 @@ impl Panel for Editor {
             return result;
         }
         match cmd {
-            PanelCommand::GetRepoRoot => {
-                let repo_root = self.get_or_compute_repo_root().cloned();
-                CommandResult::RepoRoot(repo_root)
-            }
             PanelCommand::OnGitUpdate { repo_paths } => {
                 if let Some(file_path) = self.file_path() {
                     // Check if any updated repo contains this file
@@ -635,27 +631,6 @@ impl Panel for Editor {
             PanelCommand::GetModificationStatus => CommandResult::ModificationStatus {
                 is_modified: self.buffer.is_modified(),
                 has_external_change: self.file_state.external_change_detected,
-            },
-            PanelCommand::Save => match self.save() {
-                Ok(None) => CommandResult::SaveResult {
-                    success: true,
-                    error: None,
-                },
-                Ok(Some(_remote_info)) => {
-                    // PanelCommand::Save is only used for synchronous save probes
-                    // (tests, internal callers). App-driven remote saves bypass this
-                    // path and call `editor.save()` directly to retrieve the upload
-                    // tuple and queue it via `queue_remote_editor_upload`.
-                    // Report success so `SaveResult` remains a pure sync signal.
-                    CommandResult::SaveResult {
-                        success: true,
-                        error: None,
-                    }
-                }
-                Err(e) => CommandResult::SaveResult {
-                    success: false,
-                    error: Some(e.to_string()),
-                },
             },
             PanelCommand::MarkStale => {
                 self.is_stale = true;
@@ -731,7 +706,6 @@ impl Panel for Editor {
 
             // Commands not applicable to Editor
             PanelCommand::SetFsWatchRoot { .. }
-            | PanelCommand::Resize { .. }
             | PanelCommand::SetHostFocus { .. }
             | PanelCommand::SetGitOperationInProgress { .. }
             | PanelCommand::SelectionMade { .. }

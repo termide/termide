@@ -11,10 +11,6 @@ use crate::scrollbar::{ScrollAxis, ScrollBars};
 #[derive(Debug, Clone)]
 pub enum PanelCommand<'a> {
     // === Git integration commands ===
-    /// Request panel's git repository root (if applicable).
-    /// Response: `CommandResult::RepoRoot(Option<PathBuf>)`
-    GetRepoRoot,
-
     /// Notify panel about git status changes in specified repositories.
     /// Panel should update its git diff if its file is in one of these repos.
     /// Response: `CommandResult::NeedsRedraw(bool)`
@@ -58,15 +54,6 @@ pub enum PanelCommand<'a> {
     Reload,
 
     // === Terminal commands ===
-    /// Resize terminal panel.
-    /// Response: `CommandResult::None`
-    Resize {
-        /// New row count
-        rows: u16,
-        /// New column count
-        cols: u16,
-    },
-
     /// Notify terminal-like panels that host terminal focus changed.
     /// Response: `CommandResult::None`
     SetHostFocus {
@@ -78,10 +65,6 @@ pub enum PanelCommand<'a> {
     /// Query editor modification status.
     /// Response: `CommandResult::ModificationStatus { ... }`
     GetModificationStatus,
-
-    /// Save editor content to file.
-    /// Response: `CommandResult::SaveResult { success, error }`
-    Save,
 
     // === Git operation state ===
     /// Notify panel about git operation in progress state.
@@ -256,9 +239,6 @@ pub enum CommandResult {
     /// originating key should fall through to normal panel key handling.
     Handled(bool),
 
-    /// Git repository root (response to GetRepoRoot).
-    RepoRoot(Option<PathBuf>),
-
     /// File path (for Editor panels).
     FilePath(Option<PathBuf>),
 
@@ -284,28 +264,12 @@ pub enum CommandResult {
     /// GetScrollBars). Default (both axes `None`) means the panel draws no
     /// scrollbar, so the whole border stays with the layout resize.
     ScrollBars(ScrollBars),
-
-    /// Save operation result.
-    SaveResult {
-        /// Whether save was successful
-        success: bool,
-        /// Error message if save failed
-        error: Option<String>,
-    },
 }
 
 impl CommandResult {
     /// Check if the result indicates a redraw is needed.
     pub fn needs_redraw(&self) -> bool {
         matches!(self, CommandResult::NeedsRedraw(true))
-    }
-
-    /// Get repository root from result, if present.
-    pub fn repo_root(&self) -> Option<&Path> {
-        match self {
-            CommandResult::RepoRoot(Some(path)) => Some(path.as_path()),
-            _ => None,
-        }
     }
 
     /// Get filesystem watch info from result, if present.
@@ -330,14 +294,6 @@ impl CommandResult {
             _ => None,
         }
     }
-
-    /// Get save result from result, if present.
-    pub fn save_result(&self) -> Option<(bool, Option<&str>)> {
-        match self {
-            CommandResult::SaveResult { success, error } => Some((*success, error.as_deref())),
-            _ => None,
-        }
-    }
 }
 
 #[cfg(test)]
@@ -355,19 +311,6 @@ mod tests {
         assert!(!CommandResult::None.needs_redraw());
         assert!(!CommandResult::NeedsRedraw(false).needs_redraw());
         assert!(CommandResult::NeedsRedraw(true).needs_redraw());
-    }
-
-    #[test]
-    fn test_command_result_repo_root() {
-        let none = CommandResult::None;
-        assert!(none.repo_root().is_none());
-
-        let empty = CommandResult::RepoRoot(None);
-        assert!(empty.repo_root().is_none());
-
-        let path = PathBuf::from("/home/user/project");
-        let some = CommandResult::RepoRoot(Some(path.clone()));
-        assert_eq!(some.repo_root(), Some(path.as_path()));
     }
 
     #[test]
@@ -401,40 +344,7 @@ mod tests {
     }
 
     #[test]
-    fn test_command_result_save_result() {
-        let none = CommandResult::None;
-        assert!(none.save_result().is_none());
-
-        let success = CommandResult::SaveResult {
-            success: true,
-            error: None,
-        };
-        let (ok, err) = success.save_result().unwrap();
-        assert!(ok);
-        assert!(err.is_none());
-
-        let failure = CommandResult::SaveResult {
-            success: false,
-            error: Some("Permission denied".to_string()),
-        };
-        let (ok, err) = failure.save_result().unwrap();
-        assert!(!ok);
-        assert_eq!(err, Some("Permission denied"));
-    }
-
-    #[test]
     fn test_panel_command_clone() {
-        let cmd = PanelCommand::GetRepoRoot;
-        let cloned = cmd.clone();
-        assert!(matches!(cloned, PanelCommand::GetRepoRoot));
-
-        let cmd = PanelCommand::Resize { rows: 24, cols: 80 };
-        let cloned = cmd.clone();
-        assert!(matches!(
-            cloned,
-            PanelCommand::Resize { rows: 24, cols: 80 }
-        ));
-
         let cmd = PanelCommand::SetHostFocus { focused: true };
         let cloned = cmd.clone();
         assert!(matches!(
