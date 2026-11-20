@@ -1,0 +1,1 @@
+- **A hidden journal no longer redraws the screen on every tick.** A journal panel behind another one took in new log entries only when drawn, so once any arrived it asked for a redraw on every tick for as long as it stayed hidden. It now takes them in on its tick and asks once.

@@ -128,8 +128,9 @@ impl JournalPanel {
     /// Sync log entries from logger to buffer.
     ///
     /// Uses incremental synchronization: only fetches new entries since
-    /// the last sync, avoiding O(n) clone of all log entries.
-    fn sync_logs(&mut self) {
+    /// the last sync, avoiding O(n) clone of all log entries. Returns
+    /// whether there were any.
+    fn sync_logs(&mut self) -> bool {
         // First check if there are new entries (O(1) operation)
         let new_count = termide_logger::entry_count();
 
@@ -164,7 +165,9 @@ impl JournalPanel {
             self.highlight_cache.invalidate_from(self.last_synced_count);
 
             self.last_synced_count = new_count;
+            return true;
         }
+        false
     }
 
     /// Render the one-row header strip of clickable level pills.
@@ -262,7 +265,7 @@ impl Panel for JournalPanel {
 
     fn render(&mut self, area: Rect, buf: &mut Buffer, ctx: &RenderContext) {
         // Sync new log entries
-        self.sync_logs();
+        let _ = self.sync_logs();
 
         // Carve off a one-row header strip for the level pills when
         // the panel is at least 2 rows tall; below that, the strip
@@ -336,8 +339,10 @@ impl Panel for JournalPanel {
         events
     }
 
+    /// New entries are taken in here, not only when drawn: a hidden panel,
+    /// which is not drawn, would otherwise ask for a redraw on every tick.
     fn tick(&mut self) -> Vec<PanelEvent> {
-        if self.auto_scroll && termide_logger::entry_count() > self.last_synced_count {
+        if self.sync_logs() && self.auto_scroll {
             vec![PanelEvent::NeedsRedraw]
         } else {
             vec![]
@@ -435,6 +440,27 @@ mod tests {
         journal.handle_key(press(KeyCode::Char('6'), KeyModifiers::NONE));
         journal.handle_key(press(KeyCode::Char('1'), KeyModifiers::ALT));
         assert_eq!(journal.level_enabled, [true; LEVELS.len()]);
+    }
+
+    /// A journal that is never drawn — hidden behind another panel — takes
+    /// new entries in on its tick and asks for one redraw, not one a tick.
+    #[test]
+    fn a_hidden_journal_asks_for_a_redraw_once_per_new_entries() {
+        let dir = std::env::temp_dir().join(format!("termide-journal-{}", std::process::id()));
+        termide_logger::init(dir.join("log"), None, 1000, termide_logger::LogLevel::Info);
+        let mut journal = JournalPanel::default();
+        let _ = journal.tick();
+        termide_logger::warn!("something happened");
+        assert!(matches!(
+            journal.tick().as_slice(),
+            [PanelEvent::NeedsRedraw]
+        ));
+        assert!(journal.tick().is_empty());
+        assert!(journal
+            .editor
+            .buffer()
+            .to_string()
+            .contains("something happened"));
     }
 
     #[test]
