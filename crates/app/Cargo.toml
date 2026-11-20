@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Application orchestrator for termide - coordinates all app modules"
+publish = false
 
 [dependencies]
 anyhow.workspace = true

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Text editor panel for termide"
+publish = false
 
 [dependencies]
 # External

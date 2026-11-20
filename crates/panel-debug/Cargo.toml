@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Debug session panel for termide"
+publish = false
 
 [dependencies]
 crossterm.workspace = true

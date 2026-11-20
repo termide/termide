@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Coding agent panel for termide: transcript, input, tool calls and permission prompts"
+publish = false
 
 [dependencies]
 chrono.workspace = true

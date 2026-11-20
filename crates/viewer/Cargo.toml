@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Read-only rich-text viewer panel core shared by termide's HTML and Markdown panels"
+publish = false
 
 [dependencies]
 crossterm.workspace = true

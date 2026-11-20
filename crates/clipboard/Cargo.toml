@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Clipboard operations for termide"
+publish = false
 
 [dependencies]
 arboard.workspace = true

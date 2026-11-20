@@ -5,6 +5,7 @@ edition = "2021"
 # Mirrors upstream `unicode-width` so cargo-deny picks up a license
 # expression — the patch replaces that crate in the workspace.
 license = "MIT OR Apache-2.0"
+publish = false
 
 [features]
 cjk = []

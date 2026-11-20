@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "termide's built-in Perforce plugin: run as `termide --plugin perforce`, it speaks the plugin protocol on stdio"
+publish = false
 
 [dependencies]
 dunce.workspace = true

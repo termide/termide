@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "MCP client for the termide coding agent: tools from servers over stdio or Streamable HTTP"
+publish = false
 
 [dependencies]
 base64.workspace = true

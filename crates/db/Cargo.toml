@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Database access core for termide (SQLite / PostgreSQL / MySQL viewer)"
+publish = false
 
 [dependencies]
 # Pure-Rust SQL access. SQLite is bundled (static); Postgres/MySQL speak the

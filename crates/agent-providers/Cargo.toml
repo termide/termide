@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Model providers for the termide coding agent (OpenAI-compatible chat completions)"
+publish = false
 
 [dependencies]
 log.workspace = true

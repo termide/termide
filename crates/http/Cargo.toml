@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Shared HTTP client setup for termide: TLS trusting the bundled and the system roots"
+publish = false
 
 [dependencies]
 log.workspace = true

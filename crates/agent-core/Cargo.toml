@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Provider-agnostic coding agent core: messages, tools, agent loop and steering queues"
+publish = false
 
 [dependencies]
 termide-fsutil = { path = "../fsutil" }

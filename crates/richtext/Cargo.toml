@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Parser-agnostic rich-text layout engine for termide (styled runs to wrapped ratatui lines)"
+publish = false
 
 [dependencies]
 ratatui.workspace = true

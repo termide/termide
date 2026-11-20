@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Command hooks of the termide coding agent: external programs on tool calls, JSON in, JSON out"
+publish = false
 
 [dependencies]
 log.workspace = true

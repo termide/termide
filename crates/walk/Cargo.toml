@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Walking a project tree the way git sees it, for termide"
+publish = false
 
 [dependencies]
 ignore.workspace = true

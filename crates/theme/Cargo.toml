@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Theme system for termide"
+publish = false
 
 [dependencies]
 ratatui.workspace = true

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Saved project layouts for termide"
+publish = false
 
 [dependencies]
 termide-fsutil = { path = "../fsutil" }

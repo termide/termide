@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "ACP client for the termide coding agent: an external agent over stdio behind the same panel"
+publish = false
 
 [dependencies]
 termide-fsutil = { path = "../fsutil" }

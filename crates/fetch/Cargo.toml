@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Minimal, security-bounded HTTP(S) GET for termide's viewer panels"
+publish = false
 
 [dependencies]
 termide-http = { path = "../http" }

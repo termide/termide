@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Keyboard handling and layout translation for termide"
+publish = false
 
 [dependencies]
 crossterm.workspace = true

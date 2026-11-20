@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "HTML to Markdown conversion for termide (the agent's fetch and the HTML viewer's export)"
+publish = false
 
 [dependencies]
 html5ever.workspace = true

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Logging infrastructure for termide"
+publish = false
 
 [dependencies]
 chrono.workspace = true

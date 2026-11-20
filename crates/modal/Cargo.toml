@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Modal dialog system for termide"
+publish = false
 
 [dependencies]
 # External

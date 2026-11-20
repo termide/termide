@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "The recall tool of the termide coding agent: ranked search over a project's agent sessions, git history and code"
+publish = false
 
 [dependencies]
 dunce.workspace = true

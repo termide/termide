@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Virtual File System abstraction for termide with network filesystem support"
+publish = false
 
 [dependencies]
 thiserror.workspace = true

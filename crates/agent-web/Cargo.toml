@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Web tools of the termide coding agent: fetch and web_search, over HTTP or a local Chrome"
+publish = false
 
 [dependencies]
 base64.workspace = true

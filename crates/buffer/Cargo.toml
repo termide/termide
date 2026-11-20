@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Text buffer with rope data structure for termide"
+publish = false
 
 [dependencies]
 termide-fsutil = { path = "../fsutil" }

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "HTML to terminal pseudographics renderer for termide (html5ever driving the shared richtext layout engine)"
+publish = false
 
 [dependencies]
 ratatui.workspace = true

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "termide plugins: global programs run beside the editor, spoken to over JSON-RPC on stdio"
+publish = false
 
 [dependencies]
 log.workspace = true

@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Core types and traits for termide panels"
+publish = false
 
 [dependencies]
 ratatui.workspace = true

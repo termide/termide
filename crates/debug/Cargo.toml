@@ -6,6 +6,7 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "Breakpoints and command-line debugger launches for termide"
+publish = false
 
 [dependencies]
 anyhow.workspace = true
