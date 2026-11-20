@@ -1,0 +1,1 @@
+- **A Chinese, Japanese or Korean setting label stops before its value.** A label too long for its column was cut by characters, so one in wide script ran up to twice the column into its value; it is now cut by screen columns, ending in `…` a column before the value. The section names in the sidebar are cut the same way.

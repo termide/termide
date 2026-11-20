@@ -1,0 +1,1 @@
+- **The settings window opens on a narrow terminal.** On a terminal narrower than 60 columns or shorter than 16 rows, opening it crashed termide; it now takes the whole screen there.

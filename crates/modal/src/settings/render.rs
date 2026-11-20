@@ -72,7 +72,6 @@ fn wrap_words(text: &str, width: usize) -> Vec<String> {
     lines
 }
 
-/// Truncate `s` to at most `max_chars` Unicode scalar values, safe for UTF-8 slicing.
 /// `value` cut to `max` display columns with a trailing `…` when it does not
 /// fit. Widths, not bytes: a byte cut lands inside a multi-byte character
 /// (a Cyrillic label, say) and panics.
@@ -81,14 +80,6 @@ fn fit_width(value: String, max: usize) -> String {
         termide_ui::path_utils::truncate_right(&value, max)
     } else {
         value
-    }
-}
-
-fn truncate_str(s: &str, max_chars: usize) -> &str {
-    if let Some((idx, _)) = s.char_indices().nth(max_chars) {
-        &s[..idx]
-    } else {
-        s
     }
 }
 
@@ -160,10 +151,9 @@ impl SettingsModal {
 
             let full = format!("{}{}", prefix, label);
             let max_w = width.saturating_sub(1);
-            let display = if full.chars().count() > max_w && max_w > 1 {
-                let mut s: String = full.chars().take(max_w.saturating_sub(1)).collect();
-                s.push('…');
-                s
+            // Columns, not characters: a CJK label is two a character.
+            let display = if max_w > 1 {
+                termide_ui::path_utils::truncate_right(&full, max_w)
             } else {
                 full
             };
@@ -338,7 +328,10 @@ impl SettingsModal {
                         Style::default().fg(theme.fg)
                     };
 
-                    let label_text = truncate_str(desc.label, label_width);
+                    // Leaves a column before the value: a wide (CJK) label
+                    // cut to the full column would touch it.
+                    let label_text =
+                        fit_width(desc.label.to_string(), label_width.saturating_sub(1));
                     buf.set_string(area.x + 2, y, label_text, label_style);
 
                     // Being edited, the value is the shared input field, with
@@ -750,12 +743,7 @@ impl SettingsModal {
             } else {
                 Style::default().fg(theme.fg)
             };
-            let display_name = if name.len() > label_width {
-                let truncated = truncate_str(name, label_width - 1);
-                format!("{truncated}…")
-            } else {
-                name.to_string()
-            };
+            let display_name = fit_width(name.to_string(), label_width);
             buf.set_string(area.x + 2, y, &display_name, label_style);
 
             let keys = kb_keys_of(&self.config, self.kb_section, name);
@@ -1007,6 +995,34 @@ mod label_column_tests {
                 "area {area}: column {width} leaves no gap after a {widest}-column label"
             );
         }
+    }
+
+    /// A CJK label too long for its column is cut by screen columns: cut by
+    /// characters it ran twice as wide, into its value.
+    #[test]
+    fn a_wide_label_stops_short_of_its_value() {
+        use crate::Modal;
+        use termide_config::Config;
+        termide_i18n::init_with_language("zh").unwrap();
+        let mut modal = SettingsModal::new(Config::default(), Config::default(), false);
+        let area = Rect::new(0, 0, 48, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &termide_theme::Theme::default());
+        // The cells of row `y` from column `x` on, as text.
+        let from =
+            |x: u16, y: u16| -> String { (x..area.width).map(|x| buf[(x, y)].symbol()).collect() };
+        // "Option 作为 Alt（macOS）" does not fit the column: it ends in `…`
+        // a blank column before its value.
+        let (x, y) = (0..area.height)
+            .flat_map(|y| (0..area.width).map(move |x| (x, y)))
+            .find(|&(x, y)| from(x, y).starts_with("Option"))
+            .expect("the Option-as-Alt row is shown");
+        let row = from(x, y);
+        let cut = row.find('…').unwrap_or_else(|| panic!("not cut: {row}"));
+        assert!(
+            row[cut + '…'.len_utf8()..].starts_with(" ["),
+            "the label runs into its value: {row}"
+        );
     }
 
     #[test]

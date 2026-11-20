@@ -123,8 +123,10 @@ impl SettingsModal {
     pub(super) fn calculate_size(screen: Rect) -> Rect {
         let w = ((screen.width as usize * 90) / 100).clamp(80, 140);
         let h = ((screen.height as usize * 85) / 100).clamp(20, 50);
-        let w = w.min(screen.width as usize).max(60);
-        let h = h.min(screen.height as usize).max(16);
+        // The screen bounds it last: a modal wider than a narrow terminal
+        // would be drawn outside the buffer.
+        let w = w.max(60).min(screen.width as usize);
+        let h = h.max(16).min(screen.height as usize);
         let x = (screen.width as usize).saturating_sub(w) / 2;
         let y = (screen.height as usize).saturating_sub(h) / 2;
         Rect::new(x as u16, y as u16, w as u16, h as u16)
@@ -1004,6 +1006,17 @@ impl SettingsModal {
 mod content_row_tests {
     use super::*;
     use crate::settings::fields::fields_for_tab;
+
+    /// On a terminal smaller than the modal's least size the modal takes
+    /// the screen, not more: drawn past it, it panicked.
+    #[test]
+    fn the_modal_stays_on_a_small_screen() {
+        let screen = Rect::new(0, 0, 48, 12);
+        let modal = SettingsModal::calculate_size(screen);
+        assert_eq!(modal, screen);
+        let large = SettingsModal::calculate_size(Rect::new(0, 0, 200, 60));
+        assert_eq!((large.width, large.height), (140, 50));
+    }
 
     /// `content_rows` lists the fields to render by hand, one `Field(i)` per
     /// entry, while `fields_for_tab` declares what exists. Nothing connects
