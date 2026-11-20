@@ -118,7 +118,7 @@ cargo fmt --all -- --check
 cargo machete
 ```
 
-这些就是 pre-commit 钩子（`.githooks/pre-commit`，通过 `git config core.hooksPath .githooks` 启用）的检查项：文档标题和版本检查、fmt、machete、clippy 和测试。CI 还会运行 `cargo deny check`，钩子不运行它。
+这些就是 pre-commit 钩子（`.githooks/pre-commit`，通过 `git config core.hooksPath .githooks` 启用）的检查项：文档标题和版本检查、fmt、machete、clippy 和测试。CI 还会运行 `cargo deny check` 和文档测试（`cargo test --workspace --doc`，nextest 会跳过它们）；钩子不运行这些。
 
 ## 项目结构
 

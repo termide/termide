@@ -131,8 +131,9 @@ cargo machete
 
 Это проверки pre-commit хука (`.githooks/pre-commit`, включается командой
 `git config core.hooksPath .githooks`): проверки заголовков документации и
-версии, fmt, machete, clippy и тесты. CI вдобавок запускает `cargo deny check`,
-которого в хуке нет.
+версии, fmt, machete, clippy и тесты. CI вдобавок запускает `cargo deny check`
+и doctest'ы (`cargo test --workspace --doc`, их nextest пропускает); в хуке их
+нет.
 
 ## Структура проекта
 

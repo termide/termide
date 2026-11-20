@@ -87,6 +87,13 @@ jobs:
         # reports a test that then passes as flaky.
         run: cargo nextest run --workspace --profile ci
 
+      - name: Run doctests
+        # nextest does not run doctests. They hold no platform code, so one
+        # OS is enough; the pre-commit hook leaves them out, as they cost a
+        # build of every crate's doc examples.
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo test --workspace --doc
+
       - name: Grammar tests with the C code optimised as released
         # The debug build compiles the grammars' C at -O0, which hid a heap
         # write after realloc in the Haskell scanner that only strict

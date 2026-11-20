@@ -131,7 +131,8 @@ cargo machete
 These are the gates of the pre-commit hook (`.githooks/pre-commit`, enabled
 with `git config core.hooksPath .githooks`): the doc headings and version
 checks, fmt, machete, clippy and the test suite. CI also runs `cargo deny
-check`, which the hook does not.
+check` and the doctests (`cargo test --workspace --doc`, which nextest
+skips); the hook does not.
 
 ## Project Structure
 
