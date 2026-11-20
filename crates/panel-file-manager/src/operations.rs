@@ -27,7 +27,7 @@ pub(super) enum FileOpenMode {
     ForceEdit,
     /// View mode (F3): similar to Default but executables are treated as text
     View,
-    /// Open with system default app (Shift+Enter)
+    /// Open with system default app (O / Alt+Enter)
     External,
 }
 
@@ -516,7 +516,7 @@ impl FileManager {
         determine_file_open_event(entry, &full_path, FileOpenMode::View)
     }
 
-    /// Force open file with system default application (Shift+Enter)
+    /// Force open file with system default application (O / Alt+Enter)
     pub(crate) fn open_external(&mut self) -> Option<PanelEvent> {
         let te = self.entry_under_cursor()?;
         let full_path = te.full_path.clone();

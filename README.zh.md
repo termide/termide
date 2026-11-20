@@ -114,7 +114,7 @@
 
 - **44 款内置主题** - 暗色、亮色、复古和电影主题；可用 TOML 编写自己的主题
 - **15 种界面语言** - 孟加拉语、中文、英语、法语、德语、印地语、印尼语、日语、韩语、葡萄牙语、俄语、西班牙语、泰语、土耳其语、越南语
-- **键盘与鼠标** - 完整鼠标支持；快捷键在西里尔文键盘布局下同样有效；`Shift+Enter` 用系统应用打开文件
+- **键盘与鼠标** - 完整鼠标支持；快捷键在西里尔文键盘布局下同样有效；`O` 或 `Alt+Enter` 用系统应用打开文件
 
 ## 常见问题
 
@@ -501,7 +501,7 @@ bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # 实例在终端关闭后继续运行（仅限 Unix）
 restore_projects = true  # 启动时重新打开上次运行的项目
-resource_monitor_interval = 1000
+resource_monitor_interval = 2000
 
 [editor]
 tab_size = 4

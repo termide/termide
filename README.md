@@ -114,7 +114,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 
 - **44 built-in themes** - Dark, light, retro and cinematic; write your own in TOML
 - **15 UI languages** - Bengali, Chinese, English, French, German, Hindi, Indonesian, Japanese, Korean, Portuguese, Russian, Spanish, Thai, Turkish, Vietnamese
-- **Keyboard and mouse** - Full mouse support; hotkeys work on a Cyrillic layout; `Shift+Enter` opens a file in its system application
+- **Keyboard and mouse** - Full mouse support; hotkeys work on a Cyrillic layout; `O` or `Alt+Enter` opens a file in its system application
 
 ## FAQ
 
@@ -510,7 +510,7 @@ bell_on_operation_complete = true
 icon_mode = "auto"  # auto, emoji, unicode
 always_detachable = false  # keep the instance alive across terminal closes (Unix)
 restore_projects = true  # reopen the last run's projects at launch
-resource_monitor_interval = 1000
+resource_monitor_interval = 2000
 
 [editor]
 tab_size = 4
