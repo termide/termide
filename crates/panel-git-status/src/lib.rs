@@ -534,6 +534,14 @@ impl Panel for GitStatusPanel {
                 self.watched_root = root;
                 CommandResult::None
             }
+            PanelCommand::Copy => {
+                if let Some(path) = self.selected_path() {
+                    let text = path.to_string_lossy().into_owned();
+                    let _ = termide_ui::clipboard::copy(&text);
+                    self.status_message = Some((termide_i18n::t().status_copied_fmt(&text), false));
+                }
+                CommandResult::Handled(true)
+            }
             // A paste while a selector dropdown is open goes to its filter.
             PanelCommand::PasteText { text } if self.open_filter().is_some() => {
                 self.paste_into_filter(&text);

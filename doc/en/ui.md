@@ -230,7 +230,8 @@ properties, and `Backspace` or `Delete` discards its changes after asking.
 folder of both lists, at every depth, when any is open, and opens them all
 when none is; folders a later refresh brings follow suit. These are `stage`,
 `unstage`, `view`, `edit`, `info`, `revert`, `refresh` and `toggle_folds`
-under `[git_status.keybindings]`.
+under `[git_status.keybindings]`. The global copy key (`Ctrl+C`) copies the
+path of the file or folder under the cursor, relative to the repository.
 
 The **git log** panel draws the commit graph with box-drawing pseudographics
 (`● │ ├ ╮ ╯`) laid out from each commit's parents, with each lane coloured so a

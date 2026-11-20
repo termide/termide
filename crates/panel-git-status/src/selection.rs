@@ -239,6 +239,18 @@ impl GitStatusPanel {
         }
     }
 
+    /// The repository-relative path of the selected file or directory row,
+    /// as the global copy key puts it on the clipboard.
+    pub(crate) fn selected_path(&self) -> Option<PathBuf> {
+        match self.get_selection()? {
+            Selection::UnstagedFile(idx) => self.unstaged_files.get(idx).map(|f| f.path.clone()),
+            Selection::StagedFile(idx) => self.staged_files.get(idx).map(|f| f.path.clone()),
+            Selection::UnstagedDir(idx) => self.unstaged.tree.get(idx).map(|n| n.full_path.clone()),
+            Selection::StagedDir(idx) => self.staged.tree.get(idx).map(|n| n.full_path.clone()),
+            Selection::UnstagedHeader | Selection::StagedHeader => None,
+        }
+    }
+
     // =========================================================================
     // Keyboard Navigation Helpers
     // =========================================================================
@@ -580,6 +592,37 @@ mod tests {
             ('M', false),
             "modified child colours the directory"
         );
+    }
+
+    /// The global copy key copies the selected row's path, as the git log
+    /// copies its commit hash.
+    #[test]
+    fn copy_takes_the_selected_rows_path() {
+        use termide_core::{CommandResult, Panel, PanelCommand};
+        termide_ui::clipboard::use_fake_clipboard("");
+        let (_dir, mut panel) = panel_with_files();
+        let file_row = (0..panel.total_virtual_lines())
+            .find(|&line| {
+                panel.cursor = line;
+                matches!(panel.get_selection(), Some(Selection::UnstagedFile(0)))
+            })
+            .expect("an unstaged file row");
+        panel.cursor = file_row;
+        assert!(matches!(
+            panel.handle_command(PanelCommand::Copy),
+            CommandResult::Handled(true)
+        ));
+        assert_eq!(
+            termide_ui::clipboard::paste().as_deref(),
+            Some("src/lib.rs")
+        );
+
+        panel.cursor = 0;
+        assert!(matches!(
+            panel.get_selection(),
+            Some(Selection::UnstagedHeader)
+        ));
+        assert_eq!(panel.selected_path(), None);
     }
 
     fn nested_panel() -> (tempfile::TempDir, GitStatusPanel) {

@@ -1,0 +1,1 @@
+- **The copy key works in the git status panel.** `Ctrl+C` did nothing there; it now copies the path of the file or folder under the cursor, relative to the repository, as the git log copies a commit's hash.
