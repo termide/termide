@@ -61,7 +61,7 @@ url = "2"
 sha2 = { version = "0.11", default-features = false }
 getrandom = "0.4"
 pulldown-cmark = { version = "0.12", default-features = false }
-html5ever = "0.29"
+html5ever = "0.39"
 scraper = { version = "0.27", default-features = false }
 ureq = "2.10"
 

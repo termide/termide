@@ -134,6 +134,7 @@ impl TokenSink for Sink {
                 name,
                 self_closing,
                 attrs,
+                ..
             }) => {
                 let name = name.to_string();
                 match kind {
