@@ -8,27 +8,10 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
+use termide_system_monitor::format_bytes;
 use termide_ui::path_utils::truncate_left;
 
 use crate::OperationSnapshot;
-
-/// Format bytes to human-readable string
-pub fn format_bytes(bytes: u64) -> String {
-    let t = termide_i18n::t();
-    if bytes >= 1_073_741_824 {
-        format!(
-            "{:.1}{}",
-            bytes as f64 / 1_073_741_824.0,
-            t.size_gigabytes()
-        )
-    } else if bytes >= 1_048_576 {
-        format!("{:.1}{}", bytes as f64 / 1_048_576.0, t.size_megabytes())
-    } else if bytes >= 1024 {
-        format!("{:.1}{}", bytes as f64 / 1024.0, t.size_kilobytes())
-    } else {
-        format!("{}{}", bytes, t.size_bytes())
-    }
-}
 
 /// Get icon for operation type
 fn op_type_icon(op_type: &termide_state::OperationType) -> &'static str {

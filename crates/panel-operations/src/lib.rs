@@ -22,8 +22,6 @@ use termide_file_ops::OperationId;
 use termide_state::{ActiveOperation, OperationProgress, OperationType};
 use termide_theme::Theme;
 
-pub use rendering::format_bytes;
-
 /// Lightweight snapshot of an operation for rendering.
 /// Copied from ActiveOperation to avoid borrowing issues.
 #[derive(Debug, Clone)]

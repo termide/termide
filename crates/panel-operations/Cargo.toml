@@ -17,5 +17,6 @@ termide-core = { path = "../core" }
 termide-file-ops = { path = "../file-ops" }
 termide-i18n = { path = "../i18n" }
 termide-state = { path = "../state" }
+termide-system-monitor = { path = "../system-monitor" }
 termide-theme = { path = "../theme" }
 termide-ui = { path = "../ui" }

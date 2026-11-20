@@ -6160,6 +6160,7 @@ dependencies = [
  "termide-file-ops",
  "termide-i18n",
  "termide-state",
+ "termide-system-monitor",
  "termide-theme",
  "termide-ui",
 ]
