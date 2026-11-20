@@ -5,7 +5,8 @@
 //! On `before_tool_call` the program receives
 //! `{"event","hook","cwd","tool","arguments"}` and may answer
 //! `{"decision":"allow"|"block"|"ask","reason":…,"arguments":{…}}`:
-//! `block` skips the call, `allow` runs it without asking anyone else,
+//! `block` skips the call, `allow` runs it without the mode's question (a
+//! `deny` or `ask` rule and the `.git` guard still hold),
 //! `ask` (or no decision) leaves that to the permission rules; `arguments`
 //! replaces the model's. On `after_tool_call` it also receives
 //! `"result":{"text","is_error"}` and may answer `{"text",…,"is_error"}` to

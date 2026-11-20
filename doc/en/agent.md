@@ -3125,8 +3125,9 @@ timeout_secs = 30
 
 Before a call the input is `{"event","hook","cwd","tool","arguments"}`. The
 program may print `{"decision": "block", "reason": "…"}` to skip the call
-(the reason goes to the model), `{"decision": "allow"}` to run it without a
-permission prompt, or `{"arguments": {…}}` to run it with other arguments;
+(the reason goes to the model), `{"decision": "allow"}` to run it without the
+mode's permission prompt (your `deny` rules still refuse it, and an `ask`
+rule or an edit under `.git` still asks, as in Claude Code), or `{"arguments": {…}}` to run it with other arguments;
 no decision, or `"ask"`, leaves the permission rules to decide. Exiting with
 code 2 blocks too, with standard error as the reason. After a call the input
 also carries `"result": {"text", "is_error"}`, and `{"text": "…"}` rewrites

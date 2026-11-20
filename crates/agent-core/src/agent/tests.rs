@@ -152,6 +152,56 @@ impl Hooks for Approver {
     }
 }
 
+/// A hook's approval spares a call the mode's question but not the user's
+/// own rules: a `deny` rule refuses it, an `ask` rule or an edit under
+/// `.git` asks (here no one, so it is refused).
+#[test]
+fn a_hooks_approval_does_not_get_past_the_users_rules() {
+    use crate::permissions::{AutoDenyPrompter, Decision, Mode, PermissionHooks, PermissionRules};
+
+    struct ApproveAll;
+    impl Hooks for ApproveAll {
+        fn before_tool_call(&mut self, _call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
+            ToolDecision::Approve { arguments: None }
+        }
+    }
+    let mut rules = PermissionRules {
+        mode: Mode::Ask,
+        ..PermissionRules::default()
+    };
+    rules.add(crate::SHELL_TOOL, "git push *", Decision::Deny);
+    rules.add("write", "notes.md", Decision::Ask);
+    let permissions = PermissionHooks::new(rules, Box::new(AutoDenyPrompter::new("no one")));
+    let mut hooks = ChainedHooks::new(vec![Box::new(ApproveAll), Box::new(permissions)]);
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = ToolContext::new(dir.path());
+    let mut decide = |name: &str, arguments: Value| {
+        let call = ToolCall {
+            id: "1".into(),
+            name: name.into(),
+            arguments,
+            extra_content: None,
+        };
+        hooks.before_tool_call(&call, &ctx)
+    };
+    let blocked = |decision: ToolDecision| matches!(decision, ToolDecision::Block { .. });
+    assert!(blocked(decide(
+        crate::SHELL_TOOL,
+        json!({"command": "git push origin main"})
+    )));
+    assert!(blocked(decide("write", json!({"path": ".git/config"}))));
+    assert!(blocked(decide("write", json!({"path": "notes.md"}))));
+    // What only the mode would ask about, the hook's word settles.
+    assert_eq!(
+        decide(crate::SHELL_TOOL, json!({"command": "make"})),
+        ToolDecision::Approve { arguments: None }
+    );
+    assert_eq!(
+        decide("write", json!({"path": "src/lib.rs"})),
+        ToolDecision::Approve { arguments: None }
+    );
+}
+
 #[test]
 fn a_result_records_who_let_the_call_run() {
     use crate::permissions::{

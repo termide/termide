@@ -1322,6 +1322,29 @@ impl Hooks for PermissionHooks {
         decision
     }
 
+    /// A hook's approval spares the call the mode's question, not what the
+    /// user stated: a `deny` rule still refuses it, and an `ask` rule or an
+    /// edit under `.git` still asks.
+    fn vet_approved(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
+        let subject = subject_of(call, ctx);
+        let holds = if runs_command_line(call, ctx) {
+            let verdict = self.judge_command(&subject, ctx);
+            verdict.decision == Decision::Deny || verdict.forced
+        } else {
+            self.guards_git_dir(call, &subject)
+                || matches!(
+                    self.rule_for(call, &subject, ctx),
+                    Some(Decision::Deny | Decision::Ask)
+                )
+        };
+        if !holds {
+            return ToolDecision::Allow;
+        }
+        let (decision, note) = self.judge(call, ctx);
+        self.note = Some(note);
+        decision
+    }
+
     fn take_permission(&mut self) -> Option<PermissionNote> {
         self.note.take()
     }

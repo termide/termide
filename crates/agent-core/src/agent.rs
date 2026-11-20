@@ -382,6 +382,15 @@ pub trait Hooks: Send {
         ToolDecision::Allow
     }
 
+    /// A call a hook earlier in the chain approved, put to this one after
+    /// it: what the user stated must still hold — a `deny` rule refuses it,
+    /// an `ask` rule or a guarded file asks — though nothing else is asked.
+    /// Who decided goes to [`Hooks::take_permission`] as for
+    /// `before_tool_call`. The default lets the approval stand.
+    fn vet_approved(&mut self, _call: &ToolCall, _ctx: &ToolContext) -> ToolDecision {
+        ToolDecision::Allow
+    }
+
     /// Who decided the call `before_tool_call` judged last, for the record
     /// kept with its result; taking it clears it. A hook that does not judge
     /// permissions has nothing to say.
@@ -406,6 +415,26 @@ pub trait Hooks: Send {
     }
 }
 
+/// `call`, approved by a hook, put to `hooks` in turn: the first to block
+/// it, or else `Allow`, with who decided when one of them did (the user,
+/// asked by an `ask` rule).
+fn vet(
+    hooks: &mut [Box<dyn Hooks>],
+    call: &ToolCall,
+    ctx: &ToolContext,
+) -> (ToolDecision, Option<PermissionNote>) {
+    let mut decided = None;
+    for hook in hooks {
+        let decision = hook.vet_approved(call, ctx);
+        let note = hook.take_permission();
+        if matches!(decision, ToolDecision::Block { .. }) {
+            return (decision, note);
+        }
+        decided = note.or(decided);
+    }
+    (ToolDecision::Allow, decided)
+}
+
 /// The default hooks: allow everything, never stop early.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoHooks;
@@ -413,7 +442,8 @@ pub struct NoHooks;
 impl Hooks for NoHooks {}
 
 /// Hooks run one after another: `before_tool_call` stops at the first
-/// `Block` or `Approve`, threading a `Replace` into the calls the rest see;
+/// `Block`, or at an `Approve` the hooks after it vet, threading a `Replace`
+/// into the calls the rest see;
 /// `after_tool_call` passes the result through each; the turn stops when
 /// any says so.
 pub struct ChainedHooks {
@@ -480,10 +510,21 @@ impl Hooks for ChainedHooks {
                     replaced = true;
                 }
                 ToolDecision::Approve { arguments } => {
-                    self.note = settled(hook, true);
-                    return ToolDecision::Approve {
-                        arguments: arguments.or_else(|| replaced.then_some(current.arguments)),
-                    };
+                    let arguments = arguments.or_else(|| replaced.then_some(current.arguments));
+                    let note = settled(hook, true);
+                    let mut approved = call.clone();
+                    if let Some(arguments) = &arguments {
+                        approved.arguments = arguments.clone();
+                    }
+                    match vet(&mut rest[1..], &approved, ctx) {
+                        (block @ ToolDecision::Block { .. }, vetted) => {
+                            self.note = vetted
+                                .or_else(|| Some(PermissionNote::new(DecidedBy::Hook, false)));
+                            return block;
+                        }
+                        (_, vetted) => self.note = vetted.or(note),
+                    }
+                    return ToolDecision::Approve { arguments };
                 }
                 block @ ToolDecision::Block { .. } => {
                     self.note = settled(hook, false);
@@ -498,6 +539,12 @@ impl Hooks for ChainedHooks {
         } else {
             ToolDecision::Allow
         }
+    }
+
+    fn vet_approved(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
+        let (decision, note) = vet(&mut self.hooks, call, ctx);
+        self.note = note;
+        decision
     }
 
     fn take_permission(&mut self) -> Option<PermissionNote> {
