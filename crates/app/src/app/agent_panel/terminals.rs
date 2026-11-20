@@ -73,6 +73,7 @@ impl Entry {
                 SessionShell::Fish => ShellSyntax::Fish,
             },
             at_prompt: self.shell.at_prompt(),
+            cwd: self.shell.cwd(),
         }
     }
 }

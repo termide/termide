@@ -551,6 +551,17 @@ impl AgentShell {
         self.pid
     }
 
+    /// The shell's working directory now, which its earlier commands may
+    /// have moved; `None` when the system cannot tell it.
+    pub fn cwd(&self) -> Option<std::path::PathBuf> {
+        crate::live_shell_cwd(self.pid, || {
+            self.screen
+                .read()
+                .ok()
+                .and_then(|screen| screen.reported_cwd.clone())
+        })
+    }
+
     /// Whether the shell still runs.
     pub fn is_alive(&self) -> bool {
         !self.tap.is_closed()
@@ -1149,6 +1160,27 @@ mod shell_tests {
                 std::thread::sleep(POLL);
             }
         }
+    }
+
+    /// The permission checks judge a session's next command where its
+    /// shell stands, so a `cd` must show in [`AgentShell::cwd`].
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn the_shell_reports_where_a_cd_left_it() {
+        let home = tempfile::tempdir().unwrap();
+        let Some((_term, shell)) = session(home.path()) else {
+            return;
+        };
+        let target = tempfile::tempdir().unwrap();
+        let target = dunce::canonicalize(target.path()).unwrap();
+        let (_, outcome) = run(
+            &shell,
+            &format!("cd '{}'", target.display()),
+            Duration::from_secs(20),
+        );
+        assert_eq!(outcome.end, RunEnd::Finished(Some(0)));
+        let cwd = shell.cwd().map(|dir| dunce::canonicalize(dir).unwrap());
+        assert_eq!(cwd, Some(target));
     }
 
     #[test]

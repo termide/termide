@@ -145,7 +145,7 @@ pub use terminals::{
     TerminalState,
 };
 pub use tool::{
-    CallsBeside, InheritedHooks, LateTools, RunningCall, RunningCalls, ShellSyntax, Tool,
-    ToolContext, ToolRegistry, ToolTraits, ToolUpdate, PLUGIN_TOOL_SOURCE, SHELL_TOOL,
+    CallsBeside, CommandDir, InheritedHooks, LateTools, RunningCall, RunningCalls, ShellSyntax,
+    Tool, ToolContext, ToolRegistry, ToolTraits, ToolUpdate, PLUGIN_TOOL_SOURCE, SHELL_TOOL,
 };
 pub use tool_text::{apply_tool_texts, is_known_tool_name, ToolText, SEED_TOOLS, TOOLS_DIR};

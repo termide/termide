@@ -184,6 +184,7 @@ mod tests {
             }
         });
         ToolContext {
+            runs_in: Default::default(),
             cwd: "/".into(),
             asker: None,
             prompter: None,
@@ -213,6 +214,7 @@ mod tests {
             }
         });
         ToolContext {
+            runs_in: Default::default(),
             cwd: "/".into(),
             asker: None,
             prompter: None,
@@ -269,6 +271,7 @@ mod tests {
     fn the_command_shows_trimmed() {
         let (suggester, rx) = suggestion_channel(CancelToken::new());
         let ctx = ToolContext {
+            runs_in: Default::default(),
             cwd: "/".into(),
             asker: None,
             prompter: None,
@@ -363,6 +366,7 @@ mod tests {
         let (asker, _qrx) = question_channel(CancelToken::new());
         let (suggester, rx) = suggestion_channel(CancelToken::new());
         let ctx = ToolContext {
+            runs_in: Default::default(),
             cwd: "/".into(),
             asker: Some(asker),
             prompter: None,
@@ -409,6 +413,7 @@ mod tests {
             }
         });
         let ctx = ToolContext {
+            runs_in: Default::default(),
             cwd: "/".into(),
             asker: None,
             prompter: None,
@@ -450,6 +455,7 @@ mod tests {
             }
         });
         let ctx = ToolContext {
+            runs_in: Default::default(),
             cwd: "/".into(),
             asker: None,
             prompter: None,

@@ -78,6 +78,9 @@ pub struct TerminalEntry {
     /// The shell waits at its prompt: what is typed into it is a command
     /// line, not input to a program it runs.
     pub at_prompt: bool,
+    /// The shell's working directory, which its commands may have moved;
+    /// `None` when it cannot be told.
+    pub cwd: Option<PathBuf>,
 }
 
 /// Output of a terminal the agent had not read yet.
@@ -248,6 +251,7 @@ mod tests {
             log: None,
             shell: crate::ShellSyntax::Posix,
             at_prompt: false,
+            cwd: None,
         }
     }
 

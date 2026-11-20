@@ -194,6 +194,47 @@ fn device_name(_master: &(dyn MasterPty + Send)) -> Option<std::path::PathBuf> {
     None
 }
 
+/// The working directory of the shell `pid`, as the system tells it (on
+/// Windows, the shell's own `reported` one first); `None` when it cannot be
+/// told.
+#[cfg_attr(
+    not(any(target_os = "linux", target_os = "macos", windows)),
+    allow(unused_variables)
+)]
+pub(crate) fn live_shell_cwd(
+    pid: Option<u32>,
+    reported: impl FnOnce() -> Option<std::path::PathBuf>,
+) -> Option<std::path::PathBuf> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        // The shell's own cwd, not the foreground child's: that is what the
+        // shell prompt shows and what a `cd` changes. A report the shell
+        // prints is not asked for: the kernel's answer stays authoritative,
+        // and a remote shell behind ssh cannot override it.
+        let _ = reported;
+        let pid = pid?;
+        #[cfg(target_os = "linux")]
+        return std::fs::read_link(format!("/proc/{pid}/cwd")).ok();
+        // macOS has no /proc; the same vnode comes from libproc.
+        #[cfg(target_os = "macos")]
+        return macos_proc::shell_cwd(pid);
+    }
+
+    #[cfg(windows)]
+    {
+        // The shell's own report first: PowerShell's `Set-Location` leaves
+        // the process directory untouched, so only the report follows it.
+        if let Some(path) = reported().filter(|path| path.is_absolute()) {
+            return Some(path);
+        }
+        // cmd and Git Bash keep the process directory current.
+        return pid.and_then(windows_proc::shell_cwd);
+    }
+
+    #[allow(unreachable_code)]
+    None
+}
+
 /// Wait briefly for a child whose terminal just closed to exit, and collect
 /// its status. One that keeps running without its terminal is left to
 /// [`Terminal::kill_processes`].
@@ -993,39 +1034,8 @@ impl Terminal {
     /// the shell's own report first), falling back to the directory the panel
     /// was created in.
     fn read_shell_cwd_raw(&self) -> std::path::PathBuf {
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        if let Some(pid) = self.shell_pid {
-            // The shell's own cwd, not the foreground child's: that is what the
-            // shell prompt shows and what a `cd` changes.
-            #[cfg(target_os = "linux")]
-            if let Ok(path) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
-                return path;
-            }
-
-            // macOS has no /proc; the same vnode comes from libproc.
-            #[cfg(target_os = "macos")]
-            if let Some(path) = macos_proc::shell_cwd(pid) {
-                return path;
-            }
-        }
-
-        #[cfg(windows)]
-        {
-            // The shell's own report first: PowerShell's `Set-Location` leaves
-            // the process directory untouched, so only the report follows it.
-            // On Unix the kernel's answer stays authoritative, and a report
-            // from a remote shell behind ssh cannot override it.
-            if let Some(path) = self.read_screen().reported_cwd.clone() {
-                if path.is_absolute() {
-                    return path;
-                }
-            }
-            // cmd and Git Bash keep the process directory current.
-            if let Some(path) = self.shell_pid.and_then(windows_proc::shell_cwd) {
-                return path;
-            }
-        }
-        self.initial_cwd.clone()
+        live_shell_cwd(self.shell_pid, || self.read_screen().reported_cwd.clone())
+            .unwrap_or_else(|| self.initial_cwd.clone())
     }
 
     /// Read foreground command from /proc (Linux), libproc (macOS) or a

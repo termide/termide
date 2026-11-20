@@ -204,6 +204,10 @@ impl Tool for Retexted {
         self.inner.call_traits(call, ctx)
     }
 
+    fn call_dir(&self, call: &ToolCall, ctx: &ToolContext) -> crate::CommandDir {
+        self.inner.call_dir(call, ctx)
+    }
+
     fn check(&self, call: &ToolCall, ctx: &ToolContext) -> Result<(), String> {
         self.inner.check(call, ctx)
     }

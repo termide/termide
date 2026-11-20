@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::{
-    CancelToken, ShellSyntax, Tool, ToolCall, ToolContext, ToolResultMessage, ToolTraits,
-    ToolUpdate,
+    CancelToken, CommandDir, ShellSyntax, Tool, ToolCall, ToolContext, ToolResultMessage,
+    ToolTraits, ToolUpdate,
 };
 use termide_agent_core::{TerminalRun, TerminalRunEnd, TerminalSessions, ToolText, SHELL_TOOL};
 
@@ -189,6 +189,13 @@ impl Tool for ShellTool {
             },
             "required": ["command"]
         })
+    }
+
+    fn call_dir(&self, call: &ToolCall, ctx: &ToolContext) -> CommandDir {
+        match (&self.terminals, call.arguments["session"].as_str()) {
+            (Some(terminals), Some(name)) => session_dir(terminals.as_ref(), ctx, name),
+            _ => CommandDir::Cwd,
+        }
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
@@ -653,6 +660,28 @@ pub(crate) fn check_session_name(name: &str) -> Result<(), String> {
 
 /// The line standing for the omitted middle of the output. `skipped` bytes
 /// at the end of the output did not fit the log.
+/// Where a command typed into the caller's terminal session `name` runs:
+/// where its shell stands, which earlier commands may have moved, or
+/// [`CommandDir::Unknown`] when that cannot be told. A session not open yet,
+/// or whose shell exited, opens anew in the working directory.
+pub(crate) fn session_dir(
+    terminals: &dyn TerminalSessions,
+    ctx: &ToolContext,
+    name: &str,
+) -> CommandDir {
+    let Some(owner) = ctx.session.as_ref().and_then(|view| view.id.as_deref()) else {
+        return CommandDir::Cwd;
+    };
+    let name = name.trim();
+    let entry = terminals.list(owner).into_iter().find(|entry| {
+        entry.name == name && !matches!(entry.state, termide_agent_core::TerminalState::Exited)
+    });
+    match entry {
+        None => CommandDir::Cwd,
+        Some(entry) => entry.cwd.map_or(CommandDir::Unknown, CommandDir::At),
+    }
+}
+
 fn omission_marker(omitted_lines: usize, log: Option<&Path>, skipped: u64) -> String {
     match log {
         Some(path) if skipped > 0 => format!(

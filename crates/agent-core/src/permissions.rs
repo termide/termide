@@ -37,7 +37,7 @@ use crate::cancel::CancelToken;
 use crate::classifier::{Classifier, Verdict};
 use crate::message::ToolCall;
 use crate::refusals::Refusals;
-use crate::tool::{ShellSyntax, ToolContext, SHELL_TOOL};
+use crate::tool::{CommandDir, ShellSyntax, ToolContext, SHELL_TOOL};
 
 /// Which rules count and what happens to calls none covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -219,6 +219,17 @@ fn terminals_looks(call: &ToolCall) -> bool {
 /// Whether a call runs a shell command line: a `shell` call, or a line
 /// typed into one of the agent's terminals at its prompt. Both are judged
 /// part by part under the `shell` rules.
+/// Where a command line of the call starts: the project's directory, the
+/// one a terminal session's shell has moved to, or `None` when that cannot
+/// be told.
+fn command_start(ctx: &ToolContext) -> Option<&Path> {
+    match &ctx.runs_in {
+        CommandDir::Cwd => Some(&ctx.cwd),
+        CommandDir::At(dir) => Some(dir),
+        CommandDir::Unknown => None,
+    }
+}
+
 fn runs_command_line(call: &ToolCall, ctx: &ToolContext) -> bool {
     call.name == SHELL_TOOL || ctx.tool.typed_at_prompt
 }
@@ -1138,7 +1149,7 @@ impl PermissionHooks {
     /// loosen it, since each part must earn its own allow.
     fn judge_command(&self, command: &str, ctx: &ToolContext) -> CommandVerdict {
         let mode = self.mode.get();
-        let parts = shell_parts_in(command, ctx.tool.shell, &ctx.cwd);
+        let parts = shell_parts_from(command, ctx.tool.shell, &ctx.cwd, command_start(ctx));
         let project = Project::of(&ctx.cwd);
         let mut verdict = Decision::Allow;
         let mut forced = false;
@@ -1234,7 +1245,8 @@ impl PermissionHooks {
         if self.mode.get() != Mode::Auto || forced || self.breaker.paused {
             return None;
         }
-        if parts.iter().any(|p| critical_removal(&p.text, &ctx.cwd)) {
+        let start = command_start(ctx).unwrap_or(&ctx.cwd);
+        if parts.iter().any(|p| critical_removal(&p.text, start)) {
             return None;
         }
         let verdict = self.classifier.as_mut()?.classify(call, ctx);
@@ -2440,6 +2452,19 @@ pub fn shell_parts(command: &str, cwd: &Path) -> Vec<ShellPart> {
 /// substitution no rule can stand for.
 #[must_use]
 pub fn shell_parts_in(command: &str, shell: ShellSyntax, cwd: &Path) -> Vec<ShellPart> {
+    shell_parts_from(command, shell, cwd, Some(cwd))
+}
+
+/// [`shell_parts_in`] for a command that starts in `start` rather than in
+/// the project's `cwd`, or somewhere unknown for `None`: a terminal
+/// session's shell, which keeps the directory its earlier commands left.
+#[must_use]
+pub fn shell_parts_from(
+    command: &str,
+    shell: ShellSyntax,
+    cwd: &Path,
+    start: Option<&Path>,
+) -> Vec<ShellPart> {
     let Some((command, parsed)) = parse_in(command, shell) else {
         return vec![ShellPart {
             text: command.to_string(),
@@ -2451,7 +2476,7 @@ pub fn shell_parts_in(command: &str, shell: ShellSyntax, cwd: &Path) -> Vec<Shel
         }];
     };
     let command = command.as_ref();
-    let mut dir = Some(normalize(cwd));
+    let mut dir = start.map(normalize);
     let mut stack: Vec<Option<std::path::PathBuf>> = Vec::new();
     // The directory each open subshell started in, which its end restores,
     // with the doubt then on it.

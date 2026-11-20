@@ -61,6 +61,23 @@ pub struct ToolContext {
     /// pass as well: the tools its session switched off, the checkpoints
     /// its `/undo` restores. `None` outside a panel's run.
     pub inherited: Option<InheritedHooks>,
+    /// Where a command line of this call starts, for the permission checks:
+    /// a terminal session's shell keeps the directory its earlier commands
+    /// left. Set per call by [`Tool::call_dir`].
+    pub runs_in: CommandDir,
+}
+
+/// Where a command line a call runs starts.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum CommandDir {
+    /// In the context's `cwd`: a fresh shell.
+    #[default]
+    Cwd,
+    /// In this directory: a shell that has moved there.
+    At(PathBuf),
+    /// Somewhere that cannot be told, so no relative path is known to stay
+    /// inside the project.
+    Unknown,
 }
 
 /// Builds, for each delegated run, the hooks it takes over from the run
@@ -175,6 +192,7 @@ impl ToolContext {
             resume: None,
             running: None,
             inherited: None,
+            runs_in: CommandDir::Cwd,
         }
     }
 }
@@ -250,6 +268,12 @@ pub trait Tool: Send + Sync {
     /// command, the same keys typed into a running program do not.
     fn call_traits(&self, _call: &ToolCall, _ctx: &ToolContext) -> ToolTraits {
         self.traits()
+    }
+
+    /// Where the command line the call runs starts: the context's `cwd`
+    /// unless the call types into a shell that may have moved since.
+    fn call_dir(&self, _call: &ToolCall, _ctx: &ToolContext) -> CommandDir {
+        CommandDir::Cwd
     }
 
     /// The schema entry handed to the provider.

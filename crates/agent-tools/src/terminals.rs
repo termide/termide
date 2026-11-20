@@ -9,14 +9,14 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use termide_agent_core::terminals::duration;
 use termide_agent_core::{
-    CancelToken, ShellSyntax, TerminalOutput, TerminalScreenText, TerminalSend, TerminalSendEnd,
-    TerminalSessions, TerminalState, Tool, ToolCall, ToolContext, ToolResultMessage, ToolText,
-    ToolTraits, ToolUpdate,
+    CancelToken, CommandDir, ShellSyntax, TerminalOutput, TerminalScreenText, TerminalSend,
+    TerminalSendEnd, TerminalSessions, TerminalState, Tool, ToolCall, ToolContext,
+    ToolResultMessage, ToolText, ToolTraits, ToolUpdate,
 };
 
 use crate::args::{optional_str, optional_u64};
 use crate::clean::{clean_output, resolve_screen};
-use crate::shell::check_session_name;
+use crate::shell::{check_session_name, session_dir};
 use crate::truncate::{head_tail, SHELL_MAX_BYTES};
 
 const NAME: &str = "terminals";
@@ -106,6 +106,15 @@ impl Tool for TerminalsTool {
             traits.shell = shell;
         }
         traits
+    }
+
+    fn call_dir(&self, call: &ToolCall, ctx: &ToolContext) -> CommandDir {
+        match call.arguments["session"].as_str() {
+            Some(name) if typed_command_line(call, ctx, self.terminals.as_ref()).is_some() => {
+                session_dir(self.terminals.as_ref(), ctx, name)
+            }
+            _ => CommandDir::Cwd,
+        }
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
@@ -435,6 +444,8 @@ mod tests {
         calls: Mutex<Vec<String>>,
         /// Whether the shell of `dev` waits at its prompt.
         at_prompt: bool,
+        /// Where the shell of `dev` stands, when known.
+        cwd: Option<std::path::PathBuf>,
     }
 
     impl TerminalSessions for Fake {
@@ -460,6 +471,7 @@ mod tests {
                 log: None,
                 shell: ShellSyntax::Zsh,
                 at_prompt: self.at_prompt,
+                cwd: self.cwd.clone(),
             }]
         }
         fn read(&self, _owner: &str, name: &str) -> Result<TerminalOutput, String> {
@@ -589,6 +601,28 @@ mod tests {
         let elsewhere =
             json!({ "action": "send", "session": "nope", "input": "ls", "keys": ["Enter"] });
         assert_eq!(typed(true, elsewhere), None);
+    }
+
+    /// A command line typed into a session is judged where its shell
+    /// stands, which an earlier `cd` may have moved.
+    #[test]
+    fn a_line_typed_at_a_prompt_runs_where_the_shell_stands() {
+        let dir = |cwd: Option<&str>, args: Value| {
+            let tool = TerminalsTool::new(Arc::new(Fake {
+                at_prompt: true,
+                cwd: cwd.map(Into::into),
+                ..Fake::default()
+            }));
+            tool.call_dir(&tool_call(args), &ctx_of(Some("s1")))
+        };
+        let send = json!({ "action": "send", "session": "dev", "input": "ls", "keys": ["Enter"] });
+        assert_eq!(
+            dir(Some("/etc"), send.clone()),
+            CommandDir::At("/etc".into())
+        );
+        assert_eq!(dir(None, send), CommandDir::Unknown);
+        let read = json!({ "action": "read", "session": "dev" });
+        assert_eq!(dir(Some("/etc"), read), CommandDir::Cwd);
     }
 
     #[test]

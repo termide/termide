@@ -503,6 +503,7 @@ fn the_sessions_terminals_show_in_the_strip_and_end_with_it() {
         log: None,
         shell: termide_agent_core::ShellSyntax::Posix,
         at_prompt: false,
+        cwd: None,
     };
     terminals.entries.lock().unwrap().extend([
         (

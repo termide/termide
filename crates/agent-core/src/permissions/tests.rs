@@ -961,6 +961,40 @@ fn split_shell_details() {
     assert_eq!(split_shell("   ").parts, vec![""]);
 }
 
+/// A terminal session's shell keeps the directory an earlier call moved it
+/// to: a later command is judged from there, not from the project.
+#[test]
+fn a_session_command_is_judged_where_its_shell_stands() {
+    let in_dir = |runs_in| ToolContext { runs_in, ..ctx() };
+    for mode in [Mode::Plan, Mode::Configured, Mode::Auto] {
+        let (hooks, _) = hooks(
+            PermissionRules {
+                mode,
+                ..PermissionRules::default()
+            },
+            vec![],
+        );
+        let moved_out = in_dir(CommandDir::At(PathBuf::from("/etc")));
+        let unknown = in_dir(CommandDir::Unknown);
+        let moved_in = in_dir(CommandDir::At(PathBuf::from("/proj/src")));
+        for (command, ctx, decision) in [
+            ("cat passwd", &moved_out, Decision::Ask),
+            ("ls", &moved_out, Decision::Ask),
+            ("cat id_rsa", &unknown, Decision::Ask),
+            ("cat lib.rs", &moved_in, Decision::Allow),
+            ("cat ../README.md", &moved_in, Decision::Allow),
+            ("cat ../../etc/passwd", &moved_in, Decision::Ask),
+            ("cat /proj/README.md", &unknown, Decision::Allow),
+        ] {
+            assert_eq!(
+                hooks.decide(&bash(command), ctx),
+                decision,
+                "{mode:?} {command}"
+            );
+        }
+    }
+}
+
 /// A look-only command that reads beyond the project asks, in the modes
 /// where the `read` tool does, plan mode included, while one reading
 /// inside it does not; a rule kept for it names the one command.

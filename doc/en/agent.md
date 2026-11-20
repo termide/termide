@@ -1917,7 +1917,11 @@ there does: a path argument or an input redirection (`< file`) that leads out
 — absolute, under `~`, through `..` or a symlink, or a glob such as `.*` that
 can match `..` —, a variable whose value the rules cannot see (`cat $f`), and
 `ls`, `find`, `du`, `tree`, `git` or a bare `rg` run in a directory outside
-the project (`cd /etc && cat passwd` included). A glob is judged by what it
+the project (`cd /etc && cat passwd` included). A command run in a terminal
+session (`shell` with `session`, or a line typed at its prompt with
+`terminals`) starts where that session's shell stands, which an earlier `cd`
+may have moved: after `cd /etc` there, `cat passwd` asks; where the shell's
+directory cannot be told, a relative path asks. A glob is judged by what it
 matches in the directory the command runs in, as the shell expands it (`*`,
 `?`, `[…]`; a dotfile only for a pattern that starts with `.`; a pattern that
 matches nothing stays the word as written): `cat *` or `head */config` with a

@@ -254,6 +254,7 @@ pub fn judge_tool_call(
     }
     let ctx = &ToolContext {
         tool: tool.call_traits(call, ctx),
+        runs_in: tool.call_dir(call, ctx),
         ..ctx.clone()
     };
     // A call bound to fail is not worth a prompt or a reviewer's verdict.
@@ -1501,6 +1502,7 @@ impl Agent {
     /// What the loop's tools run in.
     fn tool_context(&self) -> ToolContext {
         ToolContext {
+            runs_in: Default::default(),
             cwd: self.cwd.clone(),
             asker: self.asker.clone(),
             prompter: self.prompter.clone(),
