@@ -92,7 +92,10 @@ and appear in the help window (`F1`). Navigation keys (Tab, arrows, PageUp/Down,
 Home/End) are fixed.
 
 **Mouse:** click the table selector to open it, click a column header to cycle
-its sort, and click a data cell to move the cursor there.
+its sort, and click a data cell to move the cursor there. The wheel moves the
+cursor three rows a notch, paging the window as the arrows do, `Shift`+wheel
+moves it across columns, and over an open selector list the wheel moves the
+list's cursor.
 
 ## Sorting
 

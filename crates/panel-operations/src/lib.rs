@@ -237,6 +237,40 @@ impl OperationsPanel {
             self.scroll_offset = self.selected_index;
         }
     }
+
+    /// The first card shown when the list is scrolled to its end: the last
+    /// cards that fit the viewport, at least the last one.
+    fn max_scroll(&self) -> usize {
+        let height = self.last_area.height;
+        let mut used = 0u16;
+        let mut first = self.operations.len();
+        for op in self.operations.iter().rev() {
+            let h = op.card_height();
+            if used.saturating_add(h) > height && first < self.operations.len() {
+                break;
+            }
+            used = used.saturating_add(h);
+            first -= 1;
+        }
+        first.min(self.operations.len().saturating_sub(1))
+    }
+
+    /// Scroll the list by `delta` cards, keeping the selection on screen.
+    fn scroll_by(&mut self, delta: i32) {
+        let total = self.operations.len();
+        if total == 0 {
+            return;
+        }
+        let step = delta.unsigned_abs() as usize;
+        self.scroll_offset = if delta < 0 {
+            self.scroll_offset.saturating_sub(step)
+        } else {
+            (self.scroll_offset + step).min(self.max_scroll())
+        };
+        let visible = self.count_visible_cards(self.last_area.height).max(1);
+        let last_shown = (self.scroll_offset + visible - 1).min(total - 1);
+        self.selected_index = self.selected_index.clamp(self.scroll_offset, last_shown);
+    }
 }
 
 impl Default for OperationsPanel {
@@ -415,6 +449,11 @@ impl Panel for OperationsPanel {
         vec![]
     }
 
+    fn handle_scroll(&mut self, delta: i32, _panel_area: Rect) -> Vec<PanelEvent> {
+        self.scroll_by(delta);
+        vec![PanelEvent::NeedsRedraw]
+    }
+
     fn handle_command(&mut self, cmd: PanelCommand<'_>) -> CommandResult {
         let _ = cmd;
         CommandResult::None
@@ -554,6 +593,31 @@ mod tests {
                 .any(|e| matches!(e, PanelEvent::CancelOperation(_))),
             "{code:?} must not cancel without confirmation, got {events:?}"
         );
+    }
+
+    /// The wheel scrolls a list taller than the panel a card at a time,
+    /// stops at either end, and keeps the selection among the cards shown.
+    #[test]
+    fn the_wheel_scrolls_the_cards() {
+        let mut panel = panel_with_one_op(1);
+        let card = panel.operations[0].card_height();
+        for id in 2..=5 {
+            let next = panel.operations[0].clone();
+            panel.operations.push(OperationSnapshot {
+                id: OperationId(id),
+                ..next
+            });
+        }
+        // Two cards fit.
+        panel.last_area = Rect::new(0, 0, 40, 2 * card);
+        panel.handle_scroll(1, panel.last_area);
+        assert_eq!((panel.scroll_offset, panel.selected_index), (1, 1));
+        panel.handle_scroll(10, panel.last_area);
+        assert_eq!((panel.scroll_offset, panel.selected_index), (3, 3));
+        panel.handle_scroll(-1, panel.last_area);
+        assert_eq!((panel.scroll_offset, panel.selected_index), (2, 3));
+        panel.handle_scroll(-10, panel.last_area);
+        assert_eq!((panel.scroll_offset, panel.selected_index), (0, 1));
     }
 
     #[test]

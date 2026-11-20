@@ -1,0 +1,1 @@
+- **The mouse wheel scrolls the database and operations panels.** It did nothing there. In the database panel it now moves the grid's cursor three rows a notch, paging the window as the arrows do (`Shift`+wheel moves across columns), and moves the cursor of an open selector list; in the operations panel it scrolls the cards when they do not all fit.

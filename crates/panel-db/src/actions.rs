@@ -282,6 +282,56 @@ impl DbPanel {
         }
     }
 
+    /// Mouse wheel: an open selector list moves its cursor; otherwise the
+    /// grid's cursor moves three rows a notch (columns with Shift), paging
+    /// the window as the arrow keys do.
+    pub(crate) fn handle_wheel_impl(&mut self, event: MouseEvent, delta: i32) -> Vec<PanelEvent> {
+        let steps = delta.unsigned_abs() as usize * 3;
+        let code = if delta < 0 {
+            KeyCode::Up
+        } else {
+            KeyCode::Down
+        };
+        if self.db_dd.open {
+            for _ in 0..steps {
+                self.db_dd.handle_key(code, self.databases.len());
+            }
+            return self.redraw();
+        }
+        if self.table_dd.open {
+            for _ in 0..steps {
+                self.table_dd.handle_key(code, self.tables.len());
+            }
+            return self.redraw();
+        }
+        if steps == 0 || !self.is_connected() || self.edit.is_some() {
+            return vec![];
+        }
+        let horizontal = event.modifiers.contains(KeyModifiers::SHIFT);
+        let mut changed = false;
+        for _ in 0..steps {
+            let moved = match (horizontal, delta < 0) {
+                (true, true) => self.grid.move_left(),
+                (true, false) => self.grid.move_right(self.col_count()),
+                (false, true) => self.grid_up(),
+                (false, false) => self.grid_down(),
+            };
+            if !moved {
+                break;
+            }
+            changed = true;
+            // A page turn replaces the rows: the rest waits for it.
+            if self.loading_page() {
+                break;
+            }
+        }
+        if changed {
+            self.redraw()
+        } else {
+            vec![]
+        }
+    }
+
     // --- navigation primitives (scroll is recomputed in render) ---
 
     /// True while a page fetch is in flight. Page turns are suppressed until it

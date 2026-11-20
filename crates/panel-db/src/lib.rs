@@ -1018,6 +1018,15 @@ impl Panel for DbPanel {
         self.handle_mouse_impl(event)
     }
 
+    fn handle_wheel(
+        &mut self,
+        event: crossterm::event::MouseEvent,
+        delta: i32,
+        _panel_area: Rect,
+    ) -> Vec<PanelEvent> {
+        self.handle_wheel_impl(event, delta)
+    }
+
     fn tick(&mut self) -> Vec<PanelEvent> {
         let changed = self.poll_async();
         let mut events = std::mem::take(&mut self.login.events);
@@ -1238,6 +1247,34 @@ mod tests {
         assert_eq!(edit.input.text(), "alpha");
         assert_eq!(edit.input.cursor_pos(), "alpha".chars().count());
         assert!(!edit.is_dirty());
+    }
+
+    /// The wheel moves the grid's cursor (columns with Shift), stopping at
+    /// the last row, and an open table list's cursor instead.
+    #[test]
+    fn the_wheel_moves_the_grid_cursor_and_an_open_list() {
+        use crossterm::event::{MouseEvent, MouseEventKind};
+        let (_dir, url) = fixture();
+        let mut panel = open_table(&url, "keyed");
+        let wheel = |modifiers| MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers,
+        };
+        panel.grid.cursor_row = 0;
+        panel.grid.cursor_col = 0;
+        panel.handle_wheel(wheel(KeyModifiers::NONE), 1, Rect::default());
+        assert_eq!(panel.grid.cursor_row, 1, "two rows: stops at the last");
+        panel.handle_wheel(wheel(KeyModifiers::SHIFT), 1, Rect::default());
+        assert_eq!(panel.grid.cursor_col, 2, "three columns: stops at the last");
+        panel.handle_wheel(wheel(KeyModifiers::NONE), -1, Rect::default());
+        assert_eq!(panel.grid.cursor_row, 0);
+
+        panel.table_dd.open_at(0);
+        panel.handle_wheel(wheel(KeyModifiers::NONE), 1, Rect::default());
+        assert_eq!(panel.table_dd.cursor, 1, "two tables");
+        assert_eq!(panel.grid.cursor_row, 0);
     }
 
     fn press_with(panel: &mut DbPanel, code: KeyCode, modifiers: KeyModifiers) {

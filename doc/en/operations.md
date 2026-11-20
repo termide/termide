@@ -40,6 +40,7 @@ silences it; it is on by default.
 | `Home` / `End` (or `g` / `G`)  | Jump to the first / last operation                |
 | `Space`                        | Pause or resume the selected operation            |
 | `Esc` / `Delete` / `Backspace` | Cancel the selected operation (asks to confirm)   |
+| Mouse wheel                    | Scroll the cards when they do not all fit         |
 
 Cancelling an operation always asks for confirmation first,
 regardless of which key (or the popup menu) triggers it. `Esc` only
