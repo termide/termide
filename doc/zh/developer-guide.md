@@ -118,7 +118,7 @@ cargo fmt --all -- --check
 cargo machete
 ```
 
-这些就是 pre-commit 钩子（`.githooks/pre-commit`，通过 `git config core.hooksPath .githooks` 启用）的检查项：fmt、machete、clippy 和测试。
+这些就是 pre-commit 钩子（`.githooks/pre-commit`，通过 `git config core.hooksPath .githooks` 启用）的检查项：文档标题和版本检查、fmt、machete、clippy 和测试。CI 还会运行 `cargo deny check`，钩子不运行它。
 
 ## 项目结构
 
@@ -155,6 +155,7 @@ termide/
 │   ├── highlight/            # 语法高亮（tree-sitter）
 │   ├── html/                 # HTML 到终端伪图形的渲染器
 │   ├── html-markdown/        # HTML 转 Markdown（智能体 fetch、HTML 查看器导出）
+│   ├── http/                 # 共享的 HTTP 客户端设置（内置与系统 TLS 根证书）
 │   ├── i18n/                 # 国际化（15 种语言）
 │   ├── keyboard/             # 键盘处理与布局转换
 │   ├── layout/               # 面板组、分屏布局、全屏预设

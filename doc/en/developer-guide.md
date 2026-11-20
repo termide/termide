@@ -129,8 +129,9 @@ cargo machete
 ```
 
 These are the gates of the pre-commit hook (`.githooks/pre-commit`, enabled
-with `git config core.hooksPath .githooks`): fmt, machete, clippy and the
-test suite.
+with `git config core.hooksPath .githooks`): the doc headings and version
+checks, fmt, machete, clippy and the test suite. CI also runs `cargo deny
+check`, which the hook does not.
 
 ## Project Structure
 
@@ -167,6 +168,7 @@ termide/
 │   ├── highlight/            # Syntax highlighting (tree-sitter)
 │   ├── html/                 # HTML to terminal pseudographics renderer
 │   ├── html-markdown/        # HTML to Markdown (agent fetch, HTML viewer export)
+│   ├── http/                 # Shared HTTP client setup (bundled and system TLS roots)
 │   ├── i18n/                 # Internationalization (15 languages)
 │   ├── keyboard/             # Keyboard handling and layout translation
 │   ├── layout/               # Panel groups, split layout, fullscreen preset

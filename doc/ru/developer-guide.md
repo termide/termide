@@ -130,7 +130,9 @@ cargo machete
 ```
 
 Это проверки pre-commit хука (`.githooks/pre-commit`, включается командой
-`git config core.hooksPath .githooks`): fmt, machete, clippy и тесты.
+`git config core.hooksPath .githooks`): проверки заголовков документации и
+версии, fmt, machete, clippy и тесты. CI вдобавок запускает `cargo deny check`,
+которого в хуке нет.
 
 ## Структура проекта
 
@@ -167,6 +169,7 @@ termide/
 │   ├── highlight/            # Подсветка синтаксиса (tree-sitter)
 │   ├── html/                 # Рендеринг HTML в терминальную псевдографику
 │   ├── html-markdown/        # HTML в Markdown (fetch агента, экспорт из просмотра HTML)
+│   ├── http/                 # Общая настройка HTTP-клиента (встроенные и системные корни TLS)
 │   ├── i18n/                 # Интернационализация (15 языков)
 │   ├── keyboard/             # Обработка клавиатуры и трансляция раскладок
 │   ├── layout/               # Группы панелей, split-компоновка, fullscreen-пресет
