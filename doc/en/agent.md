@@ -1808,7 +1808,13 @@ withheld from the whole line when any part is one that destroys what it touches 
 drop`, installing or publishing a package — `cargo add` and `cargo remove`,
 which only edit the manifest, are not) or one that runs some *other*
 program, whose name the pattern would not show (`env rm`, `xargs rm`,
-`./deploy.sh`, `sh -c …`, `python3 -c …`, `make`, `nix run`). **Allow for
+`./deploy.sh`, `sh -c …`, `python3 -c …`, `make`, `nix run`). The command
+judged is the one that runs: a quoted or escaped name (`\rm`), a wrapper
+(`command`, `exec`, `env`, `xargs`, `timeout`, `nice`, `sudo`), git's own
+options (`git -C dir push`) and what `find -exec` runs or `find -delete`
+removes hide nothing. A rule for a git command with such options keeps them
+and the subcommand (`git -C dir status *`), and a rule for `find` names the
+command whole, since `find *` would cover `-delete` and `-exec`. **Allow for
 this session** is withheld only from a command that destroys: it is short
 enough to live with, and ends when the panel closes. So a destructive command
 is allowed once at a time — `all` is the mode that lets a run through without
@@ -2049,7 +2055,8 @@ Some things are never left to the reviewer, and ask as in `configured`:
 
 - a call an `ask` rule covers;
 - removing the filesystem root, the home directory, or the working directory
-  or one above it (`rm -rf ~`, `rm -rf .`, `rm -rf *`);
+  or one above it (`rm -rf ~`, `rm -rf .`, `rm -rf *`), however it is
+  wrapped (`sudo rm -rf /`, `env rm -rf ~`, `find ~ -delete`);
 - everything, once the reviewer has blocked three calls in a row or twenty in
   the session: the questions come back to you, and allowing one hands the
   decisions back to the reviewer;

@@ -1871,15 +1871,31 @@ pub fn suggested_pattern(tool: &str, subject: &str) -> String {
     }
     let parts = split_shell(subject);
     let first = parts.parts.first().map_or(subject, |p| p.as_str());
-    let mut words = first.split_whitespace();
-    let Some(head) = words.next() else {
+    let words: Vec<&str> = first.split_whitespace().collect();
+    let Some((&head, args)) = words.split_first() else {
         return "*".to_string();
     };
-    match words.next() {
-        Some(sub) if SUBCOMMAND_TOOLS.contains(&head) && !sub.starts_with('-') => {
-            format!("{head} {sub} *")
+    // A rule for every `find` would cover `find -delete` and `find -exec`.
+    if runs_through_options(head) {
+        return first.trim().to_string();
+    }
+    if !SUBCOMMAND_TOOLS.contains(&head) {
+        return format!("{head} *");
+    }
+    match args.first() {
+        Some(sub) if !sub.starts_with('-') => format!("{head} {sub} *"),
+        None => format!("{head} *"),
+        // `git -C dir status`: the rule keeps git's options and its
+        // subcommand, since `git *` would cover every push and clean.
+        Some(_) => {
+            let lead = args.len() - skip_git_globals(args).len();
+            match args.get(lead) {
+                Some(_) if head == "git" => format!("{} *", words[..=lead + 1].join(" ")),
+                // Another program's options may take values, which leaves
+                // its subcommand unknown: the rule names the command whole.
+                _ => first.trim().to_string(),
+            }
         }
-        _ => format!("{head} *"),
     }
 }
 
@@ -1922,10 +1938,12 @@ pub fn command_scopes(command: &str) -> Vec<String> {
     };
     let mut scopes = vec![command.to_string()];
     if SUBCOMMAND_TOOLS.contains(&head) {
-        if let Some(sub) = words.next().filter(|sub| !sub.starts_with('-')) {
-            scopes.push(format!("{head} {sub} *"));
+        let subcommand = suggested_pattern(SHELL_TOOL, command);
+        if subcommand.ends_with(" *") && subcommand != format!("{head} *") {
+            scopes.push(subcommand);
         }
-    } else if !delegating_command(&format!("{head} x"))
+    } else if !runs_through_options(head)
+        && !delegating_command(&format!("{head} x"))
         && !destructive_command(&format!("{head} x"))
     {
         scopes.push(format!("{head} *"));
@@ -4401,9 +4419,32 @@ fn delegating_command(part: &str) -> bool {
     let Some((&head, args)) = words.split_first() else {
         return false;
     };
+    delegating_words(head, args) || command_layers(part).len() > 1
+}
+
+fn delegating_words(head: &str, args: &[&str]) -> bool {
+    // `find -exec` and `fd -x` run the program they are handed.
+    if matches!(head, "find" | "fd" | "fdfind") {
+        return args.iter().any(|a| {
+            matches!(
+                a.trim_matches(['\'', '"']),
+                "-exec" | "-execdir" | "-ok" | "-okdir" | "-x" | "-X" | "--exec" | "--exec-batch"
+            )
+        });
+    }
     if matches!(
         head,
         "env"
+            | "command"
+            | "builtin"
+            | "exec"
+            | "source"
+            | "."
+            | "npx"
+            | "bunx"
+            | "pnpx"
+            | "stdbuf"
+            | "ionice"
             | "xargs"
             | "parallel"
             | "timeout"
@@ -4442,7 +4483,217 @@ fn delegating_command(part: &str) -> bool {
     matches!(
         head,
         "docker" | "podman" | "kubectl" | "npm" | "pnpm" | "yarn" | "bun" | "uv"
-    ) && args.iter().any(|a| matches!(*a, "run" | "exec" | "start"))
+    ) && args
+        .iter()
+        .any(|a| matches!(*a, "run" | "exec" | "start" | "dlx"))
+}
+
+/// A program's name as the shell reads it: `\rm` and `'rm'` both run `rm`.
+/// A directory stays: `./venv/bin/pip` is not the `pip` on `PATH`.
+fn bare_program(word: &str) -> &str {
+    word.trim_start_matches('\\').trim_matches(['\'', '"'])
+}
+
+/// Programs whose options make them run or delete what a rule for the
+/// program would not name (`find -exec`, `find -delete`, `fd -x`), so no
+/// rule is offered for the program as a whole.
+fn runs_through_options(head: &str) -> bool {
+    matches!(bare_program(head), "find" | "fd" | "fdfind")
+}
+
+/// What follows git's global options (`-C dir`, `-c key=value`,
+/// `--no-pager`…): the subcommand and its arguments.
+fn skip_git_globals<'a, 'b>(args: &'a [&'b str]) -> &'a [&'b str] {
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        if !arg.starts_with('-') {
+            break;
+        }
+        i += if matches!(
+            *arg,
+            "-C" | "-c"
+                | "--git-dir"
+                | "--work-tree"
+                | "--namespace"
+                | "--config-env"
+                | "--super-prefix"
+        ) {
+            2
+        } else {
+            1
+        };
+    }
+    &args[i.min(args.len())..]
+}
+
+/// The commands a part runs, outermost first: the part itself with its
+/// program's name bared ([`bare_program`]), then the command each wrapper
+/// (`env`, `xargs`, `timeout`, `sudo`, `command`…) hands its arguments on
+/// to, and what `find -exec` runs, with `find -delete` read as the `rm -r`
+/// it amounts to. The checks look at every one, so a wrapper hides nothing.
+fn command_layers(part: &str) -> Vec<Vec<String>> {
+    let mut layers = Vec::new();
+    let mut words: Vec<String> = part.split_whitespace().map(str::to_string).collect();
+    // A wrapper can wrap another; the bound keeps a contrived line cheap.
+    for _ in 0..8 {
+        let Some(head) = words.first_mut() else {
+            break;
+        };
+        *head = bare_program(head).to_string();
+        let found = find_payloads(&words);
+        let inner = wrapped_command(&words);
+        layers.push(words);
+        layers.extend(found);
+        match inner {
+            Some(inner) => words = inner,
+            None => break,
+        }
+    }
+    layers
+}
+
+/// The command a wrapper runs, past the wrapper's own options: `None` for a
+/// program that wraps nothing, or a wrapper given no command.
+fn wrapped_command(words: &[String]) -> Option<Vec<String>> {
+    let (head, args) = words.split_first()?;
+    // The options that take the next word as their value.
+    let takes_value: &[&str] = match head.as_str() {
+        // `command -v` looks a program up instead of running it.
+        "command" | "builtin" => {
+            if args
+                .iter()
+                .take_while(|a| a.starts_with('-'))
+                .any(|a| a.contains(['v', 'V']))
+            {
+                return None;
+            }
+            &[]
+        }
+        "exec" => &["-a"],
+        "env" => &["-u", "-C", "--unset", "--chdir"],
+        "nice" => &["-n", "--adjustment"],
+        "nohup" | "time" => &[],
+        "timeout" => &["-s", "-k", "--signal", "--kill-after"],
+        "xargs" => &[
+            "-n",
+            "-L",
+            "-P",
+            "-s",
+            "-I",
+            "-d",
+            "-E",
+            "-a",
+            "--max-args",
+            "--max-lines",
+            "--max-procs",
+            "--max-chars",
+            "--delimiter",
+            "--arg-file",
+            "--eof",
+        ],
+        "sudo" => &[
+            "-u",
+            "-g",
+            "-C",
+            "-D",
+            "-h",
+            "-p",
+            "-r",
+            "-t",
+            "-U",
+            "-T",
+            "--user",
+            "--group",
+            "--chdir",
+            "--prompt",
+            "--host",
+            "--close-from",
+            "--role",
+            "--type",
+            "--other-user",
+            "--command-timeout",
+        ],
+        "doas" => &["-u", "-C"],
+        "stdbuf" => &["-i", "-o", "-e"],
+        "ionice" => &["-c", "-n", "-p", "-P", "-u"],
+        "watch" => &["-n", "--interval"],
+        _ => return None,
+    };
+    let mut i = 0;
+    while let Some(arg) = args.get(i) {
+        if arg == "--" {
+            i += 1;
+            break;
+        }
+        // `env NAME=value cmd` sets a variable for the command.
+        if head == "env" && !arg.starts_with('-') && arg.contains('=') {
+            i += 1;
+            continue;
+        }
+        if !arg.starts_with('-') || arg == "-" {
+            break;
+        }
+        i += if takes_value.contains(&arg.as_str()) {
+            2
+        } else {
+            1
+        };
+    }
+    // `timeout DURATION cmd`.
+    if head == "timeout" {
+        i += 1;
+    }
+    let inner = args.get(i..)?;
+    (!inner.is_empty()).then(|| inner.to_vec())
+}
+
+/// What a `find` runs or deletes: each `-exec`/`-execdir`/`-ok`/`-okdir`
+/// command, and for `-delete` an `rm -r` of the paths it starts from.
+fn find_payloads(words: &[String]) -> Vec<Vec<String>> {
+    let Some((head, args)) = words.split_first() else {
+        return Vec::new();
+    };
+    if head.rsplit('/').next() != Some("find") {
+        return Vec::new();
+    }
+    let unquoted = |a: &String| a.trim_matches(['\'', '"']).to_string();
+    let mut layers = Vec::new();
+    let mut i = 0;
+    while i < args.len() {
+        match unquoted(&args[i]).as_str() {
+            "-exec" | "-execdir" | "-ok" | "-okdir" => {
+                let start = i + 1;
+                let end = args[start..]
+                    .iter()
+                    .position(|a| matches!(unquoted(a).as_str(), ";" | "\\;" | "+"))
+                    .map_or(args.len(), |at| start + at);
+                if start < end {
+                    let mut inner = args[start..end].to_vec();
+                    inner[0] = bare_program(&inner[0]).to_string();
+                    layers.push(inner);
+                }
+                i = end;
+            }
+            "-delete" => {
+                let mut removal = vec!["rm".to_string(), "-r".to_string()];
+                removal.extend(
+                    args.iter()
+                        .skip_while(|a| matches!(a.as_str(), "-H" | "-L" | "-P"))
+                        .take_while(|a| {
+                            !a.starts_with('-') && !matches!(a.as_str(), "(" | "\\(" | "!")
+                        })
+                        .cloned(),
+                );
+                if removal.len() == 2 {
+                    removal.push(".".to_string());
+                }
+                layers.push(removal);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    layers
 }
 
 /// Whether a command removes a directory no reviewer should be trusted with:
@@ -4451,12 +4702,16 @@ fn delegating_command(part: &str) -> bool {
 /// asks the user about these.
 #[must_use]
 fn critical_removal(part: &str, cwd: &Path) -> bool {
-    let words: Vec<&str> = part.split_whitespace().collect();
-    let Some((&head, args)) = words.split_first() else {
+    command_layers(part)
+        .iter()
+        .any(|words| removes_critical(words, cwd))
+}
+
+fn removes_critical(words: &[String], cwd: &Path) -> bool {
+    let Some((head, args)) = words.split_first() else {
         return false;
     };
-    let program = head.rsplit('/').next().unwrap_or(head);
-    if !matches!(program, "rm" | "rmdir") {
+    if !matches!(head.rsplit('/').next().unwrap_or(head), "rm" | "rmdir") {
         return false;
     }
     let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
@@ -4490,14 +4745,21 @@ fn critical_removal(part: &str, cwd: &Path) -> bool {
 /// or a publish cannot be undone or says nothing about what it destroys.
 #[must_use]
 fn destructive_command(part: &str) -> bool {
-    let words: Vec<&str> = part.split_whitespace().collect();
+    command_layers(part).iter().any(|words| {
+        let words: Vec<&str> = words.iter().map(String::as_str).collect();
+        destructive_words(&words)
+    })
+}
+
+fn destructive_words(words: &[&str]) -> bool {
     let Some((&head, args)) = words.split_first() else {
         return false;
     };
     // Deleting or overwriting what no undo reaches, or acting as another
     // account. `chmod`/`chown` are recoverable but open or lock files down.
+    // These system tools are themselves wherever they live: `/bin/rm`.
     if matches!(
-        head,
+        head.rsplit('/').next().unwrap_or(head),
         "rm" | "rmdir"
             | "unlink"
             | "shred"
@@ -4511,6 +4773,12 @@ fn destructive_command(part: &str) -> bool {
     ) {
         return true;
     }
+    // `git -C dir push`: the subcommand comes after git's own options.
+    let args = if head == "git" {
+        skip_git_globals(args)
+    } else {
+        args
+    };
     let sub = args.first().copied().unwrap_or("");
     match head {
         "git" => match sub {

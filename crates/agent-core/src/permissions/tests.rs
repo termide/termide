@@ -2298,7 +2298,21 @@ fn suggested_patterns() {
         "git push *"
     );
     assert_eq!(suggested_pattern("shell", "ls -la"), "ls *");
-    assert_eq!(suggested_pattern("shell", "git -C x status"), "git *");
+    // `git *` would cover every push and clean.
+    assert_eq!(
+        suggested_pattern("shell", "git -C x status"),
+        "git -C x status *"
+    );
+    assert_eq!(suggested_pattern("shell", "git --version"), "git --version");
+    assert_eq!(
+        suggested_pattern("shell", "docker -H h ps"),
+        "docker -H h ps"
+    );
+    // `find *` would cover `find -delete` and `find -exec`.
+    assert_eq!(
+        suggested_pattern("shell", "find . -name '*.rs'"),
+        "find . -name '*.rs'"
+    );
     assert_eq!(
         suggested_pattern("shell", "cargo test && cargo fmt"),
         "cargo test *"
@@ -3370,6 +3384,17 @@ fn critical_removals_are_the_root_the_home_and_the_project() {
         "rm -r ..",
         "/bin/rm -rf /proj",
         "rmdir /proj/sub",
+        // However the program is spelled or wrapped.
+        "\\rm -rf /",
+        "'rm' -rf ~",
+        "command rm -rf ~",
+        "env FOO=1 rm -rf ~",
+        "sudo -u root rm -rf /",
+        "timeout -s KILL 5 rm -rf /",
+        "nice -n 5 xargs -I {} rm -rf ~",
+        "find ~ -delete",
+        "find -delete",
+        "find / -exec rm -rf / ;",
     ] {
         assert!(critical_removal(command, cwd), "{command}");
     }
@@ -3380,9 +3405,75 @@ fn critical_removals_are_the_root_the_home_and_the_project() {
         "rm -f /tmp/x",
         "rm -rf ~/.cache/termide",
         "ls /",
+        "find ~ -name x",
+        "find build -delete",
+        "command -v rm",
     ] {
         assert!(!critical_removal(command, cwd), "{command}");
     }
+}
+
+/// A wrapper, a quoted or escaped name, git's global options or `find`'s
+/// actions must not hide a destructive command, nor earn the program a rule
+/// that outlasts the call.
+#[test]
+fn wrapped_destructive_commands_get_no_lasting_answer() {
+    for command in [
+        "\\rm -rf src",
+        "'rm' -rf src",
+        "/bin/rm -rf src",
+        "command rm -rf src",
+        "exec rm -rf src",
+        "env rm x",
+        "xargs rm -rf",
+        "xargs -n 1 rm -rf",
+        "timeout 5 rm -rf src",
+        "git -C . push --force",
+        "git --no-pager push",
+        "git -c a=b clean -fdx",
+        "find . -delete",
+        "/usr/bin/find . -delete",
+        "find . -name '*.o' -exec rm {} +",
+    ] {
+        assert!(destructive_command(command), "{command}");
+        let mut configured = rules("");
+        configured.mode = Mode::Configured;
+        let (hooks, asked) = hooks(configured, vec![]);
+        let mut hooks = hooks.with_persist(Box::new(|_, _, _, _| {}));
+        assert!(!matches!(
+            hooks.before_tool_call(&bash(command), &ctx()),
+            ToolDecision::Allow
+        ));
+        let request = asked.lock().unwrap()[0].clone();
+        assert!(
+            !request.can_persist && !request.can_allow_session,
+            "{command}"
+        );
+    }
+    for command in [
+        "git -C sub status",
+        "git --no-pager log",
+        "command -v rm",
+        "find . -name x",
+        "env",
+    ] {
+        assert!(!destructive_command(command), "{command}");
+    }
+    // A program that runs another, or `find` running one, is no program a
+    // rule can vouch for.
+    for command in [
+        "command ls",
+        "npx rimraf src",
+        "find . -exec ls ;",
+        "source env.sh",
+    ] {
+        assert!(delegating_command(command), "{command}");
+    }
+    assert!(command_scopes("find . -name x").is_empty());
+    assert_eq!(
+        command_scopes("git -C sub status"),
+        ["git -C sub status", "git -C sub status *"]
+    );
 }
 
 /// Replays scripted answers, each with the scope the user picked.
