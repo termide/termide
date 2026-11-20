@@ -625,12 +625,12 @@ impl Panel for Editor {
                 }
                 CommandResult::NeedsRedraw(false)
             }
+            // Sent to every panel after a git fetch, pull or push: follow the
+            // file as an external change does, never discarding unsaved work.
             PanelCommand::Reload => {
-                if self.reload_from_disk().is_ok() {
-                    CommandResult::NeedsRedraw(true)
-                } else {
-                    CommandResult::NeedsRedraw(false)
-                }
+                self.update_git_diff();
+                self.check_external_modification();
+                CommandResult::NeedsRedraw(true)
             }
             PanelCommand::GetModificationStatus => CommandResult::ModificationStatus {
                 is_modified: self.buffer.is_modified(),

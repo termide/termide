@@ -470,6 +470,35 @@ fn rewrite_later(file: &NamedTempFile, content: &str) {
     file.as_file().set_modified(later).unwrap();
 }
 
+/// A git fetch, pull or push reloads every panel; unsaved work must survive it.
+#[test]
+fn reload_keeps_unsaved_work_and_flags_a_changed_file() {
+    let (mut editor, file) = create_editor_with_content("hello");
+    let _ = editor.insert_char('x');
+    let edited = editor.buffer().text();
+
+    let _ = editor.handle_command(PanelCommand::Reload);
+    assert_eq!(editor.buffer().text(), edited);
+    assert!(editor.buffer().is_modified());
+    assert!(!editor.has_external_change());
+
+    rewrite_later(&file, "pulled");
+    let _ = editor.handle_command(PanelCommand::Reload);
+    assert_eq!(editor.buffer().text(), edited);
+    assert!(editor.buffer().is_modified());
+    assert!(editor.has_external_change());
+}
+
+#[test]
+fn reload_brings_a_clean_buffer_up_to_the_file() {
+    let (mut editor, file) = create_editor_with_content("hello");
+    rewrite_later(&file, "pulled");
+    let result = editor.handle_command(PanelCommand::Reload);
+    assert!(result.needs_redraw());
+    assert_eq!(editor.buffer().text(), "pulled");
+    assert!(!editor.buffer().is_modified());
+}
+
 #[test]
 fn a_clean_buffer_follows_the_file_on_disk_and_keeps_its_place() {
     let (mut editor, file) = create_editor_with_content("a\nb\nc\nd\ne\nf\n");
