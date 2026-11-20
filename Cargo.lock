@@ -2446,15 +2446,6 @@ dependencies = [
 
 [[package]]
 name = "lzma-rust2"
-version = "0.16.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca93e534d1142d1d0dcca6d25fe302508a5dfb40b302802904577725ea0b695b"
-dependencies = [
- "sha2 0.11.0",
-]
-
-[[package]]
-name = "lzma-rust2"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1c46f3fcd2e888afdb01a07efc071cb21300e07c68d32c3e8b01b5c8cb1fcaa"
@@ -5319,7 +5310,7 @@ dependencies = [
  "dirs",
  "libc",
  "log",
- "nix 0.29.0",
+ "nix 0.31.3",
  "ratatui",
  "tempfile",
  "termide-agent-core",
@@ -5642,7 +5633,7 @@ dependencies = [
  "dirs",
  "libc",
  "log",
- "nix 0.29.0",
+ "nix 0.31.3",
  "portable-pty",
  "tempfile",
  "termide-core",
@@ -6221,7 +6212,7 @@ dependencies = [
  "dunce",
  "libc",
  "log",
- "nix 0.29.0",
+ "nix 0.31.3",
  "portable-pty",
  "ratatui",
  "regex",
@@ -6385,7 +6376,7 @@ dependencies = [
  "hmac 0.13.0",
  "libc",
  "log",
- "lzma-rust2 0.16.5",
+ "lzma-rust2",
  "nfs3_client",
  "nfs3_server",
  "percent-encoding",
@@ -8218,7 +8209,7 @@ dependencies = [
  "getrandom 0.4.2",
  "hmac 0.13.0",
  "indexmap",
- "lzma-rust2 0.23.0",
+ "lzma-rust2",
  "memchr",
  "nix 0.31.3",
  "pbkdf2",
