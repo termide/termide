@@ -386,6 +386,68 @@ fn the_agents_file_requests_pass_the_permission_checks() {
     );
 }
 
+/// An ACP `search` is judged as the read of what it searches, so plan mode
+/// lets it through; a `delete` or a `move` is held to the rules that refuse
+/// editing what it names, and otherwise asked about as itself.
+#[test]
+fn search_delete_and_move_requests_follow_the_read_and_edit_rules() {
+    let project = tempfile::tempdir().unwrap();
+    let ask = |n: u32, kind: &str, input: Value, locations: Value| {
+        (
+            "session/request_permission",
+            json!({ "sessionId": "s1",
+                "toolCall": { "toolCallId": format!("t{n}"), "title": kind, "kind": kind,
+                    "rawInput": input, "locations": locations },
+                "options": [
+                    { "optionId": "yes", "name": "Allow", "kind": "allow_once" },
+                    { "optionId": "no", "name": "Reject", "kind": "reject_once" } ] }),
+        )
+    };
+    let chosen = |reply: Value| reply["result"]["outcome"]["optionId"].clone();
+    let wait = Duration::from_secs(10);
+
+    let (runtime, permissions, replies) = file_agent(
+        project.path().to_path_buf(),
+        Mode::Plan,
+        PermissionRules::default(),
+        vec![ask(1, "search", json!({ "pattern": "todo" }), json!([]))],
+    );
+    runtime.prompt(UserMessage::text("go")).unwrap();
+    assert_eq!(chosen(replies.recv_timeout(wait).unwrap()), "yes");
+    assert!(permissions.try_recv().is_err());
+
+    let mut rules = PermissionRules::default();
+    rules.add("edit", "secret/*", termide_agent_core::Decision::Deny);
+    let (runtime, permissions, replies) = file_agent(
+        project.path().to_path_buf(),
+        Mode::Configured,
+        rules,
+        vec![
+            ask(2, "delete", json!({}), json!([{ "path": "secret/key" }])),
+            ask(
+                3,
+                "move",
+                json!({ "source": "notes.md", "destination": "secret/notes.md" }),
+                json!([]),
+            ),
+            ask(4, "delete", json!({}), json!([{ "path": "notes.md" }])),
+        ],
+    );
+    runtime.prompt(UserMessage::text("go")).unwrap();
+    // Refused by the rule, without asking.
+    assert_eq!(chosen(replies.recv_timeout(wait).unwrap()), "no");
+    assert_eq!(chosen(replies.recv_timeout(wait).unwrap()), "no");
+    assert!(permissions.try_recv().is_err());
+    // Nothing refuses this one: the user is asked.
+    let envelope = permissions.recv_timeout(wait).unwrap();
+    assert_eq!(envelope.request.tool, "delete");
+    envelope
+        .reply
+        .send(PermissionAnswer::AllowOnce.into())
+        .unwrap();
+    assert_eq!(chosen(replies.recv_timeout(wait).unwrap()), "yes");
+}
+
 fn drain_until_end(
     runtime: &AcpRuntime,
     permissions: &Receiver<PermissionEnvelope>,

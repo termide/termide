@@ -32,10 +32,10 @@ use termide_agent_core::{
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
-    BackgroundCall, CancelToken, Decision, ExternalSessionRef, Failure, FailureKind, Hooks,
-    HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote, PlanPrompt, PromptError,
-    StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry, ToolResultMessage,
-    Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
+    BackgroundCall, CancelToken, DecidedBy, Decision, ExternalSessionRef, Failure, FailureKind,
+    Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote, PlanPrompt,
+    PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry,
+    ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_core::{CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
@@ -2871,8 +2871,32 @@ impl Shared {
         // anything the built-in agent would have let through silently.
         let (decision, note) = {
             let mut hooks = self.hooks.lock().unwrap_or_else(PoisonError::into_inner);
-            let decision = hooks.before_tool_call(&call, &ctx);
-            (decision, hooks.take_permission())
+            // A deletion or a move changes the files it names, so a rule or
+            // a mode that refuses editing one refuses it too; whatever else
+            // it is asked about as itself.
+            let refused_as_edit = matches!(call.name.as_str(), "delete" | "move")
+                && changed_paths(&tool_call, &call).into_iter().any(|path| {
+                    ["write", "edit"].into_iter().any(|name| {
+                        let change = ToolCall {
+                            name: name.into(),
+                            arguments: json!({ "path": path }),
+                            ..call.clone()
+                        };
+                        hooks.decide(&change, &ctx) == Decision::Deny
+                    })
+                });
+            if refused_as_edit {
+                (
+                    ToolDecision::Block {
+                        reason: "termide's permission settings do not let the agent change it"
+                            .into(),
+                    },
+                    Some(PermissionNote::new(DecidedBy::Rules, false)),
+                )
+            } else {
+                let decision = hooks.before_tool_call(&call, &ctx);
+                (decision, hooks.take_permission())
+            }
         };
         // Kept for the call's result, so the log says who decided it.
         if let Some(note) = note.filter(|_| !id.is_empty()) {
@@ -2885,6 +2909,7 @@ impl Shared {
         // are not asked about a second time.
         if !matches!(decision, ToolDecision::Block { .. })
             && matches!(call.name.as_str(), "read" | "edit")
+            && tool_call["kind"] != "search"
         {
             let locations = tool_call["locations"].as_array().into_iter().flatten();
             let diffs = tool_call["content"].as_array().into_iter().flatten();
@@ -3964,17 +3989,34 @@ fn gemini_mode(mode: Mode) -> &'static str {
     }
 }
 
+/// The files a deletion or a move asks about changes: its locations, and
+/// the paths its raw input names.
+fn changed_paths(tool_call: &Value, call: &ToolCall) -> Vec<String> {
+    let locations = tool_call["locations"].as_array().into_iter().flatten();
+    let named = ["path", "file_path", "source", "destination", "from", "to"]
+        .iter()
+        .map(|key| &call.arguments[*key]);
+    locations
+        .map(|location| &location["path"])
+        .chain(named)
+        .filter_map(Value::as_str)
+        .map(str::to_string)
+        .collect()
+}
+
 /// A `session/request_permission` `toolCall` as a termide [`ToolCall`], its
 /// ACP `kind` translated to the tool name the permission rules speak so the
 /// same logic judges it: `execute` becomes `shell` (the command placed under
-/// `command`, from the raw input or the title), `read`/`edit` keep their
-/// names, and anything else stands as its kind, which no built-in rule covers
-/// and so reaches the user.
+/// `command`, from the raw input or the title), a `search` is the `read` of
+/// the directory it searches (the project, when it names none), `read`/`edit`
+/// keep their names, and anything else stands as its kind, which no built-in
+/// rule covers and so reaches the user.
 fn permission_call(tool_call: &Value) -> ToolCall {
     let title = tool_call["title"].as_str().unwrap_or("").to_string();
     let kind = tool_call["kind"].as_str().unwrap_or("other");
     let name = match kind {
         "execute" => SHELL_TOOL,
+        "search" => "read",
         other => other,
     };
     let mut arguments = tool_call
@@ -3986,6 +4028,15 @@ fn permission_call(tool_call: &Value) -> ToolCall {
     // if the agent gave neither in the raw input, they are read off the rest
     // of the call — for a command, its title is the best stand-in.
     fill_own_call(tool_call, kind, &title, &mut arguments);
+    if kind == "search" && arguments["path"].as_str().is_none() {
+        let root = ["dir_path", "directory", "cwd"]
+            .iter()
+            .find_map(|key| arguments[*key].as_str())
+            .or_else(|| tool_call["locations"][0]["path"].as_str())
+            .unwrap_or(".")
+            .to_string();
+        arguments["path"] = json!(root);
+    }
     if !title.is_empty() {
         arguments["title"] = json!(title);
     }

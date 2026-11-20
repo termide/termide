@@ -334,6 +334,10 @@ on its own, the request passes the checks of termide's `read` and `write`:
 a `deny` rule or plan mode refuses it, and a read outside the project or a
 write the mode would ask about is asked about — unless you have just let the
 agent at that file on its own card.
+Of the steps they ask about, a search is judged as a `read` of the folder it
+searches, so plan mode lets it through; a deletion or a move is refused by a
+`deny` rule or a mode that would refuse editing one of the files it names,
+and is otherwise asked about as itself.
 
 Codex and Gemini CLI also get the tools of termide's MCP servers, served over
 the same local MCP server beside their own and checked as Claude Code's calls
