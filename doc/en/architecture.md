@@ -495,119 +495,6 @@ crates/i18n/
 2. `LANG` / `LC_ALL` system variables
 3. Default to English
 
-### 8. Key Dependencies
-
-**Ratatui** - Terminal UI framework
-- Widget-based rendering
-- Buffer system for efficient updates
-- Layout system (Rect, Constraints)
-
-**Crossterm** - Cross-platform terminal manipulation
-- Event handling (keyboard, mouse, resize)
-- Terminal control (cursor, colors, clear)
-- Raw mode management
-
-**Tree-sitter** - Syntax highlighting
-- Parser generators for 23 languages
-- Incremental parsing for performance
-- Query system for syntax highlighting
-
-**Ropey** - Text buffer
-- Efficient line-based text storage
-- UTF-8 aware
-- Gap buffer internally
-
-**Portable-pty** - PTY implementation
-- Cross-platform pseudo-terminal
-- Shell integration
-- Resize support
-
-**Sysinfo** - System monitoring
-- CPU usage
-- Memory usage
-- Disk space
-
-## Design Decisions
-
-### Why Split Layout with a Fullscreen Preset?
-
-**Problem:** Terminal space is limited and multi-panel IDEs often feel cramped, but binary "one-expanded, rest collapsed" layouts also throw away cases where the user wants to see two or three panels at adjusted heights at once.
-
-**Solution:** Adjustable split layout per group, plus a one-key fullscreen preset:
-- Every panel in a group is visible by default; the user picks heights via mouse drag (the panel's bottom border or its title bar), `Alt+Shift+=` / `Alt+Shift+-`, or any combination thereof.
-- `Alt+F11` toggles a "fullscreen current panel" preset that mirrors the legacy accordion view (one panel takes the full column, others collapse to one row), with the previous heights stashed for instant restore.
-- Heights are cached and rescaled proportionally when the terminal resizes.
-- Automatic stacking still kicks in when the terminal is too narrow (`auto_stack_threshold`).
-
-### Why Dynamic Panels?
-
-**Benefit:** Users can open as many panels as needed:
-- Multiple editors for different files
-- Multiple terminals for different tasks
-- Multiple file managers for different directories
-
-**Challenge:** Managing many panels efficiently
-- The fullscreen preset gives a clutter-free single-panel view on demand
-- Hotkeys provide fast navigation
-- Welcome screen auto-closes
-
-### Why Trait-Based Panels?
-
-**Flexibility:** New panel types can be added without changing core code
-- Implement `Panel` trait
-- Add to panel creation logic
-- Works with existing layout system
-
-**Polymorphism:** `Box<dyn Panel>` allows heterogeneous collections
-- Single `Vec<Box<dyn Panel>>` holds all panel types
-- Uniform rendering and event handling
-- Dynamic dispatch overhead is negligible for TUI
-
-## Performance Characteristics
-
-**Rendering:** O(n) where n = number of panels in visible groups
-- Panels with height ≥ 2 render their full content; panels collapsed to one row render only the title bar
-- Each `height >= 2` panel draws its own bottom border so adjacent panels show two consecutive border rows — the focused panel is framed in its accent colour on all four sides
-
-**Event Handling:** O(1) for most operations
-- Direct index access to focused panel
-- Hash map lookups for key bindings
-
-**Memory:** Linear with panel count
-- Each panel owns its state
-- Shared AppState is small
-- No excessive cloning (uses references)
-
-**File Operations:** Asynchronous where possible
-- FS watcher uses separate thread
-- Debouncing prevents excessive updates
-
-### Async Pipelines
-
-Several startup and hot-path operations that used to block the
-render loop now run on worker threads, polled from each panel's
-`tick()`. The pattern is the same in every case: spawn a worker,
-park a `mpsc::Receiver` on the panel, swap the result in when
-`try_recv()` returns. References below point to where each pipeline
-lives.
-
-| Pipeline                              | Worker location                                                 | Polled in                                                                          |
-|---------------------------------------|-----------------------------------------------------------------|------------------------------------------------------------------------------------|
-| FileManager initial directory read    | `crates/panel-file-manager/src/lib.rs` (`start_async_reload`)   | `check_async_reload` from app's per-tick `check_background_panel_updates`          |
-| FileManager subtree expand            | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | `poll_pending_expansions` from same path; placeholder rows show `…` until resolved |
-| FileManager per-entry git status      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`; `apply_git_statuses` reapplies if dir read raced ahead   |
-| Git status / log panel refresh        | `crates/panel-git-status/src/lib.rs`, `panel-git-log/src/lib.rs`| `poll_refresh` in each panel's `tick`                                              |
-| Git repo discovery (RepoManager)    | `crates/git/src/repo_manager.rs` (`spawn_repo_walk`)            | `RepoManager::poll` from git panel `tick`; nested repos and submodules to depth 3, clones a repo ignores or does not track from one `git ls-files --others --directory`, repositories enclosing the project dropped once the walk lands |
-| Layout restore — panels in parallel   | `crates/app/src/layout_store.rs` (`construct_panel` per panel)| Joined synchronously after spawn so the slowest panel still gates the first frame  |
-| Watcher repo registration             | `crates/watcher/src/lib.rs` (`watch_repository`)                | `poll_pending` in app main loop; inotify installs chunked at `INSTALL_CHUNK`/tick, FSEvents (macOS) one recursive root watch with `.gitignore` filtering on delivery |
-| Directory size walk (wide-view)       | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | Per-frame `try_recv` against shared cache; budget enforced per walk             |
-
-The SFTP/FTP backend uses a different pattern — a dedicated tokio
-runtime owns the connection and a chunk-as-command actor (see
-`crates/vfs/src/sftp.rs`). The sync worker drives the chunk loop and
-polls pause/cancel flags between dispatches, so a paused transfer
-leaves the actor free to serve other panels' metadata requests.
-
 ### 8. Project Layouts
 
 **Location:** `crates/project/src/lib.rs`
@@ -759,6 +646,119 @@ from the app side, recognised from git's stderr and retried through the
 askpass helper. The pending action of every vault prompt is a bare
 `PendingAction::Vault`; what the prompt is for, secrets included, stays in
 the app's `VaultState`. See `doc/en/passwords.md` for the user view.
+
+### 11. Key Dependencies
+
+**Ratatui** - Terminal UI framework
+- Widget-based rendering
+- Buffer system for efficient updates
+- Layout system (Rect, Constraints)
+
+**Crossterm** - Cross-platform terminal manipulation
+- Event handling (keyboard, mouse, resize)
+- Terminal control (cursor, colors, clear)
+- Raw mode management
+
+**Tree-sitter** - Syntax highlighting
+- Parser generators for 23 languages
+- Incremental parsing for performance
+- Query system for syntax highlighting
+
+**Ropey** - Text buffer
+- Efficient line-based text storage
+- UTF-8 aware
+- Rope (B-tree of text chunks) internally
+
+**Portable-pty** - PTY implementation
+- Cross-platform pseudo-terminal
+- Shell integration
+- Resize support
+
+**Sysinfo** - System monitoring
+- CPU usage
+- Memory usage
+- Disk space
+
+## Design Decisions
+
+### Why Split Layout with a Fullscreen Preset?
+
+**Problem:** Terminal space is limited and multi-panel IDEs often feel cramped, but binary "one-expanded, rest collapsed" layouts also throw away cases where the user wants to see two or three panels at adjusted heights at once.
+
+**Solution:** Adjustable split layout per group, plus a one-key fullscreen preset:
+- Every panel in a group is visible by default; the user picks heights via mouse drag (the panel's bottom border or its title bar), `Alt+Shift+=` / `Alt+Shift+-`, or any combination thereof.
+- `Alt+F11` toggles a "fullscreen current panel" preset that mirrors the legacy accordion view (one panel takes the full column, others collapse to one row), with the previous heights stashed for instant restore.
+- Heights are cached and rescaled proportionally when the terminal resizes.
+- Automatic stacking still kicks in when the terminal is too narrow (`auto_stack_threshold`).
+
+### Why Dynamic Panels?
+
+**Benefit:** Users can open as many panels as needed:
+- Multiple editors for different files
+- Multiple terminals for different tasks
+- Multiple file managers for different directories
+
+**Challenge:** Managing many panels efficiently
+- The fullscreen preset gives a clutter-free single-panel view on demand
+- Hotkeys provide fast navigation
+- Welcome screen auto-closes
+
+### Why Trait-Based Panels?
+
+**Flexibility:** New panel types can be added without changing core code
+- Implement `Panel` trait
+- Add to panel creation logic
+- Works with existing layout system
+
+**Polymorphism:** `Box<dyn Panel>` allows heterogeneous collections
+- Single `Vec<Box<dyn Panel>>` holds all panel types
+- Uniform rendering and event handling
+- Dynamic dispatch overhead is negligible for TUI
+
+## Performance Characteristics
+
+**Rendering:** O(n) where n = number of panels in visible groups
+- Panels with height ≥ 2 render their full content; panels collapsed to one row render only the title bar
+- Each `height >= 2` panel draws its own bottom border so adjacent panels show two consecutive border rows — the focused panel is framed in its accent colour on all four sides
+
+**Event Handling:** O(1) for most operations
+- Direct index access to focused panel
+- Hash map lookups for key bindings
+
+**Memory:** Linear with panel count
+- Each panel owns its state
+- Shared AppState is small
+- No excessive cloning (uses references)
+
+**File Operations:** Asynchronous where possible
+- FS watcher uses separate thread
+- Debouncing prevents excessive updates
+
+### Async Pipelines
+
+Several startup and hot-path operations that used to block the
+render loop now run on worker threads, polled from each panel's
+`tick()`. The pattern is the same in every case: spawn a worker,
+park a `mpsc::Receiver` on the panel, swap the result in when
+`try_recv()` returns. References below point to where each pipeline
+lives.
+
+| Pipeline                              | Worker location                                                 | Polled in                                                                          |
+|---------------------------------------|-----------------------------------------------------------------|------------------------------------------------------------------------------------|
+| FileManager initial directory read    | `crates/panel-file-manager/src/lib.rs` (`start_async_reload`)   | `check_async_reload` from app's per-tick `check_background_panel_updates`          |
+| FileManager subtree expand            | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | `poll_pending_expansions` from same path; placeholder rows show `…` until resolved |
+| FileManager per-entry git status      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`; `apply_git_statuses` reapplies if dir read raced ahead   |
+| Git status / log panel refresh        | `crates/panel-git-status/src/lib.rs`, `panel-git-log/src/lib.rs`| `poll_refresh` in each panel's `tick`                                              |
+| Git repo discovery (RepoManager)    | `crates/git/src/repo_manager.rs` (`spawn_repo_walk`)            | `RepoManager::poll` from git panel `tick`; nested repos and submodules to depth 3, clones a repo ignores or does not track from one `git ls-files --others --directory`, repositories enclosing the project dropped once the walk lands |
+| Layout restore — panels in parallel   | `crates/app/src/layout_store.rs` (`construct_panel` per panel)| Joined synchronously after spawn so the slowest panel still gates the first frame  |
+| Watcher repo registration             | `crates/watcher/src/lib.rs` (`watch_repository`)                | `poll_pending` in app main loop; inotify installs chunked at `INSTALL_CHUNK`/tick, FSEvents (macOS) one recursive root watch with `.gitignore` filtering on delivery |
+| Directory size walk (wide-view)       | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | Per-frame `try_recv` against shared cache; budget enforced per walk             |
+
+The SFTP/FTP backend uses a different pattern — a dedicated tokio
+runtime owns the connection and a chunk-as-command actor (see
+`crates/vfs/src/sftp.rs`). The sync worker drives the chunk loop and
+polls pause/cancel flags between dispatches, so a paused transfer
+leaves the actor free to serve other panels' metadata requests.
 
 ## Future Architecture Considerations
 

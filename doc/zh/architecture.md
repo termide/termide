@@ -493,114 +493,6 @@ crates/i18n/
 2. `LANG` / `LC_ALL` 系统变量
 3. 默认为英语
 
-### 8. 关键依赖
-
-**Ratatui** - 终端 UI 框架
-- 基于组件的渲染
-- 缓冲区系统实现高效更新
-- 布局系统（Rect、Constraints）
-
-**Crossterm** - 跨平台终端控制
-- 事件处理（键盘、鼠标、调整大小）
-- 终端控制（光标、颜色、清屏）
-- Raw 模式管理
-
-**Tree-sitter** - 语法高亮
-- 23 种语言的解析器生成器
-- 增量解析提升性能
-- 用于语法高亮的查询系统
-
-**Ropey** - 文本缓冲区
-- 高效的基于行的文本存储
-- UTF-8 感知
-- 内部采用 Gap buffer
-
-**Portable-pty** - PTY 实现
-- 跨平台伪终端
-- Shell 集成
-- 调整大小支持
-
-**Sysinfo** - 系统监控
-- CPU 使用率
-- 内存使用量
-- 磁盘空间
-
-## 设计决策
-
-### 为什么采用拆分布局加全屏预设？
-
-**问题：** 终端空间有限，多面板 IDE 常常显得拥挤；但「一个展开、其余折叠」的二元布局又会丢掉用户希望同时看到两三个面板（且高度可调）的场景。
-
-**解决方案：** 每组面板高度可调，并提供一键全屏预设：
-- 默认每个面板都可见；用户通过鼠标拖动（面板下边框或标题栏）、`Alt+Shift+=` / `Alt+Shift+-` 或它们的任意组合来调整高度。
-- `Alt+F11` 切换「聚焦面板全屏」预设，模拟旧的手风琴视图（一个面板占满整列，其余缩为一行），先前的高度被保存以便瞬间恢复。
-- 高度被缓存，并在终端尺寸变化时按比例重缩放。
-- 终端过窄时（`min_panel_width`）仍会自动堆叠到同一组中。
-
-### 为什么选择动态面板？
-
-**优势：** 用户可以根据需要打开任意数量的面板：
-- 多个编辑器用于不同文件
-- 多个终端用于不同任务
-- 多个文件管理器用于不同目录
-
-**挑战：** 高效管理多个面板
-- 全屏预设按需提供干净的「单面板视图」
-- 快捷键提供快速导航
-- 欢迎界面自动关闭
-
-### 为什么选择基于 Trait 的面板？
-
-**灵活性：** 无需更改核心代码即可添加新面板类型
-- 实现 `Panel` trait
-- 添加到面板创建逻辑
-- 与现有布局系统协同工作
-
-**多态性：** `Box<dyn Panel>` 允许异构集合
-- 单个 `Vec<Box<dyn Panel>>` 容纳所有面板类型
-- 统一的渲染和事件处理
-- 动态分发的开销对 TUI 来说可忽略不计
-
-## 性能特征
-
-**渲染：** O(n)，n = 可见组中的面板数量
-- height ≥ 2 的面板渲染完整内容；被压到 1 行的面板仅渲染标题栏
-- 每个 height ≥ 2 的面板都绘制自己的底部边框；连接处显示两行连续的边框，让聚焦面板被强调色完整框住
-
-**事件处理：** 大多数操作 O(1)
-- 直接索引访问聚焦面板
-- 快捷键绑定使用哈希表查找
-
-**内存：** 与面板数量线性相关
-- 每个面板拥有自己的状态
-- 共享的 AppState 很小
-- 无过度克隆（使用引用）
-
-**文件操作：** 尽可能异步
-- 文件系统监视器使用独立线程
-- 防抖避免过多更新
-
-### 异步管道
-
-一些启动和热路径操作过去会阻塞渲染循环，现在改为在工作线程上运行，并从每个
-面板的 `tick()` 中轮询。模式在所有情况下都相同：启动一个工作线程，在面板上停放
-一个 `mpsc::Receiver`，当 `try_recv()` 返回时换入结果。下表指出每个管道所在位置。
-
-| 管道                             | 工作线程位置                                                     | 轮询于                                                                        |
-|----------------------------------|-----------------------------------------------------------------|-------------------------------------------------------------------------------|
-| FileManager 初次目录读取         | `crates/panel-file-manager/src/lib.rs` (`start_async_reload`)   | 应用每帧 `check_background_panel_updates` 中的 `check_async_reload`            |
-| FileManager 子树展开             | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | 同一路径的 `poll_pending_expansions`；占位行在解析前显示 `…`                   |
-| FileManager 每条目 git 状态      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`；若目录读取抢先，`apply_git_statuses` 会重新应用      |
-| Git 状态/日志面板刷新            | `crates/panel-git-status/src/lib.rs`、`panel-git-log/src/lib.rs`| 各面板 `tick` 中的 `poll_refresh`                                             |
-| Git 子模块发现（RepoManager）    | `crates/git/src/repo_manager.rs` (`spawn_submodule_walk`)       | git 面板 `tick` 中的 `RepoManager::poll`                                       |
-| 布局恢复——并行构建面板           | `crates/app/src/layout_store.rs`（每面板 `construct_panel`）  | 启动后同步 join，因此最慢的面板仍决定首帧                                     |
-| 监视器仓库注册                   | `crates/watcher/src/lib.rs` (`watch_repository`)                | 主循环中的 `poll_pending`；inotify 每帧按 `INSTALL_CHUNK` 分块安装，FSEvents（macOS）为单个递归根监视，投递时按 `.gitignore` 过滤 |
-| 目录大小遍历（宽视图）           | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | 对共享缓存逐帧 `try_recv`；每次遍历有预算限制                              |
-
-SFTP/FTP 后端使用不同的模式——一个专用的 tokio 运行时拥有连接和一个“分块即命令”
-actor（见 `crates/vfs/src/sftp.rs`）。同步工作线程驱动分块循环，并在分发之间
-轮询暂停/取消标志，因此暂停的传输会让 actor 空闲以服务其他面板的元数据请求。
-
 ### 8. 项目布局
 
 **位置：** `crates/project/src/lib.rs`
@@ -717,6 +609,114 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 写入。Git 网络操作从应用侧走同一路径：根据 git 的 stderr 识别失败，并通过 askpass 辅助
 程序重试。每个密码库提示的待处理动作都只是 `PendingAction::Vault`；提示的用途（包括
 机密）保存在应用的 `VaultState` 中。用户视角见 `doc/zh/passwords.md`。
+
+### 11. 关键依赖
+
+**Ratatui** - 终端 UI 框架
+- 基于组件的渲染
+- 缓冲区系统实现高效更新
+- 布局系统（Rect、Constraints）
+
+**Crossterm** - 跨平台终端控制
+- 事件处理（键盘、鼠标、调整大小）
+- 终端控制（光标、颜色、清屏）
+- Raw 模式管理
+
+**Tree-sitter** - 语法高亮
+- 23 种语言的解析器生成器
+- 增量解析提升性能
+- 用于语法高亮的查询系统
+
+**Ropey** - 文本缓冲区
+- 高效的基于行的文本存储
+- UTF-8 感知
+- 内部采用 rope（文本块组成的 B 树）
+
+**Portable-pty** - PTY 实现
+- 跨平台伪终端
+- Shell 集成
+- 调整大小支持
+
+**Sysinfo** - 系统监控
+- CPU 使用率
+- 内存使用量
+- 磁盘空间
+
+## 设计决策
+
+### 为什么采用拆分布局加全屏预设？
+
+**问题：** 终端空间有限，多面板 IDE 常常显得拥挤；但「一个展开、其余折叠」的二元布局又会丢掉用户希望同时看到两三个面板（且高度可调）的场景。
+
+**解决方案：** 每组面板高度可调，并提供一键全屏预设：
+- 默认每个面板都可见；用户通过鼠标拖动（面板下边框或标题栏）、`Alt+Shift+=` / `Alt+Shift+-` 或它们的任意组合来调整高度。
+- `Alt+F11` 切换「聚焦面板全屏」预设，模拟旧的手风琴视图（一个面板占满整列，其余缩为一行），先前的高度被保存以便瞬间恢复。
+- 高度被缓存，并在终端尺寸变化时按比例重缩放。
+- 终端过窄时（`min_panel_width`）仍会自动堆叠到同一组中。
+
+### 为什么选择动态面板？
+
+**优势：** 用户可以根据需要打开任意数量的面板：
+- 多个编辑器用于不同文件
+- 多个终端用于不同任务
+- 多个文件管理器用于不同目录
+
+**挑战：** 高效管理多个面板
+- 全屏预设按需提供干净的「单面板视图」
+- 快捷键提供快速导航
+- 欢迎界面自动关闭
+
+### 为什么选择基于 Trait 的面板？
+
+**灵活性：** 无需更改核心代码即可添加新面板类型
+- 实现 `Panel` trait
+- 添加到面板创建逻辑
+- 与现有布局系统协同工作
+
+**多态性：** `Box<dyn Panel>` 允许异构集合
+- 单个 `Vec<Box<dyn Panel>>` 容纳所有面板类型
+- 统一的渲染和事件处理
+- 动态分发的开销对 TUI 来说可忽略不计
+
+## 性能特征
+
+**渲染：** O(n)，n = 可见组中的面板数量
+- height ≥ 2 的面板渲染完整内容；被压到 1 行的面板仅渲染标题栏
+- 每个 height ≥ 2 的面板都绘制自己的底部边框；连接处显示两行连续的边框，让聚焦面板被强调色完整框住
+
+**事件处理：** 大多数操作 O(1)
+- 直接索引访问聚焦面板
+- 快捷键绑定使用哈希表查找
+
+**内存：** 与面板数量线性相关
+- 每个面板拥有自己的状态
+- 共享的 AppState 很小
+- 无过度克隆（使用引用）
+
+**文件操作：** 尽可能异步
+- 文件系统监视器使用独立线程
+- 防抖避免过多更新
+
+### 异步管道
+
+一些启动和热路径操作过去会阻塞渲染循环，现在改为在工作线程上运行，并从每个
+面板的 `tick()` 中轮询。模式在所有情况下都相同：启动一个工作线程，在面板上停放
+一个 `mpsc::Receiver`，当 `try_recv()` 返回时换入结果。下表指出每个管道所在位置。
+
+| 管道                             | 工作线程位置                                                     | 轮询于                                                                        |
+|----------------------------------|-----------------------------------------------------------------|-------------------------------------------------------------------------------|
+| FileManager 初次目录读取         | `crates/panel-file-manager/src/lib.rs` (`start_async_reload`)   | 应用每帧 `check_background_panel_updates` 中的 `check_async_reload`            |
+| FileManager 子树展开             | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | 同一路径的 `poll_pending_expansions`；占位行在解析前显示 `…`                   |
+| FileManager 每条目 git 状态      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`；若目录读取抢先，`apply_git_statuses` 会重新应用      |
+| Git 状态/日志面板刷新            | `crates/panel-git-status/src/lib.rs`、`panel-git-log/src/lib.rs`| 各面板 `tick` 中的 `poll_refresh`                                             |
+| Git 子模块发现（RepoManager）    | `crates/git/src/repo_manager.rs` (`spawn_submodule_walk`)       | git 面板 `tick` 中的 `RepoManager::poll`                                       |
+| 布局恢复——并行构建面板           | `crates/app/src/layout_store.rs`（每面板 `construct_panel`）  | 启动后同步 join，因此最慢的面板仍决定首帧                                     |
+| 监视器仓库注册                   | `crates/watcher/src/lib.rs` (`watch_repository`)                | 主循环中的 `poll_pending`；inotify 每帧按 `INSTALL_CHUNK` 分块安装，FSEvents（macOS）为单个递归根监视，投递时按 `.gitignore` 过滤 |
+| 目录大小遍历（宽视图）           | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | 对共享缓存逐帧 `try_recv`；每次遍历有预算限制                              |
+
+SFTP/FTP 后端使用不同的模式——一个专用的 tokio 运行时拥有连接和一个“分块即命令”
+actor（见 `crates/vfs/src/sftp.rs`）。同步工作线程驱动分块循环，并在分发之间
+轮询暂停/取消标志，因此暂停的传输会让 actor 空闲以服务其他面板的元数据请求。
 
 ## 未来架构考虑
 
