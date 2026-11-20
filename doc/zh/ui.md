@@ -235,7 +235,7 @@ unicode_graph = false
 提交或储藏（stash）的 diff 只显示改动，此时 `Space` 与 `Enter` 一样用于折叠。按键位于
 `[git_diff.keybindings]`：`toggle_stage`、`discard`、`undo_discard`、`select_lines`、
 `prev_hunk`、`next_hunk`、`toggle_collapse`、`toggle_folds`、`edit`、`refresh`、
-`scroll_half_up` 和 `scroll_half_down`。
+`scroll_half_up` 和 `scroll_half_down`。`F5` 或 `Ctrl+R` 重新读取 diff，`Ctrl+U` / `Ctrl+D` 向上或向下滚动半屏。
 
 同一个面板也用于审查代理的改动：在代理面板中输入 `/changes`，或在其菜单中选择**审查
 更改**，会打开该面板，显示自你上次接受以来代理所做的改动，且仅此而已——你在两次请求之间

@@ -383,6 +383,7 @@ control-байты `\x1F` и `\x1C`, которые crossterm парсит в `C
 | `fold_all` / `unfold_all` (`[editor.keybindings]`) | Сворачивает / разворачивает все блоки файла |
 | `stage_change` / `unstage_change` / `revert_change` (`[editor.keybindings]`) | Индексирует, убирает из индекса или откатывает изменение под курсором или в выделенных строках |
 | `send_to_agent` (`[editor.keybindings]`, `[terminal.keybindings]`) | Вставляет выделение (в терминале также последнюю команду или последние строки) в промпт агента |
+| `copy_command_output` (`[terminal.keybindings]`) | Копирует вывод последней команды |
 
 ```toml
 [general.keybindings]

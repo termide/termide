@@ -129,7 +129,7 @@
   捕获组；否则按字面插入。
 - 关闭栏后保留查找和替换文本。
 
-可配置的编辑器按键 `replace_current` 与 `replace_all` 仍会直接作用于当前搜索
+可配置的编辑器按键 `replace_current`（`Ctrl+R`）与 `replace_all`（`Ctrl+Alt+R` / `Alt+R`）仍会直接作用于当前搜索
 （无论栏是否打开，参见[快捷键](keybindings.md)）。
 
 ## 状态栏

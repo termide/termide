@@ -303,6 +303,7 @@ crossterm 解析为 `Ctrl+7` / `Ctrl+4`,规范化器将其重写回斜杠 / 反�
 | `fold_all` / `unfold_all`（`[editor.keybindings]`） | 折叠 / 展开文件中的所有块 |
 | `stage_change` / `unstage_change` / `revert_change`（`[editor.keybindings]`） | 暂存、取消暂存或还原光标处或所选行上的更改 |
 | `send_to_agent`（`[editor.keybindings]`、`[terminal.keybindings]`） | 将所选内容（在终端中也可以是上一条命令或最后几行）放入代理的提示词 |
+| `copy_command_output`（`[terminal.keybindings]`） | 复制上一条命令的输出 |
 
 ```toml
 [general.keybindings]

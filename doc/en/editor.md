@@ -162,9 +162,9 @@ Press `Ctrl+H` to open the find bar with a Replace field added.
   supports `$1` / `${name}` capture groups; off (the default) it is literal.
 - Both find and replace text are preserved when the bar is closed.
 
-The configurable `replace_current` and `replace_all` editor keybindings still
-act on the active search directly, with or without the bar (see
-[Keybindings](keybindings.md)).
+The configurable `replace_current` (`Ctrl+R`) and `replace_all`
+(`Ctrl+Alt+R` / `Alt+R`) editor keybindings still act on the active search
+directly, with or without the bar (see [Keybindings](keybindings.md)).
 
 ## Status bar
 

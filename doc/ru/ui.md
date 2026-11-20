@@ -291,6 +291,8 @@ stash только показывает изменения, и `Space` там с
 Клавиши — в `[git_diff.keybindings]`: `toggle_stage`, `discard`,
 `undo_discard`, `select_lines`, `prev_hunk`, `next_hunk`, `toggle_collapse`,
 `toggle_folds`, `edit`, `refresh`, `scroll_half_up` и `scroll_half_down`.
+`F5` или `Ctrl+R` перечитывает diff, а `Ctrl+U` / `Ctrl+D` прокручивают на
+полэкрана вверх или вниз.
 
 Та же панель служит для ревью изменений агента: `/changes` в панели агента
 или **Ревью изменений** в её меню открывает её на том, что агент изменил с

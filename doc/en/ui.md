@@ -283,7 +283,8 @@ a file folded by hand stays folded across refreshes. A commit's or a stash's
 diff only shows changes, and `Space` folds there as `Enter` does. The keys are
 under `[git_diff.keybindings]`: `toggle_stage`, `discard`, `undo_discard`,
 `select_lines`, `prev_hunk`, `next_hunk`, `toggle_collapse`, `toggle_folds`,
-`edit`, `refresh`, `scroll_half_up` and `scroll_half_down`.
+`edit`, `refresh`, `scroll_half_up` and `scroll_half_down`. `F5` or `Ctrl+R`
+reloads the diff, and `Ctrl+U` / `Ctrl+D` scroll half a screen up or down.
 
 The same panel reviews an agent's changes: `/changes` in the agent panel, or
 **Review changes** in its menu, opens it on what the agent changed since you

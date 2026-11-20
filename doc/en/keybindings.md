@@ -369,6 +369,7 @@ table have no key either; the panel menu (`Alt+K`) offers them where they apply:
 | `fold_all` / `unfold_all` (`[editor.keybindings]`) | Fold / unfold every block of the file |
 | `stage_change` / `unstage_change` / `revert_change` (`[editor.keybindings]`) | Stage, unstage or revert the change at the cursor or on the selected lines |
 | `send_to_agent` (`[editor.keybindings]`, `[terminal.keybindings]`) | Put the selection (in a terminal also the last command or the last lines) into the agent's prompt |
+| `copy_command_output` (`[terminal.keybindings]`) | Copy the last command's output |
 
 ```toml
 [general.keybindings]
