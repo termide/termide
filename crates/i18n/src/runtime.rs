@@ -1031,7 +1031,6 @@ impl Translation for RuntimeTranslation {
         project_created,
         projects_close_title,
         projects_close_warning,
-        projects_already_open,
         projects_already_current,
         projects_move,
         projects_copy,

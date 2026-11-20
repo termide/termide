@@ -1738,7 +1738,6 @@ pub trait Translation: Send + Sync {
     fn project_created(&self) -> &str;
     fn projects_close_title(&self) -> &str;
     fn projects_close_warning(&self) -> &str;
-    fn projects_already_open(&self) -> &str;
     fn projects_already_current(&self) -> &str;
     fn projects_move(&self) -> &str;
     fn projects_copy(&self) -> &str;
