@@ -703,6 +703,28 @@ fn a_compaction_that_kept_nothing_says_so_without_a_count_of_zero() {
 }
 
 #[test]
+fn a_compaction_of_an_untold_size_counts_what_the_context_last_stood_at() {
+    let mut panel = AgentPanel::new(setup(vec![reply("ok")]));
+    panel.context_tokens = 12_857;
+    panel.apply(AgentEvent::Compacted {
+        summary: "the gist".into(),
+        kept: 0,
+        tokens_before: 0,
+        tokens_after: 700,
+        call: summary_call(),
+    });
+    assert_eq!(
+        notices(&panel).last().map(String::as_str),
+        Some(
+            termide_i18n::t()
+                .agent_notice_compacted_summary_fmt(12_857)
+                .as_str()
+        )
+    );
+    assert_eq!(panel.context_tokens, 700);
+}
+
+#[test]
 fn a_compaction_and_a_refused_summary_call_are_logged_with_how_the_call_went() {
     let dir = tempfile::tempdir().unwrap();
     let mut panel = AgentPanel::new(AgentPanelSetup {

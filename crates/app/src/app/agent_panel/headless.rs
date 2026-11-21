@@ -247,6 +247,7 @@ pub fn run_agent_headless(
                 session_id: None,
             }),
             resume: None,
+            fork: None,
             history: Vec::new(),
         };
         let runtime = match AcpRuntime::start(&agent, &config, setup) {

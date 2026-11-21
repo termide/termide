@@ -527,7 +527,17 @@ that focus, as `/compact <focus>` would — the older part of the conversation
 summarised with the focus in mind, the latest kept as it is — so the copy
 starts with what bears on the work you split off rather than the whole
 history. The panel you forked from is not compacted. A copy too short to
-compact stays whole, with a notice saying so. The agent can fork too, handing
+compact stays whole, with a notice saying so.
+
+A copy run by an [external agent](#external-agents) that can branch its
+sessions (ACP's `session/fork`; Claude Code can) branches off the agent's
+session of the source rather than opening a new one told the conversation:
+it holds the same conversation, tool calls included, and what the agent has
+cached of it serves the copy too. Its focus then goes to the agent's own
+`/compact <focus>`, once the agent has started. A copy that cannot branch —
+the agent cannot, has lost the session, or the copy works in another
+directory — opens a new session told the conversation, as a reopened one
+does, and keeps it whole whatever the focus. The agent can fork too, handing
 part of its work over to a copy (see
 [Forking part of the work](#forking-part-of-the-work)).
 
@@ -2536,7 +2546,11 @@ as its first request (`& Forking · …` in this panel, `& Taking over from …`
 in the new one). With a `focus`, the copy is compacted on it first, as
 `/fork <focus>` does, so that it starts with what bears on its part rather
 than the whole history; without one it keeps the whole conversation. The
-copy is a session of the same agent, on the same model. It is named after its
+copy is a session of the same agent, on the same model. An external agent's
+copy branches off the agent's session when it can (see `/fork` in
+[Using the panel](#using-the-panel)); the `fork` call then returns once it
+has, so the
+copy holds the conversation up to that call. It is named after its
 own part of the work rather than after the session it came from: the `title`
 the agent gave it, or else the first line of that request, cut short — with a
 counter only when another session already has the name — and that name is
@@ -2627,7 +2641,8 @@ switch back to the agent, continues that session through ACP's
 `session/resume` or `session/load` when the agent offers either (Claude Code
 does), and the agent knows the whole conversation, its tool calls included.
 When it cannot — the agent offers neither or has lost the session, the
-session was forked, moved to another directory, compacted or rewound since,
+session is a fork that could not branch off the agent's session, was moved
+to another directory, compacted or rewound since,
 or it began with another agent — the agent opens a new session and its first
 request is preceded by the conversation. When the agent's context window is
 known, it gets the whole conversation as a record — the requests, the

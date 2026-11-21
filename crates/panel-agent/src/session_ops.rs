@@ -20,7 +20,8 @@ use crate::runtime::{
 use crate::toolset::served_skills;
 use crate::{
     format_tokens, shorten_path, truncate_title, AgentPanel, Item, NoticeKind, COMPACT_COMMAND,
-    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_SESSION_ACTION, RENAME_RECENT_ACTION,
+    DELETE_RECENT_ACTION, DELETE_SESSION_ACTION, FORK_COMMANDS_GRACE, FORK_SESSION_ACTION,
+    RENAME_RECENT_ACTION,
 };
 
 /// Delete a session the panel is leaving when it holds no conversation, so
@@ -173,6 +174,7 @@ impl AgentPanel {
                 &self.context_off,
             ),
             self.panel_id,
+            None,
         );
         // Dropping the old runtime cancels it and asks its worker to stop.
         self.runtime = runtime;
@@ -821,23 +823,58 @@ impl AgentPanel {
     /// compacted on it first, so that only what bears on it stays in the
     /// context; then `first` — the request the forking agent wrote, `None`
     /// for one the user forks and goes on in by hand — goes as another
-    /// agent's message. An external agent with a `/compact` of its own is
-    /// sent that, as a request; a compaction that does not go out leaves the
-    /// copy whole, and `first` goes at once.
+    /// agent's message. An external agent is sent its own `/compact` once it
+    /// has started, as a request, and only when the copy branched off its
+    /// source's session (see [`Self::settle_fork_focus`]); a compaction that
+    /// does not go out leaves the copy whole, and `first` goes at once.
     pub fn start_fork(&mut self, focus: Option<String>, first: Option<UserMessage>) {
         let focus = focus.filter(|focus| !focus.trim().is_empty());
         self.fork_first = first;
         self.fork_compacting = match focus {
-            Some(focus) if self.external && self.agent_command(COMPACT_COMMAND).is_some() => {
-                let text = format!("/{COMPACT_COMMAND} {focus}");
-                let events = self.send_as(text.clone(), Some(text));
-                self.pending_events.extend(events);
-                true
+            Some(focus) if self.external => {
+                self.fork_focus_waiting = Some((focus, None));
+                self.settle_fork_focus();
+                self.fork_compacting || self.fork_focus_waiting.is_some()
             }
             Some(focus) => self.compact_now(Some(focus)),
             None => false,
         };
         self.release_fork_first();
+    }
+
+    /// An external fork's focus, once its agent has started: sent as the
+    /// agent's own `/compact <focus>` when the copy branched off its source's
+    /// session and the agent offers that command. A copy opened anew is to be
+    /// told the conversation before its first request, which would no longer
+    /// be a command then, so it stays whole; so does one whose agent offers
+    /// no `/compact` within [`FORK_COMMANDS_GRACE`] of starting — it lists
+    /// its commands a moment after the session opens. Whether anything is
+    /// still to be decided.
+    pub(crate) fn settle_fork_focus(&mut self) -> bool {
+        let Some((focus, ready)) = self.fork_focus_waiting.as_mut() else {
+            return false;
+        };
+        if self.runtime.is_starting() {
+            return true;
+        }
+        let ready = *ready.get_or_insert_with(std::time::Instant::now);
+        let focus = focus.clone();
+        if self.runtime.awaits_recap() {
+            log::info!("agent fork: a copy opened anew stays whole, not compacted on its focus");
+        } else if self.agent_command(COMPACT_COMMAND).is_some() {
+            let text = format!("/{COMPACT_COMMAND} {focus}");
+            let events = self.send_as(text.clone(), Some(text));
+            self.pending_events.extend(events);
+            self.fork_focus_waiting = None;
+            return false;
+        } else if ready.elapsed() < FORK_COMMANDS_GRACE {
+            return true;
+        } else {
+            log::info!("agent fork: the agent offers no /{COMPACT_COMMAND}; the copy stays whole");
+        }
+        self.fork_focus_waiting = None;
+        self.fork_compacted();
+        false
     }
 
     /// A compaction a fork's first request waited for is over, however it
@@ -849,7 +886,7 @@ impl AgentPanel {
     /// Send a fork's first request once nothing it waits for is under way:
     /// whether it went.
     pub(crate) fn release_fork_first(&mut self) -> bool {
-        if self.fork_compacting || self.is_busy() {
+        if self.fork_compacting || self.fork_focus_waiting.is_some() || self.is_busy() {
             return false;
         }
         let Some(first) = self.fork_first.take() else {

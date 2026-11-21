@@ -1,8 +1,8 @@
 use super::*;
 use std::io::pipe;
 use termide_agent_core::{
-    permission_channel, ChecklistItem, ChecklistStatus, PermissionAnswer, PermissionEnvelope,
-    PermissionRules,
+    permission_channel, ChecklistItem, ChecklistStatus, ForkSource, PermissionAnswer,
+    PermissionEnvelope, PermissionRules,
 };
 
 /// `fs/read_text_file` serves a range of a file without loading it whole
@@ -240,6 +240,7 @@ fn fake_agent(dir: PathBuf) -> (AcpRuntime, Receiver<PermissionEnvelope>) {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -316,6 +317,7 @@ fn file_agent(
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -583,6 +585,7 @@ fn recording_agent_with(
             reviewer: ReviewerSetup::default(),
             host_tools,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -1406,6 +1409,7 @@ fn a_resumed_claude_code_session_from_a_log_with_plan_mode_is_told_it_is_off() {
             earlier(),
             AcpFlavor::ClaudeCode,
             plan_seen,
+            None,
         );
         let (_, prompt) = run_prompt(&runtime, &seen, "next");
         let leaves = prompt
@@ -2028,6 +2032,7 @@ fn models_agent_with(dir: PathBuf, advertised: Value) -> AcpRuntime {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -2125,6 +2130,7 @@ fn options_are_listed_and_set_while_a_turn_runs() {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -2260,6 +2266,7 @@ fn steering_agent(dir: PathBuf, outcome: &'static str) -> (AcpRuntime, Arc<Mutex
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -2478,6 +2485,7 @@ fn side_agent(
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,
@@ -2675,6 +2683,7 @@ fn asking_agent(
             reviewer,
             host_tools: None,
             resume: None,
+            fork: None,
             history: vec![Message::User(UserMessage::text("set the project up"))],
         },
         5,
@@ -2948,6 +2957,7 @@ fn a_message_taken_by_the_next_turn_leaves_the_queue_at_once() {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         1,
@@ -3045,6 +3055,7 @@ fn a_limited_turn_is_classified_and_retried_as_it_was() {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         1,
@@ -3101,6 +3112,7 @@ fn a_failed_handshake_is_reported_on_the_first_prompt() {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         1,
@@ -3185,10 +3197,12 @@ fn session_agent(
         history,
         AcpFlavor::Generic,
         false,
+        None,
     )
 }
 
 /// [`session_agent`] of `flavor`, its log recording plan mode or not.
+#[allow(clippy::too_many_arguments)]
 fn session_agent_as(
     dir: PathBuf,
     capabilities: Value,
@@ -3197,6 +3211,7 @@ fn session_agent_as(
     history: Vec<Message>,
     flavor: AcpFlavor,
     plan_seen: bool,
+    fork: Option<ForkSource>,
 ) -> (AcpRuntime, Arc<Mutex<Vec<Value>>>) {
     let (to_agent_rx, to_agent_tx) = pipe().unwrap();
     let (from_agent_rx, from_agent_tx) = pipe().unwrap();
@@ -3216,7 +3231,7 @@ fn session_agent_as(
                 Some("initialize") => {
                     json!({ "protocolVersion": 1, "agentCapabilities": capabilities })
                 }
-                Some("session/resume" | "session/load") if forgotten => {
+                Some("session/resume" | "session/load" | "session/fork") if forgotten => {
                     send(
                         json!({ "jsonrpc": "2.0", "id": id, "error": { "code": -32002, "message": "no such session" } }),
                     );
@@ -3235,6 +3250,7 @@ fn session_agent_as(
                     json!({})
                 }
                 Some("session/resume") => json!({}),
+                Some("session/fork") => json!({ "sessionId": "branch" }),
                 Some("session/new") => json!({ "sessionId": "fresh" }),
                 Some("session/prompt") => {
                     send(update(
@@ -3269,6 +3285,7 @@ fn session_agent_as(
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume,
+            fork,
             history,
         },
         5,
@@ -3399,6 +3416,96 @@ fn a_loaded_session_replays_nothing_into_the_panel() {
     assert!(!events
         .iter()
         .any(|e| matches!(e, AgentEvent::ToolExecutionStart { .. })));
+}
+
+/// A fork's copy of the session the source ran in as `fake`, and the
+/// receiver its `fork` call waits on.
+fn fork_of_old(agent: &str) -> (Option<ForkSource>, std::sync::mpsc::Receiver<()>) {
+    let (opened, wait) = std::sync::mpsc::channel();
+    let source = ForkSource {
+        session: old_session(agent).unwrap(),
+        opened: Some(opened),
+    };
+    (Some(source), wait)
+}
+
+#[test]
+fn a_forks_copy_branches_off_the_sources_session_and_is_told_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let (fork, wait) = fork_of_old("fake");
+    let (runtime, seen) = session_agent_as(
+        dir.path().to_path_buf(),
+        json!({ "sessionCapabilities": { "fork": {}, "resume": {} } }),
+        false,
+        None,
+        earlier(),
+        AcpFlavor::Generic,
+        false,
+        fork,
+    );
+    let (events, prompt) = run_prompt(&runtime, &seen, "next");
+    assert_eq!(
+        methods(&seen),
+        ["initialize", "session/fork", "session/prompt"]
+    );
+    let branched = seen_where(&seen, |m| m["method"] == "session/fork").remove(0);
+    assert_eq!(branched["params"]["sessionId"], "old");
+    assert_eq!(branched["params"]["cwd"], json!(dir.path()));
+    // The branch is the copy's own, recorded for a reopen to resume, and
+    // holds the conversation: the request goes alone.
+    assert_eq!(opened(&events), ["fake:branch"]);
+    let sent = seen_where(&seen, |m| m["method"] == "session/prompt").remove(0);
+    assert_eq!(sent["params"]["sessionId"], "branch");
+    assert_eq!(prompt, [json!({ "type": "text", "text": "next" })]);
+    // Whoever waited for the branch is let go.
+    assert_eq!(
+        wait.recv_timeout(Duration::from_secs(5)),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+    );
+}
+
+#[test]
+fn a_forks_copy_that_cannot_branch_is_told_the_conversation() {
+    // The agent forks no session; it lost the source's; the source ran
+    // another agent.
+    for (caps, forgotten, agent) in [
+        (json!({}), false, "fake"),
+        (
+            json!({ "sessionCapabilities": { "fork": {} } }),
+            true,
+            "fake",
+        ),
+        (
+            json!({ "sessionCapabilities": { "fork": {} } }),
+            false,
+            "other",
+        ),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let (fork, wait) = fork_of_old(agent);
+        let (runtime, seen) = session_agent_as(
+            dir.path().to_path_buf(),
+            caps.clone(),
+            forgotten,
+            None,
+            earlier(),
+            AcpFlavor::Generic,
+            false,
+            fork,
+        );
+        let (events, prompt) = run_prompt(&runtime, &seen, "next");
+        assert_eq!(
+            opened(&events),
+            ["fake:fresh"],
+            "{caps} {forgotten} {agent}"
+        );
+        assert_eq!(prompt.len(), 2, "told the conversation first: {prompt:?}");
+        assert!(prompt[0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("earlier request"));
+        assert!(wait.recv_timeout(Duration::from_secs(5)).is_err());
+    }
 }
 
 #[test]
@@ -3596,6 +3703,7 @@ fn self_starting_agent(dir: PathBuf, after: &'static str) -> AcpRuntime {
             reviewer: ReviewerSetup::default(),
             host_tools: None,
             resume: None,
+            fork: None,
             history: Vec::new(),
         },
         5,

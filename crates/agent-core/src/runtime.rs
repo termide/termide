@@ -162,9 +162,24 @@ pub struct BackendSetup {
     /// The agent's own session of this conversation, when the log names
     /// one it can still resume.
     pub resume: Option<ExternalSessionRef>,
+    /// For a fork's copy, the agent's session of the source to branch off
+    /// when the agent forks sessions: the copy goes on in a session of its
+    /// own holding the same conversation, with no recap. Taken when there is
+    /// no session of the copy's own to resume.
+    pub fork: Option<ForkSource>,
     /// The conversation so far, as the log has it, for an agent that
     /// cannot resume a session of its own: it is told a recap instead.
     pub history: Vec<Message>,
+}
+
+/// The agent's session a fork's copy branches off, and who waits for it.
+pub struct ForkSource {
+    pub session: ExternalSessionRef,
+    /// Dropped once the copy has its session — branched off, or opened anew
+    /// when it could not branch — or never will: whoever holds the receiver
+    /// (the `fork` call, so that its source goes on only after the branch)
+    /// waits for that.
+    pub opened: Option<std::sync::mpsc::Sender<()>>,
 }
 
 /// termide's tools served to an external agent, and the hooks every call
@@ -274,6 +289,12 @@ pub trait Backend: Send {
     /// finished, so its models and settings are not known yet. The built-in
     /// loop is ready at once.
     fn is_starting(&self) -> bool {
+        false
+    }
+    /// Whether the backend's session opened anew on a conversation it is to
+    /// be told before its next request (an external agent that could neither
+    /// resume nor branch a session). The built-in loop holds its history.
+    fn awaits_recap(&self) -> bool {
         false
     }
     /// How full the context is and how large it is, `(used, size)` in tokens,

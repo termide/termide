@@ -33,9 +33,9 @@ use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
     BackgroundCall, CancelToken, DecidedBy, Decision, ExternalSessionRef, Failure, FailureKind,
-    Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote, PlanPrompt,
-    PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision, ToolRegistry,
-    ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
+    ForkSource, Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote,
+    PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision,
+    ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
 use termide_agent_core::{CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
@@ -268,6 +268,9 @@ struct Shared {
     served_tools: Mutex<BTreeSet<String>>,
     /// The agent's own session to resume, when the log names one.
     resume: Option<ExternalSessionRef>,
+    /// For a fork's copy, the source's session to branch off; taken by the
+    /// handshake, which drops it once the session is open.
+    fork: Mutex<Option<ForkSource>>,
     /// What the reviewer judges the agent's requests against: the user's
     /// messages and the agent's calls, as the built-in loop records them.
     intent: IntentLog,
@@ -593,6 +596,7 @@ impl AcpRuntime {
             mode: setup.mode,
             plan: setup.plan,
             resume: setup.resume,
+            fork: Mutex::new(setup.fork),
             intent: {
                 let intent = IntentLog::new();
                 for message in &setup.history {
@@ -1066,6 +1070,14 @@ impl Backend for AcpRuntime {
         self.shared.set_config_option(&id, &value)
     }
 
+    fn awaits_recap(&self) -> bool {
+        self.shared
+            .untold
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_some()
+    }
+
     fn agent_commands(&self) -> Vec<AgentCommand> {
         self.shared
             .commands
@@ -1191,8 +1203,17 @@ impl Shared {
             self.wait_for_mcp_servers();
         }
         let params = self.new_session_params(http);
-        let result =
-            outcome.and_then(|init| self.open_session(&init["agentCapabilities"], params, timeout));
+        // Whoever waits for a fork's copy to have its session is let go
+        // when this is dropped, at the end of the handshake however it went.
+        let fork = self
+            .fork
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        let result = outcome.and_then(|init| {
+            self.open_session(&init["agentCapabilities"], params, fork.as_ref(), timeout)
+        });
+        drop(fork);
         let conn = match result {
             Ok(value) => match value["sessionId"].as_str() {
                 Some(id) => {
@@ -1298,10 +1319,13 @@ impl Shared {
     /// — through `session/resume`, else `session/load`, whose replay of what
     /// the panel already shows is dropped — or else a new one, recorded in
     /// the log and told a recap of the conversation before its first request.
+    /// A fork's copy with no session of its own yet branches off `fork`'s
+    /// through `session/fork` when the agent offers it.
     fn open_session(
         &self,
         capabilities: &Value,
         params: Value,
+        fork: Option<&ForkSource>,
         timeout: Duration,
     ) -> Result<Value, String> {
         let history =
@@ -1343,6 +1367,35 @@ impl Shared {
                 Err(error) => {
                     log::warn!("acp {}: cannot resume the session: {error}", self.name)
                 }
+            }
+        }
+        // A fork's copy: a session of its own branched off the source's,
+        // holding the same conversation — whose start the agent's prompt
+        // cache already has — so nothing needs telling. The same agent
+        // only, as for a resume.
+        let source = fork
+            .map(|fork| &fork.session)
+            .filter(|source| source.agent == self.name);
+        if let Some(source) = source.filter(|_| self.can_fork.load(Ordering::Acquire)) {
+            let mut fork_params = params.clone();
+            fork_params["sessionId"] = json!(source.session_id);
+            match self.request("session/fork", fork_params, timeout) {
+                Ok(value) if value["sessionId"].is_string() => {
+                    let id = value["sessionId"].as_str().unwrap_or_default();
+                    let _ = self.events.send(AgentEvent::ExternalSession {
+                        agent: self.name.clone(),
+                        session_id: id.to_string(),
+                    });
+                    if self.plan_seen {
+                        self.told_plan
+                            .store(ToldPlan::Stale as u8, Ordering::Release);
+                    }
+                    return Ok(value);
+                }
+                Ok(_) => log::warn!("acp {}: session/fork returned no sessionId", self.name),
+                // Gone from the agent's store, most likely: the copy goes on
+                // in a new session, told the conversation.
+                Err(error) => log::warn!("acp {}: cannot branch the session: {error}", self.name),
             }
         }
         let value = self.request("session/new", params, timeout)?;

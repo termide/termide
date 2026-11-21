@@ -11,7 +11,8 @@ termide's tools by calling the MCP server termide hands it in `session/new`,
 announcing each call as `mcp__termide__<tool>` — so termide's permission
 cards, edits and blocks are the real ones. The first request plays the same
 task as mock-llm/server.py; any later one ends in a used-up session limit
-with a reset time, for the limit card. Standard library only.
+with a reset time, for the limit card. A fork's copy branches off a session
+with `session/fork`. Standard library only.
 """
 
 import calendar
@@ -237,6 +238,7 @@ def handle(message):
                 "loadSession": False,
                 "promptCapabilities": {"image": True, "embeddedContext": True},
                 "mcpCapabilities": {"http": True, "sse": True},
+                "sessionCapabilities": {"fork": {}},
             },
             "authMethods": [],
         }})
@@ -247,6 +249,14 @@ def handle(message):
         if servers:
             state["mcp"] = servers[0]
         send({"id": request_id, "result": {"sessionId": "demo-session", "configOptions": config_options()}})
+    elif method == "session/fork":
+        # A branch of the session this or another stand-in opened: the
+        # conversation is the agent's own, nothing to keep here.
+        note("session/fork " + str(params.get("sessionId")))
+        servers = [s for s in params.get("mcpServers", []) if s.get("type") == "http"]
+        if servers:
+            state["mcp"] = servers[0]
+        send({"id": request_id, "result": {"sessionId": "demo-branch", "configOptions": config_options()}})
     elif method == "session/set_config_option":
         if params.get("configId") == "model":
             state["model"] = params.get("value")

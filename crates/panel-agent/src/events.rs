@@ -549,6 +549,13 @@ impl AgentPanel {
                 tokens_after,
                 call,
             } => {
+                // An agent that says nothing of the context it compacted, in a
+                // session it has not yet reported on (a fork's copy branched
+                // a moment ago), compacted what the log last stood at.
+                let tokens_before = match tokens_before {
+                    0 => self.context_tokens,
+                    tokens => tokens,
+                };
                 // The next reply's usage would correct the figure only once
                 // the next turn finishes.
                 self.context_tokens = tokens_after;
@@ -796,6 +803,7 @@ impl AgentPanel {
             self.apply(event);
             changed = true;
         }
+        self.settle_fork_focus();
         changed |= self.release_fork_first();
         changed |= self.restart_after_early_stop();
         changed |= self.take_reviewer_spent();

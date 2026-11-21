@@ -285,6 +285,7 @@ fn setup_with(provider: Arc<Scripted>) -> AgentPanelSetup {
         terminals: None,
         fold: FoldMode::OnFinish,
         on_limit: LimitPolicy::Ask,
+        fork_from: None,
     }
 }
 

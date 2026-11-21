@@ -12,12 +12,12 @@ use termide_agent_core::{
     apply_tool_texts, build_system_prompt, discover_context_files, ensure_global_layout,
     permission_channel, AcpConfig, AcpFlavor, Agent, AgentDirs, AgentEvent, AssistantMessage,
     AutoDenyPrompter, Backend, BackendSetup, CancelToken, ChainedHooks, CompactionPolicy, Decision,
-    Failure, FailureKind, HostTools, IntentLog, LimitPolicy, Message, MessageOrigin, ModeHandle,
-    ModelChoice, ModelSpec, OriginKind, PermissionAnswer, PermissionHooks, PermissionRules,
-    PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup, Session,
-    SessionParent, SessionSummary, ShellOutput, ShellRunner, SideModels, Spender, StreamEvent,
-    ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage, UserMessage,
-    DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
+    Failure, FailureKind, ForkSource, HostTools, IntentLog, LimitPolicy, Message, MessageOrigin,
+    ModeHandle, ModelChoice, ModelSpec, OriginKind, PermissionAnswer, PermissionHooks,
+    PermissionRules, PersistScope, PlanGuard, PromptOptions, Provider, Refusals, ReviewerSetup,
+    Session, SessionParent, SessionSummary, ShellOutput, ShellRunner, SideModels, Spender,
+    StreamEvent, ThinkingLevel, Tool, ToolCall, ToolContext, ToolRegistry, ToolUpdate, Usage,
+    UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR, SESSIONS_DIR,
 };
 use termide_agent_hooks::CommandHooks;
 use termide_agent_mcp::{Connections, TokenStore};
@@ -106,7 +106,7 @@ impl App {
         cwd: &Path,
         focus: Option<String>,
     ) -> Result<()> {
-        if let Err(error) = self.open_fork(source, cwd, focus, None) {
+        if let Err(error) = self.open_fork(source, cwd, focus, None, None) {
             self.show_error_modal(error);
         }
         Ok(())
@@ -119,12 +119,19 @@ impl App {
     /// the run that call is part of, is brought to rest first — the call
     /// answered as the one that made the fork — and then takes the part of
     /// the work handed over as its first request.
+    ///
+    /// When the source runs on an external agent's session that the agent
+    /// can branch, the copy runs on a branch of it rather than being told the
+    /// conversation anew, so what the agent has cached of it serves the copy
+    /// too. `opened` is dropped once the copy has its session, however it
+    /// got one.
     pub(in crate::app) fn open_fork(
         &mut self,
         source: &Path,
         cwd: &Path,
         focus: Option<String>,
         handover: Option<Handover>,
+        opened: Option<std::sync::mpsc::Sender<()>>,
     ) -> Result<(String, u64), String> {
         let t = termide_i18n::t();
         let source_session = Session::open(source).map_err(|error| {
@@ -161,14 +168,17 @@ impl App {
             }
             None => None,
         };
+        let fork_from = fork_source(&source_session, cwd, opened);
         let settings = self.state.config.ai.clone();
-        let Some(mut panel) = restore_agent_panel(
+        let Some(mut panel) = restore_numbered_agent_panel(
             &settings,
             &self.project_root,
             cwd.to_path_buf(),
             Some(copy.clone()),
             None,
             AgentSetupState::default(),
+            None,
+            fork_from,
         ) else {
             return Err(discard_copy(t.agent_not_configured().to_string()));
         };
@@ -178,6 +188,21 @@ impl App {
         self.auto_save_layout();
         Ok(opened)
     }
+}
+
+/// The external agent's session a fork of `source` working in `cwd`
+/// branches off: the one the source runs on, when it still does. The agent
+/// keeps its sessions by directory, so a copy working elsewhere opens one of
+/// its own there.
+fn fork_source(
+    source: &Session,
+    cwd: &Path,
+    opened: Option<std::sync::mpsc::Sender<()>>,
+) -> Option<ForkSource> {
+    source
+        .external_session()
+        .filter(|_| source.header().cwd == cwd)
+        .map(|session| ForkSource { session, opened })
 }
 
 /// A fork the agent asked for: the id of its `fork` call, the part of the
@@ -296,6 +321,7 @@ impl App {
             agent,
             setup,
             number,
+            None,
         ) else {
             return Ok(());
         };
@@ -404,11 +430,22 @@ pub(crate) fn restore_agent_panel(
     agent: Option<String>,
     setup: AgentSetupState,
 ) -> Option<AgentPanel> {
-    restore_numbered_agent_panel(settings, project_root, cwd, session, agent, setup, None)
+    restore_numbered_agent_panel(
+        settings,
+        project_root,
+        cwd,
+        session,
+        agent,
+        setup,
+        None,
+        None,
+    )
 }
 
 /// [`restore_agent_panel`] for a panel taking the place of the one numbered
 /// `panel_id`, whose number it keeps; `None` gives it a number of its own.
+/// `fork_from` is the agent's session a fork's copy branches off.
+#[allow(clippy::too_many_arguments)]
 fn restore_numbered_agent_panel(
     settings: &AiSettings,
     project_root: &Path,
@@ -417,6 +454,7 @@ fn restore_numbered_agent_panel(
     agent: Option<String>,
     setup: AgentSetupState,
     panel_id: Option<u64>,
+    fork_from: Option<ForkSource>,
 ) -> Option<AgentPanel> {
     if usable_connection(settings).is_none() {
         log::warn!("agent panel not restored: no [ai.connections] entry to run on");
@@ -455,6 +493,7 @@ fn restore_numbered_agent_panel(
     });
     let mut panel_setup = agent_setup(settings, cwd, project_root, agent, session);
     panel_setup.panel_id = panel_id;
+    panel_setup.fork_from = fork_from;
     Some(AgentPanel::new(panel_setup))
 }
 
@@ -2842,6 +2881,7 @@ impl Subagents {
                 session_id: None,
             }),
             resume,
+            fork: None,
             history,
         };
         let runtime = AcpRuntime::start(&run.name, &config, setup)?;
@@ -3486,6 +3526,7 @@ fn agent_setup(
         shell_run: Some(shell_run),
         terminals: Some(Arc::clone(terminals::agent_terminals()) as _),
         on_limit: settings.on_limit,
+        fork_from: None,
     }
 }
 

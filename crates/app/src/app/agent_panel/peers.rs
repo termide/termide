@@ -100,7 +100,9 @@ enum Request {
         focus: Option<String>,
         /// The name the agent gave the fork, if any.
         title: Option<String>,
-        reply: Sender<Result<String, String>>,
+        /// What the call answers, and — when the copy branches off the
+        /// agent's session — what is dropped once it has.
+        reply: Sender<Result<Forked, String>>,
     },
     /// How many messages agents passed one another to get the run of a
     /// panel going.
@@ -198,6 +200,14 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
     ]
 }
 
+/// A `fork` call's answer, and what is dropped once its copy has branched
+/// off the agent's session.
+type Forked = (String, Option<Receiver<()>>);
+
+/// How long a `fork` call waits, at most, for its copy to branch off the
+/// agent's session: the agent's start and one request.
+const FORK_BRANCH_WAIT: Duration = Duration::from_secs(60);
+
 /// `fork` for the agent `caller` of a panel in the project at
 /// `project_root`.
 pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
@@ -206,7 +216,7 @@ pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
     let fork = Arc::new(move |ctx: &ToolContext, request: &ForkRequest| {
         clear_to_pass(ctx, &root, "fork no more")?;
         let (reply, answer) = mpsc::channel();
-        ask(
+        let (text, branched) = ask(
             Request::Fork {
                 from: ctx.panel,
                 session: ctx.session.as_ref().and_then(|session| session.id.clone()),
@@ -219,7 +229,14 @@ pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
                 reply,
             },
             &answer,
-        )
+        )?;
+        // The agent branches its session at its last message, which this
+        // call is part of: its run goes on, past this answer, only once the
+        // copy has branched off. A copy that cannot branch drops it at once.
+        if let Some(branched) = branched {
+            let _ = branched.recv_timeout(FORK_BRANCH_WAIT);
+        }
+        Ok(text)
     });
     Arc::new(ForkTool::new(fork))
 }
@@ -600,7 +617,7 @@ impl App {
     /// its own, which takes the part of the work handed over as the agent's
     /// message: one more passed without the user, so a chain of forks is cut
     /// off as one of messages is.
-    fn fork_for_agent(&mut self, fork: Fork) -> Result<String, String> {
+    fn fork_for_agent(&mut self, fork: Fork) -> Result<Forked, String> {
         let source = self
             .agent_panels()
             .find(|panel| Some(panel.panel_id()) == fork.from)
@@ -622,7 +639,8 @@ impl App {
             panel: fork.from,
             hops,
         });
-        let compacted = fork.focus.is_some();
+        let focused = fork.focus.is_some();
+        let (opened, branched) = mpsc::channel();
         let (id, panel) = self.open_fork(
             &session,
             &cwd,
@@ -632,16 +650,22 @@ impl App {
                 first,
                 title,
             }),
+            Some(opened),
         )?;
-        let context = if compacted {
-            "this conversation, compacted on your focus"
+        // Compacting a copy goes by its agent: the built-in loop always can,
+        // an external one when the copy branched off its session.
+        let context = if focused {
+            "this conversation, compacted on your focus where its agent can"
         } else {
             "this conversation"
         };
-        Ok(format!(
-            "Forked into session {id} (panel {panel}). It holds {context} and takes your prompt \
-             as its first request; it works with the user from now on. Nothing comes back from \
-             it: leave the part you handed it to it."
+        Ok((
+            format!(
+                "Forked into session {id} (panel {panel}). It holds {context} and takes your \
+                 prompt as its first request; it works with the user from now on. Nothing comes \
+                 back from it: leave the part you handed it to it."
+            ),
+            Some(branched),
         ))
     }
 

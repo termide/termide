@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 use termide_agent_core::{
     permission_channel, question_channel, suggestion_channel, Agent, AgentRuntime, Backend,
     BackendSetup, CancelToken, ChainedHooks, CheckpointHooks, CheckpointStore, CompactionPolicy,
-    CompactionPrompts, GoalPrompt, HandoffPrompt, HistoryStep, Hooks, HostTools, LoggedMessage,
-    LoopPrompt, Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
+    CompactionPrompts, ForkSource, GoalPrompt, HandoffPrompt, HistoryStep, Hooks, HostTools,
+    LoggedMessage, LoopPrompt, Message, Mode, ModeHandle, ModelInfo, ModelSpec, PermissionEnvelope,
     PermissionHooks, PermissionRules, PersistRule, PlanGuard, PlanPrompt, Provider,
     QuestionEnvelope, Refusals, ReviewerSetup, Session, ShellRunner, SideModels, SkillInfo,
     SuggestionEnvelope, TerminalSessions, Timing, ToolContext, ToolRegistry, MODEL_OPTION,
@@ -204,6 +204,7 @@ pub(crate) fn spawn_runtime(
     terminals: Option<&Arc<dyn TerminalSessions>>,
     skills: Vec<SkillInfo>,
     panel: u64,
+    fork: Option<ForkSource>,
 ) -> Spawned {
     let cancel = CancelToken::new();
     let (prompter, permission_rx) = permission_channel(cancel.clone());
@@ -292,6 +293,13 @@ pub(crate) fn spawn_runtime(
         }
         let mut host_chain = guards(checkpoints.clone());
         host_chain.push(Box::new(host_permissions));
+        // The conversation goes on in the agent's own session when it
+        // still holds it, else the agent is told a recap of it. One with
+        // nothing said yet opens anew, on the tools and prompt of now.
+        let resume = session
+            .filter(|_| !messages.is_empty())
+            .and_then(Session::external_session);
+        let resume_none = resume.is_none();
         match factory(BackendSetup {
             cwd: cwd.to_path_buf(),
             prompter: external_prompter.clone(),
@@ -319,12 +327,10 @@ pub(crate) fn spawn_runtime(
                 skills,
                 session_id: session.map(|s| s.id().to_string()),
             }),
-            // The conversation goes on in the agent's own session when it
-            // still holds it, else the agent is told a recap of it. One with
-            // nothing said yet opens anew, on the tools and prompt of now.
-            resume: session
-                .filter(|_| !messages.is_empty())
-                .and_then(Session::external_session),
+            resume,
+            // A fork's copy, which holds no session of its own yet, branches
+            // off the one its source runs on.
+            fork: fork.filter(|_| resume_none),
             history: messages.clone(),
         }) {
             Ok(runtime) => {
