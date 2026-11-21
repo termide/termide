@@ -1182,6 +1182,17 @@ fn claude_code_gets_termides_prompt_and_tools_and_none_of_its_own() {
         (call.name.as_str(), &call.arguments),
         ("shell", &json!({ "command": "ls" }))
     );
+    // claude-agent-acp 0.109.1 titles it `termide: shell`; the tool's full
+    // name is in its meta.
+    let call = tool_call_of(&json!({
+        "toolCallId": "t1", "title": "termide: shell", "kind": "other",
+        "_meta": { "claudeCode": { "toolName": "mcp__termide__shell" } },
+        "rawInput": { "command": "ls" }
+    }));
+    assert_eq!(
+        (call.name.as_str(), &call.arguments),
+        ("shell", &json!({ "command": "ls" }))
+    );
     // A tool the model made up comes as kind `other`: the block takes
     // the name it called, not the kind.
     let call = tool_call_of(&json!({

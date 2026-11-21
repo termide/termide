@@ -3734,8 +3734,10 @@ fn fill_own_call(call: &Value, kind: &str, title: &str, arguments: &mut Value) {
 }
 
 /// The name and arguments of a call of a tool termide's MCP server serves:
-/// Claude Code titles it `mcp__termide__<tool>` with the arguments as its raw
-/// input, Codex names the server and the tool in its raw input.
+/// Claude Code names it `mcp__termide__<tool>` in `_meta.claudeCode.toolName`
+/// (and, before claude-agent-acp 0.109.1, in its title, now `termide: <tool>`)
+/// with the arguments as its raw input; Codex names the server and the tool in
+/// its raw input.
 fn host_tool_of(update: &Value) -> Option<(String, Value)> {
     let input = &update["rawInput"];
     let object = |value: &Value| {
@@ -3744,10 +3746,10 @@ fn host_tool_of(update: &Value) -> Option<(String, Value)> {
             .cloned()
             .unwrap_or_else(|| json!({}))
     };
-    if let Some(name) = update["title"]
+    let claude_name = update["_meta"]["claudeCode"]["toolName"]
         .as_str()
-        .and_then(|title| title.strip_prefix(HOST_TOOL_PREFIX))
-    {
+        .or_else(|| update["title"].as_str());
+    if let Some(name) = claude_name.and_then(|name| name.strip_prefix(HOST_TOOL_PREFIX)) {
         return Some((name.to_string(), object(input)));
     }
     let tool = input["tool"]

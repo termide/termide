@@ -1,0 +1,1 @@
+- **Claude Code's calls of termide's tools show as those tools again.** Since claude-agent-acp 0.109.1 titles such a call `termide: recall` rather than `mcp__termide__recall`, the block showed that English title in place of the tool's own headline; termide now reads the tool's name from the call's metadata.
