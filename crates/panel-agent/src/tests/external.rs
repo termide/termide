@@ -654,3 +654,145 @@ fn a_cli_provider_pre_selects_its_configured_model_on_start() {
     assert_eq!(*picked.lock().unwrap(), Some("m-slow".to_string()));
     assert_eq!(panel.model.id, "m-slow");
 }
+
+/// An external fork's copy: starting until `starting` clears, told the
+/// conversation anew when `recap`, offering `/compact` once `commands`;
+/// what it is sent goes to `asked`.
+struct ForkCopy {
+    asked: Arc<Mutex<Vec<String>>>,
+    starting: Arc<AtomicBool>,
+    recap: bool,
+    commands: Arc<AtomicBool>,
+}
+
+impl Backend for ForkCopy {
+    fn prompt(&self, message: UserMessage) -> Result<(), PromptError> {
+        self.asked.lock().unwrap().push(message.plain_text());
+        Ok(())
+    }
+    fn steer(&self, message: UserMessage) {
+        self.asked.lock().unwrap().push(message.plain_text());
+    }
+    fn queue_lens(&self) -> (usize, usize) {
+        (0, 0)
+    }
+    fn abort(&self) {}
+    fn is_busy(&self) -> bool {
+        false
+    }
+    fn drain(&self) -> Vec<AgentEvent> {
+        Vec::new()
+    }
+    fn update(&self, _update: Box<dyn FnOnce(&mut Agent) + Send>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn compact(&self, _focus: Option<String>) -> Result<(), PromptError> {
+        Err(PromptError::Unsupported)
+    }
+    fn is_starting(&self) -> bool {
+        self.starting.load(Ordering::SeqCst)
+    }
+    fn awaits_recap(&self) -> bool {
+        self.recap
+    }
+    fn agent_commands(&self) -> Vec<termide_agent_core::AgentCommand> {
+        if !self.commands.load(Ordering::SeqCst) {
+            return Vec::new();
+        }
+        vec![termide_agent_core::AgentCommand {
+            name: "compact".into(),
+            description: "compact it".into(),
+            hint: String::new(),
+        }]
+    }
+    fn into_agent(self: Box<Self>) -> Option<Agent> {
+        None
+    }
+}
+
+struct ForkCopyHandles {
+    asked: Arc<Mutex<Vec<String>>>,
+    starting: Arc<AtomicBool>,
+    commands: Arc<AtomicBool>,
+    /// The session the agent was asked to branch off, if any.
+    branched_off: Arc<Mutex<Option<String>>>,
+}
+
+/// A panel opened on a fork's copy of an external agent's session.
+fn fork_copy(recap: bool) -> (AgentPanel, ForkCopyHandles) {
+    let handles = ForkCopyHandles {
+        asked: Arc::new(Mutex::new(Vec::new())),
+        starting: Arc::new(AtomicBool::new(true)),
+        commands: Arc::new(AtomicBool::new(false)),
+        branched_off: Arc::new(Mutex::new(None)),
+    };
+    let (asked, starting, commands, branched_off) = (
+        Arc::clone(&handles.asked),
+        Arc::clone(&handles.starting),
+        Arc::clone(&handles.commands),
+        Arc::clone(&handles.branched_off),
+    );
+    let panel = AgentPanel::new(AgentPanelSetup {
+        backend: Some(Arc::new(move |setup: BackendSetup| {
+            *branched_off.lock().unwrap() = setup.fork.map(|fork| fork.session.session_id);
+            Ok(Box::new(ForkCopy {
+                asked: Arc::clone(&asked),
+                starting: Arc::clone(&starting),
+                recap,
+                commands: Arc::clone(&commands),
+            }) as Box<dyn Backend>)
+        })),
+        fork_from: Some(termide_agent_core::ForkSource {
+            session: termide_agent_core::ExternalSessionRef {
+                agent: "outside".into(),
+                session_id: "source".into(),
+            },
+            opened: None,
+        }),
+        ..setup(vec![])
+    });
+    (panel, handles)
+}
+
+#[test]
+fn a_branched_fork_is_compacted_on_its_focus_by_the_agent_before_its_request() {
+    let (mut panel, copy) = fork_copy(false);
+    assert_eq!(copy.branched_off.lock().unwrap().as_deref(), Some("source"));
+    panel.start_fork(Some("the log format".into()), Some(fork_request("migrate")));
+    // Nothing goes while the agent starts, nor before it lists its commands.
+    panel.tick();
+    copy.starting.store(false, Ordering::SeqCst);
+    panel.tick();
+    assert!(copy.asked.lock().unwrap().is_empty());
+    copy.commands.store(true, Ordering::SeqCst);
+    panel.tick();
+    assert_eq!(*copy.asked.lock().unwrap(), ["/compact the log format"]);
+    // The request waits for the compaction's run to end.
+    assert!(panel.fork_first.is_some());
+    panel.apply(AgentEvent::AgentEnd);
+    panel.tick();
+    assert_eq!(
+        *copy.asked.lock().unwrap(),
+        ["/compact the log format", "migrate"]
+    );
+}
+
+#[test]
+fn a_fork_told_the_conversation_anew_stays_whole() {
+    let (mut panel, copy) = fork_copy(true);
+    copy.commands.store(true, Ordering::SeqCst);
+    panel.start_fork(Some("the log format".into()), Some(fork_request("migrate")));
+    panel.tick();
+    assert!(copy.asked.lock().unwrap().is_empty());
+    // Its first request would carry the recap ahead of a `/compact`, which
+    // the agent would no longer take for a command: the request goes alone,
+    // with no notice.
+    copy.starting.store(false, Ordering::SeqCst);
+    panel.tick();
+    assert_eq!(*copy.asked.lock().unwrap(), ["migrate"]);
+    assert!(!panel
+        .transcript()
+        .items()
+        .iter()
+        .any(|item| matches!(item, Item::Notice { .. })));
+}

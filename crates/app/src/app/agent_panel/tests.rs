@@ -1004,6 +1004,28 @@ fn a_fork_the_agent_asked_for_answers_its_call_in_the_copy_alone() {
 }
 
 #[test]
+fn a_fork_branches_off_the_agents_session_only_in_the_same_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut source = Session::create(dir.path(), dir.path()).unwrap();
+    source
+        .append_message(&Message::User(UserMessage::text("hello")))
+        .unwrap();
+    // On the built-in loop: nothing to branch off.
+    assert!(fork_source(&source, dir.path(), None).is_none());
+    source.append_external_session("claude", "s-1").unwrap();
+    let fork = fork_source(&source, dir.path(), None).expect("the agent's session");
+    assert_eq!(
+        (
+            fork.session.agent.as_str(),
+            fork.session.session_id.as_str()
+        ),
+        ("claude", "s-1")
+    );
+    let elsewhere = dir.path().join("sub");
+    assert!(fork_source(&source, &elsewhere, None).is_none());
+}
+
+#[test]
 fn a_fork_name_is_the_lowest_free_counter_in_the_directory() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = Session::create(dir.path(), dir.path()).unwrap();

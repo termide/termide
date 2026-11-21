@@ -151,6 +151,9 @@ const CWD_ACTION: &str = "agent_cwd";
 const PROMPTS_ACTION: &str = "agent_prompts";
 /// The built-in `/compact [focus]` command.
 const COMPACT_COMMAND: &str = "compact";
+/// How long an external fork's copy waits, once its agent has started, for
+/// the agent to list a `/compact` that takes the fork's focus.
+const FORK_COMMANDS_GRACE: Duration = Duration::from_secs(5);
 /// The built-in `/undo` command.
 const UNDO_COMMAND: &str = "undo";
 /// The built-in `/changes` command: review the agent's changes in the diff
@@ -428,6 +431,9 @@ pub struct AgentPanelSetup {
     /// What to do when a run stops on a limit or an outage (`[ai]
     /// on_limit`); kept in step with the configuration as it changes.
     pub on_limit: LimitPolicy,
+    /// For a fork's copy run by an external agent: the agent's session the
+    /// copy branches off instead of being told the conversation anew.
+    pub fork_from: Option<termide_agent_core::ForkSource>,
 }
 
 /// Records an "allow always" rule outside the panel, in the configuration
@@ -1293,6 +1299,10 @@ pub struct AgentPanel {
     fork_first: Option<UserMessage>,
     /// The compaction a fork's first request waits for is under way.
     fork_compacting: bool,
+    /// An external fork's focus, until its agent has started and it is known
+    /// whether its own `/compact` can take it; with the moment the agent was
+    /// first seen started. See [`AgentPanel::settle_fork_focus`].
+    fork_focus_waiting: Option<(String, Option<Instant>)>,
     queued: (usize, usize),
     /// Tokens of the last reported context, for the status chip.
     context_tokens: u64,
@@ -1475,6 +1485,7 @@ impl AgentPanel {
             setup.terminals.as_ref(),
             served_skills(setup.catalog.as_ref(), &offered_skills, &context_off),
             panel_id,
+            setup.fork_from.take(),
         );
         // Learn the context window from the provider in the background and
         // adopt the active model's real `max_model_len`; the configured window
@@ -1657,6 +1668,7 @@ impl AgentPanel {
             fork_focus: None,
             fork_first: None,
             fork_compacting: false,
+            fork_focus_waiting: None,
             queued: (0, 0),
             context_tokens: 0,
             context_logged: None,

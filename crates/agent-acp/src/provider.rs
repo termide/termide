@@ -465,6 +465,7 @@ fn service_setup(cwd: PathBuf) -> BackendSetup {
         reviewer: ReviewerSetup::default(),
         host_tools: None,
         resume: None,
+        fork: None,
         history: Vec::new(),
     }
 }

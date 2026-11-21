@@ -1,0 +1,28 @@
+# A fork of a Claude Code session, played by the stand-in adapter in
+# tools/screenshots/mock-acp: the copy branches off the agent's session with
+# `session/fork` rather than opening a new one told the conversation, and its
+# focus, which the stand-in has no `/compact` for, leaves it whole with no
+# notice.
+mock-acp claude_code
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "flag critical low-stock items in the reorder report"
+key Enter
+wait "Agent wants to run shell" 40
+type "1"
+wait "Want me to highlight" 40
+type "/fork the csv export"
+key Enter
+wait "Fork this session into a new panel?"
+key y
+wait-gone "Fork this session into a new panel?"
+mock-acp-got "session/fork demo-session" 20
+sleep 7
+mock-acp-count "session/new" 1
+mock-acp-count "prompt:" 1
+expect-not "not available"
+snapshot forked
+quit --force

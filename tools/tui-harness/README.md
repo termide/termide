@@ -75,7 +75,7 @@ Timeouts are in seconds and default to 10.
 | `expect-row N "REGEX"` | Check row N (0 is the top, -1 the bottom) |
 | `file-contains PATH "TEXT" [T]` | Wait until the project's file PATH holds TEXT |
 | `mock-llm-asked MODEL [T]` | Wait until the mock model has had a call for MODEL: where a side model setting sent it |
-| `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions) and each prompt block as `prompt: …`, and each tool termide's MCP server lists to it as `tool: …` |
+| `mock-acp-got "TEXT" [T]` | Wait until the ACP stand-in's log holds TEXT: the Claude Code one logs each `session/new` (with `plan-in-system-prompt` when its system prompt holds plan mode's instructions), each `session/fork` with the session it branches off, and each prompt block as `prompt: …`, and each tool termide's MCP server lists to it as `tool: …` |
 | `mock-acp-count "TEXT" N` | Check that the ACP stand-in's log holds TEXT exactly N times |
 | `run "COMMAND"` | Run a shell command in the project, outside termide; in the directory that held it once the project has moved away. `$TERMIDE_CONFIG` and `$TERMIDE_DATA` name termide's config and data directories, `$TERMIDE_BIN` the binary under test (for `--prompt`) |
 | `snapshot NAME` | Save the screen as text |
@@ -102,7 +102,8 @@ going on once allowed), `agent-send-message` (a message to another
 agent asking every time, its card showing whom it goes to and all it says),
 `goal` (`/goal` with its judge on the model
 `[ai.goal_judge]` names), `plan` (plan mode's carry-out card going back
-to the mode worked in, past the ones `Shift+Tab` passes through) and
+to the mode worked in, past the ones `Shift+Tab` passes through),
+`acp-fork` (`/fork <focus>` on Claude Code: the copy branches off the agent's session with `session/fork`, told nothing and left whole, with no notice, by a focus the stand-in has no `/compact` for) and
 `acp-plan` (plan mode on Claude Code: the instructions as a note, never in
 its system prompt, and a clean-context carry-out in a new session),
 `acp-agent-file` (Claude Code started by an `AGENT.md` `command` and served
