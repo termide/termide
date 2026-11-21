@@ -1,0 +1,1 @@
+- **Termide starts on a fresh Windows.** The Windows build now carries the Visual C++ runtime inside `termide.exe`; it needed `VCRUNTIME140.dll`, which a machine without the Visual C++ Redistributable lacks, and then exited at once without a word.

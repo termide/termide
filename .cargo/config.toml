@@ -25,6 +25,16 @@ linker = "cc"
 [target.aarch64-apple-darwin]
 linker = "cc"
 
+# The MSVC C runtime is linked in: a fresh Windows has no VCRUNTIME140.dll
+# unless some program installed the Visual C++ Redistributable, and the
+# binary then fails to start with STATUS_DLL_NOT_FOUND and no message. The
+# `cc` builds of the C dependencies follow the target feature (/MT).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
 # Windows target (for cross-compilation if needed)
 [target.x86_64-pc-windows-gnu]
 linker = "x86_64-w64-mingw32-gcc"
