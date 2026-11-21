@@ -186,26 +186,32 @@ wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-
 tar xzf termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 
-# Windows x86_64（从 Releases 下载 .zip，解压后在 Windows Terminal 中运行）
-# https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-pc-windows-msvc.zip
+# Windows x86_64（一行安装，或从 Releases 下载 .zip）
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 ```
 
 </details>
 
 <details>
-<summary><b>🪟 Windows (.zip)</b></summary>
+<summary><b>🪟 Windows</b></summary>
 
 Termide 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 **Windows Terminal**
 以获得最佳体验。
 
-1. 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `termide-0.50.0-x86_64-pc-windows-msvc.zip`。
-2. 解压压缩包。
-3. 在 Windows Terminal 中运行 `termide.exe`。
+**一行安装**（PowerShell 5.1+，无需管理员权限）：
+
+```powershell
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
+```
+
+安装到 `%LOCALAPPDATA%\Programs\termide` 并添加到 PATH。
+在 ARM64 Windows 11 上，x64 版本通过模拟运行。
+
+**手动安装：** 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `termide-0.50.0-x86_64-pc-windows-msvc.zip`，解压后运行 `termide.exe`。
 
 配置、项目布局和日志均位于 `%APPDATA%\termide\`。
 
-或者在 **WSL/WSL2** 中，像在任意 Linux 上一样使用 Linux x86_64 构建
-（`termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz`）。
+或者在 **WSL/WSL2** 中，像在任意 Linux 上一样使用 Linux x86_64 构建。
 
 </details>
 

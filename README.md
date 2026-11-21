@@ -186,25 +186,32 @@ wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-
 tar xzf termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 
-# Windows x86_64 (download .zip from Releases, extract, run in Windows Terminal)
-# https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-pc-windows-msvc.zip
+# Windows x86_64 (one-line installer, or download .zip from Releases)
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 ```
 
 </details>
 
 <details>
-<summary><b>🪟 Windows (.zip)</b></summary>
+<summary><b>🪟 Windows</b></summary>
 
 Termide runs natively on Windows 10+ via ConPTY. Use **Windows Terminal** for
 the best experience.
 
-1. Download `termide-0.50.0-x86_64-pc-windows-msvc.zip` from [GitHub Releases](https://github.com/termide/termide/releases).
-2. Extract the archive.
-3. Run `termide.exe` in Windows Terminal.
+**One-line installer** (PowerShell 5.1+, no admin rights needed):
+
+```powershell
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
+```
+
+Installs to `%LOCALAPPDATA%\Programs\termide` and adds it to PATH.
+On ARM64 Windows 11, the x64 build runs under emulation.
+
+**Manual:** download `termide-0.50.0-x86_64-pc-windows-msvc.zip` from [GitHub Releases](https://github.com/termide/termide/releases), extract and run `termide.exe`.
 
 Configuration, project layouts and logs live under `%APPDATA%\termide\`.
 
-Alternatively, in **WSL/WSL2** use the Linux x86_64 build (`termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz`) as on any Linux.
+Alternatively, in **WSL/WSL2** use the Linux x86_64 build as on any Linux.
 
 </details>
 

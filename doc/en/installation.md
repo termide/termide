@@ -267,6 +267,23 @@ xattr -d com.apple.quarantine termide
 
 Termide runs natively on Windows 10+ using ConPTY. Requires Windows Terminal for best experience.
 
+**One-line installer** (PowerShell 5.1+, no admin rights needed):
+
+```powershell
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
+```
+
+The script downloads the latest release, installs to `%LOCALAPPDATA%\Programs\termide` and adds it to the user PATH. Override either with environment variables:
+
+- `TERMIDE_VERSION` — install a specific version instead of the latest.
+- `TERMIDE_INSTALL_DIR` — install somewhere else.
+
+On ARM64 Windows 11 the x64 build is installed and runs under emulation. ARM64 Windows 10 is not supported (no x64 emulation).
+
+When a `.sha256` file is published alongside the archive in the release, the installer verifies the download against it.
+
+**Manual install:**
+
 1. Download the `.zip` archive from [GitHub Releases](https://github.com/termide/termide/releases):
    - `termide-VERSION-x86_64-pc-windows-msvc.zip`
 2. Extract the archive

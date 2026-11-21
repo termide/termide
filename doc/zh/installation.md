@@ -261,6 +261,23 @@ xattr -d com.apple.quarantine termide
 
 Termide 通过 ConPTY 在 Windows 10+ 上原生运行。建议使用 Windows Terminal 以获得最佳体验。
 
+**一行安装**（PowerShell 5.1+，无需管理员权限）：
+
+```powershell
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
+```
+
+脚本下载最新版本，安装到 `%LOCALAPPDATA%\Programs\termide` 并添加到用户 PATH。可通过环境变量配置：
+
+- `TERMIDE_VERSION` — 安装指定版本而非最新版。
+- `TERMIDE_INSTALL_DIR` — 安装到其他位置。
+
+在 ARM64 Windows 11 上安装 x64 版本，通过模拟运行。ARM64 Windows 10 不支持（无 x64 模拟）。
+
+如果发布中包含 `.sha256` 文件，安装程序会验证下载的压缩包。
+
+**手动安装：**
+
 1. 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `.zip` 压缩包：
    - `termide-VERSION-x86_64-pc-windows-msvc.zip`
 2. 解压压缩包

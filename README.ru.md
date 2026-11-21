@@ -186,24 +186,31 @@ wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-
 tar xzf termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 
-# Windows x86_64 (скачайте .zip с Releases, распакуйте, запустите в Windows Terminal)
-# https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-pc-windows-msvc.zip
+# Windows x86_64 (однострочник или скачайте .zip с Releases)
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 ```
 
 </details>
 
 <details>
-<summary><b>🪟 Windows (.zip)</b></summary>
+<summary><b>🪟 Windows</b></summary>
 
 Termide работает нативно на Windows 10+ через ConPTY. Для лучшего опыта используйте **Windows Terminal**.
 
-1. Скачайте `termide-0.50.0-x86_64-pc-windows-msvc.zip` с [GitHub Releases](https://github.com/termide/termide/releases).
-2. Распакуйте архив.
-3. Запустите `termide.exe` в Windows Terminal.
+**Однострочник** (PowerShell 5.1+, права администратора не нужны):
+
+```powershell
+irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
+```
+
+Устанавливается в `%LOCALAPPDATA%\Programs\termide` и добавляется в PATH.
+На ARM64 Windows 11 сборка x64 работает через эмуляцию.
+
+**Вручную:** скачайте `termide-0.50.0-x86_64-pc-windows-msvc.zip` с [GitHub Releases](https://github.com/termide/termide/releases), распакуйте и запустите `termide.exe`.
 
 Конфигурация, раскладки проектов и логи хранятся в `%APPDATA%\termide\`.
 
-Либо в **WSL/WSL2** используйте сборку Linux x86_64 (`termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz`), как на любом Linux.
+Либо в **WSL/WSL2** используйте сборку Linux x86_64, как на любом Linux.
 
 </details>
 
