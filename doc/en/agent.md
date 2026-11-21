@@ -901,7 +901,8 @@ checklist, when it keeps one, under its title and progress on the strip's rule
 (`╌╌ Checklist 2/5 ╌╌╌`), a row per step (`✓` done, dim; `▸` in progress, in the
 accent; `○` still to do), a long one showing the last step done and what
 follows it, the rest folded into `✓ +N` and `○ +N` — Codex and other ACP
-agents report theirs as their plan; a list carried through stays in sight,
+agents report theirs as their plan, and a dashed rule sets it apart from the
+rows after it; a list carried through stays in sight,
 every step checked, until your next request, and a reopened session shows the
 list as it stood; then a retry waited
 for (`↻ Usage limit reached  trying again at 21:40 (in 3m12s)`) or a pause

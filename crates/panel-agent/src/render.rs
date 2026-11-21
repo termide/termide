@@ -979,7 +979,7 @@ impl AgentPanel {
         // here, closest to the input: a block scrolled out of view does not
         // hide that it works.
         let strip_rows = self.strip_rows(text_width);
-        let mut state = self.strip_with_rule(&strip_rows, text_width);
+        let (mut state, strip_at) = self.strip_with_rule(&strip_rows, text_width);
         let room = area
             .height
             .saturating_sub(bar_rows + form_rows + u16::from(has_separator) + 1);
@@ -1192,9 +1192,9 @@ impl AgentPanel {
         self.strip_stop_x = area.x + crate::strip::strip_stop_column(text_width);
         self.strip_hits = strip_rows
             .iter()
-            .enumerate()
-            .filter(|(i, _)| 1 + i < state.len())
-            .map(|(i, row)| (state_y + 1 + i as u16, row.target, row.stop))
+            .zip(&strip_at)
+            .filter(|(_, at)| **at < state.len())
+            .map(|(row, at)| (state_y + *at as u16, row.target, row.stop))
             .collect();
         if has_separator {
             let y = form_area.y - 1;

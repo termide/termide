@@ -237,6 +237,15 @@ fn checklist_rule(
     ])
 }
 
+/// The dim dashed rule closing the checklist off from the rows after it, as
+/// wide as the rule above.
+fn dashed_rule(width: u16, colors: &ThemeColors) -> Line<'static> {
+    Line::from(Span::styled(
+        "╌".repeat(width.saturating_sub(1) as usize),
+        Style::default().fg(colors.disabled),
+    ))
+}
+
 /// The first line of `text` that holds anything, trimmed.
 fn first_line(text: &str) -> String {
     text.lines()
@@ -662,14 +671,20 @@ impl AgentPanel {
     #[cfg(test)]
     pub(crate) fn state_lines(&mut self, width: u16) -> Vec<Line<'static>> {
         let rows = self.strip_rows(width);
-        self.strip_with_rule(&rows, width)
+        self.strip_with_rule(&rows, width).0
     }
 
     /// The strip's lines: its rule, titled with the checklist's name and
-    /// progress when the list heads the strip, then its rows.
-    pub(crate) fn strip_with_rule(&self, rows: &[StripRow], width: u16) -> Vec<Line<'static>> {
+    /// progress when the list heads the strip, then its rows, the checklist
+    /// set apart from the rows after it by a dashed rule. With them, the
+    /// line each row is drawn on, for a click on it.
+    pub(crate) fn strip_with_rule(
+        &self,
+        rows: &[StripRow],
+        width: u16,
+    ) -> (Vec<Line<'static>>, Vec<usize>) {
         if rows.is_empty() {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         }
         let rule = if self.checklist.is_empty() {
             transcript::separator(width, &self.colors)
@@ -687,9 +702,23 @@ impl AgentPanel {
                 &self.colors,
             )
         };
+        let steps = rows
+            .iter()
+            .take_while(|row| row.target == StripTarget::Checklist)
+            .count();
         let mut lines = vec![rule];
-        lines.extend(strip_lines(rows, width, &self.colors));
-        lines
+        let mut at = Vec::with_capacity(rows.len());
+        for (i, line) in strip_lines(rows, width, &self.colors)
+            .into_iter()
+            .enumerate()
+        {
+            if i == steps && steps > 0 {
+                lines.push(dashed_rule(width, &self.colors));
+            }
+            at.push(lines.len());
+            lines.push(line);
+        }
+        (lines, at)
     }
 
     /// Ask before stopping the subagent the `task` call `call` handed over.

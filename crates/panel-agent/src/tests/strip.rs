@@ -301,7 +301,17 @@ fn the_agents_checklist_shows_in_the_state_strip() {
     assert!(lines[1].starts_with("✓ Read the code"), "{lines:?}");
     assert!(lines[2].starts_with("▸ Fix the bug"), "{lines:?}");
     assert!(lines[3].starts_with("○ Run the tests"), "{lines:?}");
-    assert!(lines[4].starts_with("› Queued  and the docs"), "{lines:?}");
+    // A dashed rule sets the list apart from the rows after it, and a click
+    // on those still finds them under it.
+    assert!(lines[4].chars().all(|c| c == '╌'), "{lines:?}");
+    assert!(lines[5].starts_with("› Queued  and the docs"), "{lines:?}");
+    let screen = render_text(&mut panel, 40, 20);
+    let queued = strip_row(&panel, crate::strip::StripTarget::Queued);
+    assert!(
+        screen[queued as usize].starts_with("› Queued"),
+        "{screen:?}"
+    );
+    assert!(screen[queued as usize - 1].starts_with('╌'), "{screen:?}");
     // An empty list clears it, and the rule its title.
     panel.apply(AgentEvent::Checklist { items: Vec::new() });
     let lines = strip_text(&panel.state_lines(40));
