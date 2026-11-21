@@ -3,23 +3,48 @@
 #
 # Usage: irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 
+# `iex` runs the script in the caller's session: the script block keeps its
+# variables and $ErrorActionPreference out of it, and a failure is thrown and
+# reported instead of `exit`, which would close the user's terminal.
+& {
+
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 redraws the Invoke-WebRequest progress bar per chunk,
+# which slows the download many times over.
+$ProgressPreference = 'SilentlyContinue'
 
 $Repo = 'termide/termide'
 $DefaultDir = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'Programs\termide' } else { Join-Path $HOME '.termide' }
 $InstallDir = if ($env:TERMIDE_INSTALL_DIR) { $env:TERMIDE_INSTALL_DIR } else { $DefaultDir }
+$TempDir    = $null
 
 # --- helpers ----------------------------------------------------------------
 
 function Write-Info  { param([string]$Msg) Write-Host "> $Msg" -ForegroundColor Green }
 function Write-Warn  { param([string]$Msg) Write-Host "! $Msg" -ForegroundColor Yellow }
-function Write-Err   { param([string]$Msg) Write-Host "x $Msg" -ForegroundColor Red; exit 1 }
+function Write-Err   { param([string]$Msg) throw $Msg }
+
+# The machine's own architecture. Windows PowerShell 5.1 runs on .NET
+# Framework, where RuntimeInformation.OSArchitecture can come back empty, and
+# an x64 process under emulation sees PROCESSOR_ARCHITECTURE=AMD64; the
+# system environment in the registry names the native one either way.
+function Get-OSArch {
+    $Native = (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment' -ErrorAction SilentlyContinue).PROCESSOR_ARCHITECTURE
+    if (-not $Native) { $Native = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE } }
+    switch ($Native) {
+        'AMD64' { 'X64' }
+        'ARM64' { 'Arm64' }
+        default { "$Native" }
+    }
+}
+
+try {
 
 # --- detect system ----------------------------------------------------------
 
 Write-Info 'Detecting system...'
 
-$OSArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture
+$OSArch = Get-OSArch
 
 switch ($OSArch) {
     'X64' {
@@ -32,7 +57,7 @@ switch ($OSArch) {
         if ($WinBuild -lt 22000) {
             Write-Err "ARM64 on Windows 10 (build $WinBuild) cannot run x64 binaries. Termide does not ship a native ARM64 build yet."
         }
-        Write-Warn 'No native ARM64 build — installing the x64 build (runs under emulation on Windows 11).'
+        Write-Warn 'No native ARM64 build yet: installing the x64 one, which Windows 11 runs under emulation.'
         $Target = 'x86_64-pc-windows-msvc'
     }
     default {
@@ -75,13 +100,13 @@ Write-Info "Downloading $ArchiveName..."
 try {
     Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -UseBasicParsing
 } catch {
-    Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
     Write-Err "Download failed: $_"
 }
 
 # --- verify checksum (if available) -----------------------------------------
 
 $ShaUrl = "$DownloadUrl.sha256"
+$ExpectedHash = $null
 try {
     $ShaResp = Invoke-WebRequest -Uri $ShaUrl -UseBasicParsing
     $ShaBody = ([System.Text.Encoding]::UTF8.GetString($ShaResp.Content)).Trim()
@@ -90,17 +115,15 @@ try {
     # that is returned as 200 after the redirect, so reject anything that does
     # not look like a hash.
     $ExpectedHash = ($ShaBody -split '\s')[0]
-    if ($ExpectedHash -match '^[0-9a-fA-F]{64}$') {
-        $ActualHash = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash
-        if ($ActualHash -ne $ExpectedHash.ToUpper()) {
-            Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
-            Write-Err "Checksum mismatch: expected $ExpectedHash, got $ActualHash"
-        }
-        Write-Info 'Checksum verified.'
-    }
-    # else: response is not a checksum (HTML 404 page, etc.) — skip.
 } catch {
     # .sha256 file not published yet or unreachable — skip.
+}
+if ($ExpectedHash -match '^[0-9a-fA-F]{64}$') {
+    $ActualHash = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash
+    if ($ActualHash -ne $ExpectedHash.ToUpper()) {
+        Write-Err "Checksum mismatch: expected $ExpectedHash, got $ActualHash"
+    }
+    Write-Info 'Checksum verified.'
 }
 
 # --- check for running instance ---------------------------------------------
@@ -111,7 +134,6 @@ if (Test-Path $ExePath) {
     try {
         [System.IO.File]::Open($ExePath, 'Open', 'ReadWrite', 'None').Close()
     } catch {
-        Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
         Write-Err "termide.exe is locked (probably running). Close termide and try again."
     }
 }
@@ -128,7 +150,6 @@ Expand-Archive -Path $ArchivePath -DestinationPath $ExtractDir -Force
 # The archive puts files at its root (termide.exe, README.md, LICENSE).
 $Exe = Get-ChildItem -Path $ExtractDir -Filter 'termide.exe' -Recurse | Select-Object -First 1
 if (-not $Exe) {
-    Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
     Write-Err 'termide.exe not found in the archive.'
 }
 
@@ -152,8 +173,14 @@ if ($env:Path -notlike "*$InstallDir*") {
 
 # --- done -------------------------------------------------------------------
 
-Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
-
 Write-Host ''
 Write-Info "Termide $Version installed successfully!"
 Write-Info "Run 'termide' to start."
+
+} catch {
+    Write-Host "x $($_.Exception.Message)" -ForegroundColor Red
+} finally {
+    if ($TempDir) { Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue }
+}
+
+}
