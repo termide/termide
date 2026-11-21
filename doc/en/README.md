@@ -25,6 +25,10 @@ Welcome to the Termide documentation! This guide covers installation, usage, and
 - [Custom Commands](actions.md) - Shell commands from `commands.toml` in the Commands menu
 - [Plugins](plugins.md) - Background programs that add commands, status items and agent tools
 
+### Security
+
+- [Code Signing Policy](code-signing.md) - Windows binary signing via SignPath Foundation
+
 ### Developer Documentation
 
 - [Developer Guide](developer-guide.md) - Contributing to Termide development

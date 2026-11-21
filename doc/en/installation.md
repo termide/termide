@@ -294,6 +294,27 @@ When a `.sha256` file is published alongside the archive in the release, the ins
 - Projects: `%APPDATA%\termide\projects\`
 - Logs: `%APPDATA%\termide\projects\<name>-<hash>\logs\*.log`
 
+**Uninstalling:**
+
+To remove Termide and its PATH entry, run in PowerShell:
+
+```powershell
+# Remove the binary
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\termide"
+
+# Remove it from the user PATH
+$p = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
+     Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\Programs\termide" }
+[Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'User')
+```
+
+Configuration and project data live under `%APPDATA%\termide\`. Remove that
+directory too if you want a clean uninstall:
+
+```powershell
+Remove-Item -Recurse -Force "$env:APPDATA\termide"
+```
+
 ### Windows (WSL)
 
 Termide also works in Windows Subsystem for Linux (WSL and WSL2):

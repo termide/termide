@@ -51,4 +51,32 @@ fn main() {
     };
 
     println!("cargo:rustc-env=TERMIDE_VERSION={version}");
+
+    // On Windows, embed version and product metadata into the executable so
+    // that Explorer shows them in the file properties and SignPath can enforce
+    // metadata restrictions on signed binaries.
+    #[cfg(windows)]
+    {
+        let parts: Vec<u64> = pkg.split('.').map(|s| s.parse().unwrap_or(0)).collect();
+        let (major, minor, patch) = (
+            *parts.first().unwrap_or(&0),
+            *parts.get(1).unwrap_or(&0),
+            *parts.get(2).unwrap_or(&0),
+        );
+
+        let mut res = winresource::WindowsResource::new();
+        res.set("ProductName", "termide");
+        res.set("FileDescription", "Termide — terminal workspace");
+        res.set("OriginalFilename", "termide.exe");
+        res.set("LegalCopyright", "MIT License");
+        res.set_version_info(
+            winresource::VersionInfo::PRODUCTVERSION,
+            major << 48 | minor << 32 | patch << 16,
+        );
+        res.set_version_info(
+            winresource::VersionInfo::FILEVERSION,
+            major << 48 | minor << 32 | patch << 16,
+        );
+        res.compile().expect("winresource");
+    }
 }

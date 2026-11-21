@@ -25,6 +25,10 @@
 - [自定义命令](actions.md) - 在命令菜单中运行 `commands.toml` 中的 shell 命令
 - [插件](plugins.md) - 在后台运行、添加命令、状态栏项目和代理工具的程序
 
+### 安全
+
+- [Code Signing Policy](../en/code-signing.md) - 通过 SignPath Foundation 对 Windows 二进制文件进行签名（英文）
+
 ### 开发者文档
 
 - [开发者指南](developer-guide.md) - 参与 Termide 开发

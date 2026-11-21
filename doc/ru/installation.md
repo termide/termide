@@ -296,6 +296,27 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 - Проекты: `%APPDATA%\termide\projects\`
 - Логи: `%APPDATA%\termide\projects\<имя>-<хеш>\logs\*.log`
 
+**Удаление:**
+
+Чтобы удалить Termide и убрать его из PATH, выполните в PowerShell:
+
+```powershell
+# Удалить бинарник
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\termide"
+
+# Убрать из пользовательского PATH
+$p = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
+     Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\Programs\termide" }
+[Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'User')
+```
+
+Конфигурация и данные проектов хранятся в `%APPDATA%\termide\`. Удалите и
+этот каталог, если хотите полное удаление:
+
+```powershell
+Remove-Item -Recurse -Force "$env:APPDATA\termide"
+```
+
 ### Windows (WSL)
 
 Termide также работает в Windows Subsystem for Linux (WSL и WSL2):
