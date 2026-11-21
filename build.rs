@@ -47,7 +47,7 @@ fn main() {
     let version = match short_hash {
         Some(hash) if dirty => format!("{pkg} ({hash}-dirty)"),
         Some(hash) => format!("{pkg} ({hash})"),
-        None => pkg,
+        None => pkg.clone(),
     };
 
     println!("cargo:rustc-env=TERMIDE_VERSION={version}");
