@@ -153,7 +153,8 @@ jobs:
         if: matrix.archive == 'zip'
         uses: actions/upload-artifact@v4
         with:
-          name: termide-unsigned-exe
+          # Not named termide-*: the release takes only those.
+          name: unsigned-exe
           path: target/${{ matrix.target }}/release/termide.exe
 
       - name: Package (Windows)
@@ -269,17 +270,27 @@ jobs:
       actions: read
       contents: read
     steps:
+      # First: checkout empties a workspace that is not a repository yet,
+      # which would take the files below with it.
+      - name: Checkout for packaging files
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            README.md
+            LICENSE
+          sparse-checkout-cone-mode: false
+
       - name: Download unsigned exe
         uses: actions/download-artifact@v4
         with:
-          name: termide-unsigned-exe
+          name: unsigned-exe
           path: unsigned
 
       - name: Upload for SignPath
         id: upload-unsigned
         uses: actions/upload-artifact@v4
         with:
-          name: termide-signpath-input
+          name: signpath-input
           path: unsigned/termide.exe
 
       - name: Submit signing request
@@ -295,30 +306,14 @@ jobs:
           output-artifact-directory: signed
           wait-for-completion-timeout-in-seconds: 1200
 
-      - name: Re-package signed zip
-        shell: pwsh
-        run: |
-          # Download the original artifact to get README.md and LICENSE
-          # (they were in the unsigned artifact too, but only the exe went
-          # through SignPath). We re-download the full release artifact.
-          $version = "${{ github.ref_name }}"
-          $target = "x86_64-pc-windows-msvc"
-          New-Item -ItemType Directory -Force -Path repack
-          Copy-Item signed/termide.exe repack/
-
-      - name: Checkout for packaging files
-        uses: actions/checkout@v4
-        with:
-          sparse-checkout: |
-            README.md
-            LICENSE
-          sparse-checkout-cone-mode: false
-
+      # The signed exe with the files the unsigned zip has beside it.
       - name: Build signed release archive
         shell: pwsh
         run: |
           $version = "${{ github.ref_name }}"
           $target = "x86_64-pc-windows-msvc"
+          New-Item -ItemType Directory -Force -Path repack
+          Copy-Item signed/termide.exe repack/
           Copy-Item README.md, LICENSE repack/
           $archiveName = "termide-$version-$target.zip"
           Compress-Archive -Path repack/* -DestinationPath $archiveName -Force
@@ -355,9 +350,12 @@ jobs:
           # Write to file to preserve newlines
           echo "$BODY" > release_notes.md
 
+      # The packages only: the unsigned exe and SignPath's input are not
+      # named termide-*.
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: termide-*
           path: artifacts
 
       - name: Upload Release Artifacts

@@ -280,7 +280,7 @@ The script downloads the latest release, installs to `%LOCALAPPDATA%\Programs\te
 
 On ARM64 Windows 11 the x64 build is installed and runs under emulation. ARM64 Windows 10 is not supported (no x64 emulation).
 
-When a `.sha256` file is published alongside the archive in the release, the installer verifies the download against it.
+The installer verifies the download against the `.sha256` file published beside the archive in the release, and installs nothing when that file is missing or does not match.
 
 **Manual install:**
 
@@ -296,15 +296,20 @@ When a `.sha256` file is published alongside the archive in the release, the ins
 
 **Uninstalling:**
 
-To remove Termide and its PATH entry, run in PowerShell:
+To remove Termide and its PATH entry, run in PowerShell, with
+`TERMIDE_INSTALL_DIR` set as it was for the install if you set it then:
 
 ```powershell
-# Remove the binary
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\termide"
+# Where it was installed
+$dir = if ($env:TERMIDE_INSTALL_DIR) { $env:TERMIDE_INSTALL_DIR } else { "$env:LOCALAPPDATA\Programs\termide" }
+
+# Remove the binary, and the directory once nothing else is in it
+Remove-Item -Force "$dir\termide.exe"
+if (-not (Get-ChildItem $dir)) { Remove-Item $dir }
 
 # Remove it from the user PATH
 $p = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
-     Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\Programs\termide" }
+     Where-Object { $_ -and $_.TrimEnd('\') -ne $dir.TrimEnd('\') }
 [Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'User')
 ```
 

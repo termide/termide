@@ -74,7 +74,8 @@ Write-Info 'Fetching latest version...'
 $RequestVersion = if ($env:TERMIDE_VERSION) { $env:TERMIDE_VERSION } else { $null }
 
 if ($RequestVersion) {
-    $Version = $RequestVersion
+    # Tags carry no `v`: TERMIDE_VERSION=v0.51.0 means 0.51.0.
+    $Version = $RequestVersion -replace '^v', ''
 } else {
     try {
         $Release = Invoke-RestMethod "https://api.github.com/repos/$Repo/releases/latest"
@@ -103,28 +104,29 @@ try {
     Write-Err "Download failed: $_"
 }
 
-# --- verify checksum (if available) -----------------------------------------
+# --- verify checksum ---------------------------------------------------------
 
 $ShaUrl = "$DownloadUrl.sha256"
-$ExpectedHash = $null
 try {
     $ShaResp = Invoke-WebRequest -Uri $ShaUrl -UseBasicParsing
-    $ShaBody = ([System.Text.Encoding]::UTF8.GetString($ShaResp.Content)).Trim()
-    # A valid checksum file is a 64-character hex string (optionally followed by
-    # a filename). GitHub redirects missing release assets to an HTML 404 page
-    # that is returned as 200 after the redirect, so reject anything that does
-    # not look like a hash.
-    $ExpectedHash = ($ShaBody -split '\s')[0]
 } catch {
-    # .sha256 file not published yet or unreachable — skip.
+    Write-Err "No checksum published at ${ShaUrl}: not installing an unverified download"
 }
-if ($ExpectedHash -match '^[0-9a-fA-F]{64}$') {
-    $ActualHash = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash
-    if ($ActualHash -ne $ExpectedHash.ToUpper()) {
-        Write-Err "Checksum mismatch: expected $ExpectedHash, got $ActualHash"
-    }
-    Write-Info 'Checksum verified.'
+# Windows PowerShell gives an asset served as a file in bytes, PowerShell 7
+# a text one as a string.
+$ShaContent = $ShaResp.Content
+$ShaBody = if ($ShaContent -is [byte[]]) { [System.Text.Encoding]::UTF8.GetString($ShaContent) } else { [string]$ShaContent }
+# A 64-character hex string, optionally followed by a file name; anything
+# else (an HTML error page) is no checksum.
+$ExpectedHash = ($ShaBody.Trim() -split '\s')[0]
+if ($ExpectedHash -notmatch '^[0-9a-fA-F]{64}$') {
+    Write-Err "The checksum at $ShaUrl is not a SHA-256"
 }
+$ActualHash = (Get-FileHash -Path $ArchivePath -Algorithm SHA256).Hash
+if ($ActualHash -ne $ExpectedHash.ToUpper()) {
+    Write-Err "Checksum mismatch: expected $ExpectedHash, got $ActualHash"
+}
+Write-Info 'Checksum verified.'
 
 # --- check for running instance ---------------------------------------------
 
@@ -157,17 +159,29 @@ Copy-Item -Path $Exe.FullName -Destination $ExePath -Force
 
 # --- add to PATH ------------------------------------------------------------
 
+# Whether the `;`-separated $PathList has $Dir as one of its entries, not
+# merely inside one (C:\Tools\termide-old holds C:\Tools\termide).
+function Test-PathEntry {
+    param([string]$PathList, [string]$Dir)
+    $Want = $Dir.TrimEnd('\')
+    foreach ($Entry in ($PathList -split ';')) {
+        if ($Entry.Trim().TrimEnd('\') -ieq $Want) { return $true }
+    }
+    return $false
+}
+
 # Persist in the user's PATH (Windows registry; skipped on other platforms).
 if ($IsWindows -or (-not (Test-Path variable:IsWindows))) {
     $UserPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
-    if ($UserPath -notlike "*$InstallDir*") {
+    if (-not (Test-PathEntry $UserPath $InstallDir)) {
         Write-Info 'Adding to PATH...'
-        [System.Environment]::SetEnvironmentVariable('Path', "$InstallDir;$UserPath", 'User')
+        $NewPath = if ($UserPath) { "$InstallDir;$UserPath" } else { $InstallDir }
+        [System.Environment]::SetEnvironmentVariable('Path', $NewPath, 'User')
     }
 }
 
 # Also update the current session so the user can run termide right away.
-if ($env:Path -notlike "*$InstallDir*") {
+if (-not (Test-PathEntry $env:Path $InstallDir)) {
     $env:Path = "$InstallDir;$env:Path"
 }
 

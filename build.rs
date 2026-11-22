@@ -52,11 +52,13 @@ fn main() {
 
     println!("cargo:rustc-env=TERMIDE_VERSION={version}");
 
-    // On Windows, embed version and product metadata into the executable so
+    // For Windows, embed version and product metadata into the executable so
     // that Explorer shows them in the file properties and SignPath can enforce
-    // metadata restrictions on signed binaries.
-    #[cfg(windows)]
-    {
+    // metadata restrictions on signed binaries. The target's OS, not the
+    // host's: a build script is compiled for the host, so `cfg(windows)` here
+    // would miss a cross-build and fire for a Windows host building for
+    // another target.
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let parts: Vec<u64> = pkg.split('.').map(|s| s.parse().unwrap_or(0)).collect();
         let (major, minor, patch) = (
             *parts.first().unwrap_or(&0),
@@ -77,6 +79,11 @@ fn main() {
             winresource::VersionInfo::FILEVERSION,
             major << 48 | minor << 32 | patch << 16,
         );
-        res.compile().expect("winresource");
+        // Metadata only: a missing resource compiler (`rc.exe`, or
+        // `llvm-rc`/`windres` when cross-building) leaves the binary without
+        // it rather than failing the build.
+        if let Err(error) = res.compile() {
+            println!("cargo:warning=no Windows version resource embedded: {error}");
+        }
     }
 }

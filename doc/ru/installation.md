@@ -282,7 +282,7 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 
 На ARM64 Windows 11 устанавливается сборка x64, которая работает через эмуляцию. ARM64 Windows 10 не поддерживается (нет эмуляции x64).
 
-Если в релизе опубликован файл `.sha256` рядом с архивом, установщик проверяет скачанный архив по нему.
+Установщик проверяет скачанный архив по файлу `.sha256`, опубликованному рядом с ним в релизе, и ничего не устанавливает, если этого файла нет или сумма не совпадает.
 
 **Ручная установка:**
 
@@ -298,15 +298,20 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 
 **Удаление:**
 
-Чтобы удалить Termide и убрать его из PATH, выполните в PowerShell:
+Чтобы удалить Termide и убрать его из PATH, выполните в PowerShell — с тем же
+`TERMIDE_INSTALL_DIR`, что и при установке, если вы его задавали:
 
 ```powershell
-# Удалить бинарник
-Remove-Item -Recurse -Force "$env:LOCALAPPDATA\Programs\termide"
+# Куда он установлен
+$dir = if ($env:TERMIDE_INSTALL_DIR) { $env:TERMIDE_INSTALL_DIR } else { "$env:LOCALAPPDATA\Programs\termide" }
+
+# Удалить бинарник, а каталог — если в нём больше ничего нет
+Remove-Item -Force "$dir\termide.exe"
+if (-not (Get-ChildItem $dir)) { Remove-Item $dir }
 
 # Убрать из пользовательского PATH
 $p = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
-     Where-Object { $_ -and $_ -ne "$env:LOCALAPPDATA\Programs\termide" }
+     Where-Object { $_ -and $_.TrimEnd('\') -ne $dir.TrimEnd('\') }
 [Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'User')
 ```
 

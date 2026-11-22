@@ -274,7 +274,7 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 
 在 ARM64 Windows 11 上安装 x64 版本，通过模拟运行。ARM64 Windows 10 不支持（无 x64 模拟）。
 
-如果发布中包含 `.sha256` 文件，安装程序会验证下载的压缩包。
+安装程序会按发布中与压缩包一同发布的 `.sha256` 文件验证下载内容；该文件缺失或不匹配时不安装任何内容。
 
 **手动安装：**
 

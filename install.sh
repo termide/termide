@@ -73,6 +73,31 @@ has_cmd() {
     command -v "$1" >/dev/null 2>&1
 }
 
+# The SHA-256 of file $1, in lowercase hex
+sha256_of() {
+    if has_cmd sha256sum; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif has_cmd shasum; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        error "Neither sha256sum nor shasum is installed: cannot verify the download"
+    fi
+}
+
+# Check file $1 against the checksum published at $2, or stop
+verify_sha256() {
+    SUM_FILE="$1.sha256"
+    curl -fsSL "$2" -o "$SUM_FILE" || error "No checksum published at $2: not installing an unverified download"
+    EXPECTED=$(cut -c1-64 "$SUM_FILE" | tr 'A-F' 'a-f')
+    case "$EXPECTED" in
+        *[!0-9a-f]*|"") error "The checksum at $2 is not a SHA-256" ;;
+    esac
+    [ ${#EXPECTED} -eq 64 ] || error "The checksum at $2 is not a SHA-256"
+    ACTUAL=$(sha256_of "$1")
+    [ "$ACTUAL" = "$EXPECTED" ] || error "Checksum mismatch: expected $EXPECTED, got $ACTUAL"
+    info "Checksum verified."
+}
+
 # Install using deb package
 install_deb() {
     info "Installing via deb package..."
@@ -116,7 +141,10 @@ install_binary() {
     URL="https://github.com/$REPO/releases/download/$VERSION/termide-${VERSION}-${TARGET}.tar.gz"
     TMP_DIR=$(mktemp -d)
 
-    curl -fsSL "$URL" | tar xz -C "$TMP_DIR"
+    ARCHIVE="$TMP_DIR/termide.tar.gz"
+    curl -fsSL "$URL" -o "$ARCHIVE" || error "Download failed: $URL"
+    verify_sha256 "$ARCHIVE" "$URL.sha256"
+    tar xzf "$ARCHIVE" -C "$TMP_DIR"
     sudo install -m 755 "$TMP_DIR/termide" "$INSTALL_DIR/"
     rm -rf "$TMP_DIR"
 }
