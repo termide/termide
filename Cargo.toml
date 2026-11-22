@@ -66,6 +66,8 @@ pulldown-cmark = { version = "0.12", default-features = false }
 html5ever = "0.39"
 scraper = { version = "0.27", default-features = false }
 ureq = "2.10"
+# Decoding fetched pages that are not UTF-8 (their charset or <meta charset>).
+encoding_rs = "0.8"
 
 # Shared by several crates; kept here so their versions move together.
 thiserror = "2.0"

@@ -1,6 +1,6 @@
-//! Command hooks: external programs run on tool calls, in the shape Claude
-//! Code, Gemini CLI and Cursor share — the event as JSON on stdin, a verdict
-//! as JSON on stdout, exit code 2 to block with stderr as the reason.
+//! Command hooks: external programs run on tool calls — the event as JSON on
+//! stdin, a verdict as JSON on stdout, exit code 2 to block with stderr as
+//! the reason — understanding Claude Code's hook fields too.
 //!
 //! On `before_tool_call` the program receives
 //! `{"event","hook","cwd","tool","arguments"}` and may answer
@@ -11,7 +11,15 @@
 //! replaces the model's. On `after_tool_call` it also receives
 //! `"result":{"text","is_error"}` and may answer `{"text",…,"is_error"}` to
 //! rewrite the result. A program that exits 2 blocks (before) or turns the
-//! result into an error (after) with its stderr as the text. Any other
+//! result into an error (after) with its stderr as the text.
+//!
+//! Claude Code's names come alongside: the input also carries
+//! `hook_event_name` (`PreToolUse`/`PostToolUse`), `tool_name`, `tool_input`,
+//! `tool_use_id` and, after a call, `tool_response`; a before hook may answer
+//! `hookSpecificOutput.permissionDecision` (`allow`, `deny`, `ask`, `defer`)
+//! with `permissionDecisionReason` and `updatedInput`, or the legacy
+//! top-level `approve`; an after hook may answer `decision: "block"` with a
+//! `reason`, or `hookSpecificOutput.updatedToolOutput`. Any other
 //! failure — another exit code, a timeout, a program that cannot start,
 //! stdout that is not JSON — is logged and ignored, so a broken hook never
 //! stops the agent.
@@ -70,6 +78,10 @@ impl Hooks for CommandHooks {
                 "cwd": ctx.cwd,
                 "tool": call.name,
                 "arguments": arguments,
+                "hook_event_name": "PreToolUse",
+                "tool_name": call.name,
+                "tool_input": arguments,
+                "tool_use_id": call.id,
             });
             let Some(run) = run_hook(&name, &config, &self.cwd, &input) else {
                 continue;
@@ -87,13 +99,16 @@ impl Hooks for CommandHooks {
             let Some(answer) = run.answer(&name) else {
                 continue;
             };
-            if let Some(new_arguments) = answer.get("arguments").filter(|a| a.is_object()) {
+            let specific = &answer["hookSpecificOutput"];
+            if let Some(new_arguments) = [&answer["arguments"], &specific["updatedInput"]]
+                .into_iter()
+                .rfind(|a| a.is_object())
+            {
                 arguments = new_arguments.clone();
                 replaced = true;
             }
-            match answer["decision"].as_str() {
-                Some("block") => {
-                    let reason = answer["reason"].as_str().unwrap_or("").trim();
+            match before_verdict(&answer) {
+                Some((Verdict::Block, reason)) => {
                     return ToolDecision::Block {
                         reason: if reason.is_empty() {
                             format!("blocked by hook {name}")
@@ -102,7 +117,7 @@ impl Hooks for CommandHooks {
                         },
                     };
                 }
-                Some("allow") => {
+                Some((Verdict::Allow, _)) => {
                     return ToolDecision::Approve {
                         arguments: replaced.then_some(arguments),
                     };
@@ -130,6 +145,11 @@ impl Hooks for CommandHooks {
                 "tool": call.name,
                 "arguments": call.arguments,
                 "result": { "text": result.plain_text(), "is_error": result.is_error },
+                "hook_event_name": "PostToolUse",
+                "tool_name": call.name,
+                "tool_input": call.arguments,
+                "tool_use_id": call.id,
+                "tool_response": { "text": result.plain_text(), "is_error": result.is_error },
             });
             let Some(run) = run_hook(&name, &config, &self.cwd, &input) else {
                 continue;
@@ -149,13 +169,29 @@ impl Hooks for CommandHooks {
             let Some(answer) = run.answer(&name) else {
                 continue;
             };
-            if let Some(text) = answer["text"].as_str() {
+            let replacement = answer["text"]
+                .as_str()
+                .or_else(|| answer["hookSpecificOutput"]["updatedToolOutput"].as_str());
+            if let Some(text) = replacement {
                 result.content = vec![ToolResultContent::Text {
                     text: text.to_string(),
                 }];
             }
             if let Some(is_error) = answer["is_error"].as_bool() {
                 result.is_error = is_error;
+            }
+            // Claude Code's PostToolUse block: the reason replaces the result,
+            // as an error, the way exit code 2 does.
+            if answer["decision"].as_str() == Some("block") {
+                let reason = answer["reason"].as_str().unwrap_or("").trim();
+                result.content = vec![ToolResultContent::Text {
+                    text: if reason.is_empty() {
+                        format!("result rejected by hook {name}")
+                    } else {
+                        format!("hook {name}: {reason}")
+                    },
+                }];
+                result.is_error = true;
             }
         }
         result
@@ -164,6 +200,30 @@ impl Hooks for CommandHooks {
     fn should_stop_after_turn(&mut self, _message: &AssistantMessage) -> bool {
         false
     }
+}
+
+#[derive(Debug, PartialEq)]
+enum Verdict {
+    Allow,
+    Block,
+}
+
+/// A before hook's decision and its reason. Claude Code's
+/// `hookSpecificOutput.permissionDecision` wins over the top-level
+/// `decision`, whose legacy `approve` means `allow`; `ask`, `defer` or none
+/// leave the call to the permission rules.
+fn before_verdict(answer: &Value) -> Option<(Verdict, &str)> {
+    let specific = &answer["hookSpecificOutput"];
+    let (decision, reason) = match specific["permissionDecision"].as_str() {
+        Some(decision) => (decision, &specific["permissionDecisionReason"]),
+        None => (answer["decision"].as_str()?, &answer["reason"]),
+    };
+    let verdict = match decision {
+        "allow" | "approve" => Verdict::Allow,
+        "block" | "deny" => Verdict::Block,
+        _ => return None,
+    };
+    Some((verdict, reason.as_str().unwrap_or("").trim()))
 }
 
 struct HookRun {
@@ -481,6 +541,68 @@ mod tests {
         let result =
             chain.after_tool_call(&call, ToolResultMessage::text(&call, "the secret is x"));
         assert_eq!(result.plain_text(), "hook b-reject: leaks a secret");
+        assert!(result.is_error);
+    }
+
+    /// A hook written for Claude Code reads its names from the input and is
+    /// understood in its own answer shape.
+    #[test]
+    fn claude_code_shaped_hooks_are_understood() {
+        let decide = |script: &str| {
+            let mut hooks = BTreeMap::new();
+            hooks.insert(
+                "cc".to_string(),
+                hook(HookEvent::BeforeToolCall, &[], script, 5),
+            );
+            CommandHooks::new(hooks, PathBuf::from("/tmp")).before_tool_call(&bash("ls"), &ctx())
+        };
+        // The input carries Claude Code's keys next to termide's own.
+        let echo_input = r#"input=$(cat); case "$input" in *'"hook_event_name":"PreToolUse"'*'"tool_input":{"command":"ls"}'*) ;; *) exit 1;; esac; case "$input" in *'"tool_name":"shell"'*) printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"not here"}}';; esac"#;
+        assert_eq!(
+            decide(echo_input),
+            ToolDecision::Block {
+                reason: "hook cc: not here".into()
+            }
+        );
+        assert_eq!(
+            decide(
+                r#"cat >/dev/null; printf '{"hookSpecificOutput":{"permissionDecision":"allow","updatedInput":{"command":"pwd"}}}'"#
+            ),
+            ToolDecision::Approve {
+                arguments: Some(json!({ "command": "pwd" }))
+            }
+        );
+        assert_eq!(
+            decide(
+                r#"cat >/dev/null; printf '{"hookSpecificOutput":{"permissionDecision":"ask","updatedInput":{"command":"pwd"}}}'"#
+            ),
+            ToolDecision::Replace {
+                arguments: json!({ "command": "pwd" })
+            }
+        );
+        assert_eq!(
+            decide(r#"cat >/dev/null; printf '{"decision":"approve"}'"#),
+            ToolDecision::Approve { arguments: None }
+        );
+
+        let mut hooks = BTreeMap::new();
+        hooks.insert(
+            "post".to_string(),
+            hook(
+                HookEvent::AfterToolCall,
+                &[],
+                r#"input=$(cat); case "$input" in *'"hook_event_name":"PostToolUse"'*'"tool_response":{'*secret*) printf '{"decision":"block","reason":"leaks a secret"}';; *'"tool_response":{'*) printf '{"hookSpecificOutput":{"hookEventName":"PostToolUse","updatedToolOutput":"short"}}';; esac"#,
+                5,
+            ),
+        );
+        let mut chain = CommandHooks::new(hooks, PathBuf::from("/tmp"));
+        let call = bash("cat file");
+        let result = chain.after_tool_call(&call, ToolResultMessage::text(&call, "long text"));
+        assert_eq!(result.plain_text(), "short");
+        assert!(!result.is_error);
+        let result =
+            chain.after_tool_call(&call, ToolResultMessage::text(&call, "the secret is x"));
+        assert_eq!(result.plain_text(), "hook post: leaks a secret");
         assert!(result.is_error);
     }
 

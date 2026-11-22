@@ -109,8 +109,21 @@ impl FetchTool {
         let body_budget = MAX_BYTES.saturating_sub(out.len());
         let mut body = String::new();
         let mut shown_end = offset - 1;
+        // A line longer than the whole budget (a page with no line breaks)
+        // is cut: lines are the only unit the model can page by.
+        let mut cut_line = None;
         for (index, line) in lines.iter().enumerate().skip(offset - 1).take(limit) {
-            if !body.is_empty() && body.len() + line.len() + 1 > body_budget {
+            if body.len() + line.len() + 1 > body_budget {
+                if !body.is_empty() {
+                    break;
+                }
+                let mut end = body_budget.min(line.len());
+                while !line.is_char_boundary(end) {
+                    end -= 1;
+                }
+                body.push_str(&line[..end]);
+                cut_line = Some((index + 1, end, line.len()));
+                shown_end = index + 1;
                 break;
             }
             body.push_str(line);
@@ -118,6 +131,11 @@ impl FetchTool {
             shown_end = index + 1;
         }
         out.push_str(body.trim_end_matches('\n'));
+        if let Some((number, kept, length)) = cut_line {
+            out.push_str(&format!(
+                "\n\n[Line {number} is {length} bytes long; only its first {kept} are shown.]"
+            ));
+        }
         let truncated = shown_end < total;
         if truncated {
             out.push_str(&format!(
@@ -325,6 +343,33 @@ mod tests {
             text_of(&rest),
             "URL: https://example.com/a\nTitle: A\n\nline 3\nline 4\nline 5"
         );
+    }
+
+    #[test]
+    fn fetch_cuts_a_line_longer_than_the_whole_budget() {
+        let web = http_web();
+        // One line of multi-byte characters, far past the budget.
+        let content = format!("{}\nsecond\n", "é".repeat(MAX_BYTES));
+        web.remember(
+            "https://example.com/long",
+            &FetchedPage {
+                url: "https://example.com/long".into(),
+                title: String::new(),
+                content,
+            },
+        );
+        let tool = FetchTool::new(web);
+        let result = tool.execute(
+            &call("fetch", json!({ "url": "https://example.com/long" })),
+            &ToolContext::new(std::env::temp_dir()),
+            &mut |_| {},
+            &CancelToken::new(),
+        );
+        assert!(!result.is_error);
+        let text = text_of(&result);
+        assert!(text.len() < MAX_BYTES + 512, "{} bytes", text.len());
+        assert!(text.contains("[Line 1 is 131072 bytes long; only its first"));
+        assert!(text.ends_with("[Showing lines 1-1 of 2. Use offset=2 to continue.]"));
     }
 
     #[test]

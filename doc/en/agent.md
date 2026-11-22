@@ -3152,7 +3152,8 @@ always" writes a rule for the tool name:
 A hook is a program Termide runs around a tool call, declared in
 `hooks.toml` at any of the three levels (same merging as MCP servers). It
 gets the event as JSON on standard input and answers with JSON on standard
-output, the shape Claude Code, Gemini CLI and Cursor share:
+output, and understands the fields of Claude Code's `PreToolUse` and
+`PostToolUse` hooks too (see below):
 
 ```toml
 [no-force-push]
@@ -3179,6 +3180,18 @@ if something it left running still holds its output. Arguments a hook
 rewrites go back through plan mode and the tools switched off in the
 session, so a rewrite gets no call past them. Hooks run around the calls of
 the panel's subagents and of `termide --prompt` too.
+
+Claude Code's names come alongside Termide's own. The input also carries
+`hook_event_name` (`PreToolUse` or `PostToolUse`), `tool_name`, `tool_input`,
+`tool_use_id` and, after a call, `tool_response` (`{"text", "is_error"}`).
+Before a call the answer may be
+`{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}`
+(likewise `"allow"`; `"ask"` and `"defer"` leave the rules to decide), with
+`"updatedInput": {…}` for other arguments; the older top-level `"approve"`
+means `"allow"`. After a call, `{"decision": "block", "reason": "…"}` turns the
+result into an error with the reason as its text, and
+`{"hookSpecificOutput": {"updatedToolOutput": "…"}}` rewrites it. The tool
+names are Termide's (`shell`, `edit`, …), not Claude Code's.
 
 A project's hook waits for approval as a project's MCP server does: the panel
 says so when it opens, it does not run until `/trust <name>`, and the approval

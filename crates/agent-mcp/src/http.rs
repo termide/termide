@@ -16,6 +16,9 @@
 //!   the server may answer either way;
 //! - `initialize`'s answer may carry `Mcp-Session-Id`; every later request
 //!   sends it back, since without it a session-keeping server answers 404;
+//!   a 404 to a request that carried it means the server dropped the
+//!   session, so a new one is opened with a fresh `initialize` and the
+//!   request sent again in it;
 //! - once the version is agreed, every request carries `MCP-Protocol-Version`;
 //! - a notification is owed `202 Accepted` with no body, so there is nothing to
 //!   parse and nothing to wait for;
@@ -84,6 +87,12 @@ struct Inner {
     auth: Option<Auth>,
     /// The server refused us and no kept sign-in could change its mind.
     needs_login: AtomicBool,
+    /// The params of the `initialize` that opened the session, to open a
+    /// new one with when the server drops it.
+    init_params: Mutex<Option<Value>>,
+    /// Held while a new session is opened, so requests that all find the
+    /// old one gone open one between them, not one each.
+    reopening: Mutex<()>,
 }
 
 struct Auth {
@@ -97,7 +106,20 @@ struct Auth {
 /// for any other reason.
 enum PostError {
     Unauthorized(String),
+    /// `404` to a request that carried this `Mcp-Session-Id`: the server
+    /// dropped the session, and a new one is to be opened.
+    SessionGone(String, String),
     Other(String),
+}
+
+impl PostError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Unauthorized(message) | Self::SessionGone(message, _) | Self::Other(message) => {
+                message
+            }
+        }
+    }
 }
 
 impl HttpClient {
@@ -166,6 +188,8 @@ impl HttpClient {
                 on_message: Mutex::new(None),
                 auth,
                 needs_login: AtomicBool::new(false),
+                init_params: Mutex::new(None),
+                reopening: Mutex::new(()),
             }),
             stop: Arc::new(AtomicBool::new(false)),
         })
@@ -283,28 +307,104 @@ impl Inner {
 
     /// [`Self::post`], dropping a streamed answer between events once
     /// `stop` says nobody waits for it any more.
+    ///
+    /// A `404` to a request that carried the session means the server
+    /// dropped it: as the specification asks, a new session is opened with
+    /// a fresh `initialize` and the request is sent once more in it.
     fn post_until(&self, message: &Value, stop: &dyn Fn() -> bool) -> Result<Value, String> {
+        match self.post_signed_in(message, stop) {
+            Err(PostError::SessionGone(error, gone)) => {
+                let is_initialize =
+                    message.get("method").and_then(Value::as_str) == Some("initialize");
+                if is_initialize {
+                    return Err(error);
+                }
+                if let Err(reason) = self.reopen(&gone, stop) {
+                    return Err(format!(
+                        "{error}; a new session could not be opened: {reason}"
+                    ));
+                }
+                self.post_signed_in(message, stop)
+                    .map_err(PostError::into_message)
+            }
+            other => other.map_err(PostError::into_message),
+        }
+    }
+
+    /// One POST, once more after a refusal a renewed sign-in may cure.
+    fn post_signed_in(&self, message: &Value, stop: &dyn Fn() -> bool) -> Result<Value, PostError> {
         let sent = self.bearer();
         let refused = match self.post_once(message, sent.as_deref(), stop) {
-            Ok(reply) => return Ok(reply),
-            Err(PostError::Other(error)) => return Err(error),
             Err(PostError::Unauthorized(error)) => error,
+            other => return other,
         };
         if self.auth.is_none() {
-            return Err(refused);
+            return Err(PostError::Other(refused));
         }
         if self.renew(sent.as_deref()) {
             match self.post_once(message, self.bearer().as_deref(), stop) {
-                Ok(reply) => return Ok(reply),
-                Err(PostError::Other(error)) => return Err(error),
                 Err(PostError::Unauthorized(_)) => {}
+                other => return other,
             }
         }
         self.needs_login.store(true, Ordering::Relaxed);
-        Err(format!(
+        Err(PostError::Other(format!(
             "HTTP 401: the server wants a sign-in; run /mcp login {}",
             self.name
-        ))
+        )))
+    }
+
+    /// Open a new session in place of `gone`, the one the server dropped:
+    /// `initialize` again, with no session id, then `initialized`. Nothing
+    /// to do when another request already opened one.
+    fn reopen(&self, gone: &str, stop: &dyn Fn() -> bool) -> Result<(), String> {
+        let _reopening = self
+            .reopening
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        {
+            let mut session = self.session.lock().unwrap_or_else(PoisonError::into_inner);
+            if *session != gone {
+                return Ok(());
+            }
+            session.clear();
+        }
+        let params = self
+            .init_params
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+            .ok_or("the session was never opened")?;
+        *self.protocol.lock().unwrap_or_else(PoisonError::into_inner) =
+            crate::client::PROTOCOL_VERSION.to_string();
+        log::info!(
+            "mcp {}: the server dropped the session; opening a new one",
+            self.name
+        );
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let reply = self
+            .post_signed_in(
+                &json!({ "jsonrpc": "2.0", "id": id, "method": "initialize", "params": params }),
+                stop,
+            )
+            .map_err(PostError::into_message)?;
+        if reply.get("error").is_some() {
+            return Err(jsonrpc_error(&reply));
+        }
+        self.agree_protocol(&reply);
+        self.post_signed_in(
+            &json!({ "jsonrpc": "2.0", "method": "notifications/initialized", "params": {} }),
+            stop,
+        )
+        .map_err(PostError::into_message)?;
+        Ok(())
+    }
+
+    /// Take the protocol version an `initialize` answer agrees to.
+    fn agree_protocol(&self, reply: &Value) {
+        if let Some(version) = reply["result"]["protocolVersion"].as_str() {
+            *self.protocol.lock().unwrap_or_else(PoisonError::into_inner) = version.to_string();
+        }
     }
 
     fn post_once(
@@ -319,6 +419,11 @@ impl Inner {
             .set("Content-Type", "application/json")
             // Either answer is allowed, so both are offered.
             .set("Accept", "application/json, text/event-stream");
+        let sent_session = self
+            .session
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
         let response = match self
             .decorate(call, bearer)
             .send_string(&message.to_string())
@@ -329,6 +434,12 @@ impl Inner {
             Err(ureq::Error::Status(200 | 202 | 204, _)) => return Ok(Value::Null),
             Err(ureq::Error::Status(401, response)) => {
                 return Err(PostError::Unauthorized(http_error(401, &brief(response))))
+            }
+            Err(ureq::Error::Status(404, response)) if !sent_session.is_empty() => {
+                return Err(PostError::SessionGone(
+                    http_error(404, &brief(response)),
+                    sent_session,
+                ))
             }
             Err(ureq::Error::Status(code, response)) => {
                 return Err(PostError::Other(http_error(code, &brief(response))))
@@ -498,6 +609,12 @@ impl McpTransport for HttpClient {
         }
         let inner = &self.inner;
         let id = inner.next_id.fetch_add(1, Ordering::Relaxed);
+        if method == "initialize" {
+            *inner
+                .init_params
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner) = Some(params.clone());
+        }
         let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         let (tx, rx) = mpsc::channel();
         let worker = Arc::clone(inner);
@@ -541,12 +658,7 @@ impl McpTransport for HttpClient {
             reply if reply.get("error").is_some() => Err(jsonrpc_error(reply)),
             reply => {
                 if method == "initialize" {
-                    if let Some(version) = reply["result"]["protocolVersion"].as_str() {
-                        *inner
-                            .protocol
-                            .lock()
-                            .unwrap_or_else(PoisonError::into_inner) = version.to_string();
-                    }
+                    inner.agree_protocol(reply);
                 }
                 Ok(reply.get("result").cloned().unwrap_or(Value::Null))
             }
@@ -736,9 +848,10 @@ fn jsonrpc_error(reply: &Value) -> String {
 /// Read an answer up to [`MAX_BODY`], so a server that streams forever cannot
 /// grow the process until it dies. A TLS close without `close_notify` is
 /// tolerated, as in the web tools: the bytes that arrived are the answer.
-fn read_capped(mut body: impl Read) -> Result<String, String> {
+fn read_capped(body: impl Read) -> Result<String, String> {
     let mut buf = Vec::new();
-    if let Err(error) = body.read_to_end(&mut buf) {
+    // One byte past the cap tells an answer over it from one that fits.
+    if let Err(error) = body.take(MAX_BODY + 1).read_to_end(&mut buf) {
         if error.kind() != std::io::ErrorKind::UnexpectedEof {
             return Err(format!("cannot read the answer: {error}"));
         }
@@ -909,6 +1022,114 @@ mod tests {
         // The session is still ended, off the dropping thread.
         let request = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(request.starts_with("DELETE "), "{request}");
+    }
+
+    #[test]
+    fn an_endless_answer_is_cut_at_the_cap() {
+        let error = read_capped(std::io::repeat(b'x')).unwrap_err();
+        assert!(error.contains("is over"), "{error}");
+        assert_eq!(read_capped(&b"{}"[..]).unwrap(), "{}");
+    }
+
+    /// One HTTP request off `stream`: its `Mcp-Session-Id` and its body.
+    fn read_request(stream: &mut std::net::TcpStream) -> (Option<String>, Value) {
+        let mut reader = BufReader::new(stream);
+        let mut session = None;
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            let line = line.trim_end();
+            if line.is_empty() {
+                break;
+            }
+            if let Some((key, value)) = line.split_once(':') {
+                match key.to_ascii_lowercase().as_str() {
+                    "mcp-session-id" => session = Some(value.trim().to_string()),
+                    "content-length" => length = value.trim().parse().unwrap(),
+                    _ => {}
+                }
+            }
+        }
+        let mut body = vec![0; length];
+        reader.read_exact(&mut body).unwrap();
+        (
+            session,
+            serde_json::from_slice(&body).unwrap_or(Value::Null),
+        )
+    }
+
+    /// A server that drops the session (404 to a request carrying it) is
+    /// sent a new `initialize` with no session, then the request again.
+    #[test]
+    fn a_dropped_session_is_opened_again_and_the_request_retried() {
+        use std::io::Write;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let (tx, rx) = mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            let mut sessions = 0;
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let (session, body) = read_request(&mut stream);
+                let method = body["method"].as_str().unwrap_or("").to_string();
+                let _ = tx.send(format!("{method} {}", session.as_deref().unwrap_or("-")));
+                let id = body["id"].clone();
+                let (status, headers, reply) = match (method.as_str(), session.as_deref()) {
+                    ("initialize", None) => {
+                        sessions += 1;
+                        (
+                            "200 OK",
+                            format!("Mcp-Session-Id: s{sessions}\r\n"),
+                            json!({ "jsonrpc": "2.0", "id": id, "result": {
+                                "protocolVersion": "2025-06-18", "serverInfo": { "name": "x" } } })
+                            .to_string(),
+                        )
+                    }
+                    ("notifications/initialized", _) => {
+                        ("202 Accepted", String::new(), String::new())
+                    }
+                    // The first session is dropped as soon as it is used.
+                    (_, Some("s1")) => ("404 Not Found", String::new(), String::new()),
+                    (_, Some("s2")) => (
+                        "200 OK",
+                        String::new(),
+                        json!({ "jsonrpc": "2.0", "id": id, "result": { "tools": [] } })
+                            .to_string(),
+                    ),
+                    _ => ("400 Bad Request", String::new(), String::new()),
+                };
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status}\r\n{headers}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+                    reply.len()
+                );
+            }
+        });
+        let config = McpServerConfig {
+            url: Some(url),
+            timeout_secs: 5,
+            ..Default::default()
+        };
+        let client = HttpClient::new("dropping", &config).unwrap();
+        client.initialize().unwrap();
+        let result = client.request("tools/list", json!({}), None).unwrap();
+        assert_eq!(result["tools"], json!([]));
+        let seen: Vec<String> = rx.try_iter().collect();
+        assert_eq!(
+            seen,
+            [
+                "initialize -",
+                "notifications/initialized s1",
+                "tools/list s1",
+                "initialize -",
+                "notifications/initialized s2",
+                "tools/list s2",
+            ]
+        );
+        drop(client);
     }
 
     #[test]

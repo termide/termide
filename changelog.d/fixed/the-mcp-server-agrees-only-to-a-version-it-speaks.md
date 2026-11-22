@@ -1,0 +1,1 @@
+- **Termide's MCP server agrees only to a protocol version it speaks.** It echoed back whatever version a client asked for in `initialize`, even one it does not know; it now answers with the requested version when it supports it, and with its newest one otherwise, so the client can decide.

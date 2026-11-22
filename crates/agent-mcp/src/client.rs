@@ -17,7 +17,7 @@
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -93,6 +93,12 @@ pub trait McpTransport: Send + Sync {
     /// stdio they arrive on the pipe already being read; over HTTP this opens
     /// the stream a server pushes them on. Called once, after the handshake.
     fn listen(&self, on_message: OnMessage);
+
+    /// Whether the server is gone for good (a process whose output ended):
+    /// nothing sent to it will be answered.
+    fn stopped(&self) -> bool {
+        false
+    }
 
     /// The `initialize` handshake; returns the server's declared name.
     fn initialize(&self) -> Result<String, String> {
@@ -242,7 +248,13 @@ pub struct McpClient {
     next_id: AtomicU64,
     timeout: Duration,
     child: Mutex<Option<Child>>,
+    /// Set by the reader when the server's output ends, under the `pending`
+    /// lock, so a request either sees it or is cleared with the others.
+    stopped: Arc<AtomicBool>,
 }
+
+/// What a request to a server whose output has ended fails with.
+pub(crate) const STOPPED: &str = "the server has stopped; /mcp reload starts it again";
 
 impl McpClient {
     /// Start the server process and speak to it over its stdin/stdout;
@@ -295,7 +307,18 @@ impl McpClient {
         let reader_pending = Arc::clone(&pending);
         let reply_writer = writer.clone();
         let reader_handler = Arc::clone(&on_message);
-        std::thread::spawn(move || read_loop(reader, reader_pending, reply_writer, reader_handler));
+        let stopped = Arc::new(AtomicBool::new(false));
+        let reader_stopped = Arc::clone(&stopped);
+        std::thread::spawn(move || {
+            read_loop(reader, &reader_pending, &reply_writer, &reader_handler);
+            // The server is gone: every waiting request learns it now, and
+            // every later one at once rather than at its timeout.
+            let mut pending = reader_pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            reader_stopped.store(true, Ordering::Relaxed);
+            pending.clear();
+        });
         Self {
             writer,
             pending,
@@ -303,6 +326,7 @@ impl McpClient {
             next_id: AtomicU64::new(1),
             timeout,
             child: Mutex::new(None),
+            stopped,
         }
     }
 
@@ -325,10 +349,13 @@ impl McpTransport for McpClient {
     ) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
-        self.pending
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .insert(id, tx);
+        {
+            let mut pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner);
+            if self.stopped.load(Ordering::Relaxed) {
+                return Err(format!("{method}: {STOPPED}"));
+            }
+            pending.insert(id, tx);
+        }
         let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
         if let Err(error) = self.write(&message) {
             self.pending
@@ -359,6 +386,10 @@ impl McpTransport for McpClient {
             .on_message
             .lock()
             .unwrap_or_else(PoisonError::into_inner) = Some(on_message);
+    }
+
+    fn stopped(&self) -> bool {
+        self.stopped.load(Ordering::Relaxed)
     }
 }
 
@@ -441,7 +472,7 @@ pub(crate) fn wait(
 
 /// Deliver replies to their requests, answer a server's own requests (see
 /// [`answer_server_request`]) and hand its notifications to the handler.
-fn read_loop(reader: impl Read, pending: Pending, writer: Outbox, handler: SharedHandler) {
+fn read_loop(reader: impl Read, pending: &Pending, writer: &Outbox, handler: &SharedHandler) {
     for line in BufReader::new(reader).lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
@@ -482,7 +513,7 @@ fn read_loop(reader: impl Read, pending: Pending, writer: Outbox, handler: Share
             }
             (Some(_), Some(method)) => {
                 let reply = answer_server_request(&message["id"], method.as_str().unwrap_or(""));
-                let _ = post(&writer, &reply);
+                let _ = post(writer, &reply);
             }
             (None, Some(method)) => {
                 let method = method.as_str().unwrap_or("");
@@ -498,11 +529,6 @@ fn read_loop(reader: impl Read, pending: Pending, writer: Outbox, handler: Share
             (None, None) => {}
         }
     }
-    // The server is gone: every waiting request learns it now.
-    pending
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .clear();
 }
 
 #[cfg(test)]
@@ -626,13 +652,33 @@ mod tests {
             McpClient::from_streams(from_server_rx, to_server_tx, Duration::from_millis(120));
         let error = client.request("ping", json!({}), None).unwrap_err();
         assert!(error.contains("no reply within"), "{error}");
+        assert!(!client.stopped());
         drop(from_server_tx);
         std::thread::sleep(Duration::from_millis(50));
         let error = client.request("ping", json!({}), None).unwrap_err();
         assert!(
-            error.contains("closed") || error.contains("no reply"),
+            error.contains("closed") || error.contains("no reply") || error.contains(STOPPED),
             "{error}"
         );
+    }
+
+    /// Once a server's output ends, it is known to be gone: a request fails
+    /// at once instead of waiting out its timeout.
+    #[test]
+    fn a_server_whose_output_ended_fails_requests_at_once() {
+        let (_keep_rx, to_server_tx) = pipe().unwrap();
+        let (from_server_rx, from_server_tx) = pipe().unwrap();
+        let client = McpClient::from_streams(from_server_rx, to_server_tx, Duration::from_secs(30));
+        drop(from_server_tx);
+        let started = Instant::now();
+        while !client.stopped() {
+            assert!(started.elapsed() < Duration::from_secs(5), "never noticed");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started = Instant::now();
+        let error = client.request("tools/call", json!({}), None).unwrap_err();
+        assert_eq!(error, format!("tools/call: {STOPPED}"));
+        assert!(started.elapsed() < Duration::from_secs(1));
     }
 
     /// A server that stops reading its stdin fills the pipe; requests still

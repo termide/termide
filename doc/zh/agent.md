@@ -827,7 +827,7 @@ MCP 工具像命令一样请求权限：在 `all` 中运行，在 `auto` 中交�
 
 ### 钩子
 
-钩子是 Termide 在工具调用前后运行的程序，在 `hooks.toml` 中声明，可以位于三个层级中的任何一个（合并方式与 MCP 服务器相同）。它从标准输入获得 JSON 格式的事件，并在标准输出上以 JSON 回答，这是 Claude Code、Gemini CLI 和 Cursor 共用的格式：
+钩子是 Termide 在工具调用前后运行的程序，在 `hooks.toml` 中声明，可以位于三个层级中的任何一个（合并方式与 MCP 服务器相同）。它从标准输入获得 JSON 格式的事件，并在标准输出上以 JSON 回答，同时也能理解 Claude Code 的 `PreToolUse` 和 `PostToolUse` 钩子的字段（见下文）：
 
 ```toml
 [no-force-push]
@@ -838,6 +838,8 @@ timeout_secs = 30
 ```
 
 调用之前，输入为 `{"event","hook","cwd","tool","arguments"}`。程序可以输出 `{"decision": "block", "reason": "…"}` 跳过该调用（原因会交给模型），输出 `{"decision": "allow"}` 不经模式的权限询问直接运行（你的 `deny` 规则仍会拒绝它，`ask` 规则或 `.git` 下的编辑仍会询问，与 Claude Code 相同），或输出 `{"arguments": {…}}` 以其他参数运行；没有决定或为 `"ask"` 时由权限规则决定。以代码 2 退出同样会阻止调用，并以标准错误作为原因。调用之后，输入还带有 `"result": {"text", "is_error"}`，`{"text": "…"}` 会改写模型看到的内容；退出代码 2 会把结果变为错误，并以标准错误作为其文本。钩子按名称顺序在权限规则之前运行；以其他方式失败或超时的钩子会被记录并忽略，因此出故障的钩子永远不会让代理停止。
+
+Claude Code 的字段名与 Termide 自己的字段并存。输入还带有 `hook_event_name`（`PreToolUse` 或 `PostToolUse`）、`tool_name`、`tool_input`、`tool_use_id`，调用之后还有 `tool_response`（`{"text", "is_error"}`）。调用之前，回答可以是 `{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "…"}}`（`"allow"` 同理；`"ask"` 和 `"defer"` 交由规则决定），并可用 `"updatedInput": {…}` 换成其他参数；旧的顶层 `"approve"` 等同于 `"allow"`。调用之后，`{"decision": "block", "reason": "…"}` 会把结果变为以原因为文本的错误，`{"hookSpecificOutput": {"updatedToolOutput": "…"}}` 会改写结果。工具名称是 Termide 的（`shell`、`edit` 等），而不是 Claude Code 的。
 
 项目的钩子像项目的 MCP 服务器一样等待批准：面板打开时会提示这一点，在 `/trust <name>` 之前它不会运行，只要其命令、参数、事件、工具和超时保持不变，批准就一直有效；它从下一次运行起开始运行。与服务器一样，`/trust <name>` 批准的是最后一次显示时的钩子；此后改动过的钩子会被重新显示。项目既不能关闭也不能替换配置层级的钩子：你的某个钩子可能正是一道防护。
 

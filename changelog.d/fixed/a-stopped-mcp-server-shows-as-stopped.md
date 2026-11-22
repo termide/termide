@@ -1,0 +1,1 @@
+- **A stopped MCP server shows as stopped.** A local MCP server that exited still showed as connected in `/mcp`, and each call to its tools waited out the whole timeout; `/mcp reload` kept it as it was. It now shows as failed with a hint, its calls fail at once, and a reload starts it again. A tool list change a server announced while it was still connecting is no longer lost.
