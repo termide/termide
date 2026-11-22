@@ -510,6 +510,9 @@ impl VfsState {
 
     /// Start a connection to a remote path.
     fn start_connect(&mut self, path: VfsPath) -> VfsResult<()> {
+        // Callers connect remote paths only; a local one is a bug, reported
+        // as an error in release builds.
+        debug_assert!(path.is_remote(), "start_connect on a local path");
         // Start async connection based on protocol
         let operation = match path.protocol {
             VfsProtocol::Sftp => {
