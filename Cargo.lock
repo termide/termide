@@ -5224,7 +5224,6 @@ name = "termide"
 version = "0.50.0"
 dependencies = [
  "anyhow",
- "cc",
  "clap",
  "crossterm",
  "dirs",
@@ -5287,8 +5286,10 @@ dependencies = [
 name = "termide-agent-hooks"
 version = "0.50.0"
 dependencies = [
+ "libc",
  "log",
  "serde_json",
+ "tempfile",
  "termide-agent-core",
 ]
 
@@ -5298,6 +5299,7 @@ version = "0.50.0"
 dependencies = [
  "base64 0.22.1",
  "getrandom 0.4.2",
+ "libc",
  "log",
  "open",
  "serde",
@@ -5592,6 +5594,7 @@ dependencies = [
 name = "termide-fsutil"
 version = "0.50.0"
 dependencies = [
+ "libc",
  "tempfile",
 ]
 
@@ -5915,6 +5918,7 @@ dependencies = [
  "tempfile",
  "termide-config",
  "termide-core",
+ "termide-fsutil",
  "termide-git",
  "termide-i18n",
  "termide-keyboard",

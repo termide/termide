@@ -1,0 +1,14 @@
+# The configuration of file-manager-taken-names: the shared config.toml with
+# Save As on Alt+F2, since Ctrl+Shift+S needs the kitty keyboard protocol the
+# harness does not speak.
+[general]
+language = "en"
+icon_mode = "unicode"
+# The status bar's resource figures change on their own; keep them still.
+resource_monitor_interval = 60000
+
+[editor]
+show_blame = false
+
+[editor.keybindings]
+save_as = "Alt+F2"

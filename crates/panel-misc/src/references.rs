@@ -107,8 +107,8 @@ impl termide_core::Panel for ReferencesPanel {
 
     fn title(&self) -> String {
         match &self.symbol_name {
-            Some(name) => format!("References: {} ({})", name, self.items.len()),
-            None => format!("References ({})", self.items.len()),
+            Some(name) => termide_i18n::t().references_symbol_title_fmt(name, self.items.len()),
+            None => termide_i18n::t().references_title_fmt(self.items.len()),
         }
     }
 

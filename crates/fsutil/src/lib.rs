@@ -254,6 +254,109 @@ mod tests {
     }
 }
 
+/// A directory for `name` under the system's temporary directory that only
+/// this user can reach: `<tmp>/termide-<uid>/<name>` on Unix, created
+/// owner-only (`0700`). A directory already there is used only when it is
+/// a real directory, not a link, owned by this user; access others had is
+/// taken away. Anything else — a link or a directory planted by another
+/// account in a shared `/tmp` — is an error rather than a place to write.
+pub fn private_temp_dir(name: &str) -> io::Result<PathBuf> {
+    #[cfg(unix)]
+    let base = std::env::temp_dir().join(format!("termide-{}", euid()));
+    #[cfg(not(unix))]
+    let base = std::env::temp_dir().join("termide");
+    ensure_private_dir(&base)?;
+    let dir = base.join(name);
+    ensure_private_dir(&dir)?;
+    Ok(dir)
+}
+
+/// Make `dir` an owner-only directory of this user's, creating it when
+/// missing; see [`private_temp_dir`].
+pub fn ensure_private_dir(dir: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+        match fs::DirBuilder::new().mode(0o700).create(dir) {
+            Ok(()) => {}
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(e) => return Err(e),
+        }
+        let meta = fs::symlink_metadata(dir)?;
+        if !meta.is_dir() || meta.uid() != euid() {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "{} is not a directory of this user's; not using it",
+                    dir.display()
+                ),
+            ));
+        }
+        if meta.mode() & 0o077 != 0 {
+            fs::set_permissions(dir, fs::Permissions::from_mode(0o700))?;
+        }
+        Ok(())
+    }
+    #[cfg(not(unix))]
+    fs::create_dir_all(dir)
+}
+
+#[cfg(unix)]
+fn euid() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+#[cfg(all(test, unix))]
+mod private_dir_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    fn mode(path: &Path) -> u32 {
+        fs::symlink_metadata(path).unwrap().permissions().mode() & 0o777
+    }
+
+    #[test]
+    fn a_private_dir_is_created_owner_only_and_tightened() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("p");
+        ensure_private_dir(&dir).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
+        ensure_private_dir(&dir).unwrap();
+        assert_eq!(mode(&dir), 0o700);
+    }
+
+    #[test]
+    fn a_link_or_a_file_is_not_taken_for_a_private_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let elsewhere = tmp.path().join("elsewhere");
+        fs::create_dir(&elsewhere).unwrap();
+        fs::set_permissions(&elsewhere, fs::Permissions::from_mode(0o755)).unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink(&elsewhere, &link).unwrap();
+        let err = ensure_private_dir(&link).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        // The link's target is left as it was.
+        assert_eq!(mode(&elsewhere), 0o755);
+
+        let file = tmp.path().join("file");
+        fs::write(&file, "").unwrap();
+        assert!(ensure_private_dir(&file).is_err());
+    }
+
+    #[test]
+    fn the_private_temp_dir_is_this_users() {
+        let dir = private_temp_dir("fsutil-test").unwrap();
+        assert!(dir.ends_with("fsutil-test"));
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(dir.parent().unwrap()), 0o700);
+        let name = dir.parent().unwrap().file_name().unwrap().to_string_lossy();
+        assert_eq!(name, format!("termide-{}", euid()));
+        let _ = fs::remove_dir(&dir);
+    }
+}
+
 /// `PATH` without its relative entries (`.`, an empty one, `bin`): a program
 /// termide starts by name in a project's directory would be found through
 /// them in the project, where a repository can plant one. Pass it as the

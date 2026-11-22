@@ -410,6 +410,11 @@ pub enum OperationError {
     /// A directory cannot be copied or moved into its own subtree.
     #[error("Cannot copy or move {} into itself", .0.display())]
     DestinationInsideSource(PathBuf),
+
+    /// A pipe, socket or device: reading one may block forever or never
+    /// end, so it is not copied.
+    #[error("Cannot copy {}: not a regular file (a pipe, socket or device)", .0.display())]
+    SpecialFile(PathBuf),
 }
 
 /// Events emitted by the operation system.

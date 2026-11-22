@@ -239,10 +239,19 @@ impl BookmarksConfig {
     pub fn load_from_dir(config_dir: &Path) -> Self {
         let path = config_dir.join("bookmarks.toml");
         if path.exists() {
-            std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|s| toml::from_str(&s).ok())
-                .unwrap_or_default()
+            // A file that does not load starts an empty list; the next save
+            // keeps a copy of it first (see `save_to_dir`).
+            match std::fs::read_to_string(&path).map(|s| toml::from_str(&s)) {
+                Ok(Ok(config)) => config,
+                Ok(Err(e)) => {
+                    log::warn!("Failed to parse {}: {}", path.display(), e);
+                    Self::default()
+                }
+                Err(e) => {
+                    log::warn!("Failed to read {}: {}", path.display(), e);
+                    Self::default()
+                }
+            }
         } else {
             Self::default()
         }
@@ -271,12 +280,15 @@ impl BookmarksConfig {
         }
     }
 
-    /// Save bookmarks to a config directory.
+    /// Save bookmarks to a config directory, atomically. A file there that
+    /// did not load is copied aside first, since these bookmarks hold none
+    /// of its entries.
     pub fn save_to_dir(&self, config_dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(config_dir)?;
         let path = config_dir.join("bookmarks.toml");
         let content = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
-        std::fs::write(path, content)
+        crate::backup::back_up_unloadable(&path, |text| toml::from_str::<Self>(text).is_ok())?;
+        termide_fsutil::write_atomic(&path, content.as_bytes())
     }
 
     /// Save bookmarks to the default config directory.
@@ -612,5 +624,29 @@ mod tests {
 
         let names = config.group_names();
         assert_eq!(names, vec!["Config", "Projects"]);
+    }
+
+    /// A bookmarks file that does not parse loads as an empty list; adding
+    /// a bookmark then must not lose the user's entries for good.
+    #[test]
+    fn saving_over_a_file_that_did_not_load_keeps_a_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bookmarks.toml");
+        let broken = "[[bookmarks]]\npath = \"/srv/a\"\noops =\n";
+        std::fs::write(&path, broken).unwrap();
+
+        let mut config = BookmarksConfig::load_from_dir(dir.path());
+        assert!(config.bookmarks.is_empty());
+        config.add(Bookmark::new("/srv/b".to_string()));
+        config.save_to_dir(dir.path()).unwrap();
+
+        let backup = dir.path().join("bookmarks.toml.bak");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), broken);
+        let saved = BookmarksConfig::load_from_dir(dir.path());
+        assert_eq!(saved.bookmarks.len(), 1);
+
+        // A file that loads is simply replaced, with no further copies.
+        config.save_to_dir(dir.path()).unwrap();
+        assert!(!dir.path().join("bookmarks.toml.bak.1").exists());
     }
 }

@@ -94,6 +94,9 @@ pub trait Translation: Send + Sync {
     fn editor_cancel(&self) -> &str;
     fn editor_close_external(&self) -> &str;
     fn editor_close_external_question(&self) -> &str;
+    /// Suffix of an editor tab's title while its file changed on disk.
+    fn editor_title_changed_on_disk(&self) -> &str;
+    fn editor_remote_changed_question(&self) -> &str;
     fn editor_overwrite_disk(&self) -> &str;
     fn editor_keep_disk_close(&self) -> &str;
     fn editor_reload_into_editor(&self) -> &str;
@@ -1749,6 +1752,10 @@ pub trait Translation: Send + Sync {
     fn projects_move_title(&self) -> &str;
     fn projects_transfer_busy(&self) -> &str;
     fn projects_transfer_exists_fmt(&self, path: &str) -> String;
+    /// Save As onto an existing file: asks whether to replace it.
+    fn save_as_replace_fmt(&self, path: &str) -> String;
+    /// A batch item bound for a server whose local name is not UTF-8.
+    fn op_name_not_utf8_fmt(&self, path: &str) -> String;
     fn projects_move_nested_open_fmt(&self, path: &str) -> String;
     fn project_moved_to_fmt(&self, path: &str) -> String;
     fn projects_relink_title_fmt(&self, name: &str) -> String;
@@ -1808,8 +1815,6 @@ pub trait Translation: Send + Sync {
     fn status_selected(&self) -> &str;
     fn status_tab_modal_title(&self) -> &str;
     fn status_plain_text(&self) -> &str;
-    fn status_terminal(&self) -> &str;
-    fn status_layout(&self) -> &str;
     // UI elements
     fn ui_yes(&self) -> &str;
     fn ui_no(&self) -> &str;
@@ -1893,6 +1898,11 @@ pub trait Translation: Send + Sync {
 
     // Modal titles
     fn modal_confirm_title(&self) -> &str;
+    fn modal_input_title(&self) -> &str;
+    fn ui_filter_label(&self) -> &str;
+    fn command_palette_no_commands(&self) -> &str;
+    fn fm_searching(&self) -> &str;
+    fn editor_untitled(&self) -> &str;
     fn modal_error_title(&self) -> &str;
     /// Status shown when a command would change a browsed archive.
     fn fm_archive_read_only(&self) -> &str;
@@ -2002,6 +2012,10 @@ pub trait Translation: Send + Sync {
         files: &str,
     ) -> String;
     fn git_diff_title_fmt(&self, repo: &str, branch: &str, files: &str) -> String;
+    fn git_diff_files_count_fmt(&self, count: usize) -> String;
+    fn git_diff_stash_title_fmt(&self, message: &str, files: &str) -> String;
+    fn references_title_fmt(&self, count: usize) -> String;
+    fn references_symbol_title_fmt(&self, symbol: &str, count: usize) -> String;
     fn git_diff_discard_confirm_fmt(&self, path: &str) -> String;
     fn git_diff_delete_untracked_fmt(&self, path: &str) -> String;
     fn git_diff_restored_fmt(&self, path: &str) -> String;
@@ -2043,6 +2057,7 @@ pub trait Translation: Send + Sync {
     fn replace_done_title(&self) -> &str;
     fn replace_done_fmt(&self, count: usize, files: usize) -> String;
     fn replace_confirm_fmt(&self, count: usize, files: usize) -> String;
+    fn replace_failed_fmt(&self, failed: usize, path: &str, error: &str) -> String;
     fn replace_no_files_selected(&self) -> &str;
     fn replace_selection_fmt(&self, selected: usize, total: usize, matches: usize) -> String;
 

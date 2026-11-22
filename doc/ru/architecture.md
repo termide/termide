@@ -176,7 +176,7 @@ pub trait Panel {
 - Поддержка ANSI-цветов
 - Обработка изменения размера
 
-**Journal** (`crates/panel-misc/src/journal.rs`)
+**Journal** (`crates/panel-misc/src/journal/`)
 - Просмотр логов приложения
 - Информация о панелях
 - Мониторинг системных ресурсов
@@ -312,7 +312,7 @@ while !state.should_quit {
 
 #### 4.1 Основной рендеринг
 
-**Расположение:** `crates/ui-render/src/layout.rs`
+**Расположение:** `src/ui.rs` (`render_layout_with_accordion`)
 
 Поток рендеринга:
 
@@ -359,7 +359,7 @@ fn render_main_area(frame, layout_manager, state) {
 
 #### 4.2 Рендеринг панелей
 
-**Расположение:** `crates/ui-render/src/panel.rs`
+**Расположение:** `crates/ui-render/src/panel_rendering.rs`
 
 **Полная панель (height ≥ 2 строк):**
 - Граница с кнопкой действий `[≡]` и emoji + заголовком (напр. `[≡] 📁 Файлы`)
@@ -411,20 +411,29 @@ pub struct AppState {
 
 #### 5.2 Конфигурация
 
-**Расположение:** `crates/config/src/lib.rs`
+**Расположение:** `crates/config/src/settings.rs`
 
 Конфигурация пользователя загружается из TOML:
 
 ```rust
 pub struct Config {
-    pub general: GeneralSettings,         // Тема, язык, icon_mode, vim_mode, клавиатурные комбинации
-    pub editor: EditorSettings,           // Размер табуляции, перенос, git diff, авто-отступ
-    pub file_manager: FileManagerSettings, // Ширина расширенного вида, клавиатурные комбинации
-    pub git_status: GitStatusSettings,    // Клавиатурные комбинации
-    pub terminal: TerminalSettings,       // Клавиатурные комбинации
-    pub lsp: LspSettings,                // LSP-серверы, автодополнение, подсказки
-    pub logging: LoggingSettings,         // Уровень логов, интервал мониторинга ресурсов
-    pub vfs: VfsSettings,                // Таймаут подключения VFS
+    pub general: GeneralSettings,                  // Общее: тема, язык, icon_mode, vim_mode, интервал мониторинга ресурсов, клавиатурные комбинации
+    pub editor: EditorSettings,                    // Размер табуляции, перенос, git diff, авто-отступ, blame
+    pub file_manager: FileManagerSettings,         // Ширина расширенного вида, размеры каталогов, клавиатурные комбинации
+    pub git_status: GitStatusSettings,             // Клавиатурные комбинации
+    pub git_diff: GitDiffSettings,                 // Клавиатурные комбинации
+    pub git_log: GitLogSettings,                   // Клавиатурные комбинации, Unicode-граф
+    pub database: DatabaseSettings,                // Клавиатурные комбинации
+    pub viewer: ViewerSettings,                    // Клавиатурные комбинации
+    pub terminal: TerminalSettings,                // Оболочка, прокрутка, интеграция с оболочкой, клавиатурные комбинации
+    pub lsp: LspSettings,                          // LSP-серверы, автодополнение, подсказки
+    pub debug: DebugSettings,                      // Запуск отладчиков
+    pub logging: LoggingSettings,                  // Файл логов, минимальный уровень
+    pub vfs: VfsSettings,                          // Таймаут подключения VFS
+    pub vault: VaultSettings,                      // Автоблокировка хранилища паролей
+    pub highlight: HighlightSettings,              // Пользовательские языки ключевых слов
+    pub ai: AiSettings,                            // Подключения к моделям и агент
+    pub plugins: BTreeMap<String, PluginSettings>, // Включение и настройки плагинов
 }
 ```
 
@@ -437,7 +446,7 @@ pub struct Config {
 
 **Расположение:** `crates/theme/src/lib.rs`
 
-**Встроенные темы:** 38 тем (Dracula, Nord, Monokai, Matrix, Pip-Boy и др.)
+**Встроенные темы:** 44 темы (Dracula, Nord, Monokai, Matrix, Pip-Boy и др.)
 
 **Пользовательские темы:** Загрузка из `~/.config/termide/themes/*.toml`
 
@@ -599,7 +608,7 @@ Alpine / musl.
   блокирующего варианта нет.
 - **`VfsManager`** (`crates/vfs/src/lib.rs`) — кэш провайдеров по ключу
   `(scheme, host, port, user)`; вытесняет записи, чей актор умер.
-- **SFTP-актор** (`crates/vfs/src/sftp.rs`) — единственная tokio-задача владеет
+- **SFTP-актор** (`crates/vfs/src/sftp/`) — единственная tokio-задача владеет
   сессией `russh-sftp` и обрабатывает малые атомарные команды (`OpenRead` /
   `ReadChunk` / `WriteChunk` / `CloseHandle` / `Stat` / `ListDir` /
   `MkdirRecursive` / …). Циклы чанков живут на стороне синхронного воркера,
@@ -755,7 +764,7 @@ Alpine / musl.
 | Обход размера каталогов (широкий вид)        | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | Покадровый `try_recv` к общему кэшу; бюджет ограничен на каждый обход                |
 
 Бэкенд SFTP/FTP использует другую схему — выделенный tokio-рантайм владеет
-соединением и актором «чанк-как-команда» (см. `crates/vfs/src/sftp.rs`).
+соединением и актором «чанк-как-команда» (см. `crates/vfs/src/sftp/`).
 Синхронный воркер крутит цикл чанков и между отправками опрашивает флаги
 паузы/отмены, поэтому приостановленная передача оставляет актор свободным для
 обслуживания запросов метаданных от других панелей.

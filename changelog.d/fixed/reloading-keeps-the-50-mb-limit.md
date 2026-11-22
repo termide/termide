@@ -1,0 +1,1 @@
+- **Reloading keeps the 50 MB limit.** A file that grew past the editor's size limit while open was loaded whole when reloaded with `Ctrl+Shift+R` or when it changed on disk, though it would not have been opened. It is now left out as on opening: the buffer keeps its text and the reload says the file is too large.

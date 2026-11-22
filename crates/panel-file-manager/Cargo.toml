@@ -2,6 +2,7 @@
 name = "termide-panel-file-manager"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -23,6 +24,7 @@ unicode-width.workspace = true
 # Workspace crates
 termide-config = { path = "../config" }
 termide-vfs = { path = "../vfs" }
+termide-fsutil = { path = "../fsutil" }
 termide-system-monitor = { path = "../system-monitor" }
 termide-core = { path = "../core" }
 termide-git = { path = "../git" }

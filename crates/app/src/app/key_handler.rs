@@ -385,8 +385,28 @@ impl App {
     /// Handle modal request from panel
     pub(super) fn handle_modal_request(
         &mut self,
+        action: PendingAction,
+        modal: ActiveModal,
+    ) -> Result<()> {
+        self.open_modal_request(action, modal, false)
+    }
+
+    /// Handle a modal request a panel raised in its tick — a host key, an
+    /// archive password, a connection error: it waits while another
+    /// question is open (see [`crate::state::AppState::ask_when_free`]).
+    pub(super) fn handle_background_modal_request(
+        &mut self,
+        action: PendingAction,
+        modal: ActiveModal,
+    ) -> Result<()> {
+        self.open_modal_request(action, modal, true)
+    }
+
+    fn open_modal_request(
+        &mut self,
         mut action: PendingAction,
         mut modal: ActiveModal,
+        background: bool,
     ) -> Result<()> {
         // For Copy/Move - find all other FM panels and create suggestions
         let is_copy = matches!(action, PendingAction::CopyPath { .. });
@@ -454,7 +474,15 @@ impl App {
             _ => {}
         }
 
-        self.state.set_pending_action(action, modal);
+        if background {
+            // Raised by a panel's tick, not by the user: it waits behind an
+            // open question rather than replacing it.
+            if !self.state.ask_when_free(action, modal) {
+                return Ok(());
+            }
+        } else {
+            self.state.set_pending_action(action, modal);
+        }
 
         // Check if there's a channel receiver for directory size in panel
         if let Some(panel) = self.layout_manager.active_panel_mut() {

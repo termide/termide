@@ -16,19 +16,6 @@ impl App {
 
         // Map SelectAction to PendingAction
         let pending_action = match on_select {
-            termide_core::SelectAction::SelectTheme => {
-                // Theme selection is handled differently
-                return;
-            }
-            termide_core::SelectAction::SelectLanguage => {
-                // Language selection is handled differently
-                return;
-            }
-            termide_core::SelectAction::SelectEncoding => {
-                // Encoding selection is handled differently
-                return;
-            }
-            termide_core::SelectAction::CloseEditorChoice => PendingAction::CloseEditorWithSave,
             // A panel-defined selection (e.g. an agent permission prompt);
             // the chosen index goes back to the panels as
             // `PanelCommand::SelectionMade`.
@@ -52,43 +39,14 @@ impl App {
 
         // Map InputAction to PendingAction
         let pending_action = match &on_submit {
-            termide_core::InputAction::RenameFile { from } => PendingAction::MovePath {
-                sources: vec![from.clone()],
-                target_directory: from.parent().map(|p| p.to_path_buf()),
-            },
-            termide_core::InputAction::CreateFile { in_dir } => PendingAction::CreateFile {
-                directory: in_dir.clone(),
-            },
-            termide_core::InputAction::CreateDirectory { in_dir } => {
-                PendingAction::CreateDirectory {
-                    directory: in_dir.clone(),
-                }
-            }
             // A panel-defined prompt (e.g. renaming an agent conversation);
             // the text goes back to the panels as
             // `PanelCommand::InputSubmitted`.
             termide_core::InputAction::Custom(action) => PendingAction::PanelInput {
                 action: action.clone(),
             },
-            termide_core::InputAction::GotoLine => {
-                // GotoLine is handled directly, not through modal
-                return;
-            }
             termide_core::InputAction::ViewPath { base_dir } => PendingAction::ViewPath {
                 base_dir: base_dir.clone(),
-            },
-            termide_core::InputAction::SaveFileAs { directory } => PendingAction::SaveFileAs {
-                directory: directory.clone(),
-            },
-            termide_core::InputAction::CopyTo { sources } => PendingAction::CopyPath {
-                sources: sources.clone(),
-                target_directory: None,
-                create_symlink: false,
-                create_relative_symlink: false,
-            },
-            termide_core::InputAction::MoveTo { sources } => PendingAction::MovePath {
-                sources: sources.clone(),
-                target_directory: None,
             },
             termide_core::InputAction::RenameSymbol {
                 file_path,
@@ -101,7 +59,8 @@ impl App {
             },
         };
 
-        let mut modal = InputModal::with_default("Input", prompt, &initial_value);
+        let mut modal =
+            InputModal::with_default(i18n::t().modal_input_title(), prompt, &initial_value);
         if let PendingAction::ViewPath { base_dir } = &pending_action {
             modal.set_suggestions(Box::new(crate::app::modal::PathSuggestions::new(
                 base_dir.clone(),
@@ -132,15 +91,6 @@ impl App {
 
         // Map ConfirmAction to PendingAction
         let pending_action = match on_confirm {
-            termide_core::ConfirmAction::DeleteFile(path) => {
-                PendingAction::DeletePath { paths: vec![path] }
-            }
-            termide_core::ConfirmAction::DeletePaths(paths) => PendingAction::DeletePath { paths },
-            termide_core::ConfirmAction::DeleteDirectory(path) => {
-                PendingAction::DeletePath { paths: vec![path] }
-            }
-            termide_core::ConfirmAction::DiscardChanges(_path) => PendingAction::ClosePanel,
-            termide_core::ConfirmAction::CloseWithoutSaving => PendingAction::CloseEditorWithSave,
             termide_core::ConfirmAction::QuitApplication => PendingAction::QuitApplication,
             termide_core::ConfirmAction::CancelOperation(op_id) => {
                 PendingAction::CancelOperation(op_id)
@@ -152,14 +102,11 @@ impl App {
             termide_core::ConfirmAction::Custom(action) => PendingAction::PanelConfirm { action },
         };
 
-        // Create confirmation modal. Deleting is destructive and cannot be
-        // undone, so that prompt starts on "No" — every other confirmation
-        // keeps "Yes" as the default answer.
+        // Create confirmation modal. A panel's own confirmation is often a
+        // deletion, destructive and not undone, so it starts on "No" — every
+        // other confirmation keeps "Yes" as the default answer.
         let modal = ConfirmModal::new(title, message);
-        let modal = if matches!(
-            pending_action,
-            PendingAction::DeletePath { .. } | PendingAction::PanelConfirm { .. }
-        ) {
+        let modal = if matches!(pending_action, PendingAction::PanelConfirm { .. }) {
             modal.defaulting_to_no()
         } else {
             modal

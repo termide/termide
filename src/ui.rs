@@ -855,9 +855,6 @@ fn render_status_bar_for_active(
         let params = StatusBarParams {
             theme: state.theme,
             status_message: state.ui.status_message.as_ref(),
-            terminal_width: state.terminal.width,
-            terminal_height: state.terminal.height,
-            recommended_layout: state.get_recommended_layout(),
             background_ops,
             disk_selected,
             plugin_status: state.ui.plugin_status.as_deref(),

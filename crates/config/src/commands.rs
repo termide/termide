@@ -587,14 +587,18 @@ impl CommandsMetadata {
     /// The file is edited in place rather than rewritten: commands keep
     /// their order and the comments around them, a changed command has only
     /// its changed fields rewritten, and new commands go at the end. A file
-    /// that does not parse is replaced.
+    /// that does not parse is replaced, after a copy of it is kept as
+    /// `commands.toml.bak`. The write is atomic.
     pub fn save(&self, config_dir: &Path) -> std::io::Result<()> {
         let toml_path = config_dir.join("commands.toml");
         if let Some(parent) = toml_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        crate::backup::back_up_unloadable(&toml_path, |text| {
+            text.parse::<toml_edit::DocumentMut>().is_ok()
+        })?;
         let original = std::fs::read_to_string(&toml_path).unwrap_or_default();
-        std::fs::write(&toml_path, self.render_over(&original))
+        termide_fsutil::write_atomic(&toml_path, self.render_over(&original).as_bytes())
     }
 
     /// The text of `original` edited to hold exactly these entries.
@@ -1205,6 +1209,23 @@ mode = "report"
     fn test_parse_invalid_toml() {
         let meta = CommandsMetadata::parse("not valid toml [[[[");
         assert!(meta.entries.is_empty());
+    }
+
+    /// Saving over a commands file that does not parse replaces it, but a
+    /// copy of it stays as `commands.toml.bak`.
+    #[test]
+    fn saving_over_an_unparsable_file_keeps_a_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let broken = "not valid toml [[[[";
+        std::fs::write(dir.path().join("commands.toml"), broken).unwrap();
+
+        let meta = CommandsMetadata::load(dir.path());
+        meta.save(dir.path()).unwrap();
+
+        let backup = dir.path().join("commands.toml.bak");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), broken);
+        let saved = std::fs::read_to_string(dir.path().join("commands.toml")).unwrap();
+        assert!(saved.parse::<toml_edit::DocumentMut>().is_ok());
     }
 
     #[test]

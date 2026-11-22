@@ -95,10 +95,11 @@ fn edit(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
         Some(rest) => ("\u{feff}", rest),
         None => ("", original.as_str()),
     };
-    let crlf = body.contains("\r\n");
-    let haystack = normalize(body, crlf);
-    let needle = normalize(old, crlf);
-    let replacement = normalize(new, crlf);
+    // Matching runs on `\n` endings; each line gets its own ending back when
+    // the file is written, so a file mixing both keeps them.
+    let haystack = normalize(body);
+    let needle = normalize(old);
+    let replacement = normalize(new);
 
     let matches = find_matches(&haystack, &needle);
     if matches.is_empty() {
@@ -134,11 +135,7 @@ fn edit(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
         .to_string();
 
     let mut output = String::from(bom);
-    output.push_str(&if crlf {
-        updated.replace('\n', "\r\n")
-    } else {
-        updated
-    });
+    output.push_str(&restore_endings(body, &haystack, &updated));
     termide_fsutil::write_atomic(&path, output.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
 
@@ -173,12 +170,52 @@ fn edit(call: &ToolCall, ctx: &ToolContext) -> Result<(String, Value), String> {
     ))
 }
 
-fn normalize(text: &str, crlf: bool) -> String {
-    if crlf || text.contains("\r\n") {
-        text.replace("\r\n", "\n")
-    } else {
-        text.to_string()
+fn normalize(text: &str) -> String {
+    text.replace("\r\n", "\n")
+}
+
+/// `updated`, the edited `haystack`, with the line endings of `original`
+/// (the file before [`normalize`]) put back: a line the edit left alone
+/// keeps its own, a line in place of others takes theirs in order (the last
+/// one's past their count), and an inserted line takes the one of the line
+/// before it, or after it at the start of the file.
+fn restore_endings(original: &str, haystack: &str, updated: &str) -> String {
+    if !original.contains("\r\n") {
+        return updated.to_string();
     }
+    if !original.replace("\r\n", "").contains('\n') {
+        // CRLF throughout.
+        return updated.replace('\n', "\r\n");
+    }
+    let crlf: Vec<bool> = original
+        .split_inclusive('\n')
+        .map(|line| line.ends_with("\r\n"))
+        .collect();
+    let old_lines: Vec<&str> = haystack.split_inclusive('\n').collect();
+    let new_lines: Vec<&str> = updated.split_inclusive('\n').collect();
+    let ending_at = |index: usize| crlf.get(index).copied().unwrap_or(false);
+    let mut out = String::with_capacity(updated.len() + updated.len() / 16);
+    for op in similar::capture_diff_slices(similar::Algorithm::Myers, &old_lines, &new_lines) {
+        let old = op.old_range();
+        for (offset, line) in new_lines[op.new_range()].iter().enumerate() {
+            let crlf_here = match op {
+                DiffOp::Equal { .. } => ending_at(old.start + offset),
+                DiffOp::Replace { .. } => ending_at((old.start + offset).min(old.end - 1)),
+                DiffOp::Insert { .. } if old.start > 0 => ending_at(old.start - 1),
+                DiffOp::Insert { .. } => ending_at(old.start),
+                // A deletion adds no lines.
+                DiffOp::Delete { .. } => false,
+            };
+            match line.strip_suffix('\n') {
+                Some(text) if crlf_here => {
+                    out.push_str(text);
+                    out.push_str("\r\n");
+                }
+                _ => out.push_str(line),
+            }
+        }
+    }
+    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -488,6 +525,44 @@ mod tests {
             std::fs::read_to_string(path).unwrap(),
             "\u{feff}one\r\n2\r\nthree\r\n"
         );
+    }
+
+    #[test]
+    fn a_mixed_file_keeps_each_lines_ending() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(dir.path(), "one\r\ntwo\nthree\r\nfour\nfive\r\n");
+        // A line replaced in place keeps its ending; lines added take the
+        // ending of the line they replace or follow; the rest stay as they were.
+        let result = run(
+            dir.path(),
+            json!({ "path": "f.rs", "old_string": "two\nthree\n", "new_string": "2\n2.5\n3\n" }),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "one\r\n2\n2.5\r\n3\r\nfour\nfive\r\n"
+        );
+        let result = run(
+            dir.path(),
+            json!({ "path": "f.rs", "old_string": "four\n", "new_string": "four\nfour and a half\n" }),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "one\r\n2\n2.5\r\n3\r\nfour\nfour and a half\nfive\r\n"
+        );
+    }
+
+    #[test]
+    fn an_lf_file_stays_lf_and_a_lone_cr_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(dir.path(), "a\rb\nc\n");
+        let result = run(
+            dir.path(),
+            json!({ "path": "f.rs", "old_string": "c", "new_string": "d\ne" }),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "a\rb\nd\ne\n");
     }
 
     #[cfg(unix)]

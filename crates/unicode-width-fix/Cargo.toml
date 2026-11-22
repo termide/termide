@@ -2,6 +2,7 @@
 name = "unicode-width"
 version = "0.2.2"
 edition = "2021"
+rust-version.workspace = true
 # Mirrors upstream `unicode-width` so cargo-deny picks up a license
 # expression — the patch replaces that crate in the workspace.
 license = "MIT OR Apache-2.0"

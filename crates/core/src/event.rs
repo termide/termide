@@ -1009,21 +1009,6 @@ pub enum VimPanelDirection {
 /// Confirmation dialog actions.
 #[derive(Debug, Clone)]
 pub enum ConfirmAction {
-    /// Delete file at path
-    DeleteFile(PathBuf),
-
-    /// Delete multiple paths
-    DeletePaths(Vec<PathBuf>),
-
-    /// Delete directory at path
-    DeleteDirectory(PathBuf),
-
-    /// Discard unsaved changes
-    DiscardChanges(PathBuf),
-
-    /// Close panel without saving
-    CloseWithoutSaving,
-
     /// Quit application
     QuitApplication,
 
@@ -1047,31 +1032,10 @@ pub enum ConfirmAction {
 /// Input dialog actions.
 #[derive(Debug, Clone)]
 pub enum InputAction {
-    /// Rename file
-    RenameFile { from: PathBuf },
-
-    /// Create new file in directory
-    CreateFile { in_dir: PathBuf },
-
-    /// Create new directory
-    CreateDirectory { in_dir: PathBuf },
-
-    /// Go to line number
-    GotoLine,
-
     /// Open a path (or, later, URL) typed in a viewer's "go to" prompt,
     /// routed to the appropriate viewer by type. Relative paths resolve
     /// against `base_dir`.
     ViewPath { base_dir: PathBuf },
-
-    /// Save file as (new name)
-    SaveFileAs { directory: PathBuf },
-
-    /// Copy files to destination
-    CopyTo { sources: Vec<PathBuf> },
-
-    /// Move files to destination
-    MoveTo { sources: Vec<PathBuf> },
 
     /// Text a panel asked for itself; the entered value comes back as
     /// `PanelCommand::InputSubmitted` carrying this action string.
@@ -1088,18 +1052,6 @@ pub enum InputAction {
 /// Selection dialog actions.
 #[derive(Debug, Clone)]
 pub enum SelectAction {
-    /// Select theme
-    SelectTheme,
-
-    /// Select language
-    SelectLanguage,
-
-    /// Select encoding
-    SelectEncoding,
-
-    /// Close editor with save/discard/cancel choice
-    CloseEditorChoice,
-
     /// Custom selection action
     Custom(String),
 }

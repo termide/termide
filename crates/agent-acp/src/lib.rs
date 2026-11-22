@@ -1122,21 +1122,22 @@ fn agent_command(config: &AcpConfig, cwd: &Path) -> Command {
 impl Drop for AcpRuntime {
     fn drop(&mut self) {
         self.shared.cancel.cancel();
-        // Closing stdin tells a well-behaved agent to exit; kill the rest.
+        // Closing stdin tells a well-behaved agent to exit; a moment later
+        // its session's group goes, what the agent started with it. The
+        // agent leads that group (`setsid` in `agent_command`).
         self.shared
             .writer
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        if let Some(mut child) = self
+        if let Some(child) = self
             .shared
             .child
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
         {
-            let _ = child.kill();
-            let _ = child.wait();
+            termide_agent_mcp::process::retire(child, termide_agent_mcp::process::GRACE);
         }
     }
 }

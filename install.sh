@@ -201,6 +201,8 @@ install_binary() {
 # Install using Homebrew
 install_homebrew() {
     info "Installing via Homebrew..."
+    # A tap formula carries one version; there is no pinning another.
+    warn "Homebrew installs the tap's current version, which may differ from $VERSION."
     brew install termide/termide/termide
 }
 
@@ -212,16 +214,17 @@ install_cargo() {
     # Cargo.lock for a reproducible result. CFLAGS carries the flag the
     # repository's .cargo/config.toml sets for the syntax grammars, which
     # cargo does not read for an install from git: without it GCC builds some
-    # grammars' scanners into code that writes into freed memory.
+    # grammars' scanners into code that writes into freed memory. Release
+    # tags carry no `v`, as the download URLs show.
     info "Installing via Cargo (compiling from source)..."
     CFLAGS="${CFLAGS:+$CFLAGS }-fno-strict-aliasing" \
-        cargo install --git https://github.com/termide/termide --locked termide
+        cargo install --git https://github.com/termide/termide --tag "$VERSION" --locked termide
 }
 
 # Install using Nix
 install_nix() {
     info "Installing via Nix..."
-    nix profile install github:termide/termide --refresh
+    nix profile install "github:termide/termide/$VERSION" --refresh
 }
 
 # Show menu and get choice
@@ -333,7 +336,11 @@ main() {
     esac
 
     printf "\n"
-    info "Termide $VERSION installed successfully!"
+    if [ "$METHOD" = "homebrew" ]; then
+        info "Termide installed successfully!"
+    else
+        info "Termide $VERSION installed successfully!"
+    fi
     info "Run 'termide' to start."
 }
 

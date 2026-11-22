@@ -57,25 +57,35 @@ pub(crate) fn file_readonly(path: &Path) -> Option<bool> {
         .map(|m| m.permissions().readonly())
 }
 
-/// Get current modification time of a file.
-pub(crate) fn get_file_mtime(path: &Path) -> Option<SystemTime> {
-    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
+/// Get current modification time and size of a file.
+pub(crate) fn get_file_stamp(path: &Path) -> (Option<SystemTime>, Option<u64>) {
+    match std::fs::metadata(path) {
+        Ok(m) => (m.modified().ok(), Some(m.len())),
+        Err(_) => (None, None),
+    }
 }
 
-/// Check if file was modified externally by comparing modification times.
+/// Check if file was modified externally since its modification time and
+/// size were recorded.
 ///
-/// Returns `true` if `current_mtime > saved_mtime`.
-pub(crate) fn was_modified_externally(path: &Path, saved_mtime: Option<SystemTime>) -> bool {
-    let saved = match saved_mtime {
-        Some(t) => t,
-        None => return false,
+/// Any other modification time counts, older as well as newer: a restore
+/// from a backup or a `git checkout` of an old blob can move it back. A
+/// different size counts even when the time did not move, as on file
+/// systems with a coarse clock. Nothing recorded, or a file that cannot be
+/// looked at, is not a change.
+pub(crate) fn was_modified_externally(
+    path: &Path,
+    saved_mtime: Option<SystemTime>,
+    saved_size: Option<u64>,
+) -> bool {
+    let Some(saved) = saved_mtime else {
+        return false;
     };
-
     match std::fs::metadata(path) {
-        Ok(metadata) => match metadata.modified() {
-            Ok(current) => current > saved,
-            Err(_) => false,
-        },
+        Ok(metadata) => {
+            metadata.modified().is_ok_and(|current| current != saved)
+                || saved_size.is_some_and(|size| size != metadata.len())
+        }
         Err(_) => false,
     }
 }
@@ -85,7 +95,7 @@ pub(crate) fn path_to_title(path: &Path) -> String {
     path.file_name()
         .and_then(|n| n.to_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| "Untitled".to_string())
+        .unwrap_or_else(|| termide_i18n::t().editor_untitled().to_string())
 }
 
 #[cfg(test)]
@@ -111,5 +121,39 @@ mod tests {
         let metadata = result.unwrap();
         assert!(metadata.size > 0);
         assert!(metadata.mtime.is_some());
+    }
+
+    fn set_mtime(path: &Path, mtime: SystemTime) {
+        std::fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(mtime)
+            .unwrap();
+    }
+
+    #[test]
+    fn an_older_mtime_is_an_external_change() {
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "abc").unwrap();
+        let (mtime, size) = get_file_stamp(file.path());
+        assert!(!was_modified_externally(file.path(), mtime, size));
+
+        set_mtime(
+            file.path(),
+            mtime.unwrap() - std::time::Duration::from_secs(3600),
+        );
+        assert!(was_modified_externally(file.path(), mtime, size));
+    }
+
+    #[test]
+    fn a_new_size_under_the_same_mtime_is_an_external_change() {
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), "abc").unwrap();
+        let (mtime, size) = get_file_stamp(file.path());
+
+        std::fs::write(file.path(), "abcdef").unwrap();
+        set_mtime(file.path(), mtime.unwrap());
+        assert!(was_modified_externally(file.path(), mtime, size));
     }
 }

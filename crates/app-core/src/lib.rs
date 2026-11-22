@@ -270,8 +270,9 @@ pub enum AppCommand {
     OpenModal {
         /// The modal to open
         modal: ActiveModal,
-        /// Associated pending action
-        action: Option<PendingAction>,
+        /// Associated pending action (boxed: a batch operation makes it
+        /// several times larger than any other command)
+        action: Option<Box<PendingAction>>,
     },
     /// Close the active modal
     CloseModal,

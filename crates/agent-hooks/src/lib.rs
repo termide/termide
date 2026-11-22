@@ -205,14 +205,18 @@ impl HookRun {
 /// Run the program with `input` on stdin, killing it at the timeout.
 /// `None` when it could not be started or did not finish in time.
 fn run_hook(name: &str, config: &HookConfig, cwd: &Path, input: &Value) -> Option<HookRun> {
-    let mut child = match Command::new(&config.command)
+    let mut command = Command::new(&config.command);
+    command
         .args(&config.args)
         .current_dir(cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+    // A group of its own, so what the hook starts in the background ends
+    // with it at the timeout.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(error) => {
             log::warn!("hook {name}: cannot start {}: {error}", config.command);
@@ -229,8 +233,8 @@ fn run_hook(name: &str, config: &HookConfig, cwd: &Path, input: &Value) -> Optio
             let _ = stdin.write_all(input.as_bytes());
         });
     }
-    let stdout = child.stdout.take().map(read_all_in_background);
-    let stderr = child.stderr.take().map(read_all_in_background);
+    let stdout = child.stdout.take().map(Drain::start);
+    let stderr = child.stderr.take().map(Drain::start);
 
     let deadline = Instant::now() + Duration::from_secs(config.timeout_secs.max(1));
     let code = loop {
@@ -240,6 +244,7 @@ fn run_hook(name: &str, config: &HookConfig, cwd: &Path, input: &Value) -> Optio
                 std::thread::sleep(Duration::from_millis(10));
             }
             Ok(None) => {
+                kill_group(&child);
                 let _ = child.kill();
                 let _ = child.wait();
                 log::warn!(
@@ -254,9 +259,22 @@ fn run_hook(name: &str, config: &HookConfig, cwd: &Path, input: &Value) -> Optio
             }
         }
     };
-    let collect = |handle: Option<std::thread::JoinHandle<String>>| {
-        handle.and_then(|h| h.join().ok()).unwrap_or_default()
-    };
+    // Something the hook left running in the background can keep its
+    // output open past its exit: that waits a moment, within the timeout,
+    // then the group is killed and what arrived is read.
+    let closed_by = deadline.min(Instant::now() + EXIT_GRACE);
+    let closed = [&stdout, &stderr]
+        .into_iter()
+        .flatten()
+        .all(|drain| drain.wait_closed(closed_by));
+    if !closed {
+        kill_group(&child);
+        let settled = Instant::now() + Duration::from_millis(100);
+        for drain in [&stdout, &stderr].into_iter().flatten() {
+            drain.wait_closed(settled);
+        }
+    }
+    let collect = |drain: Option<Drain>| drain.map(|d| d.text()).unwrap_or_default();
     Some(HookRun {
         code,
         stdout: collect(stdout),
@@ -264,13 +282,68 @@ fn run_hook(name: &str, config: &HookConfig, cwd: &Path, input: &Value) -> Optio
     })
 }
 
-/// Drain a pipe on a thread so a chatty hook cannot block on a full pipe.
-fn read_all_in_background(mut pipe: impl Read + Send + 'static) -> std::thread::JoinHandle<String> {
-    std::thread::spawn(move || {
-        let mut text = String::new();
-        let _ = pipe.read_to_string(&mut text);
-        text
-    })
+/// How long the hook's output may stay open after it exits.
+const EXIT_GRACE: Duration = Duration::from_millis(500);
+
+/// Kill the hook's process group: it and whatever it started.
+fn kill_group(child: &std::process::Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(child.id()) {
+        // SAFETY: plain syscall; the group is the hook's own (`process_group(0)`).
+        unsafe {
+            libc::killpg(pid, libc::SIGKILL);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = child;
+}
+
+/// A pipe drained on a thread so a chatty hook cannot block on a full pipe;
+/// what it read so far can be taken without waiting for the end.
+struct Drain {
+    text: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    closed: std::sync::mpsc::Receiver<()>,
+}
+
+impl Drain {
+    fn start(mut pipe: impl Read + Send + 'static) -> Self {
+        let text = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (done, closed) = std::sync::mpsc::channel::<()>();
+        let sink = text.clone();
+        std::thread::spawn(move || {
+            let _done = done;
+            let mut buf = [0u8; 8192];
+            loop {
+                match pipe.read(&mut buf) {
+                    Ok(0) | Err(_) => return,
+                    Ok(n) => sink
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .extend_from_slice(&buf[..n]),
+                }
+            }
+        });
+        Self { text, closed }
+    }
+
+    /// Whether the pipe reached its end by `until`.
+    fn wait_closed(&self, until: Instant) -> bool {
+        let left = until.saturating_duration_since(Instant::now());
+        matches!(
+            self.closed.recv_timeout(left),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected)
+        )
+    }
+
+    fn text(&self) -> String {
+        String::from_utf8_lossy(
+            &self
+                .text
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+        )
+        .into_owned()
+    }
 }
 
 #[cfg(test)]
@@ -427,5 +500,57 @@ mod tests {
         let result = chain.after_tool_call(&call, ToolResultMessage::text(&call, &big));
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(result.plain_text().len(), big.len());
+    }
+
+    /// A hook that answers and exits but leaves a job holding its output is
+    /// read at once, and the job ends with it.
+    #[test]
+    fn a_background_job_neither_holds_the_hook_nor_outlives_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        let script = format!(
+            r#"cat >/dev/null; (sleep 2; touch '{}') & printf '{{"decision":"block","reason":"held"}}'"#,
+            marker.display()
+        );
+        let mut hooks = BTreeMap::new();
+        hooks.insert(
+            "bg".to_string(),
+            hook(HookEvent::BeforeToolCall, &[], &script, 30),
+        );
+        let mut chain = CommandHooks::new(hooks, PathBuf::from("/tmp"));
+        let started = Instant::now();
+        let decision = chain.before_tool_call(&bash("ls"), &ctx());
+        assert!(started.elapsed() < Duration::from_secs(2));
+        assert_eq!(
+            decision,
+            ToolDecision::Block {
+                reason: "hook bg: held".into()
+            }
+        );
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!marker.exists(), "the background job outlived the hook");
+    }
+
+    /// At the timeout what the hook started goes with it.
+    #[test]
+    fn the_timeout_kills_what_the_hook_started() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join("survived");
+        let script = format!(
+            "cat >/dev/null; (sleep 2; touch '{}') >/dev/null 2>&1 & sleep 10",
+            marker.display()
+        );
+        let mut hooks = BTreeMap::new();
+        hooks.insert(
+            "slow".to_string(),
+            hook(HookEvent::BeforeToolCall, &[], &script, 1),
+        );
+        let mut chain = CommandHooks::new(hooks, PathBuf::from("/tmp"));
+        assert_eq!(
+            chain.before_tool_call(&bash("ls"), &ctx()),
+            ToolDecision::Allow
+        );
+        std::thread::sleep(Duration::from_secs(3));
+        assert!(!marker.exists(), "the background job outlived the timeout");
     }
 }

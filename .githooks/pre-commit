@@ -39,8 +39,9 @@ REPO_ROOT="$(git rev-parse --show-toplevel)"
 # Docs-only commits
 #
 # A commit that touches only documentation compiles nothing: no test reads
-# doc/ or the top-level Markdown files. Formatting is all there is to check,
-# and that is Rust's, so nothing runs. Markdown elsewhere (crates/*/assets,
+# doc/ or the top-level Markdown files. It skips fmt, machete, clippy and the
+# tests, and still runs the text checks below (doc/ru headings, the version
+# copies), which build nothing. Markdown elsewhere (crates/*/assets,
 # skills' scripts) can be compiled in or read by tests and goes through the
 # full gate.
 # ---------------------------------------------------------------------------

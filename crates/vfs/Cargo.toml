@@ -2,6 +2,7 @@
 name = "termide-vfs"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -17,20 +18,20 @@ log.workspace = true
 # SFTP support — pure-Rust russh stack (no OpenSSL/libssh2 needed). Its
 # crypto on ring, as the TLS below, rather than the default aws-lc-rs, a C
 # library built with cmake: one crypto backend in the binary, and no cmake.
-russh = { version = "0.65", default-features = false, features = ["flate2", "ring", "rsa"] }
-russh-sftp = "2.2"
+russh = { version = "0.65", default-features = false, features = ["flate2", "ring", "rsa"], optional = true }
+russh-sftp = { version = "2.2", optional = true }
 # Hashed known_hosts names (`|1|salt|hash`); the versions russh already uses.
-hmac = "0.13"
-sha1 = "0.11"
+hmac = { version = "0.13", optional = true }
+sha1 = { version = "0.11", optional = true }
 # Salt for hashed known_hosts names; the version russh already uses.
-getrandom.workspace = true
+getrandom = { workspace = true, optional = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync", "io-util", "macros", "time", "net", "fs"] }
 
 # FTP support — rustls TLS provider (pure-Rust, enables musl-static builds).
 # `rustls-ring` keeps the TLS stack pure Rust (ring, not aws-lc-rs) so
 # musl-static builds need no cmake/C toolchain.
-suppaftp = { version = "10.0.2", features = ["rustls-ring"] }
-webpki-roots.workspace = true
+suppaftp = { version = "10.0.2", features = ["rustls-ring"], optional = true }
+webpki-roots = { workspace = true, optional = true }
 
 # SMB2/3 — pure Rust on tokio, crypto from RustCrypto: no libsmbclient
 # (GPL, not linkable statically) and no C toolchain.
@@ -57,8 +58,8 @@ dirs.workspace = true
 
 [features]
 default = ["sftp", "ftp", "smb", "nfs", "archive"]
-sftp = []
-ftp = []
+sftp = ["dep:russh", "dep:russh-sftp", "dep:hmac", "dep:sha1", "dep:getrandom"]
+ftp = ["dep:suppaftp", "dep:webpki-roots"]
 smb = ["dep:smb2"]
 nfs = ["dep:nfs3_client"]
 archive = ["dep:zip", "dep:tar", "dep:flate2", "dep:bzip2", "dep:lzma-rust2", "dep:ruzstd"]

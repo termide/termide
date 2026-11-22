@@ -313,7 +313,7 @@ impl FileManager {
             let style = Style::default()
                 .fg(theme.accented_bg)
                 .add_modifier(Modifier::DIM);
-            buf.set_string(area.x, area.y, "Searching…", style);
+            buf.set_string(area.x, area.y, termide_i18n::t().fm_searching(), style);
             return;
         }
 

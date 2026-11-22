@@ -1,0 +1,1 @@
+- **An absurd Retry-After no longer breaks the wait for a limit.** A provider's `Retry-After`, or a reset span in its error text, large enough to run past the clock overflowed the reset time: a panic in a debug build, a reset in the past otherwise. The wait taken from a server is now held to eight days, past any weekly limit.

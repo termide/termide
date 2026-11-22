@@ -28,6 +28,9 @@ use termide_agent_core::{expand_env, CancelToken, McpServerConfig, McpTarget};
 /// The protocol revision requested; servers answer with the one they speak.
 pub const PROTOCOL_VERSION: &str = "2024-11-05";
 
+/// The most `tools/list` pages read from one server.
+const MAX_TOOL_PAGES: usize = 100;
+
 /// Receives a server's notifications: the method and its params. Called on
 /// the transport's reader thread, so it must hand anything slow to a thread
 /// of its own — a request made from inside it would wait for a reply that
@@ -109,11 +112,14 @@ pub trait McpTransport: Send + Sync {
             .to_string())
     }
 
-    /// Every tool the server offers, following `nextCursor` pages.
+    /// Every tool the server offers, following `nextCursor` pages, up to
+    /// [`MAX_TOOL_PAGES`] and not round a cursor met before: a server that
+    /// pages in a circle would hold the connection forever.
     fn list_tools(&self) -> Result<Vec<McpToolInfo>, String> {
         let mut tools = Vec::new();
         let mut cursor: Option<String> = None;
-        loop {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..MAX_TOOL_PAGES {
             let params = match &cursor {
                 Some(cursor) => json!({ "cursor": cursor }),
                 None => json!({}),
@@ -134,10 +140,18 @@ pub trait McpTransport: Send + Sync {
                 });
             }
             match result["nextCursor"].as_str() {
-                Some(next) if !next.is_empty() => cursor = Some(next.to_string()),
+                Some(next) if !next.is_empty() => {
+                    if !seen.insert(next.to_string()) {
+                        log::warn!("mcp: tools/list came back to cursor {next}; stopping there");
+                        return Ok(tools);
+                    }
+                    cursor = Some(next.to_string());
+                }
                 _ => return Ok(tools),
             }
         }
+        log::warn!("mcp: tools/list still had pages after {MAX_TOOL_PAGES}; stopping there");
+        Ok(tools)
     }
 
     /// Call a tool; the text of the result's content blocks and whether the
@@ -187,11 +201,42 @@ pub trait McpTransport: Send + Sync {
 }
 
 type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
 type SharedHandler = Arc<Mutex<Option<OnMessage>>>;
 
+/// Lines for the server's stdin, written on a thread of their own: a server
+/// that stops reading fills the pipe, and a write made by the caller would
+/// then hold that request, and every one after it, past any timeout. `None`
+/// closes stdin.
+type Outbox = Sender<Option<Vec<u8>>>;
+
+fn start_writer(mut writer: impl Write + Send + 'static) -> Outbox {
+    let (outbox, lines) = mpsc::channel::<Option<Vec<u8>>>();
+    let spawned = std::thread::Builder::new()
+        .name("termide-mcp-stdin".into())
+        .spawn(move || {
+            while let Ok(Some(line)) = lines.recv() {
+                if let Err(error) = writer.write_all(&line).and_then(|()| writer.flush()) {
+                    log::debug!("mcp: cannot write to the server: {error}");
+                    return;
+                }
+            }
+        });
+    if let Err(error) = spawned {
+        log::warn!("mcp: cannot start the writer thread: {error}");
+    }
+    outbox
+}
+
+fn post(outbox: &Outbox, message: &Value) -> Result<(), String> {
+    let mut line = message.to_string().into_bytes();
+    line.push(b'\n');
+    outbox
+        .send(Some(line))
+        .map_err(|_| "cannot write to the server: it stopped reading".to_string())
+}
+
 pub struct McpClient {
-    writer: SharedWriter,
+    writer: Outbox,
     pending: Pending,
     on_message: SharedHandler,
     next_id: AtomicU64,
@@ -219,6 +264,7 @@ impl McpClient {
         if let Some(cwd) = &config.cwd {
             command.current_dir(cwd);
         }
+        crate::process::own_group(&mut command);
         let mut child = command
             .spawn()
             .map_err(|error| format!("cannot start {program}: {error}"))?;
@@ -243,11 +289,11 @@ impl McpClient {
         writer: impl Write + Send + 'static,
         timeout: Duration,
     ) -> Self {
-        let writer: SharedWriter = Arc::new(Mutex::new(Box::new(writer)));
+        let writer = start_writer(writer);
         let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
         let on_message: SharedHandler = Arc::new(Mutex::new(None));
         let reader_pending = Arc::clone(&pending);
-        let reply_writer = Arc::clone(&writer);
+        let reply_writer = writer.clone();
         let reader_handler = Arc::clone(&on_message);
         std::thread::spawn(move || read_loop(reader, reader_pending, reply_writer, reader_handler));
         Self {
@@ -262,15 +308,9 @@ impl McpClient {
 
     /// The `initialize` handshake is on [`McpTransport`]; the name it returns
     /// is what the panel shows. `request` and `notify` are the two verbs the
-    /// pipes answer.
+    /// pipes answer. Queued, never waited for (see [`Outbox`]).
     fn write(&self, message: &Value) -> Result<(), String> {
-        let mut line = message.to_string();
-        line.push('\n');
-        let mut writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
-        writer
-            .write_all(line.as_bytes())
-            .and_then(|()| writer.flush())
-            .map_err(|error| format!("cannot write to the server: {error}"))
+        post(&self.writer, message)
     }
 }
 
@@ -298,11 +338,14 @@ impl McpTransport for McpClient {
             return Err(error);
         }
         let outcome = wait(&rx, self.timeout, cancel);
-        if outcome.is_err() {
+        if let Err(error) = &outcome {
             self.pending
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner)
                 .remove(&id);
+            if error.gave_up() {
+                let _ = self.notify("notifications/cancelled", cancelled(id, error));
+            }
         }
         outcome.map_err(|error| format!("{method}: {error}"))
     }
@@ -320,46 +363,85 @@ impl McpTransport for McpClient {
 }
 
 impl Drop for McpClient {
+    /// Close the server's stdin, which tells it to exit, and end its process
+    /// group a moment later (see [`crate::process::retire`]).
     fn drop(&mut self) {
-        if let Some(mut child) = self
+        let _ = self.writer.send(None);
+        if let Some(child) = self
             .child
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take()
         {
-            let _ = child.kill();
-            let _ = child.wait();
+            crate::process::retire(child, crate::process::GRACE);
         }
     }
 }
 
-fn wait(
+/// Why a request has no answer.
+#[derive(Debug)]
+pub(crate) enum WaitError {
+    /// The server answered with an error, or the transport failed.
+    Failed(String),
+    /// The run was cancelled.
+    Aborted,
+    /// No answer within the timeout.
+    TimedOut(Duration),
+    /// The server went away.
+    Closed,
+}
+
+impl WaitError {
+    /// Whether we stopped waiting while the server may still be working on
+    /// the request: it is then told so (`notifications/cancelled`).
+    pub(crate) fn gave_up(&self) -> bool {
+        matches!(self, Self::Aborted | Self::TimedOut(_))
+    }
+}
+
+impl std::fmt::Display for WaitError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Failed(error) => f.write_str(error),
+            Self::Aborted => f.write_str("aborted"),
+            Self::TimedOut(timeout) => write!(f, "no reply within {} s", timeout.as_secs()),
+            Self::Closed => f.write_str("the server closed the connection"),
+        }
+    }
+}
+
+/// The params of `notifications/cancelled` for request `id`.
+pub(crate) fn cancelled(id: u64, why: &WaitError) -> Value {
+    json!({ "requestId": id, "reason": why.to_string() })
+}
+
+/// Wait for the reply on `rx` up to `timeout`, giving up early when
+/// `cancel` is set.
+pub(crate) fn wait(
     rx: &Receiver<Result<Value, String>>,
     timeout: Duration,
     cancel: Option<&CancelToken>,
-) -> Result<Value, String> {
+) -> Result<Value, WaitError> {
     let deadline = Instant::now() + timeout;
     loop {
         if cancel.is_some_and(CancelToken::is_cancelled) {
-            return Err("aborted".to_string());
+            return Err(WaitError::Aborted);
         }
         let left = deadline.saturating_duration_since(Instant::now());
         if left.is_zero() {
-            return Err(format!("no reply within {} s", timeout.as_secs()));
+            return Err(WaitError::TimedOut(timeout));
         }
         match rx.recv_timeout(left.min(Duration::from_millis(50))) {
-            Ok(reply) => return reply,
+            Ok(reply) => return reply.map_err(WaitError::Failed),
             Err(RecvTimeoutError::Timeout) => {}
-            Err(RecvTimeoutError::Disconnected) => {
-                return Err("the server closed the connection".to_string())
-            }
+            Err(RecvTimeoutError::Disconnected) => return Err(WaitError::Closed),
         }
     }
 }
 
 /// Deliver replies to their requests, answer a server's own requests (see
 /// [`answer_server_request`]) and hand its notifications to the handler.
-fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter, handler: SharedHandler) {
+fn read_loop(reader: impl Read, pending: Pending, writer: Outbox, handler: SharedHandler) {
     for line in BufReader::new(reader).lines() {
         let Ok(line) = line else { break };
         if line.trim().is_empty() {
@@ -400,12 +482,7 @@ fn read_loop(reader: impl Read, pending: Pending, writer: SharedWriter, handler:
             }
             (Some(_), Some(method)) => {
                 let reply = answer_server_request(&message["id"], method.as_str().unwrap_or(""));
-                let mut line = reply.to_string();
-                line.push('\n');
-                let mut writer = writer.lock().unwrap_or_else(PoisonError::into_inner);
-                let _ = writer
-                    .write_all(line.as_bytes())
-                    .and_then(|()| writer.flush());
+                let _ = post(&writer, &reply);
             }
             (None, Some(method)) => {
                 let method = method.as_str().unwrap_or("");
@@ -556,6 +633,102 @@ mod tests {
             error.contains("closed") || error.contains("no reply"),
             "{error}"
         );
+    }
+
+    /// A server that stops reading its stdin fills the pipe; requests still
+    /// end at their timeout instead of blocking in the write.
+    #[test]
+    fn a_server_that_reads_nothing_cannot_hold_requests() {
+        let (_unread, to_server_tx) = pipe().unwrap();
+        let (from_server_rx, _from_server_tx) = pipe().unwrap();
+        let client =
+            McpClient::from_streams(from_server_rx, to_server_tx, Duration::from_millis(100));
+        let big = "x".repeat(1 << 20);
+        let (done_tx, done_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            for _ in 0..3 {
+                let error = client
+                    .request("tools/call", json!({ "text": big }), None)
+                    .unwrap_err();
+                assert!(error.contains("no reply within"), "{error}");
+            }
+            let _ = done_tx.send(());
+        });
+        done_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("a request blocked on the full pipe");
+    }
+
+    /// A request given up on, by a cancel or the timeout, is cancelled on
+    /// the server too.
+    #[test]
+    fn giving_up_on_a_request_tells_the_server() {
+        let give_up = |timeout: Duration, cancel: Option<&CancelToken>| {
+            let (to_server_rx, to_server_tx) = pipe().unwrap();
+            let (from_server_rx, from_server_tx) = pipe().unwrap();
+            let client = McpClient::from_streams(from_server_rx, to_server_tx, timeout);
+            let error = client.request("tools/call", json!({}), cancel).unwrap_err();
+            drop(client);
+            drop(from_server_tx);
+            let lines: Vec<Value> = BufReader::new(to_server_rx)
+                .lines()
+                .map(|line| serde_json::from_str(&line.unwrap()).unwrap())
+                .collect();
+            (error, lines)
+        };
+        let (error, lines) = give_up(Duration::from_millis(100), None);
+        assert!(error.contains("no reply within"), "{error}");
+        assert_eq!(lines[1]["method"], "notifications/cancelled");
+        assert_eq!(lines[1]["params"]["requestId"], 1);
+
+        let cancel = CancelToken::new();
+        let canceller = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            canceller.cancel();
+        });
+        let (error, lines) = give_up(Duration::from_secs(10), Some(&cancel));
+        assert!(error.contains("aborted"), "{error}");
+        assert_eq!(lines[1]["method"], "notifications/cancelled");
+        assert_eq!(lines[1]["params"]["reason"], "aborted");
+    }
+
+    /// A server whose pages run in a circle, or on without end, is listed
+    /// as far as it went rather than read forever.
+    #[test]
+    fn tool_pages_stop_at_a_repeated_cursor_and_at_the_cap() {
+        struct Pages {
+            next: fn(u64) -> Option<String>,
+            calls: AtomicU64,
+        }
+        impl McpTransport for Pages {
+            fn request(
+                &self,
+                _method: &str,
+                _params: Value,
+                _cancel: Option<&CancelToken>,
+            ) -> Result<Value, String> {
+                let page = self.calls.fetch_add(1, Ordering::Relaxed);
+                Ok(json!({
+                    "tools": [{ "name": format!("t{page}") }],
+                    "nextCursor": (self.next)(page),
+                }))
+            }
+            fn notify(&self, _method: &str, _params: Value) -> Result<(), String> {
+                Ok(())
+            }
+            fn listen(&self, _on_message: OnMessage) {}
+        }
+        let circle = Pages {
+            next: |page| Some(format!("c{}", page % 2)),
+            calls: AtomicU64::new(0),
+        };
+        assert_eq!(circle.list_tools().unwrap().len(), 3);
+        let endless = Pages {
+            next: |page| Some(format!("c{page}")),
+            calls: AtomicU64::new(0),
+        };
+        assert_eq!(endless.list_tools().unwrap().len(), MAX_TOOL_PAGES);
     }
 
     #[test]

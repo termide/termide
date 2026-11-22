@@ -11,6 +11,9 @@ use termide_vfs::VfsPath;
 pub struct FileState {
     /// File modification time at load/save (for detecting external changes).
     pub mtime: Option<SystemTime>,
+    /// File size on disk at load/save, compared with `mtime` to detect
+    /// external changes; `None` when it was not recorded.
+    pub disk_size: Option<u64>,
     /// Flag: file was modified externally.
     pub external_change_detected: bool,
     /// File size in bytes (for determining whether to use smart features).
@@ -25,7 +28,8 @@ pub struct FileState {
     pub remote_path: Option<VfsPath>,
     /// Temporary local file path for remote editing.
     pub temp_local_path: Option<PathBuf>,
-    /// Remote modification time at load (for conflict detection).
+    /// The server's modification time of the remote file when it was
+    /// downloaded or last uploaded, checked before the next upload.
     pub remote_mtime: Option<SystemTime>,
     /// Flag: file is currently being uploaded to remote server.
     pub uploading: bool,
@@ -40,9 +44,10 @@ impl FileState {
     pub fn new() -> Self {
         Self {
             mtime: None,
+            disk_size: None,
             external_change_detected: false,
             size: 0,
-            title: "Untitled".to_string(),
+            title: termide_i18n::t().editor_untitled().to_string(),
             unsaved_buffer_file: None,
             initial_directory: None,
             remote_path: None,
@@ -57,6 +62,7 @@ impl FileState {
     pub fn from_path(path: &Path, mtime: Option<SystemTime>, size: u64) -> Self {
         Self {
             mtime,
+            disk_size: mtime.map(|_| size),
             external_change_detected: false,
             size,
             title: file_io::path_to_title(path),
@@ -70,12 +76,14 @@ impl FileState {
         }
     }
 
-    /// Create FileState for a remote file.
+    /// Create FileState for a remote file: `mtime` and `size` are the local
+    /// temp copy's, `remote_mtime` the server's at download.
     pub fn from_remote(
         remote_path: VfsPath,
         temp_path: PathBuf,
         mtime: Option<SystemTime>,
         size: u64,
+        remote_mtime: Option<SystemTime>,
     ) -> Self {
         let title = remote_path
             .file_name()
@@ -84,6 +92,7 @@ impl FileState {
             .unwrap_or_else(|| remote_path.to_url_string());
         Self {
             mtime,
+            disk_size: mtime.map(|_| size),
             external_change_detected: false,
             size,
             title,
@@ -91,7 +100,7 @@ impl FileState {
             initial_directory: None,
             remote_path: Some(remote_path),
             temp_local_path: Some(temp_path),
-            remote_mtime: mtime,
+            remote_mtime,
             uploading: false,
             disk_read_only: None,
         }
@@ -117,16 +126,22 @@ impl FileState {
         self.remote_mtime = mtime;
     }
 
+    /// Whether the file on disk differs from the recorded modification
+    /// time or size.
+    pub fn changed_on_disk(&self, path: &Path) -> bool {
+        file_io::was_modified_externally(path, self.mtime, self.disk_size)
+    }
+
     /// Check if file was modified externally.
     pub fn check_external_modification(&mut self, path: &Path) {
-        if file_io::was_modified_externally(path, self.mtime) {
+        if self.changed_on_disk(path) {
             self.external_change_detected = true;
         }
     }
 
-    /// Update mtime after save.
+    /// Record the file's modification time and size after a load or save.
     pub fn update_mtime(&mut self, path: &Path) {
-        self.mtime = file_io::get_file_mtime(path);
+        (self.mtime, self.disk_size) = file_io::get_file_stamp(path);
         self.external_change_detected = false;
     }
 

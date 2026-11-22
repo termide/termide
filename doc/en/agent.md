@@ -1544,7 +1544,10 @@ a loopback, private or link-local address in any spelling a browser reads
 `.internal`, `.lan`, `.home.arpa` or `.intranet`, or a name without a dot.
 A page the agent has read could otherwise have it reach a service there.
 Only the address as written is judged: a public name that resolves to a
-private address is not caught.
+private address is not caught. A redirect is held to the same rule: a fetch
+that starts elsewhere does not follow one to this machine or a private
+network, and with Chrome a page that ends up there is not read; fetch that
+address directly to be asked.
 
 A file the agent edits while it is open in an editor is reloaded there at
 once, cursor and scroll position kept, unless that editor has unsaved changes;
@@ -3170,7 +3173,9 @@ also carries `"result": {"text", "is_error"}`, and `{"text": "…"}` rewrites
 what the model sees; exit code 2 turns the result into an error with
 standard error as its text. Hooks run in name order before the permission
 rules; a hook that fails in any other way, or exceeds its timeout, is logged
-and ignored, so a broken hook never stops the agent. Arguments a hook
+and ignored, so a broken hook never stops the agent. A hook runs in a process
+group of its own, killed at its timeout, or half a second after the hook exits
+if something it left running still holds its output. Arguments a hook
 rewrites go back through plan mode and the tools switched off in the
 session, so a rewrite gets no call past them. Hooks run around the calls of
 the panel's subagents and of `termide --prompt` too.

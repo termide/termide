@@ -11,7 +11,7 @@
 - [文件管理器](file-manager.md) - 文件导航和操作
 - [操作面板](operations.md) - 后台传输：暂停、恢复、取消、部分上传清理
 - [远程文件系统（VFS）](vfs.md) - 通过 SFTP / FTP / FTPS / SMB / NFS 浏览和传输文件
-- [数据库查看器](database.md) - 只读浏览 SQLite / PostgreSQL / MySQL 表
+- [数据库查看器](database.md) - 浏览和编辑 SQLite / PostgreSQL / MySQL 表
 - [密码库](passwords.md) - 以主密码加密保存连接密码
 - [终端](terminal.md) - 使用集成终端
 - [可分离实例](detached-instances.md) - 在 SSH 断开后保持 termide 继续运行
@@ -24,10 +24,11 @@
 - [主题](themes.md) - 使用主题自定义外观
 - [自定义命令](actions.md) - 在命令菜单中运行 `commands.toml` 中的 shell 命令
 - [插件](plugins.md) - 在后台运行、添加命令、状态栏项目和代理工具的程序
+- [快捷键](keybindings.md) - 所有快捷键及其重新绑定方式
 
 ### 安全
 
-- [Code Signing Policy](../en/code-signing.md) - 通过 SignPath Foundation 对 Windows 二进制文件进行签名（英文）
+- [代码签名政策](code-signing.md) - 通过 SignPath Foundation 对 Windows 二进制文件进行签名
 
 ### 开发者文档
 

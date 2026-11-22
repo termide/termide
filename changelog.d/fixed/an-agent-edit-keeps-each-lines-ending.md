@@ -1,0 +1,1 @@
+- **An agent edit keeps each line's ending.** In a file mixing CRLF and LF line endings, the agent's `edit` rewrote every line with CRLF. Now lines it does not touch keep their own ending, and the lines it writes take the ending of the lines they replace or follow.

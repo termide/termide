@@ -98,7 +98,7 @@ fn test_handle_command_not_applicable() {
 #[test]
 fn test_editor_panel_trait_title() {
     let editor = Editor::new();
-    assert_eq!(editor.title(), "Untitled");
+    assert_eq!(editor.title(), termide_i18n::t().editor_untitled());
 
     let (editor, _file) = create_editor_with_content("test");
     // Title should be the filename

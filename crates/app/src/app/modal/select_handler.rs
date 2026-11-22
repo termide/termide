@@ -71,6 +71,10 @@ impl App {
         vfs_manager: Arc<termide_vfs::VfsManager>,
         close_after: Option<std::path::PathBuf>,
     ) -> bool {
+        if self.ask_if_remote_changed(&temp_path, close_after.is_some()) {
+            return false;
+        }
+
         // Set uploading flag on the active editor (spinner in header)
         if let Some(panel) = self.layout_manager.active_panel_mut() {
             if let Some(editor) = panel.as_editor_mut() {

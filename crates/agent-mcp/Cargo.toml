@@ -2,6 +2,7 @@
 name = "termide-agent-mcp"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -21,6 +22,9 @@ url.workspace = true
 
 termide-agent-core = { path = "../agent-core" }
 termide-http = { path = "../http" }
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

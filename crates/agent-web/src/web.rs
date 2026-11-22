@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant};
 
+use termide_agent_core::permissions::reaches_this_network;
 use termide_agent_core::CancelToken;
 use termide_html_markdown::html_to_markdown;
 
@@ -458,6 +459,11 @@ fn fetch_in_browser(
         cancel,
     )?;
     let final_url = info["url"].as_str().unwrap_or(url).to_string();
+    // The browser follows redirects itself; what it read on this machine or
+    // its network after starting elsewhere is not handed on.
+    if let Some(refusal) = local_landing_refusal(url, &final_url) {
+        return Err(refusal);
+    }
     let content_type = info["type"].as_str().unwrap_or("");
     if let Some(html) = info["html"].as_str() {
         let converted = html_to_markdown(html, &final_url);
@@ -482,7 +488,7 @@ fn fetch_in_browser(
 /// The search without a browser: the results page over plain HTTP, read
 /// with the engine's selectors.
 fn search_over_http(engine: &Engine, url: &str, limit: usize) -> Result<Vec<SearchResult>, String> {
-    let fetched = termide_fetch::fetch(url)?;
+    let fetched = fetch_holding_hops(url)?;
     let results = engine.results_from_html(&fetched.text(), &fetched.final_url, limit)?;
     if results.is_empty() {
         return Err(format!(
@@ -494,8 +500,30 @@ fn search_over_http(engine: &Engine, url: &str, limit: usize) -> Result<Vec<Sear
     Ok(results)
 }
 
+/// Why a fetch of `requested` must not use what it got at `landed`, after
+/// redirects: the permission check judged the requested URL alone, so a
+/// public address that sends the fetch on to this machine or its network
+/// would reach a service there unasked. A fetch the user let reach this
+/// network may go on within it.
+fn local_landing_refusal(requested: &str, landed: &str) -> Option<String> {
+    (!reaches_this_network(requested) && reaches_this_network(landed)).then(|| {
+        format!(
+            "refused: {requested} redirects to {landed}, on this machine or its network; \
+             fetch that address directly to have it asked about"
+        )
+    })
+}
+
+/// [`termide_fetch::fetch`], refusing a redirect into this machine or its
+/// network before it is followed (see [`local_landing_refusal`]).
+fn fetch_holding_hops(url: &str) -> Result<termide_fetch::Fetched, String> {
+    termide_fetch::fetch_checked(url, |next| {
+        local_landing_refusal(url, next.as_str()).map_or(Ok(()), Err)
+    })
+}
+
 fn fetch_over_http(url: &str) -> Result<FetchedPage, String> {
-    let fetched = termide_fetch::fetch(url)?;
+    let fetched = fetch_holding_hops(url)?;
     let content_type = fetched.content_type.as_str();
     if content_type.contains("html") || (content_type.is_empty() && looks_like_html(&fetched.body))
     {
@@ -543,6 +571,51 @@ mod tests {
         assert_eq!(Display::parse("minimized"), Display::Minimized);
         assert_eq!(Display::parse("visible"), Display::Visible);
         assert_eq!(Display::parse("nonsense"), Display::Headless);
+    }
+
+    #[test]
+    fn a_public_fetch_may_not_land_on_this_network() {
+        for landed in [
+            "http://127.0.0.1:8080/admin",
+            "http://localhost/",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://[::1]/",
+            "http://router.lan/",
+        ] {
+            let refusal = local_landing_refusal("https://example.com/", landed);
+            assert!(refusal.is_some_and(|r| r.contains(landed)), "{landed}");
+        }
+        // Public to public, and onwards from an address the user was asked about.
+        assert!(local_landing_refusal("https://example.com/", "https://example.org/").is_none());
+        assert!(
+            local_landing_refusal("http://localhost:3000/", "http://127.0.0.1:3000/x").is_none()
+        );
+        assert!(local_landing_refusal("http://10.0.0.2/", "https://example.org/").is_none());
+    }
+
+    #[test]
+    fn a_fetch_on_this_network_follows_redirects_within_it() {
+        // The origin is on this machine, so it may redirect within it: the
+        // hop check lets the fetch through to the target.
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let request = String::from_utf8_lossy(&buf);
+                let response = if request.starts_with("GET /next") {
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".to_string()
+                } else {
+                    "HTTP/1.1 302 Found\r\nLocation: /next\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_string()
+                };
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        let fetched = fetch_holding_hops(&origin).unwrap();
+        assert_eq!(fetched.body, b"ok");
     }
 
     #[test]

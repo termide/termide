@@ -177,7 +177,7 @@ pub trait Panel {
 - ANSI color support
 - Resize handling
 
-**Journal** (`crates/panel-misc/src/journal.rs`)
+**Journal** (`crates/panel-misc/src/journal/`)
 - Application log viewer
 - Panel information
 - System resource monitoring
@@ -313,7 +313,7 @@ When modal is open, keyboard input goes to modal first. Escape closes modal.
 
 #### 4.1 Main Rendering
 
-**Location:** `crates/ui-render/src/layout.rs`
+**Location:** `src/ui.rs` (`render_layout_with_accordion`)
 
 Rendering flow:
 
@@ -360,7 +360,7 @@ Every panel with `height >= 2` draws its own complete border; two adjacent panel
 
 #### 4.2 Panel Rendering
 
-**Location:** `crates/ui-render/src/panel.rs`
+**Location:** `crates/ui-render/src/panel_rendering.rs`
 
 **Full panel (height ≥ 2 rows):**
 - Border with the `[≡]` action button and emoji + title (e.g. `[≡] 📁 Files`)
@@ -412,20 +412,29 @@ Most state is single-threaded (TUI runs on main thread). File system watcher use
 
 #### 5.2 Configuration
 
-**Location:** `crates/config/src/lib.rs`
+**Location:** `crates/config/src/settings.rs`
 
 User configuration loaded from TOML:
 
 ```rust
 pub struct Config {
-    pub general: GeneralSettings,         // Theme, language, icon_mode, vim_mode, keybindings
-    pub editor: EditorSettings,           // Tab size, word wrap, git diff, auto-indent
-    pub file_manager: FileManagerSettings, // Extended view width, keybindings
-    pub git_status: GitStatusSettings,    // Keybindings
-    pub terminal: TerminalSettings,       // Keybindings
-    pub lsp: LspSettings,                // LSP servers, completion, hover
-    pub logging: LoggingSettings,         // Log level, resource monitor interval
-    pub vfs: VfsSettings,                // VFS connection timeout
+    pub general: GeneralSettings,                  // General: theme, language, icon_mode, vim_mode, resource monitor interval, keybindings
+    pub editor: EditorSettings,                    // Tab size, word wrap, git diff, auto-indent, blame
+    pub file_manager: FileManagerSettings,         // Extended view width, directory sizes, keybindings
+    pub git_status: GitStatusSettings,             // Keybindings
+    pub git_diff: GitDiffSettings,                 // Keybindings
+    pub git_log: GitLogSettings,                   // Keybindings, Unicode graph
+    pub database: DatabaseSettings,                // Keybindings
+    pub viewer: ViewerSettings,                    // Keybindings
+    pub terminal: TerminalSettings,                // Shell, scrollback, shell integration, keybindings
+    pub lsp: LspSettings,                          // LSP servers, completion, hover
+    pub debug: DebugSettings,                      // Debugger launch settings
+    pub logging: LoggingSettings,                  // Log file, minimum level
+    pub vfs: VfsSettings,                          // VFS connection timeout
+    pub vault: VaultSettings,                      // Password vault auto-lock
+    pub highlight: HighlightSettings,              // Custom keyword languages
+    pub ai: AiSettings,                            // Model connections and the coding agent
+    pub plugins: BTreeMap<String, PluginSettings>, // Per-plugin switches and settings
 }
 ```
 
@@ -438,7 +447,7 @@ pub struct Config {
 
 **Location:** `crates/theme/src/lib.rs`
 
-**Built-in Themes:** 38 themes (Dracula, Nord, Monokai, Matrix, Pip-Boy, etc.)
+**Built-in Themes:** 44 themes (Dracula, Nord, Monokai, Matrix, Pip-Boy, etc.)
 
 **Custom Themes:** Load from `~/.config/termide/themes/*.toml`
 
@@ -597,7 +606,7 @@ statically on Alpine / musl.
   whose receiver the caller polls — there is no blocking variant.
 - **`VfsManager`** (`crates/vfs/src/lib.rs`) — provider cache keyed
   by `(scheme, host, port, user)`; evicts entries whose actor died.
-- **SFTP actor** (`crates/vfs/src/sftp.rs`) — a single tokio task
+- **SFTP actor** (`crates/vfs/src/sftp/`) — a single tokio task
   owns the `russh-sftp` session and handles small atomic commands
   (`OpenRead` / `ReadChunk` / `WriteChunk` / `CloseHandle` / `Stat`
   / `ListDir` / `MkdirRecursive` / …). Chunk loops live on the sync
@@ -756,7 +765,7 @@ lives.
 
 The SFTP/FTP backend uses a different pattern — a dedicated tokio
 runtime owns the connection and a chunk-as-command actor (see
-`crates/vfs/src/sftp.rs`). The sync worker drives the chunk loop and
+`crates/vfs/src/sftp/`). The sync worker drives the chunk loop and
 polls pause/cancel flags between dispatches, so a paused transfer
 leaves the actor free to serve other panels' metadata requests.
 

@@ -38,23 +38,4 @@ impl LayoutInfo {
             }
         }
     }
-
-    /// Get recommended layout description
-    pub fn recommended_layout_str(&self) -> &'static str {
-        match self.mode {
-            LayoutMode::Single => "Single panel",
-            LayoutMode::MultiPanel => match self.main_panels_count {
-                1 => "1 panel",
-                2 => "2 panels",
-                3 => "3 panels",
-                4 => "4 panels",
-                5 => "5 panels",
-                6 => "6 panels",
-                7 => "7 panels",
-                8 => "8 panels",
-                9 => "9 panels",
-                _ => "Many panels",
-            },
-        }
-    }
 }

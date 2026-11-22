@@ -1,0 +1,47 @@
+# Taken names in the file manager and the editor (doc/en/file-manager.md,
+# doc/en/editor.md): "New file" on a name that exists fails with "already
+# exists" and leaves the file whole; Save As onto another existing file asks
+# first, and declining keeps it.
+project empty
+config file-manager-taken-names.toml
+start
+run "echo keep > notes.txt && echo other > other.txt"
+wait "other.txt"
+
+# Shift+F4: new file, under the taken name.
+key Shift+F4
+type "notes.txt"
+key Enter
+wait "already exists"
+snapshot new-file-taken
+key Esc
+wait-gone "already exists"
+run "grep -qx keep notes.txt"
+
+# Edit notes.txt, then Save As other.txt: asked, declined, kept.
+key Home Down
+wait "notes.txt"
+key F4
+wait "keep"
+key Alt+F2
+wait "Save As"
+key Ctrl+A
+type "other.txt"
+key Enter
+wait "other.txt already exists. Replace it?"
+snapshot save-as-replace
+key Esc
+wait-gone "Replace it?"
+run "grep -qx other other.txt"
+
+# Asked again and confirmed: replaced.
+key Alt+F2
+wait "Save As"
+key Ctrl+A
+type "other.txt"
+key Enter
+wait "other.txt already exists. Replace it?"
+key y
+wait-gone "Replace it?"
+file-contains other.txt "keep"
+quit --force

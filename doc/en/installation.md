@@ -17,7 +17,9 @@ release, and installs nothing when that file is missing or does not match.
 It uses `sudo` only where the install directory needs it. Environment
 variables change what it does:
 
-- `TERMIDE_VERSION` — install a specific version instead of the latest.
+- `TERMIDE_VERSION` — install a specific version instead of the latest. The
+  binary, the packages, Nix and Cargo all take it; Homebrew installs the tap's
+  current version whatever it says.
 - `TERMIDE_INSTALL_DIR` — install the binary somewhere else than
   `/usr/local/bin` (`$PREFIX/bin` under Termux).
 

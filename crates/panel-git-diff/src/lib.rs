@@ -413,14 +413,14 @@ impl Panel for GitDiffPanel {
         let files = if self.diffs.len() == 1 {
             self.diffs[0].path.clone()
         } else {
-            format!("{} files", self.diffs.len())
+            t.git_diff_files_count_fmt(self.diffs.len())
         };
 
         let title = if self.review.is_some() {
             t.git_diff_review_title_fmt(&repo_name, &files)
         } else if let Some(ref msg) = self.stash_message {
             // Stash diff: show message instead of hash
-            format!("Diff: {} — {}", msg, files)
+            t.git_diff_stash_title_fmt(msg, &files)
         } else if let Some(ref hash) = self.commit_hash {
             // Show short hash (first 7 characters)
             let short_hash = if hash.len() > 7 { &hash[..7] } else { hash };

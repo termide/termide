@@ -1932,8 +1932,9 @@ fn inside_project(call: &ToolCall, ctx: &ToolContext) -> bool {
 /// under a local-only domain, or a single label, which a resolver completes
 /// from the local search domains. A public name that resolves to such an
 /// address is not caught: the name is all there is to judge before the
-/// fetch.
-fn reaches_this_network(url: &str) -> bool {
+/// fetch. The fetch tool holds each redirect it follows to the same rule.
+#[must_use]
+pub fn reaches_this_network(url: &str) -> bool {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or(rest);
     let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);

@@ -100,7 +100,7 @@ fn render_filtered_dropdown(
     let scroll_offset = follow_scroll(scroll, cursor_row.unwrap_or(0), visible_count, rows.len());
 
     let total_height = (visible_count as u16) + filter_rows + 2; // +2 for borders
-    let label = " Filter: ";
+    let label = format!(" {} ", termide_i18n::t().ui_filter_label());
     let content_width = content_width
         .max(dropdown_rows_width(rows))
         .max(label.width() + FILTER_MIN_FIELD);
@@ -143,7 +143,7 @@ fn render_filtered_dropdown(
     buf.set_stringn(
         dropdown_x + 1,
         dropdown_y + 1,
-        label,
+        &label,
         label_width as usize,
         Style::default().fg(theme.fg),
     );

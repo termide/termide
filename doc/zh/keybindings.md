@@ -54,18 +54,32 @@ Termide 在与绑定匹配前对每个按键事件进行规范化。规范化在
   `Alt+Shift+...` 绑定不能匹配。
 - `Super` / `Meta` / `Hyper` 修饰符。
 
-termide 自带的增强层默认值(`replace_all` 的 `Ctrl+Alt+R`,`toggle_comment` 的
-`Ctrl+.`)被保留,因为它们是编辑器中的事实标准,且各有一个通用层的替代键
-(`Alt+R`、`Ctrl+/`)。在不支持 Kitty 协议的终端上,termide 在启动时记录
-警告,列出受影响的绑定;用户可通过设置 → 键绑定重新绑定。
+termide 自带的增强层默认值被保留,因为它们是各编辑器中的事实标准:
+
+| 绑定 | 动作 | 分区 | 通用层替代键 |
+|---|---|---|---|
+| `Ctrl+Alt+R` | `replace_all` | `editor` | `Alt+R` |
+| `Ctrl+.` | `toggle_comment` | `editor` | `Ctrl+/` |
+| `Ctrl+Shift+Z` | `redo` | `editor` | `Ctrl+Y` |
+| `Ctrl+Shift+S` | `save_as` | `editor` | — |
+| `Ctrl+Shift+R` | `reload` | `editor` | — |
+| `Ctrl+Shift+F` | `search_content` | `file_manager` | — |
+| `Ctrl+Shift+H` | `search_replace` | `file_manager` | — |
+
+不支持 Kitty 协议的终端把 `Ctrl+Shift+<字母>` 作为普通的 `Ctrl+<字母>` 发送,
+因此这样的按键会到达绑定在后者上的动作:`Ctrl+Shift+S` 原地保存,
+`Ctrl+Shift+Z` 撤销,替换进行中时 `Ctrl+Shift+R` 替换当前匹配,
+`Ctrl+Shift+F` 打开文件管理器的文件名搜索。在这样的终端上,termide 在启动时
+记录警告,列出受影响的绑定;可通过设置 → 键绑定重新绑定它们。
 
 ## macOS: Option 不是 Alt
 
 在 macOS 上,所有终端默认都把 `Option` 当作**文本组合**修饰符——Ghostty
 `macos-option-as-alt=false`,kitty `macos_option_as_alt no`,iTerm2
 Option=Normal,Terminal.app 的 "Use Option as Meta key" 关闭。因此 `Option+F`
-以组合后的字形 `ƒ` 到达,不带 ALT 位,所有 `Alt+<字母>` 默认值(18 个
-全局动作)都无法触发。波及范围取决于终端:在 Ghostty 上,不产生文本的按键
+以组合后的字形 `ƒ` 到达,不带 ALT 位,所有 `Alt+<字符>` 默认值都无法触发:
+`Alt+<字母>` 全局动作、`Alt+1`…`Alt+9`(转到项目)、`Alt+\`、`Alt+-` 和
+`Alt+=`,以及编辑器的 `Alt+,`、`Alt+.` 和 `Alt+R`。波及范围取决于终端:在 Ghostty 上,不产生文本的按键
 保留 ALT 位,所以 `Option+F9`、`Option+Up/Down` 和 `Option+Backspace` 仍然
 可用,而 Terminal.app 连这些键的修饰符也会剥离,只送出一个裸 `Up`。
 
@@ -77,6 +91,9 @@ Termide 的补救措施是 Kitty 的 `REPORT_ALL_KEYS_AS_ESCAPE_CODES` 标志,�
 [general]
 report_all_keys = true  # 默认
 ```
+
+它也是设置窗口"通用"页面"输入"组中的 *Option as Alt*;更改在 termide 下次
+启动时生效。
 
 该标志有一个代价:死键和输入法组合不再到达 termide,因此 `Option+E` `E` → `é`
 在应用内失效。需要组合输入的用户应设置 `report_all_keys = false`,然后要么重新
@@ -215,6 +232,11 @@ F 键行发送的是媒体键,任何 `F<n>` 绑定都无法到达。对大多数
 | 编辑文件 | `F4` | `git_status` |
 | 清除过滤 | `Shift+F3` | `database` |
 
+代理面板自身的 `F2`–`F8` 是固定按键,情况相同;可用其他方式代替它们:`F2`
+用 `/rename`,`F3` 用 `/usage`,`F4` 用空提示中的 `Esc`,`F5` 用 `/fork`,
+`F6` 用新会话横幅上的会话列表,`F7` 用 `/new`,`F8` 用 `/clear`(见
+[代理](agent.md))。
+
 termide 在 macOS 上启动时会记录一条列出这些绑定的警告。请启用该设置,或通过
 设置 → 键绑定重新绑定这些动作。
 
@@ -284,14 +306,13 @@ switch_directory = "Ctrl+\\"
 (例如 VTE)上也能工作 —— VTE 将它们作为 `\x1F` 和 `\x1C` 控制字节发送,
 crossterm 解析为 `Ctrl+7` / `Ctrl+4`,规范化器将其重写回斜杠 / 反斜杠。
 
-任何动作都支持多个备选项:列在数组中。第一项是帮助窗口中显示的
-规范字符串。
+任何动作都支持多个备选项:列在数组中。帮助窗口显示全部备选项,菜单显示第一项。
 
-有两个动作在一个分区中配置,却也在另一个面板中使用。Git 日志用
+有三个动作在一个分区中配置,却也在另一个面板中使用。Git 日志用
 `[file_manager.keybindings]` 中的 `open_external`(默认 `O` 和 `Alt+Enter`)
 在 termide 之外打开文件,因此在那里重新绑定或清除的按键会同时改变两个面板。
 编辑器用 `[viewer.keybindings]` 中的 `toggle_hex`(`Ctrl+L`)切换为其文件的
-十六进制视图。
+十六进制视图,并用同一分区中的 `toggle_view`(`Ctrl+E`)在查看与编辑之间切换。
 
 不用改文件也能配出同样的形状:在 Settings → Keybindings 中,每一行列出
 该动作接受的所有按键,`Left`/`Right` 在各按键之间移动光标,`Enter` 为

@@ -8,6 +8,7 @@ use std::sync::{mpsc as std_mpsc, Arc};
 use std::time::Duration;
 
 use crate::error::{VfsError, VfsResult};
+use crate::local_part::{is_plain_entry_name, LocalPart};
 use crate::types::{DownloadProgress, UploadProgress, VfsFileType};
 
 use super::actor::{SftpCommand, SftpHandle};
@@ -190,26 +191,7 @@ pub(super) fn worker_download_file(
     // Into a sibling, put in place once whole: a cancelled or failed
     // download leaves the file it was to replace as it was, and nothing
     // half-written (the sibling goes when dropped).
-    let parent = local
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or(Path::new("."));
-    let prefix = format!(
-        ".{}.",
-        local.file_name().unwrap_or_default().to_string_lossy()
-    );
-    // `create_new`: the sibling is a fresh file with the usual mode, never
-    // a link followed.
-    let mut dst = tempfile::Builder::new()
-        .prefix(&prefix)
-        .suffix(".termide-part")
-        .make_in(parent, |path| {
-            std::fs::File::options()
-                .write(true)
-                .create_new(true)
-                .open(path)
-        })
-        .map_err(VfsError::Io)?;
+    let mut dst = LocalPart::create(local).map_err(VfsError::Io)?;
     let mut current_bytes = 0u64;
     let current_name = remote.file_name().map(|s| s.to_string_lossy().into_owned());
 
@@ -259,26 +241,9 @@ pub(super) fn worker_download_file(
     if cancelled {
         return Err(VfsError::Cancelled);
     }
-    // A file replaced keeps its mode, as it did when written in place.
-    if let Ok(meta) = std::fs::symlink_metadata(local) {
-        if meta.is_file() {
-            let _ = std::fs::set_permissions(dst.path(), meta.permissions());
-        }
-    }
-    dst.persist(local).map_err(|e| VfsError::Io(e.error))?;
+    dst.persist(local).map_err(VfsError::Io)?;
     state.files_done += 1;
     Ok(())
-}
-
-/// Whether `name`, as a server listed it, is one plain entry of its
-/// directory: a name holding a separator, a drive or a parent would put a
-/// download outside the folder it goes to.
-fn is_plain_entry_name(name: &str) -> bool {
-    let mut parts = Path::new(name).components();
-    matches!(
-        (parts.next(), parts.next()),
-        (Some(std::path::Component::Normal(_)), None)
-    ) && !name.contains(['/', '\\', '\0'])
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -383,6 +348,7 @@ pub(super) fn worker_upload_file(
             local,
             remote,
             false,
+            None,
             pause,
             cancel,
             progress_tx,
@@ -403,11 +369,20 @@ pub(super) fn worker_upload_file(
         let (from, to) = (from.to_path_buf(), to.to_path_buf());
         handle.dispatch(move |reply| SftpCommand::Rename { from, to, reply })
     };
+    // The file replaced keeps its permission bits. The part is created
+    // with them, so it is never more open than the file while it is being
+    // written (the server's umask can only narrow them), and set to them
+    // exactly before the swap: a part left narrower stops the replace.
+    let mode = existing
+        .as_ref()
+        .and_then(|m| m.permissions)
+        .map(|m| m & 0o7777);
     if let Err(e) = upload_to(
         handle,
         local,
         &part,
         true,
+        mode.map(|m| m & 0o777),
         pause,
         cancel,
         progress_tx,
@@ -416,14 +391,16 @@ pub(super) fn worker_upload_file(
         let _ = remove(&part);
         return Err(e);
     }
-    // The file replaced keeps its permission bits.
-    if let Some(mode) = existing.as_ref().and_then(|m| m.permissions) {
-        let p = part.clone();
-        let _ = handle.dispatch(move |reply| SftpCommand::SetMode {
-            path: p,
-            mode: mode & 0o7777,
-            reply,
-        });
+    if let Some(mode) = mode {
+        if let Err(e) = restore_mode(handle, &part, mode) {
+            let _ = remove(&part);
+            return Err(VfsError::RemoteError {
+                message: format!(
+                    "{}: could not keep its mode {mode:o}: {e}",
+                    remote.display()
+                ),
+            });
+        }
     }
     let aside = existing
         .is_some()
@@ -449,13 +426,39 @@ pub(super) fn worker_upload_file(
     Ok(())
 }
 
-/// Write `local` into `remote`, a fresh file when `exclusive`.
+/// Set `path`'s permission bits to `mode`. A server refusing SETSTAT is
+/// forgiven when the file already has them (created with `mode` under a
+/// umask that took nothing away).
+fn restore_mode(handle: &SftpHandle, path: &Path, mode: u32) -> VfsResult<()> {
+    let p = path.to_path_buf();
+    let set = handle.dispatch(move |reply| SftpCommand::SetMode {
+        path: p,
+        mode,
+        reply,
+    });
+    let Err(e) = set else { return Ok(()) };
+    let p = path.to_path_buf();
+    let has = handle
+        .dispatch(move |reply| SftpCommand::Lstat { path: p, reply })
+        .ok()
+        .and_then(|m| m.permissions)
+        .map(|m| m & 0o7777);
+    if has == Some(mode) {
+        Ok(())
+    } else {
+        Err(e)
+    }
+}
+
+/// Write `local` into `remote`, a fresh file when `exclusive`; a file
+/// created gets `mode` (less the server's umask).
 #[allow(clippy::too_many_arguments)]
 fn upload_to(
     handle: &SftpHandle,
     local: &Path,
     remote: &Path,
     exclusive: bool,
+    mode: Option<u32>,
     pause: &Arc<AtomicBool>,
     cancel: &Arc<AtomicBool>,
     progress_tx: &std_mpsc::Sender<UploadProgress>,
@@ -468,6 +471,7 @@ fn upload_to(
     let remote_id = handle.dispatch(move |reply| SftpCommand::OpenWrite {
         path: p,
         exclusive,
+        mode,
         reply,
     })?;
     let guard = RemoteHandleGuard {
@@ -576,18 +580,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn only_a_plain_entry_name_is_downloaded() {
-        assert!(is_plain_entry_name("notes.txt"));
-        assert!(is_plain_entry_name(".hidden"));
-        assert!(!is_plain_entry_name(".."));
-        assert!(!is_plain_entry_name("."));
-        assert!(!is_plain_entry_name("a/../../x"));
-        assert!(!is_plain_entry_name("/home/u/.ssh/authorized_keys"));
-        assert!(!is_plain_entry_name("a\\b"));
-        assert!(!is_plain_entry_name(""));
-    }
-
-    #[test]
     fn a_remote_sibling_is_hidden_unique_and_beside_the_target() {
         let target = Path::new("/srv/www/index.html");
         let a = remote_sibling(target, "termide-part");
@@ -691,6 +683,53 @@ mod tests {
             .file_type()
             .is_symlink());
         assert_eq!(std::fs::read(&target).unwrap(), b"through");
+    }
+
+    /// The part written for a private file is private from its creation,
+    /// not only once the content is whole.
+    #[test]
+    fn the_part_of_a_private_file_is_private_while_written() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let Some(handle) = local_sftp_server() else {
+            eprintln!("no sftp-server here; skipped");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().to_path_buf();
+        let remote = dir.join("secret");
+        std::fs::write(&remote, b"old").unwrap();
+        std::fs::set_permissions(&remote, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let local = dir.join("local");
+        std::fs::write(&local, b"new").unwrap();
+
+        let (tx, rx) = std_mpsc::channel();
+        let pause = Arc::new(AtomicBool::new(true));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let mut state = UlState {
+            total_files: 1,
+            total_bytes: 3,
+            files_done: 0,
+            bytes_done: 0,
+        };
+        std::thread::scope(|s| {
+            let upload = s.spawn(|| {
+                worker_upload_file(&handle, &local, &remote, &pause, &cancel, &tx, &mut state)
+            });
+            // The first progress comes once the part is open, before any data.
+            rx.recv().unwrap();
+            let part = std::fs::read_dir(&dir)
+                .unwrap()
+                .map(|e| e.unwrap().path())
+                .find(|p| p.to_string_lossy().contains("termide-part"))
+                .expect("the part file");
+            let mode = std::fs::metadata(&part).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+            pause.store(false, Ordering::Relaxed);
+            upload.join().unwrap().unwrap();
+        });
+        assert_eq!(std::fs::read(&remote).unwrap(), b"new");
+        let mode = std::fs::metadata(&remote).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
     }
 
     #[test]

@@ -174,9 +174,7 @@ fn sessions_can_be_listed_switched_and_resumed() {
     assert_eq!(options.len(), 2);
     assert!(options[0].starts_with("● "), "{:?}", options[0]);
     assert!(options[1].contains("first task"), "{:?}", options[1]);
-    let SelectAction::Custom(action) = on_select else {
-        panic!("expected a custom action");
-    };
+    let SelectAction::Custom(action) = on_select;
 
     // Choosing the older one replays its transcript into the panel.
     let result = panel.handle_command(PanelCommand::SelectionMade {

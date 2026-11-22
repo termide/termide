@@ -4,6 +4,8 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::SystemTime;
@@ -12,10 +14,12 @@ use suppaftp::rustls::{ClientConfig, RootCertStore};
 use suppaftp::{RustlsConnector, RustlsFtpStream};
 
 use crate::error::{VfsError, VfsResult};
+use crate::local_part::LocalPart;
 use crate::traits::VfsProvider;
 use crate::types::{
-    AuthMethod, ConnectOptions, ConnectionState, VfsEntry, VfsFileType, VfsMetadata, VfsOperation,
-    VfsPath, VfsProtocol,
+    AuthMethod, ConnectOptions, ConnectionState, DownloadProgress, UploadProgress,
+    VfsDownloadOperation, VfsEntry, VfsFileType, VfsMetadata, VfsOperation, VfsPath, VfsProtocol,
+    VfsUploadOperation,
 };
 
 /// Default FTP port.
@@ -130,6 +134,194 @@ impl FtpProvider {
             _ => "anonymous@".to_string(),
         }
     }
+
+    /// Download the file `remote` to `local` on a thread of its own: a
+    /// piece at a time, with progress, pause and cancel, into a sibling of
+    /// `local` that takes its place once whole.
+    fn start_download(&self, remote: &VfsPath, local: &Path) -> Started<PathBuf, DownloadProgress> {
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let (progress_tx, progress) = std::sync::mpsc::channel();
+        let pause = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let target = self
+            .get_stream()
+            .and_then(|stream| Ok((stream, Self::to_remote_path(remote)?)));
+        let (local, flags) = (local.to_path_buf(), (pause.clone(), cancel.clone()));
+        thread::spawn(move || {
+            let result = target.and_then(|(stream, remote)| {
+                let mut ftp = lock_ftp(&stream)?;
+                download_file(&mut ftp, &remote, &local, &flags.0, &flags.1, &progress_tx)
+                    .map(|()| local)
+            });
+            let _ = done_tx.send(result);
+        });
+        Started {
+            done,
+            progress,
+            pause,
+            cancel,
+        }
+    }
+
+    /// Upload the file `local` to `remote` on a thread of its own, a piece
+    /// at a time, with progress, pause and cancel.
+    fn start_upload(&self, local: &Path, remote: &VfsPath) -> Started<(), UploadProgress> {
+        let (done_tx, done) = std::sync::mpsc::channel();
+        let (progress_tx, progress) = std::sync::mpsc::channel();
+        let pause = Arc::new(AtomicBool::new(false));
+        let cancel = Arc::new(AtomicBool::new(false));
+        let target = self
+            .get_stream()
+            .and_then(|stream| Ok((stream, Self::to_remote_path(remote)?)));
+        let (local, flags) = (local.to_path_buf(), (pause.clone(), cancel.clone()));
+        thread::spawn(move || {
+            let result = target.and_then(|(stream, remote)| {
+                let mut ftp = lock_ftp(&stream)?;
+                upload_file(&mut ftp, &local, &remote, &flags.0, &flags.1, &progress_tx)
+            });
+            let _ = done_tx.send(result);
+        });
+        Started {
+            done,
+            progress,
+            pause,
+            cancel,
+        }
+    }
+}
+
+/// Size of the pieces a transfer moves between checks for pause and cancel.
+const PIECE: usize = 256 * 1024;
+
+/// A transfer started on its thread.
+struct Started<T, P> {
+    done: Receiver<VfsResult<T>>,
+    progress: Receiver<P>,
+    pause: Arc<AtomicBool>,
+    cancel: Arc<AtomicBool>,
+}
+
+/// Copy `from` into `to` a piece at a time, waiting out a pause and
+/// stopping with `Cancelled` on a cancel between pieces; `moved` hears of
+/// each piece through.
+fn pump(
+    from: &mut dyn Read,
+    to: &mut dyn Write,
+    pause: &AtomicBool,
+    cancel: &AtomicBool,
+    mut moved: impl FnMut(u64),
+) -> VfsResult<()> {
+    let mut buf = vec![0; PIECE];
+    loop {
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                return Err(VfsError::Cancelled);
+            }
+            if !pause.load(Ordering::Relaxed) {
+                break;
+            }
+            thread::sleep(std::time::Duration::from_millis(50));
+        }
+        let n = match from.read(&mut buf) {
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(VfsError::Io(e)),
+        };
+        if n == 0 {
+            to.flush()?;
+            return Ok(());
+        }
+        to.write_all(&buf[..n])?;
+        moved(n as u64);
+    }
+}
+
+fn download_file(
+    ftp: &mut RustlsFtpStream,
+    remote: &str,
+    local: &Path,
+    pause: &AtomicBool,
+    cancel: &AtomicBool,
+    progress: &Sender<DownloadProgress>,
+) -> VfsResult<()> {
+    let total = ftp.size(remote).map(|s| s as u64).unwrap_or(0);
+    let mut report = DownloadProgress {
+        bytes_downloaded: 0,
+        total_bytes: total,
+        current_file: Path::new(remote)
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned()),
+        files_downloaded: 0,
+        total_files: 1,
+        current_file_bytes: 0,
+        current_file_total: total,
+    };
+    let _ = progress.send(report.clone());
+    let mut part = LocalPart::create(local)?;
+    let mut data = ftp
+        .retr_as_stream(remote)
+        .map_err(|e| VfsError::Ftp(format!("retr {remote}: {e}")))?;
+    let pumped = pump(&mut data, &mut part, pause, cancel, |n| {
+        report.bytes_downloaded += n;
+        report.current_file_bytes += n;
+        let _ = progress.send(report.clone());
+    });
+    match pumped {
+        Ok(()) => ftp
+            .finalize_retr_stream(data)
+            .map_err(|e| VfsError::Ftp(format!("retr {remote}: {e}")))?,
+        Err(e) => {
+            // The part goes with `part`; the control channel is told.
+            let _ = ftp.abort(data);
+            return Err(e);
+        }
+    }
+    part.persist(local)?;
+    report.files_downloaded = 1;
+    let _ = progress.send(report);
+    Ok(())
+}
+
+/// Upload `local` into `remote`. FTP's STOR writes the file in place, so
+/// a cancel or a cut connection leaves what got there.
+fn upload_file(
+    ftp: &mut RustlsFtpStream,
+    local: &Path,
+    remote: &str,
+    pause: &AtomicBool,
+    cancel: &AtomicBool,
+    progress: &Sender<UploadProgress>,
+) -> VfsResult<()> {
+    let mut source = std::fs::File::open(local)?;
+    let total = source.metadata().map(|m| m.len()).unwrap_or(0);
+    let mut report = UploadProgress {
+        bytes_uploaded: 0,
+        total_bytes: total,
+        current_file: local.file_name().map(|n| n.to_string_lossy().into_owned()),
+        files_uploaded: 0,
+        total_files: 1,
+        current_file_bytes: 0,
+        current_file_total: total,
+    };
+    let _ = progress.send(report.clone());
+    let mut data = ftp
+        .put_with_stream(remote)
+        .map_err(|e| VfsError::Ftp(format!("stor {remote}: {e}")))?;
+    let pumped = pump(&mut source, &mut data, pause, cancel, |n| {
+        report.bytes_uploaded += n;
+        report.current_file_bytes += n;
+        let _ = progress.send(report.clone());
+    });
+    // Closing the data channel ends the upload either way; the reply is
+    // what tells a whole one.
+    let finished = ftp
+        .finalize_put_stream(data)
+        .map_err(|e| VfsError::Ftp(format!("stor {remote}: {e}")));
+    pumped?;
+    finished?;
+    report.files_uploaded = 1;
+    let _ = progress.send(report);
+    Ok(())
 }
 
 impl Drop for FtpProvider {
@@ -595,75 +787,31 @@ impl VfsProvider for FtpProvider {
     }
 
     fn download(&self, remote: &VfsPath, local: &Path) -> VfsOperation<PathBuf> {
-        let stream = match self.get_stream() {
-            Ok(s) => s,
-            Err(e) => return VfsOperation::error(e),
-        };
-        let remote_path = match Self::to_remote_path(remote) {
-            Ok(p) => p,
-            Err(e) => return VfsOperation::error(e),
-        };
-        let local_path = local.to_path_buf();
+        VfsOperation::new(self.start_download(remote, local).done)
+    }
 
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        thread::spawn(move || {
-            let result = (|| -> VfsResult<PathBuf> {
-                let mut ftp = lock_ftp(&stream)?;
-
-                let mut data = Vec::new();
-                let mut reader = ftp
-                    .retr_as_buffer(&remote_path)
-                    .map_err(|e| VfsError::Ftp(format!("retr {remote_path}: {e}")))?;
-
-                reader.read_to_end(&mut data).map_err(VfsError::Io)?;
-
-                // Write to local file
-                let mut file = std::fs::File::create(&local_path).map_err(VfsError::Io)?;
-                file.write_all(&data).map_err(VfsError::Io)?;
-
-                Ok(local_path)
-            })();
-
-            let _ = tx.send(result);
-        });
-
-        VfsOperation::new(rx)
+    fn download_with_progress(&self, remote: &VfsPath, local: &Path) -> VfsDownloadOperation {
+        let started = self.start_download(remote, local);
+        VfsDownloadOperation::new(
+            started.done,
+            started.progress,
+            started.pause,
+            started.cancel,
+        )
     }
 
     fn upload(&self, local: &Path, remote: &VfsPath) -> VfsOperation<()> {
-        let stream = match self.get_stream() {
-            Ok(s) => s,
-            Err(e) => return VfsOperation::error(e),
-        };
-        let remote_path = match Self::to_remote_path(remote) {
-            Ok(p) => p,
-            Err(e) => return VfsOperation::error(e),
-        };
-        let local_path = local.to_path_buf();
+        VfsOperation::new(self.start_upload(local, remote).done)
+    }
 
-        let (tx, rx) = std::sync::mpsc::channel();
-
-        thread::spawn(move || {
-            let result = (|| -> VfsResult<()> {
-                // Read local file
-                let data = std::fs::read(&local_path).map_err(VfsError::Io)?;
-
-                let mut ftp = lock_ftp(&stream)?;
-
-                let mut reader = std::io::Cursor::new(data);
-                ftp.put_file(&remote_path, &mut reader)
-                    .map_err(|e| VfsError::RemoteError {
-                        message: format!("Failed to upload file: {}", e),
-                    })?;
-
-                Ok(())
-            })();
-
-            let _ = tx.send(result);
-        });
-
-        VfsOperation::new(rx)
+    fn upload_with_progress(&self, local: &Path, remote: &VfsPath) -> VfsUploadOperation {
+        let started = self.start_upload(local, remote);
+        VfsUploadOperation::new(
+            started.done,
+            started.progress,
+            started.pause,
+            started.cancel,
+        )
     }
 
     fn supported_auth_methods(&self) -> Vec<AuthMethod> {
@@ -731,6 +879,29 @@ mod tests {
             list_line_name("-rw-r--r-- 1 user group 12 Jan 01 12:00", VfsFileType::File),
             None
         );
+    }
+
+    #[test]
+    fn a_transfer_moves_in_pieces_and_stops_on_a_cancel() {
+        let data = vec![7u8; PIECE * 2 + 10];
+        let (pause, cancel) = (AtomicBool::new(false), AtomicBool::new(false));
+        let mut out = Vec::new();
+        let mut pieces = Vec::new();
+        pump(&mut &data[..], &mut out, &pause, &cancel, |n| {
+            pieces.push(n)
+        })
+        .unwrap();
+        assert_eq!(out, data);
+        assert_eq!(pieces.iter().sum::<u64>(), data.len() as u64);
+        assert!(pieces.len() >= 3, "{pieces:?}");
+
+        // A cancel during the transfer stops it after the piece in hand.
+        let mut out = Vec::new();
+        let result = pump(&mut &data[..], &mut out, &pause, &cancel, |_| {
+            cancel.store(true, Ordering::Relaxed)
+        });
+        assert!(matches!(result, Err(VfsError::Cancelled)), "{result:?}");
+        assert_eq!(out.len(), PIECE);
     }
 
     #[test]

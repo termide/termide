@@ -1,0 +1,1 @@
+- **A language server that fails to start is ended.** A server whose `initialize` failed was left running in the background; it is now killed and reaped.

@@ -288,6 +288,8 @@ impl Translation for RuntimeTranslation {
         editor_cancel,
         editor_close_external,
         editor_close_external_question,
+        editor_title_changed_on_disk,
+        editor_remote_changed_question,
         editor_overwrite_disk,
         editor_keep_disk_close,
         editor_reload_into_editor,
@@ -1071,8 +1073,6 @@ impl Translation for RuntimeTranslation {
         status_selected,
         status_tab_modal_title,
         status_plain_text,
-        status_terminal,
-        status_layout,
         ui_yes,
         ui_no,
         ui_ok,
@@ -1124,6 +1124,11 @@ impl Translation for RuntimeTranslation {
         op_type_command,
         op_type_scanning,
         modal_confirm_title,
+        modal_input_title,
+        ui_filter_label,
+        command_palette_no_commands,
+        fm_searching,
+        editor_untitled,
         modal_error_title,
         fm_archive_read_only,
         fm_cut_local_only,
@@ -2986,6 +2991,32 @@ impl Translation for RuntimeTranslation {
         )
     }
 
+    fn git_diff_files_count_fmt(&self, count: usize) -> String {
+        let plural = self.pluralize(count, "file");
+        self.format(
+            "git_diff_files_count_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn git_diff_stash_title_fmt(&self, message: &str, files: &str) -> String {
+        self.format(
+            "git_diff_stash_title_fmt",
+            &[("message", message), ("files", files)],
+        )
+    }
+
+    fn references_title_fmt(&self, count: usize) -> String {
+        self.format("references_title_fmt", &[("count", &count.to_string())])
+    }
+
+    fn references_symbol_title_fmt(&self, symbol: &str, count: usize) -> String {
+        self.format(
+            "references_symbol_title_fmt",
+            &[("symbol", symbol), ("count", &count.to_string())],
+        )
+    }
+
     fn git_diff_discard_confirm_fmt(&self, path: &str) -> String {
         self.format("git_diff_discard_confirm_fmt", &[("path", path)])
     }
@@ -3055,6 +3086,14 @@ impl Translation for RuntimeTranslation {
 
     fn projects_transfer_exists_fmt(&self, path: &str) -> String {
         self.format("projects_transfer_exists_fmt", &[("path", path)])
+    }
+
+    fn save_as_replace_fmt(&self, path: &str) -> String {
+        self.format("save_as_replace_fmt", &[("path", path)])
+    }
+
+    fn op_name_not_utf8_fmt(&self, path: &str) -> String {
+        self.format("op_name_not_utf8_fmt", &[("path", path)])
     }
 
     fn projects_move_nested_open_fmt(&self, path: &str) -> String {
@@ -3146,6 +3185,17 @@ impl Translation for RuntimeTranslation {
         self.format(
             "replace_confirm_fmt",
             &[("count", &count.to_string()), ("files", &files.to_string())],
+        )
+    }
+
+    fn replace_failed_fmt(&self, failed: usize, path: &str, error: &str) -> String {
+        self.format(
+            "replace_failed_fmt",
+            &[
+                ("failed", &failed.to_string()),
+                ("path", path),
+                ("error", error),
+            ],
         )
     }
 
@@ -3539,6 +3589,65 @@ mod tests {
                 assert!(extra.is_empty(), "{lang}: {key} has {extra:?}");
             }
         }
+    }
+
+    /// A Latin letter inside a word of a non-Latin script is a slip — a
+    /// transliteration mark typed into Bengali (`অপেকṣা`), a key pressed
+    /// in the wrong layout — that shows as a broken word. Latin Extended
+    /// letters have no place in these languages at all; a run of plain
+    /// Latin letters with native letters on both sides is flagged unless it
+    /// is a word Japanese and Chinese write in Latin between their own.
+    /// Placeholders sit between braces, never inside a word.
+    #[test]
+    fn no_latin_letter_hides_inside_a_native_word() {
+        fn native(lang: &str, c: char) -> bool {
+            let ranges: &[(u32, u32)] = match lang {
+                "bn" => &[(0x0980, 0x09FF)],
+                "hi" => &[(0x0900, 0x097F)],
+                "th" => &[(0x0E00, 0x0E7F)],
+                "ja" => &[(0x3040, 0x30FF), (0x4E00, 0x9FFF)],
+                "ko" => &[(0x1100, 0x11FF), (0x3130, 0x318F), (0xAC00, 0xD7AF)],
+                "zh" => &[(0x4E00, 0x9FFF)],
+                _ => &[],
+            };
+            ranges
+                .iter()
+                .any(|&(from, to)| (from..=to).contains(&u32::from(c)))
+        }
+        fn latin_extended(c: char) -> bool {
+            c.is_alphabetic() && matches!(u32::from(c), 0x00C0..=0x024F | 0x1E00..=0x1EFF)
+        }
+        fn latin(c: char) -> bool {
+            c.is_ascii_alphabetic() || latin_extended(c)
+        }
+        const ALLOWED: &[&str] = &["N", "URL", "Git", "diff"];
+
+        let mut found = Vec::new();
+        for lang in ["bn", "hi", "th", "ja", "ko", "zh"] {
+            let data = loader::load_language(lang).unwrap();
+            for (key, text) in data.strings.iter().chain(&data.formats) {
+                let chars: Vec<char> = text.chars().collect();
+                let mut i = 0;
+                while i < chars.len() {
+                    if !latin(chars[i]) {
+                        i += 1;
+                        continue;
+                    }
+                    let start = i;
+                    while i < chars.len() && latin(chars[i]) {
+                        i += 1;
+                    }
+                    let run: String = chars[start..i].iter().collect();
+                    let inside = start > 0
+                        && native(lang, chars[start - 1])
+                        && chars.get(i).is_some_and(|&c| native(lang, c));
+                    if run.chars().any(latin_extended) || (inside && !ALLOWED.contains(&&*run)) {
+                        found.push(format!("{lang}: {key}: {run:?}"));
+                    }
+                }
+            }
+        }
+        assert!(found.is_empty(), "Latin inside native words: {found:#?}");
     }
 
     /// A key missing from a language silently shows the English text, so

@@ -330,13 +330,16 @@ Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md) when reporti
 
 **Log locations:**
 
-Each run writes its own `session-<date>-<time>.log` into the project directory
-for the project you opened, under the data directory:
+Each run writes its own `logs/YYYYMMDD-HHMMSS-MSC.log` into the directory of
+the project you opened, `projects/<name>-<hash>/` under the data directory:
 
-- Linux: `~/.local/share/termide/projects/<project path>/`
-  (or `$XDG_DATA_HOME/termide/projects/<project path>/`)
-- macOS: `~/Library/Application Support/termide/projects/<project path>/`
-- Windows: `%APPDATA%\termide\projects\<project path>\`
+- Linux: `~/.local/share/termide/projects/<name>-<hash>/logs/`
+  (or `$XDG_DATA_HOME/termide/projects/<name>-<hash>/logs/`)
+- macOS: `~/Library/Application Support/termide/projects/<name>-<hash>/logs/`
+- Windows: `%APPDATA%\termide\projects\<name>-<hash>\logs\`
+
+`<name>` is the last component of the project's path and `<hash>` a hash of
+the whole path.
 
 `termide --diagnostics` prints the exact project directory for the current
 project. Logs older than 24 hours are removed automatically. Setting
@@ -441,7 +444,7 @@ Contains:
 
 Logs live in the project directory, not in a cache directory — see
 [Log locations](#bug-reports) above. One file per run,
-`session-<date>-<time>.log`, pruned after 24 hours.
+`projects/<name>-<hash>/logs/YYYYMMDD-HHMMSS-MSC.log`, pruned after 24 hours.
 
 ## Development Resources
 

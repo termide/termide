@@ -173,6 +173,7 @@ impl App {
                                                 pending_download.temp_path,
                                                 mtime,
                                                 size,
+                                                pending_download.remote_mtime,
                                             ));
                                             editor.set_vfs_manager(pending_download.vfs_manager);
 
@@ -346,13 +347,8 @@ impl App {
                                     mut operation,
                                 }) = self.state.pending_action.take()
                                 {
-                                    // Track completed destination for cancel cleanup
-                                    if let Some(source) = operation.current_source() {
-                                        let filename =
-                                            source.file_name().unwrap_or_default().to_os_string();
-                                        let dest_path = operation.destination.join(filename);
-                                        operation.add_completed_destination(dest_path);
-                                    }
+                                    // Track what this copy created for cancel cleanup
+                                    operation.record_item_destination();
                                     operation.increment_success();
                                     operation.advance();
                                     // Update file count immediately so the card reflects completion
@@ -369,6 +365,8 @@ impl App {
                                 // "Save and close"
                                 if upload.close_after {
                                     self.close_editor_by_path(&upload.editor_path);
+                                } else {
+                                    self.refresh_editor_remote_mtime(&upload.editor_path);
                                 }
                             }
 
@@ -398,16 +396,9 @@ impl App {
                                     mut operation,
                                 }) = self.state.pending_action.take()
                                 {
-                                    // Track completed destination for cancel cleanup
+                                    // Track what this copy created for cancel cleanup
                                     if completed > 0 {
-                                        if let Some(source) = operation.current_source() {
-                                            let filename = source
-                                                .file_name()
-                                                .unwrap_or_default()
-                                                .to_os_string();
-                                            let dest_path = operation.destination.join(filename);
-                                            operation.add_completed_destination(dest_path);
-                                        }
+                                        operation.record_item_destination();
                                     }
                                     // Add completed count to batch
                                     for _ in 0..completed {
@@ -568,9 +559,13 @@ impl App {
                                 // Remove batch tracking card from operations panel
                                 self.state.finish_batch_tracking();
 
-                                if let Some(PendingAction::ContinueBatchOperation { operation }) =
-                                    self.state.pending_action.take()
+                                if let Some(PendingAction::ContinueBatchOperation {
+                                    mut operation,
+                                }) = self.state.pending_action.take()
                                 {
+                                    // The item cut short was new too: its
+                                    // remains are as much the batch's own.
+                                    operation.record_item_destination();
                                     // Show cleanup modal similar to check_local_copy_progress
                                     let all_dest_paths = operation.completed_destinations.clone();
                                     let buttons = super::modal::cancel_copy_buttons(

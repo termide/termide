@@ -1,0 +1,1 @@
+- **Ending a debug session ends the debugger and what it started.** A stopped or closed session left the debug adapter, and the program it launched, running. The adapter now gets a short grace period to exit on its own, then it is killed together with its process group.

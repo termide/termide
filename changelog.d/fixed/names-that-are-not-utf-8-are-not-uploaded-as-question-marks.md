@@ -1,0 +1,1 @@
+- **A file name that is not UTF-8 is no longer uploaded as "?".** Copying such files to a server sent each one to a destination named "?", so they overwrote one another. They are now refused with a message naming the file; local copies keep the name as it is.

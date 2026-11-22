@@ -1,0 +1,1 @@
+- **An NFS or SMB server cannot place a download outside its folder.** A directory download joined the names the server listed onto the local folder as they came, so a server listing an entry such as `../../.bashrc` could write anywhere the user can. A listed name that is not one plain entry now stops the download, and an NFS listing leaves out a name no file system holds.

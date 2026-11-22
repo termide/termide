@@ -1224,7 +1224,7 @@ impl Session {
     /// End the session, ending the program too.
     pub fn stop(&mut self) {
         if let Some(build) = self.build.take() {
-            let _ = build.lock().unwrap_or_else(|e| e.into_inner()).kill();
+            kill_group(&mut build.lock().unwrap_or_else(|e| e.into_inner()));
         }
         if !self.is_active() {
             return;
@@ -1329,11 +1329,71 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         if let Some(build) = self.build.take() {
-            let _ = build.lock().unwrap_or_else(|e| e.into_inner()).kill();
+            kill_group(&mut build.lock().unwrap_or_else(|e| e.into_inner()));
         }
-        if let Some(mut adapter) = self.adapter.take() {
-            let _ = adapter.kill();
-            let _ = adapter.wait();
+        if let Some(adapter) = self.adapter.take() {
+            // `stop` sent `disconnect` asking the adapter to end the
+            // program; killing it at once would leave the program running.
+            reap(adapter, ADAPTER_GRACE);
+        }
+    }
+}
+
+/// How long an adapter gets to act on `disconnect` before it is killed.
+const ADAPTER_GRACE: Duration = Duration::from_millis(1500);
+
+/// Kill `child` and everything in its process group: started under
+/// `setsid` (see [`crate::detach`]) it leads one, which holds what it
+/// started — the compiler under a build's `sh -c`, the program under an
+/// adapter.
+fn kill_group(child: &mut Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = libc::pid_t::try_from(child.id()) {
+        // SAFETY: a plain syscall; the group is the child's own.
+        unsafe {
+            libc::killpg(pid, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+}
+
+/// Give `child` up to `grace` to exit on its own, then kill its process
+/// group and reap it — on a thread of its own, so ending a session never
+/// holds the screen up.
+fn reap(child: Child, grace: Duration) -> Option<std::thread::JoinHandle<()>> {
+    let slot = Arc::new(Mutex::new(Some(child)));
+    let mine = Arc::clone(&slot);
+    let run = move || {
+        let deadline = Instant::now() + grace;
+        loop {
+            let mut guard = mine.lock().unwrap_or_else(|e| e.into_inner());
+            let Some(child) = guard.as_mut() else {
+                return;
+            };
+            // Gone, or not ours to wait for: what it left in its group
+            // goes all the same.
+            let running = matches!(child.try_wait(), Ok(None));
+            if !running || Instant::now() >= deadline {
+                kill_group(child);
+                let _ = child.wait();
+                return;
+            }
+            drop(guard);
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    };
+    match std::thread::Builder::new()
+        .name("dap-reaper".into())
+        .spawn(run)
+    {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            log::warn!("Debug adapter: no thread to end it gracefully: {e}");
+            if let Some(mut child) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                kill_group(&mut child);
+                let _ = child.wait();
+            }
+            None
         }
     }
 }
