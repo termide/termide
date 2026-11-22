@@ -28,7 +28,9 @@ pub use terminal_info::TerminalInfo;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
-use input_encoding::{arrow_modifier_param, legacy_key_bytes, modern_key_bytes, pty_key};
+use input_encoding::{
+    arrow_modifier_param, function_key_bytes, legacy_key_bytes, modern_key_bytes, pty_key,
+};
 use link_detection::HighlightSegment;
 #[cfg(unix)]
 use nix::sys::signal::{self, Signal};
@@ -942,13 +944,13 @@ impl Terminal {
 
     /// Paste text directly to PTY (from bracketed paste event or clipboard).
     ///
-    /// Uses bracketed paste mode to wrap the text, which tells the shell/application
-    /// that this is pasted content and newlines should not trigger command execution.
+    /// The outer terminal stripped its own bracketed-paste markers; they are
+    /// added back when the program in the PTY enabled the mode (`CSI ? 2004
+    /// h`), which tells it the newlines are pasted, not typed. See
+    /// [`clipboard::paste_bytes`] for what the text loses on the way.
     pub fn paste_text(&mut self, text: &str) -> Result<()> {
-        // Always use bracketed paste - the outer terminal (where termide runs)
-        // already stripped the brackets, so we need to re-add them for the
-        // inner shell/application running in our PTY
-        self.input.send(clipboard::paste_bytes(text, true))?;
+        let bracketed = self.read_screen().bracketed_paste_mode;
+        self.input.send(clipboard::paste_bytes(text, bracketed))?;
         Ok(())
     }
 
@@ -1482,9 +1484,6 @@ impl Panel for Terminal {
             KeyCode::Backspace => {
                 let _ = self.send_input(&legacy_key_bytes(key.code, key.modifiers));
             }
-            KeyCode::Delete => {
-                let _ = self.send_input(b"\x1b[3~");
-            }
             KeyCode::Left => {
                 if let Some(m) = arrow_modifier_param(key.modifiers) {
                     let _ = self.send_input(format!("\x1b[1;{m}D").as_bytes());
@@ -1541,12 +1540,6 @@ impl Panel for Terminal {
                     let _ = self.send_input(b"\x1b[F");
                 }
             }
-            KeyCode::PageUp => {
-                let _ = self.send_input(b"\x1b[5~");
-            }
-            KeyCode::PageDown => {
-                let _ = self.send_input(b"\x1b[6~");
-            }
             KeyCode::Tab => {
                 let _ = self.send_input(b"\t");
             }
@@ -1557,24 +1550,13 @@ impl Panel for Terminal {
             KeyCode::Esc => {
                 let _ = self.send_input(b"\x1b");
             }
-            KeyCode::F(n) => {
-                // F-keys escape sequences for xterm-256color
-                const FKEY_SEQS: &[&[u8]] = &[
-                    b"\x1bOP",   // F1
-                    b"\x1bOQ",   // F2
-                    b"\x1bOR",   // F3
-                    b"\x1bOS",   // F4
-                    b"\x1b[15~", // F5
-                    b"\x1b[17~", // F6
-                    b"\x1b[18~", // F7
-                    b"\x1b[19~", // F8
-                    b"\x1b[20~", // F9
-                    b"\x1b[21~", // F10
-                    b"\x1b[23~", // F11
-                    b"\x1b[24~", // F12
-                ];
-                if let Some(seq) = FKEY_SEQS.get((n as usize).wrapping_sub(1)) {
-                    let _ = self.send_input(seq);
+            KeyCode::Insert
+            | KeyCode::Delete
+            | KeyCode::PageUp
+            | KeyCode::PageDown
+            | KeyCode::F(_) => {
+                if let Some(bytes) = function_key_bytes(key.code, key.modifiers) {
+                    let _ = self.send_input(&bytes);
                 }
             }
             _ => {}
@@ -1894,6 +1876,26 @@ impl Panel for Terminal {
             #[cfg(unix)]
             {
                 let pid = Pid::from_raw(pid as i32);
+                // Hang up first, as closing a terminal window does: the
+                // shell passes SIGHUP on to its jobs, which sit in process
+                // groups of their own (`sleep 999 &`), and would otherwise
+                // keep the terminal and the panel's reader alive.
+                let foreground = self
+                    .pty
+                    .lock()
+                    .ok()
+                    .and_then(|pty| pty.process_group_leader())
+                    .filter(|&group| group > 0 && group != pid.as_raw());
+                let _ = signal::kill(pid, Signal::SIGHUP);
+                if let Some(group) = foreground {
+                    let _ = signal::killpg(Pid::from_raw(group), Signal::SIGHUP);
+                }
+                for _ in 0..10 {
+                    if self.has_exited() {
+                        return;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
                 let _ = signal::killpg(pid, Signal::SIGTERM);
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 if self.is_alive() || !self.has_exited() {
@@ -1962,6 +1964,50 @@ mod device_tests {
             start.elapsed() < std::time::Duration::from_secs(2),
             "closing waited for the program: {:?}",
             start.elapsed()
+        );
+    }
+
+    /// A background job (`sleep 999 &`) holds the terminal open after the
+    /// shell is gone; closing the panel hangs it up, as closing a terminal
+    /// window does, so neither the job nor the panel's reader lives on.
+    #[test]
+    fn closing_ends_a_background_job_of_the_shell() {
+        let dir = tempfile::tempdir().unwrap();
+        let pid_file = dir.path().join("job.pid");
+        let Ok(mut term) = Terminal::new_with_shell(10, 40, "/bin/bash", None) else {
+            return; // No PTY or no bash.
+        };
+        term.send_input(format!("sleep 999 & echo $! > '{}'\r", pid_file.display()).as_bytes())
+            .unwrap();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let job = loop {
+            let pid = std::fs::read_to_string(&pid_file).ok();
+            if let Some(pid) = pid.and_then(|p| p.trim().parse::<i32>().ok()) {
+                break Pid::from_raw(pid);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the job never started"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        };
+        let reader_alive = Arc::clone(&term.is_alive);
+        drop(term);
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while (signal::kill(job, None).is_ok() || *reader_alive.lock().unwrap())
+            && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let job_left = signal::kill(job, None).is_ok();
+        if job_left {
+            let _ = signal::kill(job, Signal::SIGKILL);
+        }
+        assert!(!job_left, "the background job outlived the panel");
+        assert!(
+            !*reader_alive.lock().unwrap(),
+            "the reader outlived the panel"
         );
     }
 

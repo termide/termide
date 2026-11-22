@@ -222,6 +222,56 @@ pub fn ansi_256_to_color(code: u16) -> Color {
         .unwrap_or(Color::Reset)
 }
 
+/// A character set designated into G0 or G1 (`ESC ( 0`, `ESC ) B`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Charset {
+    #[default]
+    Ascii,
+    /// DEC Special Graphics: lower-case letters and some punctuation draw
+    /// lines and symbols, as `tmux`, `mc` and ncurses programs without UTF-8
+    /// line drawing (`NCURSES_NO_UTF8_ACS` unset) use it.
+    DecSpecialGraphics,
+}
+
+/// The character DEC Special Graphics shows for `ch`, as xterm maps it.
+fn dec_special_graphics(ch: char) -> char {
+    match ch {
+        '_' => ' ',
+        '`' => '◆',
+        'a' => '▒',
+        'b' => '␉',
+        'c' => '␌',
+        'd' => '␍',
+        'e' => '␊',
+        'f' => '°',
+        'g' => '±',
+        'h' => '␤',
+        'i' => '␋',
+        'j' => '┘',
+        'k' => '┐',
+        'l' => '┌',
+        'm' => '└',
+        'n' => '┼',
+        'o' => '⎺',
+        'p' => '⎻',
+        'q' => '─',
+        'r' => '⎼',
+        's' => '⎽',
+        't' => '├',
+        'u' => '┤',
+        'v' => '┴',
+        'w' => '┬',
+        'x' => '│',
+        'y' => '≤',
+        'z' => '≥',
+        '{' => 'π',
+        '|' => '≠',
+        '}' => '£',
+        '~' => '·',
+        ch => ch,
+    }
+}
+
 /// How long a synchronized update (`CSI ? 2026 h`) may hold back rendering.
 /// A program killed mid-frame, or a file containing the sequence sent to
 /// the terminal with `cat`, would otherwise freeze the panel for good;
@@ -239,10 +289,19 @@ pub struct TerminalScreen {
     pub use_alt_screen: bool,
     /// Cursor position (row, col)
     pub cursor: (usize, usize),
-    /// Saved cursor position
+    /// The main screen's saved cursor position (DECSC, and on entering
+    /// the alternate screen with `CSI ? 1049 h`)
     pub saved_cursor: Option<(usize, usize)>,
     /// Style saved together with the cursor (DECSC)
     pub saved_style: CellStyle,
+    /// The alternate screen's own saved cursor and style: as in xterm, a
+    /// DECSC in a full-screen program leaves the main screen's alone.
+    pub alt_saved_cursor: Option<(usize, usize)>,
+    pub alt_saved_style: CellStyle,
+    /// The character sets in G0 and G1
+    pub charsets: [Charset; 2],
+    /// Shift Out (SO, `^N`) put G1 in use; Shift In (SI, `^O`) G0 again
+    pub shift_out: bool,
     /// Cursor visibility
     pub cursor_visible: bool,
     /// Screen dimensions
@@ -335,6 +394,10 @@ impl TerminalScreen {
             cursor: (0, 0),
             saved_cursor: None,
             saved_style: CellStyle::default(),
+            alt_saved_cursor: None,
+            alt_saved_style: CellStyle::default(),
+            charsets: [Charset::Ascii; 2],
+            shift_out: false,
             cursor_visible: true,
             rows,
             cols,
@@ -463,6 +526,10 @@ impl TerminalScreen {
     /// therefore advances exactly as the application and the host terminal
     /// expect, which keeps relative cursor motion and erasing in sync.
     pub fn put_char(&mut self, ch: char) {
+        let ch = match self.charsets[usize::from(self.shift_out)] {
+            Charset::Ascii => ch,
+            Charset::DecSpecialGraphics => dec_special_graphics(ch),
+        };
         let width = match ch.width() {
             None => return,
             Some(0) => {
@@ -872,18 +939,31 @@ impl TerminalScreen {
         self.cursor.1 = next_tab.min(self.cols.saturating_sub(1));
     }
 
-    /// Save the cursor position and the current style (DECSC, `CSI s`).
+    /// Save the cursor position and the current style (DECSC, `CSI s`),
+    /// in the slot of the screen showing.
     pub fn save_cursor(&mut self) {
-        self.saved_cursor = Some(self.cursor);
-        self.saved_style = self.current_style;
+        let (cursor, style) = (self.cursor, self.current_style);
+        if self.use_alt_screen {
+            self.alt_saved_cursor = Some(cursor);
+            self.alt_saved_style = style;
+        } else {
+            self.saved_cursor = Some(cursor);
+            self.saved_style = style;
+        }
     }
 
-    /// Restore what `save_cursor` saved (DECRC, `CSI u`). The position is
-    /// clamped to the grid: the screen may have shrunk since it was saved.
+    /// Restore what `save_cursor` saved on the screen showing (DECRC,
+    /// `CSI u`). The position is clamped to the grid: the screen may have
+    /// shrunk since it was saved.
     pub fn restore_cursor(&mut self) {
-        if let Some((row, col)) = self.saved_cursor {
+        let (saved, style) = if self.use_alt_screen {
+            (self.alt_saved_cursor, self.alt_saved_style)
+        } else {
+            (self.saved_cursor, self.saved_style)
+        };
+        if let Some((row, col)) = saved {
             self.move_cursor(row, col);
-            self.current_style = self.saved_style;
+            self.current_style = style;
         }
     }
 
@@ -984,8 +1064,10 @@ impl TerminalScreen {
         self.reset_scroll_region();
         self.cursor.0 = self.cursor.0.min(rows - 1);
         self.cursor.1 = self.cursor.1.min(cols - 1);
-        if let Some((row, col)) = self.saved_cursor {
-            self.saved_cursor = Some((row.min(rows - 1), col.min(cols - 1)));
+        for saved in [&mut self.saved_cursor, &mut self.alt_saved_cursor] {
+            if let Some((row, col)) = *saved {
+                *saved = Some((row.min(rows - 1), col.min(cols - 1)));
+            }
         }
         self.dirty = true;
     }

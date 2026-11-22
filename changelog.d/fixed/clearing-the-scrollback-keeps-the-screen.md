@@ -1,0 +1,1 @@
+- **Clearing the scrollback keeps the screen.** `CSI 3 J`, which erases a terminal's scrollback, also blanked the screen and moved the cursor to the top; it now leaves both as they are, as in xterm.

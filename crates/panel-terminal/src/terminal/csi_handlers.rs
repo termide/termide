@@ -12,28 +12,27 @@ use super::{
     TerminalScreen,
 };
 
-/// Handle DEC private sequences (sequences starting with '?').
-///
-/// Returns true if the sequence was handled (caller should return early).
+/// Handle DEC private modes (DECSET/DECRST, `CSI ? … h/l`). Every mode in
+/// the list applies, in order: ncurses sends `CSI ? 1006 ; 1000 h`.
 pub fn handle_private_sequence(screen: &mut TerminalScreen, params: &Params, c: char) {
-    let mode = params
-        .iter()
-        .next()
-        .and_then(|p| p.first())
-        .copied()
-        .unwrap_or(0);
+    for param in params.iter() {
+        set_private_mode(screen, param.first().copied().unwrap_or(0), c);
+    }
+    screen.dirty = true;
+}
 
+fn set_private_mode(screen: &mut TerminalScreen, mode: u16, c: char) {
     match (mode, c) {
         (1049, 'h') => {
-            // Switch to alternate screen and save cursor
+            // Save the cursor (the main screen's: each screen has its own
+            // saved cursor), then switch to the alternate screen
             screen.save_cursor();
             screen.switch_to_alt_screen();
         }
         (1049, 'l') => {
-            // Return to main screen and restore cursor
+            // Return to the main screen and restore its cursor
             screen.switch_to_main_screen();
             screen.restore_cursor();
-            screen.saved_cursor = None;
         }
         (47, 'h') => {
             // Switch to alternate screen (without saving cursor)
@@ -115,7 +114,6 @@ pub fn handle_private_sequence(screen: &mut TerminalScreen, params: &Params, c: 
             // Unknown private sequence - ignore
         }
     }
-    screen.dirty = true;
 }
 
 /// Handle SGR (Select Graphic Rendition) sequences for text styling.

@@ -11,7 +11,7 @@ use ratatui::layout::Rect;
 use termide_core::PanelEvent;
 use termide_ui::{extract_hex_color_at_col, ColorPreview};
 
-use crate::input_encoding::{can_send_mouse_event, mouse_modifier_bits, mouse_route, MouseRoute};
+use crate::input_encoding::{can_send_mouse_event, mouse_report, mouse_route, MouseRoute};
 use crate::link_detection;
 use crate::selection::{line_selection, word_selection};
 use crate::Terminal;
@@ -23,9 +23,6 @@ impl Terminal {
         mouse: &crossterm::event::MouseEvent,
         panel_area: Rect,
     ) -> Result<()> {
-        use crossterm::event::{MouseButton, MouseEventKind};
-        use std::io::Write;
-
         let (mouse_tracking, sgr_mode) = {
             let screen = self.read_screen();
             (screen.mouse_tracking, screen.sgr_mouse_mode)
@@ -54,50 +51,9 @@ impl Terminal {
         let inner_x = clamped_col.saturating_sub(inner_x_min) + 1;
         let inner_y = clamped_row.saturating_sub(inner_y_min) + 1;
 
-        // Reusable buffer to avoid allocations (max SGR sequence is ~20 bytes)
-        let mut buf = [0u8; 32];
-
-        // Determine button code and whether this is release event
-        let modifier_bits = mouse_modifier_bits(mouse.modifiers);
-        let (btn_code, is_release): (u8, bool) = match mouse.kind {
-            MouseEventKind::Down(MouseButton::Left) => (modifier_bits, false),
-            MouseEventKind::Down(MouseButton::Middle) => (1 + modifier_bits, false),
-            MouseEventKind::Down(MouseButton::Right) => (2 + modifier_bits, false),
-            MouseEventKind::Up(MouseButton::Left)
-            | MouseEventKind::Up(MouseButton::Middle)
-            | MouseEventKind::Up(MouseButton::Right) => (3 + modifier_bits, true),
-            MouseEventKind::Drag(MouseButton::Left) => (32 + modifier_bits, false),
-            MouseEventKind::Drag(MouseButton::Middle) => (33 + modifier_bits, false),
-            MouseEventKind::Drag(MouseButton::Right) => (34 + modifier_bits, false),
-            MouseEventKind::Moved => (35 + modifier_bits, false),
-            MouseEventKind::ScrollUp => (64 + modifier_bits, false),
-            MouseEventKind::ScrollDown => (65 + modifier_bits, false),
-            _ => return Ok(()),
-        };
-
-        // Build sequence directly into buffer (zero allocation)
-        let len = if sgr_mode {
-            // SGR format: ESC [ < btn ; x ; y (M for press, m for release)
-            let suffix: u8 = if is_release { b'm' } else { b'M' };
-            let mut cursor = std::io::Cursor::new(&mut buf[..]);
-            write!(cursor, "\x1b[<{};{};{}", btn_code, inner_x, inner_y).ok();
-            let pos = cursor.position() as usize;
-            buf[pos] = suffix;
-            pos + 1
-        } else {
-            // X10/Normal format: ESC [ M <btn+32> <x+32> <y+32>
-            // Release in non-SGR mode always uses button code 3
-            let effective_btn = if is_release { 3 } else { btn_code };
-            buf[0] = b'\x1b';
-            buf[1] = b'[';
-            buf[2] = b'M';
-            buf[3] = effective_btn.saturating_add(32);
-            buf[4] = (inner_x as u8).saturating_add(32);
-            buf[5] = (inner_y as u8).saturating_add(32);
-            6
-        };
-
-        self.send_input(&buf[..len])?;
+        if let Some(bytes) = mouse_report(mouse.kind, mouse.modifiers, inner_x, inner_y, sgr_mode) {
+            self.send_input(&bytes)?;
+        }
         Ok(())
     }
 
