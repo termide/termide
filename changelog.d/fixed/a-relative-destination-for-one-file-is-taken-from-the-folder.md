@@ -1,0 +1,1 @@
+- **A relative destination for a single file is taken from the folder.** Copying or moving one file to a path typed relative, such as `dst`, looked for it inside the file (`a.txt/dst`) and failed with "Not a directory"; a symlink made that way pointed there too. The path is now taken from the folder the prompt offers, as it is for several files.

@@ -42,4 +42,26 @@ file-contains dst/a_new.txt "new"
 file-contains dst/b_new.txt "new"
 expect-not "File Conflict"
 run "grep -qx old dst/a.txt && grep -qx old dst/b.txt"
+
+# Rename to a name that is taken too, then Overwrite: the file under the
+# picked name is replaced, the one first asked about is kept.
+run "echo other > dst/c.txt"
+key Home Down Down
+wait "a.txt"
+key F5
+wait "Copy"
+key Ctrl+A
+type "dst"
+key Enter
+wait "File Conflict"
+key Right Right Enter
+wait "Rename a.txt"
+key Ctrl+A
+type "c.txt"
+key Enter
+wait "File Conflict"
+expect "c.txt"
+key Home Enter
+file-contains dst/c.txt "new"
+run "grep -qx old dst/a.txt"
 quit --force

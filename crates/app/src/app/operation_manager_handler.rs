@@ -636,17 +636,15 @@ impl App {
                         OperationPath::Remote(vfs_path) => vfs_path.path.clone(),
                     };
 
-                    // Show ConflictModal
-                    let modal = termide_modal::ConflictModal::new(
-                        &source_path,
-                        &dest_path,
-                        conflict_info.remaining_items,
+                    self.ask_worker_conflict(
+                        termide_state::WorkerConflict {
+                            operation_id: id,
+                            source: source_path,
+                            destination: dest_path,
+                            remaining_items: conflict_info.remaining_items,
+                        },
+                        None,
                     );
-                    self.state.set_pending_action(
-                        PendingAction::ResolveOperationConflict { operation_id: id },
-                        ActiveModal::Conflict(Box::new(modal)),
-                    );
-                    self.state.needs_redraw = true;
                 }
             }
         }

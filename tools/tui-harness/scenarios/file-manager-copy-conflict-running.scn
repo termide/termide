@@ -1,0 +1,45 @@
+# A conflict the running copy raises — the destination appeared after the
+# copy checked it, while it scans a large folder — answered Rename asks for
+# the name: Esc on that prompt asks about the conflict again (the copy still
+# waits), and a name typed there is where the folder lands, the file in the
+# way kept.
+project empty
+config file-manager-taken-names.toml
+setup "mkdir dst big && echo new > big/marker && (cd big && seq 1 60000 | xargs touch)"
+start
+wait "big"
+
+# Copy big into dst; the copy's scan of 60000 files leaves time to put a
+# file named big in its way.
+key Home Down
+key F5
+wait "Copy"
+key Ctrl+A
+type "dst"
+key Enter
+wait "Scanning" 20
+run "echo old > dst/big"
+wait "Directory Conflict" 60
+# Six answers: the copy's own dialog, with items left inside the folder.
+expect "Rename All"
+snapshot conflict
+
+# Rename, then Esc on the name: back to the conflict, not left waiting.
+key Right Right Enter
+wait "Rename big"
+key Esc
+wait "Directory Conflict"
+expect-not "Rename big"
+
+# Rename with a name: the folder lands under it.
+key Right Right Enter
+wait "Rename big"
+key Ctrl+A
+type "$0_new"
+key Enter
+wait-gone "Directory Conflict"
+file-contains dst/big_new/marker "new" 120
+run "grep -qx old dst/big"
+expect-not "Conflict"
+wait-gone "Scanning" 120
+quit --force

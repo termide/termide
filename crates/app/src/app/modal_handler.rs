@@ -91,12 +91,17 @@ impl App {
                 // Handle cancellation from RenamePattern - return to ConflictModal
                 if is_rename_pattern && matches!(result, ModalResult::Cancelled) {
                     // Take operation from pending action and return to ConflictModal
-                    #[allow(clippy::collapsible_match)]
-                    if let Some(action) = self.state.take_pending_action() {
-                        if let termide_state::PendingAction::RenameWithPattern {
+                    match self.state.take_pending_action() {
+                        // A running worker still waits: asked again, not left.
+                        Some(termide_state::PendingAction::RenameOperationConflict {
+                            conflict,
+                        }) => {
+                            self.ask_worker_conflict(conflict, None);
+                            return Ok(());
+                        }
+                        Some(termide_state::PendingAction::RenameWithPattern {
                             operation, ..
-                        } = action
-                        {
+                        }) => {
                             use termide_modal::ConflictModal;
 
                             if let Some(source) = operation.current_source() {
@@ -122,6 +127,7 @@ impl App {
                                 return Ok(());
                             }
                         }
+                        _ => {}
                     }
                 }
 
@@ -987,8 +993,11 @@ impl App {
                     self.handle_follow_symlink(value, &target_path)?;
                 }
                 // Handle conflict resolution for OperationManager operations
-                PendingAction::ResolveOperationConflict { operation_id } => {
-                    self.handle_resolve_operation_conflict(operation_id, value)?;
+                PendingAction::ResolveOperationConflict { conflict, renamed } => {
+                    self.handle_resolve_operation_conflict(conflict, renamed, value);
+                }
+                PendingAction::RenameOperationConflict { conflict } => {
+                    self.handle_rename_operation_conflict(conflict, value);
                 }
                 // LSP rename symbol: user confirmed new name in the input modal
                 PendingAction::LspRenameSymbol {

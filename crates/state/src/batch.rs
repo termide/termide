@@ -158,6 +158,10 @@ pub struct BatchOperation {
     pub rename_pattern: Option<RenamePattern>,
     /// Counter for $I variable in pattern
     pub rename_counter: usize,
+    /// The name picked with Rename for the current item when it is taken
+    /// too: the conflict dialog then asks about it, and Overwrite replaces
+    /// the file under it. Dropped when the batch moves on.
+    pub picked_name: Option<String>,
     /// Statistics: successfully processed
     pub success_count: usize,
     /// Statistics: errors
@@ -201,6 +205,7 @@ impl BatchOperation {
             conflict_mode: ConflictMode::Ask,
             rename_pattern: None,
             rename_counter: 1,
+            picked_name: None,
             success_count: 0,
             error_count: 0,
             skipped_count: 0,
@@ -289,6 +294,7 @@ impl BatchOperation {
         // A note left by an item that failed or was skipped must not be
         // taken for the next item's destination.
         self.item_destination = None;
+        self.picked_name = None;
         self.current_index += 1;
     }
 

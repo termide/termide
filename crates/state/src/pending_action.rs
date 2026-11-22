@@ -33,6 +33,21 @@ pub struct UnpackPlan {
     pub confirmed: bool,
 }
 
+/// A conflict a running copy/move worker raised: the worker waits for its
+/// answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkerConflict {
+    /// The operation whose worker waits.
+    pub operation_id: termide_file_ops::OperationId,
+    /// The item being copied or moved.
+    pub source: PathBuf,
+    /// The taken path the worker asked about; a name the user picks goes
+    /// in its directory.
+    pub destination: PathBuf,
+    /// Items left after this one, which decides whether "… All" is offered.
+    pub remaining_items: usize,
+}
+
 /// Action pending modal result
 #[derive(Debug, Clone)]
 pub enum PendingAction {
@@ -306,9 +321,13 @@ pub enum PendingAction {
     FollowSymlink { target_path: PathBuf },
     /// Resolve a file conflict for an OperationManager operation
     ResolveOperationConflict {
-        /// The operation ID waiting for resolution
-        operation_id: termide_file_ops::OperationId,
+        conflict: WorkerConflict,
+        /// A name picked for the item that is taken as well: the dialog
+        /// asks about it, and Overwrite replaces that file.
+        renamed: Option<String>,
     },
+    /// The new name for the item of a worker conflict answered Rename
+    RenameOperationConflict { conflict: WorkerConflict },
     /// LSP rename symbol: applies WorkspaceEdit after user confirms new name
     LspRenameSymbol {
         file_path: PathBuf,

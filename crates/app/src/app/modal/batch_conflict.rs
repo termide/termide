@@ -24,7 +24,21 @@ impl App {
     ) -> Result<()> {
         use termide_modal::ConflictResolution;
 
-        if let Some(resolution) = value.get::<ConflictResolution>() {
+        if let Some(&resolution) = value.get::<ConflictResolution>() {
+            let resolution = match resolution {
+                // The dialog was about a name picked for this item: it goes
+                // under that name now, and later conflicts are overwritten.
+                ConflictResolution::OverwriteAll if operation.picked_name.is_some() => {
+                    operation.set_conflict_mode(ConflictMode::OverwriteAll);
+                    ConflictResolution::Overwrite
+                }
+                // A new name, or a pattern, takes the picked one's place.
+                ConflictResolution::Rename | ConflictResolution::RenameAll => {
+                    operation.picked_name = None;
+                    resolution
+                }
+                _ => resolution,
+            };
             match resolution {
                 ConflictResolution::Overwrite => {
                     // Overwrite this file - execute operation directly
@@ -258,6 +272,9 @@ impl App {
                     let modified = metadata.as_ref().and_then(|m| m.modified().ok());
 
                     let new_name = pattern.apply(&original_name, counter, created, modified);
+                    // A taken name is asked about; Overwrite then replaces
+                    // the file under it, not under the item's own name.
+                    operation.picked_name = Some(new_name.clone());
 
                     let dest_str = operation.destination.to_string_lossy();
                     if termide_vfs::is_vfs_url(&dest_str) {
@@ -332,10 +349,13 @@ impl App {
     }
 }
 
-/// The name a Rename All pattern gave the current item, which
-/// `process_batch_operation` computed with the counter it then advanced;
-/// `None` without a pattern.
+/// The name the current item was given: picked with Rename, or by a Rename
+/// All pattern, which `process_batch_operation` applied with the counter it
+/// then advanced; `None` when it keeps its own.
 fn renamed_item_name(operation: &BatchOperation, source: &std::path::Path) -> Option<String> {
+    if let Some(name) = &operation.picked_name {
+        return Some(name.clone());
+    }
     let pattern = operation.rename_pattern.as_ref()?;
     let name = source
         .file_name()
@@ -402,5 +422,33 @@ mod tests {
             item_destination(&operation, source, renamed.as_deref()),
             PathBuf::from("/nonexistent/dst/a_1.txt")
         );
+    }
+
+    /// Overwriting a name picked with Rename that is taken too replaces the
+    /// file under that name, not the one the first conflict was about; the
+    /// next item keeps its own name.
+    #[test]
+    fn an_overwrite_after_a_taken_picked_name_targets_that_name() {
+        let mut operation = BatchOperation::new(
+            BatchOperationType::Copy,
+            vec![
+                PathBuf::from("/nonexistent/src/a.txt"),
+                PathBuf::from("/nonexistent/src/b.txt"),
+            ],
+            PathBuf::from("/nonexistent/dst"),
+        )
+        .with_destination_directory(true);
+        let source = Path::new("/nonexistent/src/a.txt");
+        operation.picked_name = Some("c.txt".to_string());
+        let renamed = renamed_item_name(&operation, source);
+        assert_eq!(renamed.as_deref(), Some("c.txt"));
+        assert_eq!(
+            item_destination(&operation, source, renamed.as_deref()),
+            PathBuf::from("/nonexistent/dst/c.txt")
+        );
+
+        operation.advance();
+        let next = Path::new("/nonexistent/src/b.txt");
+        assert_eq!(renamed_item_name(&operation, next), None);
     }
 }

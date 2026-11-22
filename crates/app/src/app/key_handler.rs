@@ -514,6 +514,10 @@ impl App {
         .or(source_dir.clone())
         .unwrap_or_else(|| "/".to_string());
 
+        // A path typed relative is taken from this directory: the one the
+        // default names, not the copy of a single file it names in it.
+        *target_directory = Some(destination_base(&dest_dir));
+
         // A single file keeps its name: the path names the copy.
         let file_name = match sources {
             [source] => source.file_name().and_then(|n| n.to_str()),
@@ -530,8 +534,6 @@ impl App {
             None if dest_dir.ends_with('/') => dest_dir,
             None => format!("{}/", dest_dir),
         };
-
-        *target_directory = Some(std::path::PathBuf::from(default_dest.trim_end_matches('/')));
 
         // Prepare title and prompt
         let t = i18n::t();
@@ -589,9 +591,29 @@ fn default_destination_dir<'a>(
         .find(|dir| !is_source(dir))
 }
 
+/// The directory a destination typed relative is taken from, as the copy
+/// or move prompt gives it: the root stays the root.
+fn destination_base(dest_dir: &str) -> std::path::PathBuf {
+    match dest_dir.trim_end_matches('/') {
+        "" => std::path::PathBuf::from("/"),
+        dir => std::path::PathBuf::from(dir),
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::default_destination_dir;
+    use super::{default_destination_dir, destination_base};
+
+    /// A relative destination is taken from the default's directory, never
+    /// from the path of a single file's copy in it.
+    #[test]
+    fn a_relative_destination_is_taken_from_a_directory() {
+        assert_eq!(
+            destination_base("/proj/dst/"),
+            std::path::PathBuf::from("/proj/dst")
+        );
+        assert_eq!(destination_base("/"), std::path::PathBuf::from("/"));
+    }
 
     fn dirs(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
