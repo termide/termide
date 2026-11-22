@@ -11,7 +11,7 @@ use ratatui::{
 };
 
 use crate::base::{button_style, render_modal_block};
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use termide_core::ThemeColors;
 use termide_i18n as i18n;
@@ -147,44 +147,27 @@ impl CommitModal {
                 (None, None)
             };
 
-            // Render line with selection highlighting and cursor
-            let mut x = area.x;
+            // Render line with selection highlighting and cursor, a grapheme
+            // cluster at a time: a letter and its accents share a cell.
             let line_len = line.chars().count();
             let is_cursor_line = is_focused && line_idx == cursor.row;
 
-            for (char_idx, ch) in line.chars().enumerate() {
-                if x >= area.x + area.width {
-                    break;
-                }
-
-                let is_cursor_here = is_cursor_line && char_idx == cursor.col;
-                let is_selected = sel_start.is_some()
-                    && sel_end.is_some()
-                    && char_idx >= sel_start.unwrap()
-                    && char_idx < sel_end.unwrap();
-
-                let ch_width = ch.width().unwrap_or(1) as u16;
-
-                if is_cursor_here {
-                    // Inverted cursor - show character with swapped colors
-                    buf.set_string(
-                        x,
-                        y,
-                        ch.to_string(),
-                        Style::default().fg(theme.bg).bg(theme.fg),
-                    );
-                } else if is_selected {
-                    buf.set_string(
-                        x,
-                        y,
-                        ch.to_string(),
-                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg),
-                    );
-                } else {
-                    buf.set_string(x, y, ch.to_string(), Style::default().fg(theme.fg));
-                }
-                x += ch_width;
-            }
+            let drawn =
+                termide_ui::render_field_text(buf, area.x, y, area.width, line, 0, |at, end| {
+                    let is_cursor_here = is_cursor_line && (at..end).contains(&cursor.col);
+                    let is_selected = sel_start
+                        .zip(sel_end)
+                        .is_some_and(|(s, e)| at >= s && at < e);
+                    if is_cursor_here {
+                        // Inverted cursor - show character with swapped colors
+                        Style::default().fg(theme.bg).bg(theme.fg)
+                    } else if is_selected {
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
+                    } else {
+                        Style::default().fg(theme.fg)
+                    }
+                });
+            let mut x = area.x + drawn;
 
             // Show cursor at end of line or on empty line (inverted space)
             if is_cursor_line && cursor.col >= line_len && x < area.x + area.width {
@@ -583,6 +566,26 @@ mod tests {
         press(&mut modal, KeyCode::Enter, KeyModifiers::NONE);
         assert!(modal.handle_paste("body\r\nmore"));
         assert_eq!(modal.textarea.text(), "title\nbody\nmore");
+    }
+
+    /// "café" spelled with a combining accent, as macOS file names are: one
+    /// cell when drawn and clicked, one step for Backspace.
+    #[test]
+    fn an_accented_letter_is_one_cell_and_one_backspace_in_the_message() {
+        use crate::base::test_mouse::press as down;
+        let mut modal = modal();
+        assert!(modal.handle_paste("cafe\u{301}x"));
+        let area = Rect::new(0, 0, 100, 40);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        let text = modal.last_textarea_area.unwrap();
+        assert_eq!(buf[(text.x + 3, text.y)].symbol(), "e\u{301}");
+        assert_eq!(buf[(text.x + 4, text.y)].symbol(), "x");
+        // A click on the x lands before it, past both characters of é.
+        modal.handle_mouse(down(text.x + 4, text.y), area).unwrap();
+        assert_eq!(modal.textarea.cursor().col, 5);
+        press(&mut modal, KeyCode::Backspace, KeyModifiers::NONE);
+        assert_eq!(modal.textarea.text(), "cafx");
     }
 
     #[test]

@@ -9,7 +9,7 @@ use ratatui::{
     layout::Rect,
     style::{Modifier, Style},
 };
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
+use unicode_width::UnicodeWidthStr;
 
 use termide_theme::Theme;
 use termide_ui::choice_form::wrap;
@@ -246,6 +246,22 @@ impl DialogModal {
         (width, height.min(area.height))
     }
 
+    /// The characters of field `line` scrolled out on the left of a field
+    /// `width` cells wide: a one-line field keeps the cursor in sight by its
+    /// tail, from the start of a cluster; a field of several lines does not
+    /// scroll sideways.
+    fn field_skip(&self, line: &str, width: u16) -> usize {
+        if self.spec.input.as_ref().is_some_and(|f| f.lines == 1) {
+            termide_ui::text_utils::input_scroll_offset(
+                line,
+                self.field.cursor().col,
+                usize::from(width),
+            )
+        } else {
+            0
+        }
+    }
+
     fn render_field(&mut self, area: Rect, buf: &mut Buffer, theme: &Theme) {
         let focused = self.focus == Part::Input;
         let border = Style::default().fg(if focused {
@@ -272,34 +288,31 @@ impl DialogModal {
             .take(inner.height as usize)
         {
             let y = inner.y + (i - scroll) as u16;
-            // A one-line field keeps the cursor in sight by its tail.
-            let skip = if self.spec.input.as_ref().is_some_and(|f| f.lines == 1) {
-                cursor
-                    .col
-                    .saturating_sub(inner.width.saturating_sub(1) as usize)
-            } else {
-                0
-            };
-            let mut x = inner.x;
+            let skip = self.field_skip(line, inner.width);
             let len = line.chars().count();
-            for (col, ch) in line.chars().enumerate().skip(skip) {
-                let width = ch.width().unwrap_or(1) as u16;
-                if x + width > inner.right() {
-                    break;
-                }
-                let selected = selection.is_some_and(|(start, end)| {
-                    (i, col) >= (start.row, start.col) && (i, col) < (end.row, end.col)
-                });
-                let style = if focused && i == cursor.row && col == cursor.col {
-                    Style::default().fg(theme.bg).bg(theme.fg)
-                } else if selected {
-                    Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
-                } else {
-                    Style::default().fg(theme.fg)
-                };
-                buf.set_string(x, y, ch.to_string(), style);
-                x += width;
-            }
+            // A grapheme cluster at a time: a letter and its accents share a
+            // cell.
+            let drawn = termide_ui::render_field_text(
+                buf,
+                inner.x,
+                y,
+                inner.width,
+                line,
+                skip,
+                |at, end| {
+                    let selected = selection.is_some_and(|(start, end)| {
+                        (i, at) >= (start.row, start.col) && (i, at) < (end.row, end.col)
+                    });
+                    if focused && i == cursor.row && (at..end).contains(&cursor.col) {
+                        Style::default().fg(theme.bg).bg(theme.fg)
+                    } else if selected {
+                        Style::default().fg(theme.selected_fg).bg(theme.selected_bg)
+                    } else {
+                        Style::default().fg(theme.fg)
+                    }
+                },
+            );
+            let x = inner.x + drawn;
             if focused && i == cursor.row && cursor.col >= len && x < inner.right() {
                 buf.set_string(x, y, " ", Style::default().bg(theme.fg));
             }
@@ -496,8 +509,17 @@ impl Modal for DialogModal {
                     self.focus = Part::Input;
                     let row = self.field.scroll_offset() + (mouse.row - area.y) as usize;
                     let row = row.min(self.field.line_count().saturating_sub(1));
-                    self.field
-                        .mouse_press(row, (mouse.column - area.x) as usize);
+                    // The cell clicked is a display column, past what the
+                    // field scrolled out: map it to the cluster drawn there.
+                    let line = self.field.lines()[row].clone();
+                    let skip = self.field_skip(&line, area.width);
+                    let shown: String = line.chars().skip(skip).collect();
+                    let col = skip
+                        + termide_ui::text_utils::char_at_x(
+                            &shown,
+                            usize::from(mouse.column - area.x),
+                        );
+                    self.field.mouse_press(row, col);
                 }
                 if let Some(area) = self.list_area.filter(|r| r.contains(at)) {
                     let row = self.list_scroll + (mouse.row - area.y) as usize;
@@ -642,6 +664,45 @@ mod tests {
         assert_eq!(answer.selected, Some(1));
         assert_eq!(answer.text.as_deref(), Some("x"));
         assert!(answer.checked.is_empty());
+    }
+
+    /// "café" spelled with a combining accent: one cell in the field, and a
+    /// click maps to the letter drawn there, in a scrolled one-line field too.
+    #[test]
+    fn an_accented_letter_is_one_cell_in_the_field_and_under_a_click() {
+        let mut modal = DialogModal::new(DialogSpec {
+            input: Some(DialogInput {
+                lines: 1,
+                ..DialogInput::default()
+            }),
+            ..spec()
+        });
+        // Long enough to scroll the field, the accented letter at the end.
+        let text = format!("{}cafe\u{301}x", "a".repeat(100));
+        typed(&mut modal, &text);
+        let area = Rect::new(0, 0, 80, 30);
+        let mut buf = Buffer::empty(area);
+        modal.render(area, &mut buf, &Theme::default());
+        let field = modal.input_area.unwrap();
+        // The cursor sits in the last cell, the x before it, é before that.
+        let x = field.right() - 2;
+        assert_eq!(buf[(x, field.y)].symbol(), "x");
+        assert_eq!(buf[(x - 1, field.y)].symbol(), "e\u{301}");
+        let click = |column| MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row: field.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        modal.handle_mouse(click(x), area).unwrap();
+        assert_eq!(modal.field.cursor().col, 105, "before the x, past é");
+        // Back to the end, drawn as before.
+        press(&mut modal, KeyCode::End, KeyModifiers::NONE);
+        modal.render(area, &mut buf, &Theme::default());
+        modal.handle_mouse(click(x - 1), area).unwrap();
+        assert_eq!(modal.field.cursor().col, 103, "before é");
+        press(&mut modal, KeyCode::Delete, KeyModifiers::NONE);
+        assert_eq!(modal.field.text(), format!("{}cafx", "a".repeat(100)));
     }
 
     #[test]

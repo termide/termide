@@ -73,6 +73,30 @@ fn shift_arrows_select_the_prompt_and_ctrl_a_takes_it_all() {
     );
 }
 
+/// "café" typed with a combining accent, as some input methods send it and
+/// macOS file names spell it: the prompt draws é in one cell, and the arrows
+/// and Backspace take the letter with its accent.
+#[test]
+fn an_accented_letter_is_one_cell_and_one_step_in_the_prompt() {
+    let mut panel = panel(vec![]);
+    type_text(&mut panel, "cafe\u{301}x");
+    let rows = render_text(&mut panel, 30, 10);
+    assert!(
+        rows.iter().any(|row| row.contains("cafe\u{301}x")),
+        "é is drawn in one cell, no blank after it: {rows:?}"
+    );
+    panel.handle_key(chord(KeyCode::Left, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Left, KeyModifiers::NONE));
+    assert_eq!(
+        panel.input_area().cursor().col,
+        3,
+        "x, then é with its accent"
+    );
+    panel.handle_key(chord(KeyCode::Right, KeyModifiers::NONE));
+    panel.handle_key(chord(KeyCode::Backspace, KeyModifiers::NONE));
+    assert_eq!(panel.input_text(), "cafx");
+}
+
 /// The prompt's cut and paste through the keys, on a stand-in clipboard so
 /// the user's is never touched.
 #[test]

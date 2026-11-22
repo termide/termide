@@ -1,0 +1,43 @@
+# An accented letter spelled with a combining mark, as macOS spells file
+# names and some input methods type it, is one character in the multi-line
+# inputs too: the agent prompt and the commit message draw it in one cell,
+# and Backspace takes the letter with its accent, not the accent alone.
+project empty
+mock-llm
+start
+run "git init -q && echo a > a.txt && git add a.txt && git commit -qm init"
+run "echo b > a.txt && git add a.txt"
+
+# The agent prompt. Type "cafe" + COMBINING ACUTE + "x".
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "caféx"
+# No blank cell between the accented letter and the next one.
+wait-re "caf[^ ]{1,2}x"
+snapshot prompt-typed
+# Left over the x, Backspace over the whole é, then Left lands before the f.
+key Left Backspace Left
+type "y"
+wait "cayfx"
+expect-not "cafex"
+snapshot prompt-edited
+key Ctrl+A Backspace
+wait-gone "cayfx"
+
+# The commit message window of the git status panel.
+key Alt+G
+wait "a.txt"
+key Shift+Tab Right Right Right Right Right Enter
+wait "Commit 1"
+type "caféx"
+wait-re "caf[^ ]{1,2}x"
+key Left Backspace
+type "y"
+wait "cafyx"
+expect-not "cafeyx"
+snapshot commit-edited
+key Tab Enter
+wait-re "Committed: [0-9a-f]{7}" 15
+run "git log -1 --format=%s | grep -qx cafyx"
+quit --force
