@@ -797,6 +797,49 @@ mod tests {
         }
     }
 
+    /// doc/en/keybindings.md lists every action of every section with its
+    /// default keys ("All actions"); a new action, or a changed default,
+    /// has to show up there too.
+    #[test]
+    fn the_keybindings_doc_lists_every_action_with_its_defaults() {
+        let doc = include_str!("../../../../doc/en/keybindings.md");
+        let mut config = Config::default();
+        config.normalize();
+        for section in 0..KB_SECTIONS.len() {
+            let heading = format!("#### `[{}.keybindings]`\n", kb_section_key(section));
+            let start = doc
+                .find(&heading)
+                .unwrap_or_else(|| panic!("no {heading:?} in doc/en/keybindings.md"));
+            let body = &doc[start + heading.len()..];
+            let body = &body[..body.find("\n#").unwrap_or(body.len())];
+            let rows: Vec<&str> = body.lines().filter(|l| l.starts_with("| `")).collect();
+            let names = kb_binding_names(section);
+            assert_eq!(rows.len(), names.len(), "rows under {heading:?}");
+            for name in names {
+                let prefix = format!("| `{name}` | ");
+                let row = rows
+                    .iter()
+                    .find(|r| r.starts_with(&prefix))
+                    .unwrap_or_else(|| panic!("{heading:?} lacks `{name}`"));
+                // "`a`, `b`", or "— (no key)" for an unbound action.
+                let cell = row[prefix.len()..].trim_end_matches(" |");
+                let documented: Vec<String> = if cell.starts_with('—') {
+                    Vec::new()
+                } else {
+                    cell.trim_matches('`')
+                        .split("`, `")
+                        .map(|k| k.replace("\\|", "|"))
+                        .collect()
+                };
+                assert_eq!(
+                    documented,
+                    kb_keys_of(&config, section, name),
+                    "default keys of {heading:?} `{name}`"
+                );
+            }
+        }
+    }
+
     /// A section index past the end must not panic; the sidebar clamps, but
     /// the accessors are the ones that would go out of bounds.
     #[test]

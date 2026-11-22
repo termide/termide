@@ -1,1 +1,0 @@
-- **Windows binary is code-signed.** The release `termide.exe` is signed via SignPath Foundation (free for open source), so Windows SmartScreen and Smart App Control no longer block it on a fresh install.
