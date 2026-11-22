@@ -763,7 +763,8 @@ impl Panel for Editor {
                         Ok(()) => Some(filename.to_string()),
                         Err(e) => {
                             log::warn!("Failed to save the unsaved changes: {e}");
-                            None
+                            termide_project::has_unsaved_buffer(project_dir, filename)
+                                .then(|| filename.to_string())
                         }
                     }
                 });
@@ -784,7 +785,11 @@ impl Panel for Editor {
             // Save content to the project directory
             if let Err(e) = termide_project::save_unsaved_buffer(project_dir, &filename, &content) {
                 log::warn!("Failed to save unsaved buffer: {}", e);
-                return None;
+                // The backup written before stays named, or the layout's
+                // cleanup would delete it.
+                if !termide_project::has_unsaved_buffer(project_dir, &filename) {
+                    return None;
+                }
             }
 
             Some(PanelState::Editor {

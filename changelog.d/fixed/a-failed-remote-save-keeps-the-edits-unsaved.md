@@ -1,0 +1,1 @@
+- **A remote file whose upload fails stays unsaved.** Saving a file opened from a server cleared its modified mark before the upload ran, so when the upload failed or was cancelled the editor looked saved and closed without asking, though the edits were only in the local copy. The buffer is now marked unsaved again.

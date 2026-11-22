@@ -109,10 +109,20 @@ pub fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Write (or overwrite) the sidecar for an instance.
+/// Write (or overwrite) the sidecar for an instance: whole, through a file
+/// beside it renamed into place, so a `--list-instances` reading it at that
+/// moment never finds it empty or half written and takes the instance for
+/// dead.
 pub fn write_info(info: &InstanceInfo) -> Result<()> {
     let path = paths::info_path(&info.id)?;
-    std::fs::write(&path, info.serialise())
+    let mut temp = path.as_os_str().to_owned();
+    temp.push(format!(".{}.tmp", std::process::id()));
+    let temp = PathBuf::from(temp);
+    std::fs::write(&temp, info.serialise())
+        .and_then(|()| std::fs::rename(&temp, &path))
+        .inspect_err(|_| {
+            let _ = std::fs::remove_file(&temp);
+        })
         .with_context(|| format!("Failed to write {}", path.display()))
 }
 
@@ -213,13 +223,24 @@ pub fn is_running(info: &InstanceInfo) -> bool {
     }
     match (info.pid_start, process_start(info.pid)) {
         (Some(recorded), Some(current)) => recorded == current,
-        _ => paths::socket_path(&info.id)
-            .is_ok_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok()),
+        _ => paths::socket_path(&info.id).is_ok_and(|socket| socket_accepts(&socket)),
     }
 }
 
 #[cfg(not(unix))]
 pub fn is_running(_info: &InstanceInfo) -> bool {
+    false
+}
+
+/// Whether a daemon listens on `socket`; it sees the probe as a client that
+/// says nothing, and drops it.
+#[cfg(unix)]
+fn socket_accepts(socket: &std::path::Path) -> bool {
+    std::os::unix::net::UnixStream::connect(socket).is_ok()
+}
+
+#[cfg(not(unix))]
+fn socket_accepts(_socket: &std::path::Path) -> bool {
     false
 }
 
@@ -256,6 +277,10 @@ fn scan() -> Result<Vec<InstanceInfo>> {
         };
         match read_info(id) {
             Some(info) => found.push(info),
+            // A daemon binds its socket before it writes the sidecar: one
+            // that takes a connection is starting, not dead, and is left
+            // alone, unlisted until its sidecar is there.
+            None if socket_accepts(&path) => {}
             // A socket with no readable sidecar is unusable — nothing can be
             // reported about it and nothing can attach — so treat it as dead.
             None => remove(id),
@@ -315,6 +340,42 @@ mod tests {
         for path in &paths {
             assert!(!path.exists(), "{} should be gone", path.display());
         }
+    }
+
+    // Regression: a daemon binds its socket before it writes the sidecar,
+    // and a `--list-instances` in between deleted the live socket.
+    #[cfg(unix)]
+    #[test]
+    fn a_starting_instance_keeps_its_socket() {
+        let id = "test-starting-without-sidecar";
+        remove(id);
+        let socket = paths::socket_path(id).unwrap();
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let listed = scan().unwrap();
+        let kept = socket.exists();
+        remove(id);
+        assert!(kept, "the socket of a live daemon was removed");
+        assert!(listed.iter().all(|info| info.id != id));
+    }
+
+    #[test]
+    fn a_sidecar_is_written_whole_and_leaves_nothing_beside_it() {
+        let mut info = sample();
+        info.id = "test-sidecar-written-whole".to_string();
+        write_info(&info).unwrap();
+        let read = read_info(&info.id);
+        let dir = paths::runtime_dir().unwrap();
+        let strays: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                name.starts_with(&info.id) && name.ends_with(".tmp")
+            })
+            .collect();
+        remove(&info.id);
+        assert_eq!(read, Some(info));
+        assert!(strays.is_empty());
     }
 
     #[test]

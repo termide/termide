@@ -43,8 +43,11 @@ impl App {
                     0,
                 );
 
-                // Skip file manager refresh - file already exists, we're just overwriting
-                self.state.skip_refresh_after_upload = true;
+                self.state.editor_uploads.push(crate::state::EditorUpload {
+                    operation_id,
+                    editor_path: temp_path,
+                    close_after: false,
+                });
             }
             Err(e) => {
                 log::error!("Failed to start upload operation: {}", e);

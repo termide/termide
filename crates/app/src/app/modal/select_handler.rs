@@ -80,6 +80,7 @@ impl App {
 
         let total_bytes = std::fs::metadata(&temp_path).map(|m| m.len()).unwrap_or(0);
         let source_display = temp_path.display().to_string();
+        let editor_path = temp_path.clone();
         let request = termide_file_ops::OperationRequest::upload(temp_path, remote_path.clone());
 
         match self.state.start_operation_now(request, vfs_manager) {
@@ -92,11 +93,11 @@ impl App {
                     1,
                     total_bytes,
                 );
-                if close_after.is_some() {
-                    self.state.close_editor_after_upload = close_after;
-                }
-                // Skip file-manager refresh — file already exists at destination
-                self.state.skip_refresh_after_upload = true;
+                self.state.editor_uploads.push(crate::state::EditorUpload {
+                    operation_id,
+                    close_after: close_after.is_some(),
+                    editor_path: close_after.unwrap_or(editor_path),
+                });
                 true
             }
             Err(e) => {

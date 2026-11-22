@@ -9,6 +9,8 @@
 //! - Symlinks from the archive are created only after every file has been
 //!   written, and only when the kernel's resolution of the target — links
 //!   in the archive included — stays inside the extracted subtree.
+//! - A file is written beside its destination and renamed onto it once
+//!   whole: a cancel or a bad entry leaves a file already there as it was.
 
 use std::collections::BTreeMap;
 use std::fs::{self, File};
@@ -172,15 +174,20 @@ pub(crate) fn extract(
         let job = &jobs[&source];
         let (first, first_meta) = &job.dests[0];
         progress.start_file(first, job.size);
-        let out = write_entry(reader, base, first, job.size, control, &mut progress)?;
-        apply_metadata(&out, first_meta);
+        let part = write_entry(reader, base, first, job.size, control, &mut progress)?;
+        apply_metadata(&part.file, first_meta);
+        part.persist(first)?;
         progress.finish_file();
         for (copy, meta) in &job.dests[1..] {
             control.checkpoint()?;
             progress.start_file(copy, job.size);
-            let mut out = create_file(base, copy)?;
-            std::io::copy(&mut File::open(first)?, &mut out)?;
-            apply_metadata(&out, meta);
+            let mut part = Part::create(base, copy)?;
+            if let Err(e) = std::io::copy(&mut File::open(first)?, &mut part.file) {
+                part.discard();
+                return Err(e.into());
+            }
+            apply_metadata(&part.file, meta);
+            part.persist(copy)?;
             progress.advance(job.size);
             progress.finish_file();
         }
@@ -230,9 +237,10 @@ fn add_job(jobs: &mut BTreeMap<EntrySource, Job>, source: EntrySource, node: &No
         .push((dest, node.meta.clone()));
 }
 
-/// Stream one entry into `dest`, never writing more than its declared size:
-/// an entry that decompresses to more than it claims (a zip bomb) fails
-/// instead of filling the disk. A partial file is removed on failure.
+/// Stream one entry into a part file for `dest`, never writing more than its
+/// declared size: an entry that decompresses to more than it claims (a zip
+/// bomb) fails instead of filling the disk. The part file is removed on
+/// failure; on success the caller renames it onto `dest`.
 fn write_entry(
     reader: &mut dyn Read,
     base: &Path,
@@ -240,8 +248,9 @@ fn write_entry(
     size: u64,
     control: &Control,
     progress: &mut Progress<'_>,
-) -> VfsResult<File> {
-    let mut out = create_file(base, dest)?;
+) -> VfsResult<Part> {
+    let mut part = Part::create(base, dest)?;
+    let out = &mut part.file;
     let result = (|| {
         let mut buf = vec![0u8; COPY_BUFFER];
         let mut written = 0u64;
@@ -259,10 +268,9 @@ fn write_entry(
         check_size(written, size)
     })();
     match result {
-        Ok(()) => Ok(out),
+        Ok(()) => Ok(part),
         Err(e) => {
-            drop(out);
-            let _ = fs::remove_file(dest);
+            part.discard();
             Err(e)
         }
     }
@@ -309,23 +317,61 @@ fn ensure_dir(base: &Path, dir: &Path) -> VfsResult<()> {
     Ok(())
 }
 
-/// Create (or truncate) the file `path` below `base` without writing
-/// through a symlink: a link at `path` itself is replaced, as tar does.
-fn create_file(base: &Path, path: &Path) -> VfsResult<File> {
-    if let Some(parent) = path.parent() {
+/// A file being extracted, written under a hidden name beside its
+/// destination until it is whole.
+struct Part {
+    path: PathBuf,
+    file: File,
+}
+
+impl Part {
+    /// Create a new part file for `dest` below `base`, never through a
+    /// symlink: the directories on the way are checked, and the file is
+    /// created anew under a name no one else holds.
+    fn create(base: &Path, dest: &Path) -> VfsResult<Self> {
+        use std::sync::atomic::AtomicU64;
+        static COUNT: AtomicU64 = AtomicU64::new(0);
+        let parent = dest.parent().unwrap_or(base);
         ensure_dir(base, parent)?;
+        let name = dest
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        loop {
+            let n = COUNT.fetch_add(1, Ordering::Relaxed);
+            let path = parent.join(format!(".{name}.{}-{n}.termide-part", std::process::id()));
+            let mut options = File::options();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.custom_flags(libc::O_NOFOLLOW);
+            }
+            match options.open(&path) {
+                Ok(file) => return Ok(Self { path, file }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e.into()),
+            }
+        }
     }
-    if fs::symlink_metadata(path).is_ok_and(|m| m.file_type().is_symlink()) {
-        fs::remove_file(path)?;
+
+    /// Put the whole file in place of `dest`. A symlink there is replaced,
+    /// not followed, as tar does; a directory there fails.
+    fn persist(self, dest: &Path) -> VfsResult<()> {
+        let Self { path, file } = self;
+        drop(file);
+        fs::rename(&path, dest).map_err(|e| {
+            let _ = fs::remove_file(&path);
+            e.into()
+        })
     }
-    let mut options = File::options();
-    options.write(true).create(true).truncate(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.custom_flags(libc::O_NOFOLLOW);
+
+    /// Drop the part file.
+    fn discard(self) {
+        let Self { path, file } = self;
+        drop(file);
+        let _ = fs::remove_file(path);
     }
-    Ok(options.open(path)?)
 }
 
 fn check_size_bound(read: u64, declared: u64) -> VfsResult<()> {

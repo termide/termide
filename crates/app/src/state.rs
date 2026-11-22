@@ -35,9 +35,9 @@ pub use termide_modal::ActiveModal;
 // paths under `crate::state` remain unchanged.
 pub use crate::state_types::{
     kill_process_tree, BatchOperationState, CacheState, CommandOperationHandle,
-    CommandOperationResult, GitOperationHandle, GitOperationResult, PendingBatchUpload,
-    PendingCommandLaunch, PendingEditorDownload, PendingRemoteDelete, ResourceModalKind,
-    ScrollBarDrag, StashState,
+    CommandOperationResult, EditorUpload, GitOperationHandle, GitOperationResult,
+    PendingBatchUpload, PendingCommandLaunch, PendingEditorDownload, PendingRemoteDelete,
+    ResourceModalKind, ScrollBarDrag, StashState,
 };
 
 /// The key prefix of a Sessions row in the AI menu, before the directory
@@ -120,11 +120,9 @@ pub struct AppState {
     pub pending_editor_download: Option<PendingEditorDownload>,
     /// Grouped state for an in-flight batch operation (upload/delete/tracking).
     pub batch: BatchOperationState,
-    /// Close editor after current upload completes (for "save and close" flow).
-    /// Stores the file path of the editor to close (to find the correct panel).
-    pub close_editor_after_upload: Option<PathBuf>,
-    /// Skip file manager refresh after upload (for editor saves - file already exists)
-    pub skip_refresh_after_upload: bool,
+    /// Remote editors' saves being uploaded, each settled when its own
+    /// operation ends
+    pub editor_uploads: Vec<EditorUpload>,
     /// Unified watcher for filesystem and git changes
     pub watcher: Option<UnifiedWatcher>,
     /// Watches the app holds on `watcher`: one per panel wanting the target.
@@ -312,8 +310,7 @@ impl AppState {
                 id_counter: u64::MAX / 2,
                 ..Default::default()
             },
-            close_editor_after_upload: None,
-            skip_refresh_after_upload: false,
+            editor_uploads: Vec::new(),
             watcher: None,
             held_watches: HashMap::new(),
             theme,

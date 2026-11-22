@@ -91,10 +91,18 @@ pub(super) enum SftpCommand {
         path: PathBuf,
         reply: Reply<u64>,
     },
-    /// Open a remote file for writing (CREATE | WRITE | TRUNCATE).
+    /// Open a remote file for writing (CREATE | WRITE | TRUNCATE), or
+    /// with `exclusive` one that must not exist yet (CREATE | EXCLUDE).
     OpenWrite {
         path: PathBuf,
+        exclusive: bool,
         reply: Reply<u64>,
+    },
+    /// Set the permission bits of `path`.
+    SetMode {
+        path: PathBuf,
+        mode: u32,
+        reply: Reply<()>,
     },
     /// Read up to `max_bytes` from the file at `handle`. Empty Vec = EOF.
     ReadChunk {
@@ -257,12 +265,27 @@ pub(super) async fn sftp_actor(
                     }
                 }
             }
-            SftpCommand::OpenWrite { path, reply } => {
+            SftpCommand::SetMode { path, mode, reply } => {
+                let attrs = FileAttributes {
+                    permissions: Some(mode),
+                    ..FileAttributes::empty()
+                };
+                let _ = reply.send(map_sftp_unit(
+                    sftp!().set_metadata(path_to_string(&path), attrs).await,
+                ));
+            }
+            SftpCommand::OpenWrite {
+                path,
+                exclusive,
+                reply,
+            } => {
+                let flags = if exclusive {
+                    OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE
+                } else {
+                    OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE
+                };
                 let res = sftp!()
-                    .open_with_flags(
-                        path_to_string(&path),
-                        OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE,
-                    )
+                    .open_with_flags(path_to_string(&path), flags)
                     .await
                     .map_err(map_sftp_err);
                 match res {

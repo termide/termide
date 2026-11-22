@@ -85,6 +85,10 @@ file. **No** leaves it on the server, so you can pick up the transfer
 later — for example by re-running the same copy and letting your
 server-side resume mechanism handle the seek.
 
+An SFTP upload asks nothing: it writes a hidden file beside the target,
+removes it itself when cancelled, and leaves the file it would have
+replaced as it was.
+
 ### Local / remote batch
 
 For a batch operation that has already produced files at the

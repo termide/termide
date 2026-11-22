@@ -1,0 +1,1 @@
+- **A transfer's follow-up waits for that transfer.** Deleting the source of a move from a server, uploading the next file of a batch and closing an editor after "save and close" ran when any operation finished, so a copy elsewhere finishing first could delete a remote source still being downloaded. Each now waits for its own operation.

@@ -167,11 +167,15 @@ impl App {
         }
     }
 
-    /// Clear uploading flag on any editor that currently has it set.
-    pub(super) fn clear_any_editor_uploading_flag(&mut self) {
+    /// The upload of the editor with this path failed or was cancelled:
+    /// its buffer is unsaved again.
+    pub(super) fn editor_upload_failed(&mut self, path: &std::path::Path) {
         for panel in self.layout_manager.iter_all_panels_mut() {
             if let Some(editor) = panel.as_editor_mut() {
-                editor.set_uploading(false);
+                if editor.file_path() == Some(path) {
+                    editor.upload_failed();
+                    return;
+                }
             }
         }
     }

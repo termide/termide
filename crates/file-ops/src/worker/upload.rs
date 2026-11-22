@@ -255,14 +255,9 @@ impl OperationWorker for UploadWorker {
                     files_completed += 1;
                     bytes_transferred += file_size;
 
-                    // If move, delete source (file or directory)
+                    // If move, delete what was uploaded of the source
                     if self.is_move {
-                        let delete_result = if source.is_dir() {
-                            fs::remove_dir_all(source)
-                        } else {
-                            fs::remove_file(source)
-                        };
-                        if let Err(e) = delete_result {
+                        if let Err(e) = remove_uploaded(source) {
                             // Log but don't fail the batch
                             failed_files
                                 .push(format!("{}: failed to delete source: {}", file_name, e));
@@ -305,6 +300,47 @@ impl OperationWorker for UploadWorker {
     }
 }
 
+/// Remove the source of a move once it has been uploaded: the file, or of a
+/// directory the regular files and the directories they leave empty. An
+/// upload skips symbolic links and special files inside a directory, so
+/// those stay, with the directories that hold them, and the move reports
+/// them instead of losing them.
+fn remove_uploaded(source: &Path) -> std::io::Result<()> {
+    let kept = if fs::symlink_metadata(source)?.is_dir() {
+        remove_uploaded_dir(source)?
+    } else {
+        fs::remove_file(source)?;
+        0
+    };
+    if kept > 0 {
+        return Err(std::io::Error::other(format!(
+            "{kept} entries were not uploaded (symbolic links or special files) and stay"
+        )));
+    }
+    Ok(())
+}
+
+/// Remove the regular files under `dir` and the directories left empty;
+/// returns how many entries stayed.
+fn remove_uploaded_dir(dir: &Path) -> std::io::Result<usize> {
+    let mut kept = 0;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        if file_type.is_dir() {
+            kept += remove_uploaded_dir(&entry.path())?;
+        } else if file_type.is_file() {
+            fs::remove_file(entry.path())?;
+        } else {
+            kept += 1;
+        }
+    }
+    if kept == 0 {
+        fs::remove_dir(dir)?;
+    }
+    Ok(kept)
+}
+
 impl UploadWorker {
     /// Execute upload for a single file (optimized path).
     fn execute_single_file(
@@ -332,12 +368,7 @@ impl UploadWorker {
 
         // Handle move cleanup for single file or directory
         if self.is_move && result.is_success() {
-            let delete_result = if source.is_dir() {
-                fs::remove_dir_all(source)
-            } else {
-                fs::remove_file(source)
-            };
-            if let Err(e) = delete_result {
+            if let Err(e) = remove_uploaded(source) {
                 return OperationResult::Failed(format!(
                     "Upload succeeded but failed to delete source: {}",
                     e
@@ -456,5 +487,44 @@ impl UploadWorker {
 
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_move_keeps_what_the_upload_skipped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("src");
+        fs::create_dir_all(source.join("plain/deep")).unwrap();
+        fs::create_dir_all(source.join("links")).unwrap();
+        fs::write(source.join("a.txt"), "a").unwrap();
+        fs::write(source.join("plain/deep/b.txt"), "b").unwrap();
+        fs::write(source.join("links/c.txt"), "c").unwrap();
+        std::os::unix::fs::symlink("../a.txt", source.join("links/to-a")).unwrap();
+
+        let error = remove_uploaded(&source).unwrap_err();
+        assert!(error.to_string().contains("1 entries"), "{error}");
+        assert!(!source.join("a.txt").exists());
+        assert!(!source.join("plain").exists());
+        assert!(!source.join("links/c.txt").exists());
+        assert!(fs::symlink_metadata(source.join("links/to-a")).is_ok());
+    }
+
+    #[test]
+    fn a_move_of_plain_files_removes_the_whole_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("src");
+        fs::create_dir_all(source.join("sub")).unwrap();
+        fs::write(source.join("sub/b.txt"), "b").unwrap();
+        remove_uploaded(&source).unwrap();
+        assert!(!source.exists());
+
+        let file = tmp.path().join("f.txt");
+        fs::write(&file, "f").unwrap();
+        remove_uploaded(&file).unwrap();
+        assert!(!file.exists());
     }
 }

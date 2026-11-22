@@ -24,10 +24,18 @@ fn stamped(extension: &str) -> String {
 /// Generate a unique filename for an unsaved buffer, kept in the project's
 /// `buffers/`.
 ///
-/// Format: YYYYMMDD-HHIISS-MSEC.txt
-/// Example: 20251203-143022-456.txt
+/// Format: YYYYMMDD-HHMMSS-MSC-PID-N.txt
+/// Example: 20251203-143022-456-4242-0.txt
 pub fn generate_unsaved_filename() -> String {
-    stamped("txt")
+    // Buffers named in one pass share the millisecond: a count kept for
+    // the process tells them apart, and the process id tells this
+    // termide's from another's.
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNT: AtomicU64 = AtomicU64::new(0);
+    let n = COUNT.fetch_add(1, Ordering::Relaxed);
+    let name = stamped("txt");
+    let stem = name.trim_end_matches(".txt");
+    format!("{stem}-{}-{n}.txt", std::process::id())
 }
 
 /// Generate a unique filename for the log of one termide run.
@@ -96,6 +104,12 @@ pub fn save_unsaved_buffer(project_dir: &Path, filename: &str, content: &str) ->
         )
     })?;
     Ok(())
+}
+
+/// Whether the backup file `filename` of an unsaved buffer is there: kept
+/// when writing a newer one failed, an older copy of the changes beats none.
+pub fn has_unsaved_buffer(project_dir: &Path, filename: &str) -> bool {
+    buffer_path(project_dir, filename).is_file()
 }
 
 /// Load unsaved buffer content from its backup file
@@ -361,12 +375,16 @@ path = "/old/style/path"
     fn test_generate_unsaved_filename_format() {
         let filename = generate_unsaved_filename();
         assert!(filename.ends_with(".txt"));
-        // Format: YYYYMMDD-HHMMSS-MSC.txt
-        assert_eq!(
-            filename.len(),
-            "20251203-143022-456.txt".len(),
-            "{filename}"
-        );
+        assert!(is_buffer_name(&filename));
+        // Format: YYYYMMDD-HHMMSS-MSC-PID-N.txt
+        let pid = format!("-{}-", std::process::id());
+        assert!(filename.contains(&pid), "{filename}");
+    }
+
+    #[test]
+    fn buffers_named_in_one_pass_get_names_of_their_own() {
+        let names: HashSet<String> = (0..1000).map(|_| generate_unsaved_filename()).collect();
+        assert_eq!(names.len(), 1000);
     }
 
     // =========================================================================

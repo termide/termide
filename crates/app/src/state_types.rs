@@ -127,6 +127,17 @@ impl std::fmt::Debug for CommandOperationHandle {
     }
 }
 
+/// The upload of a remote editor's save, in flight.
+#[derive(Debug, Clone)]
+pub struct EditorUpload {
+    /// The operation that uploads it
+    pub operation_id: termide_file_ops::OperationId,
+    /// The editor's file path (its local copy), to find its panel
+    pub editor_path: PathBuf,
+    /// Close the editor once the upload succeeds ("save and close")
+    pub close_after: bool,
+}
+
 /// Pending editor download — tracks a download operation that should open an editor on completion.
 /// Used when opening remote files: the download runs via OperationManager, and on completion
 /// the editor is opened with the downloaded temp file.
@@ -217,6 +228,9 @@ pub struct PendingBatchUpload {
     /// is incomplete; previously-completed files in the batch are
     /// already on the server and must not be touched).
     pub current_remote_target: Option<termide_vfs::VfsPath>,
+    /// The operation uploading the current file, once started: only its
+    /// end moves the batch on
+    pub operation_id: Option<termide_file_ops::OperationId>,
 }
 
 impl std::fmt::Debug for PendingBatchUpload {
