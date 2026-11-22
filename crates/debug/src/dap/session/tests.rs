@@ -678,3 +678,61 @@ fn a_waiting_session_stopped_never_begins() {
     );
     assert!(session.output.iter().all(|l| l.kind != OutputKind::Build));
 }
+
+/// Whether a process with `pid` still exists (a zombie counts).
+#[cfg(unix)]
+fn alive(pid: libc::pid_t) -> bool {
+    // SAFETY: signal 0 only checks the pid.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// An adapter left running after the grace is killed with everything it
+/// started — the program it debugs runs in its process group.
+#[cfg(unix)]
+#[test]
+fn an_adapter_past_its_grace_is_killed_with_its_group() {
+    use std::io::BufRead;
+    let mut command = Command::new("sh");
+    crate::detach(&mut command)
+        .args(["-c", "sleep 30 & echo $!; wait"])
+        .stdout(Stdio::piped());
+    let mut child = command.spawn().unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let program: libc::pid_t = line.trim().parse().unwrap();
+    assert!(alive(program));
+
+    let started = Instant::now();
+    reap(child, Duration::from_millis(100))
+        .expect("a reaper thread")
+        .join()
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+
+    // The orphaned program is reaped by init; give it a moment.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while alive(program) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !alive(program),
+        "the debuggee in the adapter's group is gone"
+    );
+}
+
+/// An adapter that ends on its own within the grace is not waited out.
+#[cfg(unix)]
+#[test]
+fn an_adapter_that_ends_on_its_own_is_reaped_at_once() {
+    let mut command = Command::new("sh");
+    crate::detach(&mut command).args(["-c", "exit 0"]);
+    let child = command.spawn().unwrap();
+    let started = Instant::now();
+    reap(child, Duration::from_secs(10))
+        .expect("a reaper thread")
+        .join()
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_secs(5));
+}

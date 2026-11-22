@@ -147,9 +147,17 @@ impl LspServer {
             })
             .with_context(|| format!("Failed to start LSP server: {}", config.command))?;
 
-        let stdin = process.stdin.take().context("Failed to get stdin")?;
-        let stdout = process.stdout.take().context("Failed to get stdout")?;
-        let stderr = process.stderr.take().context("Failed to get stderr")?;
+        let (stdin, stdout, stderr) = match (
+            process.stdin.take(),
+            process.stdout.take(),
+            process.stderr.take(),
+        ) {
+            (Some(stdin), Some(stdout), Some(stderr)) => (stdin, stdout, stderr),
+            _ => {
+                kill_and_reap(&mut process);
+                anyhow::bail!("Failed to get the LSP server's pipes: {}", config.command);
+            }
+        };
 
         // Stderr reader thread - captures server error output to journal
         let stderr_handle = {
@@ -208,7 +216,17 @@ impl LspServer {
         };
 
         // Send initialize request
-        let initialize_rx = server.initialize(workspace_root, &config.command)?;
+        // A server that could not be initialized is not handed out, so
+        // nothing would ever shut it down: end it here.
+        let initialize_rx = match server.initialize(workspace_root, &config.command) {
+            Ok(rx) => rx,
+            Err(e) => {
+                *server.status.lock().unwrap_or_else(|e| e.into_inner()) =
+                    ServerStatus::ShuttingDown;
+                kill_and_reap(&mut server.process);
+                return Err(e);
+            }
+        };
 
         // Writer thread - sends messages to server
         {
@@ -702,6 +720,12 @@ impl LspServer {
     }
 }
 
+/// End a server process that will not be handed out, and reap it.
+fn kill_and_reap(process: &mut Child) {
+    let _ = process.kill();
+    let _ = process.wait();
+}
+
 #[cfg(test)]
 mod tests {
     use super::{effective_status, ServerStatus};
@@ -761,6 +785,45 @@ mod tests {
             )
             .expect("sh starts");
             (server, crash_rx)
+        }
+
+        /// A server that fails `initialize` — here a workspace root that is
+        /// no file URI — is ended and reaped, not left running as an orphan
+        /// nobody will ever shut down.
+        #[test]
+        fn a_server_that_fails_to_initialize_is_ended() {
+            let (diagnostics_tx, _) = mpsc::channel();
+            let (apply_edit_tx, _) = mpsc::channel();
+            let (crash_tx, _) = mpsc::channel();
+            let marker = "61.4173";
+            let config = LspServerConfig {
+                command: "sh".into(),
+                args: vec!["-c".into(), format!("exec sleep {marker}")],
+                root_markers: Vec::new(),
+            };
+            let started = LspServer::start(
+                "test".into(),
+                config,
+                // Relative: it exists for the spawn, but has no file URI.
+                ".".into(),
+                diagnostics_tx,
+                apply_edit_tx,
+                CrashNotice::new(crash_tx, 7),
+            );
+            assert!(started.is_err());
+
+            let ours = std::process::id().to_string();
+            let out = std::process::Command::new("ps")
+                .args(["-A", "-o", "ppid=,command="])
+                .output()
+                .unwrap();
+            let left: Vec<String> = String::from_utf8_lossy(&out.stdout)
+                .lines()
+                .filter(|l| l.split_whitespace().next() == Some(ours.as_str()))
+                .filter(|l| l.contains(marker))
+                .map(str::to_string)
+                .collect();
+            assert!(left.is_empty(), "left behind: {left:?}");
         }
 
         fn hover(server: &LspServer, dir: &Path) -> mpsc::Receiver<Option<lsp_types::Hover>> {
