@@ -297,21 +297,6 @@ mod tests {
         assert_eq!(rows.iter().filter(|r| r.commit.is_some()).count(), 4);
     }
 
-    /// Render the *real* repo history (run with
-    /// `cargo test -p termide-git graph::tests::demo_real -- --ignored --nocapture`).
-    #[test]
-    #[ignore = "demo: prints the live repo graph for eyeballing"]
-    fn demo_real_history() {
-        let out = std::process::Command::new("git")
-            .args(["log", "--format=%h\t%p", "-n", "30", "--branches"])
-            .output()
-            .expect("git log");
-        let stdout = String::from_utf8_lossy(&out.stdout);
-        let commits = parse_parents_log(&stdout);
-        let rows = render_graph(&commits);
-        println!("\n{}\n", dump(&commits, &rows));
-    }
-
     #[test]
     fn three_way_fold_uses_through_glyph() {
         // Three tips that all share parent `g` fold in one row: the middle lane
