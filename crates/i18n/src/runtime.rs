@@ -3541,6 +3541,65 @@ mod tests {
         }
     }
 
+    /// A Latin letter inside a word of a non-Latin script is a slip — a
+    /// transliteration mark typed into Bengali (`অপেকṣা`), a key pressed
+    /// in the wrong layout — that shows as a broken word. Latin Extended
+    /// letters have no place in these languages at all; a run of plain
+    /// Latin letters with native letters on both sides is flagged unless it
+    /// is a word Japanese and Chinese write in Latin between their own.
+    /// Placeholders sit between braces, never inside a word.
+    #[test]
+    fn no_latin_letter_hides_inside_a_native_word() {
+        fn native(lang: &str, c: char) -> bool {
+            let ranges: &[(u32, u32)] = match lang {
+                "bn" => &[(0x0980, 0x09FF)],
+                "hi" => &[(0x0900, 0x097F)],
+                "th" => &[(0x0E00, 0x0E7F)],
+                "ja" => &[(0x3040, 0x30FF), (0x4E00, 0x9FFF)],
+                "ko" => &[(0x1100, 0x11FF), (0x3130, 0x318F), (0xAC00, 0xD7AF)],
+                "zh" => &[(0x4E00, 0x9FFF)],
+                _ => &[],
+            };
+            ranges
+                .iter()
+                .any(|&(from, to)| (from..=to).contains(&u32::from(c)))
+        }
+        fn latin_extended(c: char) -> bool {
+            c.is_alphabetic() && matches!(u32::from(c), 0x00C0..=0x024F | 0x1E00..=0x1EFF)
+        }
+        fn latin(c: char) -> bool {
+            c.is_ascii_alphabetic() || latin_extended(c)
+        }
+        const ALLOWED: &[&str] = &["N", "URL", "Git", "diff"];
+
+        let mut found = Vec::new();
+        for lang in ["bn", "hi", "th", "ja", "ko", "zh"] {
+            let data = loader::load_language(lang).unwrap();
+            for (key, text) in data.strings.iter().chain(&data.formats) {
+                let chars: Vec<char> = text.chars().collect();
+                let mut i = 0;
+                while i < chars.len() {
+                    if !latin(chars[i]) {
+                        i += 1;
+                        continue;
+                    }
+                    let start = i;
+                    while i < chars.len() && latin(chars[i]) {
+                        i += 1;
+                    }
+                    let run: String = chars[start..i].iter().collect();
+                    let inside = start > 0
+                        && native(lang, chars[start - 1])
+                        && chars.get(i).is_some_and(|&c| native(lang, c));
+                    if run.chars().any(latin_extended) || (inside && !ALLOWED.contains(&&*run)) {
+                        found.push(format!("{lang}: {key}: {run:?}"));
+                    }
+                }
+            }
+        }
+        assert!(found.is_empty(), "Latin inside native words: {found:#?}");
+    }
+
     /// A key missing from a language silently shows the English text, so
     /// nothing at runtime points at it: every dictionary has exactly en's keys.
     #[test]

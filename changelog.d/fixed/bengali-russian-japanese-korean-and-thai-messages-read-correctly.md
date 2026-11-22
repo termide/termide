@@ -1,0 +1,1 @@
+- **Bengali, Russian, Japanese, Korean and Thai messages read correctly.** Misspelt Bengali agent messages, an informal Russian address in restored sessions, the untranslated `/loop` usage in Japanese, Korean, German, Spanish and French, and a half-English Thai language-server trust prompt are fixed.
