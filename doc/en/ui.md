@@ -46,7 +46,7 @@ Opened with `Alt+P` or menu **Options → Settings**. The previous horizontal-ta
 
 **Where settings are stored.** The first button switches storage:
 - **Global** — `~/.config/termide/config.toml` on Linux, `~/Library/Application Support/termide/config.toml` on macOS, `%APPDATA%\termide\config.toml` on Windows, shared by every project.
-- **Project** — `<project>/.termide/config.toml`, holding only what differs from the global settings. Switching to it creates the file; the settings themselves do not change.
+- **Project** — `<project>/.termide/config.toml`, holding only what differs from the global settings. Switching to it creates the file; the settings themselves do not change. A connection, debugger or LSP server the global settings (or, for LSP, the built-ins) define and the project deletes is written as `<name> = false` under its table, which removes it for that project.
 - Switching back to global deletes the project file and asks what to do with its settings: **Discard** them (the global ones apply) or **Move to Global** (they become the global settings for every project).
 
 **Reset** asks first and acts where the settings are stored: a project goes back to the global settings, the global settings to the defaults.

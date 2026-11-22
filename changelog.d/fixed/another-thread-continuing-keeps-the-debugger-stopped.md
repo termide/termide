@@ -1,0 +1,1 @@
+- **Another thread continuing keeps the debugger stopped.** When a debug adapter said that one thread other than the stopped one ran again (`allThreadsContinued: false`), the debug panel showed the program running and dropped the stack and variables of the stop. It now keeps them until the stopped thread, or every thread, continues.

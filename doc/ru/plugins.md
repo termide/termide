@@ -115,6 +115,11 @@ enabled = false
 изменятся его настройки, его не перезапустят, каталог плагинов не перечитают
 или termide не перезапустится; строка состояния его проекта сообщает об этом.
 
+termide никогда не ждёт, пока плагин прочтёт отправленное: плагин, который
+перестал читать свой stdin, теряет события, отправленные ему за это время, а
+запросы termide к нему сразу завершаются ошибкой, пока он снова не начнёт
+читать.
+
 ## Как написать плагин
 
 Каждое сообщение — одна строка JSON-RPC 2.0. Всё, что плагин пишет в stderr,
@@ -342,7 +347,7 @@ termide спрашивает плагины проекта файла вмест
 | `window/confirm` | `title`, `message` | `true`, `false` или `null` |
 | `window/choose` | `title`, `items` (строки) | индекс выбранного или `null` |
 | `window/input` | `title`, `prompt`, `default` (необязательно) | текст или `null` |
-| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` — `text`, `number`, `bool` или `select` | `{ name: value }` (переключатели — логические значения, числа — числами) или `null` |
+| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` — `text`, `number`, `bool` или `select`, `default` — строка, число или логическое значение | `{ name: value }` (переключатели — логические значения, числа — числами) или `null` |
 | `window/message` | `title`, `message` | `null` |
 | `window/dialog` | `title` и любые из `message`, `input`, `list`, `buttons` (ниже) | `{ "button", "text"?, "checked"?, "selected"? }` или `null` |
 

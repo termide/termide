@@ -1,0 +1,1 @@
+- **An outline expanded again shows the edits made meanwhile.** A collapsed outline did not parse the file, yet once it had symbols expanding it kept them, so it listed and jumped to the lines of the text before the edits, and `Ctrl+Up`/`Ctrl+Down` in the editor went by them too. Expanding it now parses the file again, and edits made while it is collapsed are taken in then.

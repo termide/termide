@@ -1,0 +1,1 @@
+- **A plugin form takes a number or boolean default.** `window/form` refused the whole form when a field's `default` was `true` or `3` rather than a string, though `commands.toml` parameters take them. It now takes a string, number or boolean, as there.

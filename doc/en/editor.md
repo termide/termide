@@ -542,7 +542,9 @@ Entries under `[lsp.servers]` override or add to the built-in servers listed in
 in use. An entry for a built-in language changes only the fields it sets, so
 `command = "/opt/rust-analyzer"` alone keeps the built-in `root_markers`. An entry
 for any other language adds a server for it. The key is the language id Termide
-detects for the file, such as `typescriptreact` for `.tsx`.
+detects for the file, such as `typescriptreact` for `.tsx`. `<language> = false`
+under `[lsp.servers]` removes a server, a built-in one included; it is what
+deleting a server in **Settings → LSP** writes.
 
 A server starts in the nearest directory above the file that holds one of its
 `root_markers`, and one server runs per language and root. For Rust and Go that

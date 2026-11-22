@@ -147,9 +147,38 @@ pub struct CommandParam {
     /// For Select type: list of options.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<String>,
-    /// Default value as a string.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Default value as a string. Read from a string, a boolean or a number
+    /// (a plugin's form fields send `true` or `3`), as `commands.toml` reads
+    /// it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "scalar_as_text"
+    )]
     pub default: Option<String>,
+}
+
+/// A string, boolean or number as the text a form field holds.
+fn scalar_as_text<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Scalar {
+        Text(String),
+        Bool(bool),
+        Integer(i64),
+        Float(f64),
+    }
+    Ok(
+        Option::<Scalar>::deserialize(deserializer)?.map(|scalar| match scalar {
+            Scalar::Text(text) => text,
+            Scalar::Bool(b) => b.to_string(),
+            Scalar::Integer(i) => i.to_string(),
+            Scalar::Float(f) => f.to_string(),
+        }),
+    )
 }
 
 impl CommandParam {

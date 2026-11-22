@@ -114,6 +114,10 @@ seconds. After three crashes within a minute it stays off until its settings
 change, it is restarted, the plugins directory is read again or termide
 restarts, and its project's status bar says so.
 
+termide never waits for a plugin to read what it sends: a plugin that stops
+reading its stdin loses the events sent to it meanwhile, and termide's
+requests to it fail at once, until it reads again.
+
 ## Writing a plugin
 
 Each message is one line of JSON-RPC 2.0. Anything a plugin writes to stderr
@@ -339,7 +343,7 @@ request is answered when the user closes the window: with the answer, or
 | `window/confirm` | `title`, `message` | `true`, `false` or `null` |
 | `window/choose` | `title`, `items` (strings) | the index picked, or `null` |
 | `window/input` | `title`, `prompt`, `default` (optional) | the text, or `null` |
-| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` one of `text`, `number`, `bool`, `select` | `{ name: value }` (switches as booleans, numbers as numbers), or `null` |
+| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` one of `text`, `number`, `bool`, `select`, `default` a string, number or boolean | `{ name: value }` (switches as booleans, numbers as numbers), or `null` |
 | `window/message` | `title`, `message` | `null` |
 | `window/dialog` | `title`, and any of `message`, `input`, `list`, `buttons` (below) | `{ "button", "text"?, "checked"?, "selected"? }`, or `null` |
 

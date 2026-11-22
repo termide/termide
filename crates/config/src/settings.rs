@@ -112,7 +112,7 @@ pub struct AiSettings {
     pub connection: String,
 
     /// The connections, by name.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "map_with_removals")]
     pub connections: std::collections::BTreeMap<String, Connection>,
 
     /// Upper bound on the model's output tokens per turn (one response). Zero
@@ -1138,7 +1138,11 @@ pub struct DebugSettings {
 
     /// Per-debugger settings, keyed by the name `commands.toml` uses
     /// (`lldb-dap`, `dlv-dap`, `gdb`…).
-    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    #[serde(
+        default,
+        skip_serializing_if = "std::collections::BTreeMap::is_empty",
+        deserialize_with = "map_with_removals"
+    )]
     pub debuggers: std::collections::BTreeMap<String, DebuggerSettings>,
 }
 
@@ -1204,7 +1208,13 @@ pub struct LspSettings {
 
     /// Per-language server configurations: the built-ins, with each user
     /// entry laid over the built-in of the same language or added beside them.
-    #[serde(default = "default_lsp_servers", deserialize_with = "lsp_servers")]
+    /// A built-in left out is written as `<language> = false`, so that it
+    /// stays removed when the config is read back.
+    #[serde(
+        default = "default_lsp_servers",
+        deserialize_with = "lsp_servers",
+        serialize_with = "serialize_lsp_servers"
+    )]
     pub servers: std::collections::HashMap<String, LspServerSettings>,
 }
 
@@ -1455,7 +1465,8 @@ fn default_lsp_servers() -> std::collections::HashMap<String, LspServerSettings>
 /// layered loader overlays files: an entry for a built-in language changes
 /// only the fields it sets, any other entry is added. Without this a single
 /// entry would replace the whole built-in table whenever a config is parsed
-/// directly (`--config`, saving the config file from the editor).
+/// directly (`--config`, saving the config file from the editor). An entry
+/// written as `false` removes the server, built-in or not.
 fn lsp_servers<'de, D>(
     deserializer: D,
 ) -> Result<std::collections::HashMap<String, LspServerSettings>, D::Error>
@@ -1463,9 +1474,12 @@ where
     D: serde::Deserializer<'de>,
 {
     use serde::de::Error;
-    let entries = std::collections::HashMap::<String, toml::Value>::deserialize(deserializer)?;
     let mut servers = default_lsp_servers();
-    for (lang, entry) in entries {
+    for (lang, entry) in entries_with_removals::<D>(deserializer)? {
+        let Some(entry) = entry else {
+            servers.remove(&lang);
+            continue;
+        };
         let merged = match servers.remove(&lang) {
             Some(builtin) => {
                 let mut value = toml::Value::try_from(builtin).map_err(D::Error::custom)?;
@@ -1480,6 +1494,79 @@ where
         servers.insert(lang, server);
     }
     Ok(servers)
+}
+
+/// The servers, and `<language> = false` for each built-in among
+/// [`default_lsp_servers`] that is not there: without it a removed built-in
+/// would come back from the defaults when the config is read again.
+fn serialize_lsp_servers<S>(
+    servers: &std::collections::HashMap<String, LspServerSettings>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    #[derive(Serialize)]
+    #[serde(untagged)]
+    enum Entry<'a> {
+        Server(&'a LspServerSettings),
+        Removed(bool),
+    }
+    let mut entries: std::collections::BTreeMap<&str, Entry> = servers
+        .iter()
+        .map(|(lang, server)| (lang.as_str(), Entry::Server(server)))
+        .collect();
+    let builtins = default_lsp_servers();
+    for lang in builtins.keys() {
+        entries
+            .entry(lang.as_str())
+            .or_insert(Entry::Removed(false));
+    }
+    serializer.collect_map(entries)
+}
+
+/// A table of named entries in which `<name> = false` removes the entry
+/// a lower layer defined: the project file removing a connection or a
+/// debugger of the global one. What is left must parse as `T`.
+fn map_with_removals<'de, D, T>(
+    deserializer: D,
+) -> Result<std::collections::BTreeMap<String, T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::de::DeserializeOwned,
+{
+    use serde::de::Error;
+    let mut map = std::collections::BTreeMap::new();
+    for (name, entry) in entries_with_removals::<D>(deserializer)? {
+        if let Some(entry) = entry {
+            let value = entry.try_into().map_err(|e: toml::de::Error| {
+                D::Error::custom(format!("{name}: {}", e.message()))
+            })?;
+            map.insert(name, value);
+        }
+    }
+    Ok(map)
+}
+
+/// The entries of a table of named entries, `None` for one written as
+/// `false` — the removal marker [`crate::Config::save_to`] writes.
+fn entries_with_removals<'de, D>(
+    deserializer: D,
+) -> Result<Vec<(String, Option<toml::Value>)>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error;
+    std::collections::BTreeMap::<String, toml::Value>::deserialize(deserializer)?
+        .into_iter()
+        .map(|(name, entry)| match entry {
+            toml::Value::Boolean(false) => Ok((name, None)),
+            toml::Value::Boolean(true) => Err(D::Error::custom(format!(
+                "{name}: expected a table, or `false` to remove it"
+            ))),
+            entry => Ok((name, Some(entry))),
+        })
+        .collect()
 }
 
 /// Legacy flat config format for migration.

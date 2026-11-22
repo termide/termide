@@ -94,14 +94,15 @@ impl OutlinePanel {
 
     /// Update content from the active editor.
     ///
-    /// Skips re-parsing if the panel is stale (collapsed).
-    /// Resets selection when the tracked file changes.
+    /// Skips re-parsing if the panel is stale (collapsed): its symbols are
+    /// then out of date until it is refreshed, which reparses. Resets
+    /// selection when the tracked file changes. Returns whether it parsed.
     pub fn update_content(
         &mut self,
         file_path: Option<PathBuf>,
         content: &str,
         language: Option<&str>,
-    ) {
+    ) -> bool {
         if self.is_stale {
             let file_changed = self.tracked_file != file_path;
             self.tracked_file = file_path;
@@ -112,7 +113,7 @@ impl OutlinePanel {
                 self.selected_index = 0;
                 self.scroll_offset = 0;
             }
-            return;
+            return false;
         }
 
         let file_changed = self.tracked_file != file_path;
@@ -137,6 +138,12 @@ impl OutlinePanel {
         if !self.symbols.is_empty() && self.selected_index >= self.symbols.len() {
             self.selected_index = self.symbols.len() - 1;
         }
+        true
+    }
+
+    /// Whether the panel is collapsed and skips parsing until refreshed.
+    pub fn is_stale(&self) -> bool {
+        self.is_stale
     }
 
     /// Move selection up.
@@ -311,7 +318,9 @@ impl Panel for OutlinePanel {
             PanelCommand::RefreshIfStale => {
                 if self.is_stale {
                     self.is_stale = false;
-                    if self.tracked_file.is_some() && self.symbols.is_empty() {
+                    // Whatever symbols it holds may predate edits made
+                    // while it was collapsed: parse the file again.
+                    if self.tracked_file.is_some() {
                         self.needs_repopulate = true;
                     }
                     CommandResult::NeedsRedraw(true)
@@ -598,5 +607,38 @@ impl Panel for OutlinePanel {
 
     fn to_state(&self, _project_dir: &std::path::Path) -> Option<termide_core::PanelState> {
         Some(termide_core::PanelState::Outline)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BEFORE: &str = "# One\n\n# Two\n";
+    const AFTER: &str = "# Zero\n\n# One\n\n# Two\n";
+
+    fn md() -> Option<PathBuf> {
+        Some(PathBuf::from("/p/notes.md"))
+    }
+
+    #[test]
+    fn a_collapsed_outline_reparses_when_expanded() {
+        let mut outline = OutlinePanel::new(Theme::default());
+        assert!(outline.update_content(md(), BEFORE, Some("markdown")));
+        let before = outline.symbol_lines();
+        assert!(!before.is_empty());
+
+        outline.handle_command(PanelCommand::MarkStale);
+        // Edited while collapsed: nothing parsed, so nothing to hand on.
+        assert!(!outline.update_content(md(), AFTER, Some("markdown")));
+        assert_eq!(outline.symbol_lines(), before);
+
+        outline.handle_command(PanelCommand::RefreshIfStale);
+        assert!(
+            outline.needs_repopulate(),
+            "symbols of the old text must be parsed again"
+        );
+        assert!(outline.update_content(md(), AFTER, Some("markdown")));
+        assert_ne!(outline.symbol_lines(), before);
     }
 }

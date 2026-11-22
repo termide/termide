@@ -1055,7 +1055,14 @@ impl Session {
                 self.changed();
             }
             "continued" => {
-                if self.is_stopped() {
+                // DAP: `allThreadsContinued` absent or true means every
+                // thread runs again; false, only `threadId` does — which
+                // leaves the stop shown unless that is the stopped thread.
+                let all = body["allThreadsContinued"].as_bool().unwrap_or(true);
+                let ours = body["threadId"]
+                    .as_i64()
+                    .is_some_and(|t| Some(t) == self.thread_id);
+                if self.is_stopped() && (all || ours) {
                     self.resumed();
                 }
             }

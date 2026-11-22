@@ -32,7 +32,8 @@ pub use completion_list::{CompletionAction, CompletionItem, CompletionList};
 pub use diff_style::{blend_colors, diff_line_bg};
 pub use field_edit::{edit_text_area, edit_text_input, FieldEdit};
 pub use grapheme_utils::{
-    cell_symbol, expand_tabs, grapheme_display_width, render_text_cells, str_display_width,
+    cell_symbol, expand_tabs, grapheme_display_width, render_field_text, render_text_cells,
+    str_display_width,
 };
 pub use grid::{ColumnSort, Grid, GridCell, GridEditor, GridHit, GridRows, GridState, GridWindow};
 pub use input_bar::{Control, Focus, InputBar, InputBarAction};
@@ -521,9 +522,11 @@ impl TextInput {
         }
         if self.cursor_pos > 0 {
             self.save_undo_state();
-            self.cursor_pos -= 1;
-            let byte_idx = self.byte_index();
-            self.input.remove(byte_idx);
+            let end = self.byte_index();
+            // The whole cluster: a letter with its accents, not the accent.
+            self.cursor_pos = text_utils::cluster_start_before(&self.input, self.cursor_pos);
+            let start = self.byte_index();
+            self.input.replace_range(start..end, "");
             true
         } else {
             false
@@ -539,31 +542,40 @@ impl TextInput {
         let char_count = self.input.chars().count();
         if self.cursor_pos < char_count {
             self.save_undo_state();
-            let byte_idx = self.byte_index();
-            self.input.remove(byte_idx);
+            let start = self.byte_index();
+            let end = self
+                .char_to_byte_index(text_utils::cluster_end_after(&self.input, self.cursor_pos));
+            self.input.replace_range(start..end, "");
             true
         } else {
             false
         }
     }
 
-    /// Move cursor left
+    /// Move cursor left, over a whole grapheme cluster
     pub fn move_left(&mut self) -> bool {
         self.clear_selection();
+        self.step_left()
+    }
+
+    /// Move cursor right, over a whole grapheme cluster
+    pub fn move_right(&mut self) -> bool {
+        self.clear_selection();
+        self.step_right()
+    }
+
+    fn step_left(&mut self) -> bool {
         if self.cursor_pos > 0 {
-            self.cursor_pos -= 1;
+            self.cursor_pos = text_utils::cluster_start_before(&self.input, self.cursor_pos);
             true
         } else {
             false
         }
     }
 
-    /// Move cursor right
-    pub fn move_right(&mut self) -> bool {
-        self.clear_selection();
-        let char_count = self.input.chars().count();
-        if self.cursor_pos < char_count {
-            self.cursor_pos += 1;
+    fn step_right(&mut self) -> bool {
+        if self.cursor_pos < self.input.chars().count() {
+            self.cursor_pos = text_utils::cluster_end_after(&self.input, self.cursor_pos);
             true
         } else {
             false
@@ -587,24 +599,13 @@ impl TextInput {
     /// Move cursor left while extending selection
     pub fn move_left_with_selection(&mut self) -> bool {
         self.start_selection();
-        if self.cursor_pos > 0 {
-            self.cursor_pos -= 1;
-            true
-        } else {
-            false
-        }
+        self.step_left()
     }
 
     /// Move cursor right while extending selection
     pub fn move_right_with_selection(&mut self) -> bool {
         self.start_selection();
-        let char_count = self.input.chars().count();
-        if self.cursor_pos < char_count {
-            self.cursor_pos += 1;
-            true
-        } else {
-            false
-        }
+        self.step_right()
     }
 
     /// Move cursor to start while extending selection
@@ -645,7 +646,7 @@ impl TextInput {
             pos -= 1;
         }
 
-        pos
+        text_utils::cluster_floor(&self.input, pos)
     }
 
     /// Find word boundary to the right of cursor
@@ -674,7 +675,8 @@ impl TextInput {
             pos += 1;
         }
 
-        pos
+        // Past a letter's accents, which are not alphanumeric themselves.
+        text_utils::cluster_ceil(&self.input, pos)
     }
 
     /// Move cursor one word to the left (Ctrl+Left)
@@ -705,7 +707,7 @@ impl TextInput {
 
     /// Set cursor and start selection (for mouse down)
     pub fn set_cursor_with_selection_start(&mut self, pos: usize) {
-        let pos = pos.min(self.input.chars().count());
+        let pos = text_utils::cluster_floor(&self.input, pos.min(self.input.chars().count()));
         self.selection_anchor = Some(pos);
         self.cursor_pos = pos;
     }
@@ -752,8 +754,8 @@ impl TextInput {
         let chars: Vec<char> = self.input.chars().collect();
         match text_utils::word_range_at(&chars, pos) {
             Some((start, end)) => {
-                self.selection_anchor = Some(start);
-                self.cursor_pos = end;
+                self.selection_anchor = Some(text_utils::cluster_floor(&self.input, start));
+                self.cursor_pos = text_utils::cluster_ceil(&self.input, end);
             }
             None => self.set_cursor_with_selection_start(pos),
         }
@@ -764,7 +766,8 @@ impl TextInput {
         if self.selection_anchor.is_none() {
             self.selection_anchor = Some(self.cursor_pos);
         }
-        self.cursor_pos = pos.min(self.input.chars().count());
+        self.cursor_pos =
+            text_utils::cluster_floor(&self.input, pos.min(self.input.chars().count()));
     }
 
     /// Check if input is empty
@@ -839,6 +842,59 @@ mod tests {
         let input = TextInput::new();
         assert_eq!(input.text(), "");
         assert_eq!(input.cursor_pos(), 0);
+    }
+
+    /// "café.txt" as macOS spells file names: `e` then COMBINING ACUTE.
+    const NFD: &str = "cafe\u{301}.txt";
+
+    #[test]
+    fn an_accented_letter_is_one_step_for_the_cursor_and_backspace() {
+        let mut input = TextInput::with_text(NFD);
+        input.move_home();
+        for _ in 0..3 {
+            input.move_right();
+        }
+        assert_eq!(input.cursor_pos(), 3);
+        // Right over é takes the accent along.
+        input.move_right();
+        assert_eq!(input.cursor_pos(), 5);
+        input.move_left();
+        assert_eq!(input.cursor_pos(), 3);
+        input.move_right_with_selection();
+        assert_eq!(input.selected_text(), Some("e\u{301}"));
+        input.clear_selection();
+        // Backspace after é removes the letter, not just its accent.
+        assert!(input.backspace());
+        assert_eq!(input.text(), "caf.txt");
+        // Delete before it removes the whole letter too.
+        let mut input = TextInput::with_text(NFD);
+        input.move_home();
+        for _ in 0..3 {
+            input.move_right();
+        }
+        assert!(input.delete());
+        assert_eq!(input.text(), "caf.txt");
+    }
+
+    #[test]
+    fn a_click_maps_to_the_cell_an_accented_letter_takes() {
+        let mut input = TextInput::with_text(NFD);
+        input.follow_scroll(40);
+        // Cells: c a f é . t x t — the dot is in cell 4.
+        assert_eq!(input.char_at_column(Some(3)), 3);
+        assert_eq!(input.char_at_column(Some(4)), 5);
+        // A position inside the cluster is moved to its start.
+        input.set_cursor_with_selection_start(4);
+        assert_eq!(input.cursor_pos(), 3);
+        // A double click on the word takes the accent with it.
+        input.select_word_at(0);
+        assert_eq!(input.selected_text(), Some("cafe\u{301}"));
+        input.move_end();
+        input.move_word_left();
+        input.move_word_left();
+        assert_eq!(input.cursor_pos(), 0);
+        input.move_word_right();
+        assert_eq!(input.cursor_pos(), 6);
     }
 
     #[test]

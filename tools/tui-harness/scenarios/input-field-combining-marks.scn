@@ -1,0 +1,23 @@
+# An accented letter spelled with a combining mark, as macOS spells file
+# names, is one character in a single-line field: drawn in one cell, and
+# Backspace takes the letter with its accent, not the accent alone.
+project empty
+start
+run "echo keep > other.txt"
+wait "other.txt"
+
+# Shift+F4: new file. Type "cafe" + COMBINING ACUTE + "x".
+key Shift+F4
+type "caféx"
+# No blank cell between the accented letter and the next one.
+wait-re "caf[^ ]{1,2}x"
+snapshot typed
+# Backspace twice: x, then the whole é.
+key Backspace Backspace
+type "y"
+wait "cafy"
+expect-not "cafey"
+key Enter
+wait-gone "Create File"
+run "test -f cafy"
+quit --force

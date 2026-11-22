@@ -230,9 +230,57 @@ pub fn render_text_cells(
     col
 }
 
+/// Draw a single-line input field's `text` from character `scroll` on, in at
+/// most `width` cells from `(x, y)`, one grapheme cluster at a time as
+/// [`crate::text_utils::field_clusters`] measures them: a letter with its
+/// combining accents is one cell, never a blank one beside it. `style(at,
+/// end)` gives the style of the cluster of characters `[at, end)`, for the
+/// cursor and the selection. Returns the columns drawn.
+pub fn render_field_text(
+    buf: &mut Buffer,
+    x: u16,
+    y: u16,
+    width: u16,
+    text: &str,
+    scroll: usize,
+    style: impl Fn(usize, usize) -> Style,
+) -> u16 {
+    let mut col = 0u16;
+    for (at, g, w) in crate::text_utils::field_clusters(text) {
+        if at < scroll {
+            continue;
+        }
+        let w = w as u16;
+        if col + w > width {
+            break;
+        }
+        let style = style(at, at + g.chars().count());
+        // Clear the cells first: a cluster of marks alone draws nothing of
+        // its own, and its cell must not keep what was there.
+        for dx in 0..w {
+            buf[(x + col + dx, y)].set_symbol(" ").set_style(style);
+        }
+        render_text_cells(buf, x + col, y, g, w, style);
+        col += w;
+    }
+    col
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_field_draws_a_letter_and_its_accent_in_one_cell() {
+        use ratatui::layout::Rect;
+        let mut buf = Buffer::empty(Rect::new(0, 0, 6, 1));
+        // "e" + COMBINING ACUTE, as a macOS file name spells é.
+        let cols = render_field_text(&mut buf, 0, 0, 6, "ce\u{301}x", 0, |_, _| Style::default());
+        assert_eq!(cols, 3);
+        assert_eq!(buf[(0, 0)].symbol(), "c");
+        assert_eq!(buf[(1, 0)].symbol(), "e\u{301}");
+        assert_eq!(buf[(2, 0)].symbol(), "x");
+    }
 
     #[test]
     fn test_devanagari_grapheme_width() {

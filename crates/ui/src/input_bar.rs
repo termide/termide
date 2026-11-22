@@ -961,30 +961,31 @@ fn render_labeled_input(buf: &mut Buffer, area: Rect, field: &LabeledInput, colo
         return;
     }
 
-    let chars: Vec<char> = text.chars().collect();
-    let widths: Vec<usize> = chars.iter().map(|c| char_width(*c)).collect();
-    let start = scroll.min(chars.len());
-
     let base = if focused {
         Style::default().fg(colors.fg).bg(colors.bg)
     } else {
         Style::default().fg(colors.fg)
     };
     let invert = Style::default().fg(colors.bg).bg(colors.fg);
-    let mut col = 0u16;
-    for i in start..chars.len() {
-        let cw = widths[i] as u16;
-        if col + cw > width {
-            break;
-        }
-        let selected = selection.is_some_and(|(s, e)| i >= s && i < e);
-        let at_cursor = focused && i == cursor;
-        let style = if at_cursor || selected { invert } else { base };
-        buf.set_string(x0 + col, area.y, chars[i].to_string(), style);
-        col += cw;
-    }
+    let col = crate::grapheme_utils::render_field_text(
+        buf,
+        x0,
+        area.y,
+        width,
+        text,
+        scroll,
+        |at, end| {
+            let selected = selection.is_some_and(|(s, e)| at >= s && at < e);
+            let at_cursor = focused && (at..end).contains(&cursor);
+            if at_cursor || selected {
+                invert
+            } else {
+                base
+            }
+        },
+    );
     // Cursor at end of text.
-    if focused && cursor >= chars.len() && col < width {
+    if focused && cursor >= text.chars().count() && col < width {
         buf[(x0 + col, area.y)].set_style(invert);
     }
 }

@@ -417,6 +417,55 @@ fn parse_error(value: &toml::Value) -> Option<String> {
         .map(|e| e.message().to_string())
 }
 
+/// Tables of named entries, in which `<name> = false` removes an entry a
+/// lower layer (the defaults, or the global file under a project's) defined.
+/// Diffing alone cannot say it: a key missing from the config is left out
+/// of the diff, so the entry would come back from the layer below.
+const REMOVABLE_ENTRIES: &[&[&str]] = &[
+    &["ai", "connections"],
+    &["debug", "debuggers"],
+    &["lsp", "servers"],
+];
+
+/// Mark in `actual` as `false` each entry of [`REMOVABLE_ENTRIES`] that
+/// `baseline` has and `actual` does not.
+fn mark_removed_entries(actual: &mut toml::Value, baseline: &toml::Value) {
+    for path in REMOVABLE_ENTRIES {
+        let Some(before) = path
+            .iter()
+            .try_fold(baseline, |v, key| v.get(*key))
+            .and_then(toml::Value::as_table)
+        else {
+            continue;
+        };
+        let Some(after) = table_at_mut(actual, path) else {
+            continue;
+        };
+        for name in before.keys() {
+            after
+                .entry(name.clone())
+                .or_insert(toml::Value::Boolean(false));
+        }
+    }
+}
+
+/// The table at `path` inside `value`, made where missing.
+fn table_at_mut<'a>(
+    value: &'a mut toml::Value,
+    path: &[&str],
+) -> Option<&'a mut toml::value::Table> {
+    let table = value.as_table_mut()?;
+    match path {
+        [] => Some(table),
+        [first, rest @ ..] => table_at_mut(
+            table
+                .entry((*first).to_string())
+                .or_insert_with(|| toml::Value::Table(toml::value::Table::new())),
+            rest,
+        ),
+    }
+}
+
 /// The value at the dotted `path` inside `value`.
 fn value_at<'a>(value: &'a toml::Value, path: &[String]) -> Option<&'a toml::Value> {
     path.iter().try_fold(value, |v, key| v.get(key.as_str()))
@@ -560,9 +609,8 @@ impl Config {
             std::fs::create_dir_all(parent)?;
         }
 
-        let actual_value = toml::Value::try_from(self)?;
-        let baseline_value = toml::Value::try_from(baseline)?;
-        let diff = diff_toml(&actual_value, &baseline_value)
+        let diff = self
+            .diff_from(baseline)?
             .unwrap_or_else(|| toml::Value::Table(Default::default()));
 
         let content = toml::to_string_pretty(&diff)?;
@@ -578,13 +626,17 @@ impl Config {
     /// Whether this config differs from `baseline` in anything that would be
     /// saved.
     pub fn differs_from(&self, baseline: &Config) -> bool {
-        let Ok(actual) = toml::Value::try_from(self) else {
-            return false;
-        };
-        let Ok(baseline) = toml::Value::try_from(baseline) else {
-            return false;
-        };
-        crate::diff::diff_toml(&actual, &baseline).is_some()
+        self.diff_from(baseline).is_ok_and(|diff| diff.is_some())
+    }
+
+    /// What [`Config::save_to`] writes over `baseline`: the fields that
+    /// differ, and `<name> = false` for each named entry of `baseline`
+    /// (see [`REMOVABLE_ENTRIES`]) this config no longer has.
+    fn diff_from(&self, baseline: &Config) -> Result<Option<toml::Value>> {
+        let mut actual = toml::Value::try_from(self)?;
+        let baseline = toml::Value::try_from(baseline)?;
+        mark_removed_entries(&mut actual, &baseline);
+        Ok(diff_toml(&actual, &baseline))
     }
 
     /// Whether the `[ai]` sections of the two configs differ.
@@ -1205,6 +1257,83 @@ mod lsp_servers_tests {
                 .collect::<Vec<_>>(),
             ["command"]
         );
+    }
+
+    fn defaults() -> Config {
+        let mut config = Config::default();
+        config.normalize();
+        config
+    }
+
+    /// Save `config` over `baseline` and read the file back over it, as the
+    /// next start does.
+    fn save_and_reload(config: &Config, baseline: &Config) -> (String, Config) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        config.save_to(&path, baseline).unwrap();
+        let written = std::fs::read_to_string(&path).unwrap();
+        let mut value = toml::Value::try_from(baseline).unwrap();
+        merge_partial(&mut value, &toml::from_str(&written).unwrap());
+        (written, value.try_into().unwrap())
+    }
+
+    #[test]
+    fn a_removed_builtin_server_stays_removed() {
+        let mut config = defaults();
+        config.lsp.servers.remove("rust");
+        let (written, reloaded) = save_and_reload(&config, &defaults());
+        assert!(written.contains("rust = false"), "{written}");
+        assert!(!reloaded.lsp.servers.contains_key("rust"));
+        assert!(reloaded.lsp.servers.contains_key("go"));
+        // Parsed directly, as `--config` and the editor do, too.
+        let parsed = Config::validate_content(&written).unwrap();
+        assert!(!parsed.lsp.servers.contains_key("rust"));
+        assert!(!parsed.differs_from(&config));
+    }
+
+    #[test]
+    fn a_renamed_builtin_server_leaves_one_entry() {
+        let mut config = defaults();
+        let server = config.lsp.servers.remove("rust").unwrap();
+        config.lsp.servers.insert("rust2".into(), server);
+        let (_, reloaded) = save_and_reload(&config, &defaults());
+        assert!(!reloaded.lsp.servers.contains_key("rust"));
+        assert!(reloaded.lsp.servers.contains_key("rust2"));
+    }
+
+    #[test]
+    fn a_project_removes_what_the_global_file_defines() {
+        let global = Config::validate_content(
+            "[ai.connections.work]\nmodel = \"m\"\n\
+             [debug.debuggers.gdb]\ncommand = \"/opt/gdb\"\n\
+             [lsp.servers.zig]\ncommand = \"zls\"\n",
+        )
+        .unwrap();
+        let mut project = global.clone();
+        project.ai.connections.remove("work");
+        project.debug.debuggers.remove("gdb");
+        project.lsp.servers.remove("zig");
+        assert!(project.differs_from(&global));
+        let (written, reloaded) = save_and_reload(&project, &global);
+        assert!(!reloaded.ai.connections.contains_key("work"), "{written}");
+        assert!(!reloaded.debug.debuggers.contains_key("gdb"), "{written}");
+        assert!(!reloaded.lsp.servers.contains_key("zig"), "{written}");
+        // Through the layered loader, as the project is opened.
+        let dir = tempfile::tempdir().unwrap();
+        let (global_path, project_path) = (dir.path().join("g.toml"), dir.path().join("p.toml"));
+        global.save_to(&global_path, &defaults()).unwrap();
+        std::fs::write(&project_path, &written).unwrap();
+        let loaded = Config::load_layers(Some(&global_path), &project_path).unwrap();
+        assert!(loaded.warnings.is_empty(), "{:?}", loaded.warnings);
+        assert!(!loaded.effective.ai.connections.contains_key("work"));
+        assert!(!loaded.effective.debug.debuggers.contains_key("gdb"));
+        assert!(loaded.global_layer.debug.debuggers.contains_key("gdb"));
+    }
+
+    #[test]
+    fn only_false_removes_an_entry() {
+        let error = Config::validate_content("[lsp.servers]\nrust = true\n").unwrap_err();
+        assert!(format!("{error:#}").contains("rust"), "{error:#}");
     }
 
     #[test]

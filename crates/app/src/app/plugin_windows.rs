@@ -510,6 +510,29 @@ mod tests {
     }
 
     #[test]
+    fn form_fields_take_typed_defaults() {
+        let Kind::Form { fields } = parse(
+            "window/form",
+            &json!({ "fields": [
+                { "name": "force", "type": "bool", "default": true },
+                { "name": "count", "type": "number", "default": 3 },
+                { "name": "ratio", "type": "number", "default": 0.5 },
+                { "name": "env", "type": "text", "default": "prod" },
+                { "name": "none", "type": "text", "default": null },
+            ] }),
+        )
+        .unwrap() else {
+            panic!("a form");
+        };
+        let defaults: Vec<_> = fields.iter().map(|f| f.default.as_deref()).collect();
+        assert_eq!(
+            defaults,
+            [Some("true"), Some("3"), Some("0.5"), Some("prod"), None]
+        );
+        assert_eq!(fields[0].initial_value(), "true");
+    }
+
+    #[test]
     fn a_dialog_takes_its_parts_and_answers_with_them() {
         use termide_modal::dialog::{DialogAnswer, DialogPick};
         let Kind::Dialog(spec) = parse(
