@@ -11,7 +11,6 @@ use termide_buffer::SearchState;
 
 use termide_core::{PanelEvent, Searchable};
 use termide_modal::{FindBar, FindBarAction, FindBarBtn, FindBarConfig, FindField};
-use unicode_segmentation::UnicodeSegmentation;
 
 use crate::search;
 
@@ -202,41 +201,23 @@ impl Editor {
         let is_multiline = replace_text.contains('\n');
         self.invalidate_cache_after_edit(result.start_line, is_multiline);
 
-        // Update search_state
-        if let Some(ref mut search_state) = self.search.state {
-            if let Some(idx) = search_state.current_match {
-                // Remove this match (and its recorded length) from the lists
-                search_state.matches.remove(idx);
-                if idx < search_state.match_lengths.len() {
-                    search_state.match_lengths.remove(idx);
-                }
-
-                // Shift remaining same-line matches by the length delta
-                search::update_match_positions_after_replace(
-                    &mut search_state.matches,
-                    &match_cursor,
-                    match_len,
-                    replace_text.graphemes(true).count(),
-                );
-
-                // Update current match index
-                if search_state.matches.is_empty() {
-                    search_state.current_match = None;
-                } else if idx >= search_state.matches.len() {
-                    search_state.current_match = Some(search_state.matches.len() - 1);
-                }
-
-                // Move cursor to next match and create selection
-                if let Some(cidx) = search_state.current_match {
-                    if let Some(next_cursor) = search_state.matches.get(cidx).cloned() {
-                        let next_len = search_state.match_len_at(cidx);
-                        let (selection, end_cursor) =
-                            search::get_match_selection(&next_cursor, next_len);
-                        self.cursor = end_cursor;
-                        self.selection = Some(selection);
-                    }
+        // Search again: the replacement may have added or removed lines or
+        // made new matches, so shifting the old positions cannot be trusted.
+        // The next match is the first one after the replaced text.
+        if let Some(mut search_state) = self.search.state.take() {
+            self.perform_search(&mut search_state);
+            search_state.find_closest_match(&result.new_cursor);
+            self.selection = None;
+            if let Some(cidx) = search_state.current_match {
+                if let Some(next_cursor) = search_state.matches.get(cidx).cloned() {
+                    let next_len = search_state.match_len_at(cidx);
+                    let (selection, end_cursor) =
+                        search::get_match_selection(&next_cursor, next_len);
+                    self.cursor = end_cursor;
+                    self.selection = Some(selection);
                 }
             }
+            self.search.state = Some(search_state);
         }
 
         Ok(())

@@ -288,15 +288,7 @@ impl App {
                     let ref_locations: Vec<termide_core::ReferenceLocation> = locations
                         .into_iter()
                         .filter_map(|loc| {
-                            let uri_str = loc.uri.as_str();
-                            if !uri_str.starts_with("file://") {
-                                return None;
-                            }
-                            let path_str = &uri_str[7..];
-                            #[cfg(unix)]
-                            let path = std::path::PathBuf::from(path_str);
-                            #[cfg(windows)]
-                            let path = std::path::PathBuf::from(path_str.trim_start_matches('/'));
+                            let path = termide_lsp::uri_to_path(&loc.uri)?;
                             Some(termide_core::ReferenceLocation {
                                 path,
                                 line: loc.range.start.line as usize,

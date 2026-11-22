@@ -9,6 +9,7 @@ use anyhow::Result;
 use regex::{Regex, RegexBuilder};
 use unicode_segmentation::UnicodeSegmentation;
 
+use termide_buffer::columns::{grapheme_to_byte, trim_line_ending};
 use termide_buffer::{Cursor, SearchState, Selection, TextBuffer};
 
 /// Build a regex for `query`, honoring case sensitivity. Returns `None` when
@@ -20,19 +21,13 @@ fn build_regex(query: &str, case_sensitive: bool) -> Option<Regex> {
         .ok()
 }
 
-/// Byte offset of grapheme index `g` within `line`, or `line.len()` if `g` is
-/// at/after the end.
-fn grapheme_byte(line: &str, g: usize) -> usize {
-    line.grapheme_indices(true)
-        .nth(g)
-        .map(|(b, _)| b)
-        .unwrap_or(line.len())
-}
-
 /// Perform search through the entire buffer.
 ///
 /// Populates `matches` (start of each hit) and `match_lengths` (grapheme
 /// length of each hit, needed because regex matches vary in length).
+///
+/// Each line is searched without its line ending, so `\s+$` stops before the
+/// newline instead of swallowing it, and `foo$` matches on every line.
 pub fn perform_search(buffer: &TextBuffer, search: &mut SearchState) {
     search.matches.clear();
     search.match_lengths.clear();
@@ -46,8 +41,9 @@ pub fn perform_search(buffer: &TextBuffer, search: &mut SearchState) {
             return;
         };
         for line_idx in 0..buffer.line_count() {
-            if let Some(line_text) = buffer.line_cow(line_idx) {
-                for m in re.find_iter(&line_text) {
+            if let Some(line_cow) = buffer.line_cow(line_idx) {
+                let line_text = trim_line_ending(&line_cow);
+                for m in re.find_iter(line_text) {
                     // Skip zero-width matches (e.g. `a*` against "") — they
                     // can't be replaced meaningfully and add noise.
                     if m.start() == m.end() {
@@ -74,11 +70,12 @@ pub fn perform_search(buffer: &TextBuffer, search: &mut SearchState) {
         CaseFolded::new(&search.query).text
     };
     for line_idx in 0..buffer.line_count() {
-        let Some(line_text) = buffer.line_cow(line_idx) else {
+        let Some(line_cow) = buffer.line_cow(line_idx) else {
             continue;
         };
-        let folded = (!search.case_sensitive).then(|| CaseFolded::new(&line_text));
-        let haystack = folded.as_ref().map_or(&*line_text, |f| f.text.as_str());
+        let line_text = trim_line_ending(&line_cow);
+        let folded = (!search.case_sensitive).then(|| CaseFolded::new(line_text));
+        let haystack = folded.as_ref().map_or(line_text, |f| f.text.as_str());
 
         let mut byte_col = 0;
         while let Some(byte_pos) = haystack[byte_col..].find(&query) {
@@ -181,8 +178,9 @@ pub fn expand_replacement(
     let Some(line) = buffer.line_cow(match_cursor.line) else {
         return replace_with;
     };
-    let start = grapheme_byte(&line, match_cursor.column);
-    let end = grapheme_byte(&line, match_cursor.column + match_len);
+    let line = trim_line_ending(&line);
+    let start = grapheme_to_byte(line, match_cursor.column);
+    let end = grapheme_to_byte(line, match_cursor.column + match_len);
     let matched = &line[start..end];
     re.replace(matched, replace_with.as_str()).into_owned()
 }
@@ -193,7 +191,8 @@ pub struct ReplaceResult {
     pub start_line: usize,
 }
 
-/// Replace `match_len` graphemes at `match_cursor` with `replace_text`.
+/// Replace `match_len` graphemes at `match_cursor` with `replace_text`, as
+/// one undo step.
 ///
 /// `replace_text` must already be the final text to insert (see
 /// [`expand_replacement`] for regex capture-group expansion).
@@ -208,46 +207,31 @@ pub fn replace_at_position(
         column: match_cursor.column + match_len,
     };
 
-    buffer.delete_range(match_cursor, &end_cursor)?;
-    buffer.insert(match_cursor, replace_text)?;
-
-    let new_cursor = Cursor {
-        line: match_cursor.line,
-        column: match_cursor.column + replace_text.graphemes(true).count(),
-    };
+    buffer.begin_undo_group();
+    let result = buffer
+        .delete_range(match_cursor, &end_cursor)
+        .and_then(|()| buffer.insert(match_cursor, replace_text));
+    buffer.end_undo_group();
 
     Ok(ReplaceResult {
-        new_cursor,
+        new_cursor: result?,
         start_line: match_cursor.line,
     })
 }
 
-/// Update match positions after a replacement.
-///
-/// Adjusts the positions of matches that come after the replacement point
-/// on the same line by the length delta `inserted_len - match_len`.
-pub fn update_match_positions_after_replace(
-    matches: &mut [Cursor],
-    match_cursor: &Cursor,
-    match_len: usize,
-    inserted_len: usize,
-) {
-    let replacement_offset = inserted_len as isize - match_len as isize;
-    if replacement_offset != 0 {
-        for match_pos in matches.iter_mut() {
-            if match_pos.line == match_cursor.line && match_pos.column > match_cursor.column {
-                match_pos.column = (match_pos.column as isize + replacement_offset).max(0) as usize;
-            }
-        }
-    }
-}
-
-/// Replace all matches in `search` in reverse order.
+/// Replace all matches in `search` in reverse order, as one undo step.
 ///
 /// Reverse order keeps earlier positions valid as later ones change.
 /// Per-match lengths and regex capture-group expansion are honored.
 /// Returns the number of replacements made.
 pub fn replace_all_matches(buffer: &mut TextBuffer, search: &SearchState) -> Result<usize> {
+    buffer.begin_undo_group();
+    let result = replace_all_in_reverse(buffer, search);
+    buffer.end_undo_group();
+    result
+}
+
+fn replace_all_in_reverse(buffer: &mut TextBuffer, search: &SearchState) -> Result<usize> {
     let mut count = 0;
 
     for idx in (0..search.matches.len()).rev() {
@@ -356,6 +340,47 @@ mod tests {
             assert_eq!(b.line_cow(0).unwrap(), expected);
             assert_eq!(r.new_cursor.column, s.matches[0].column + 2);
         }
+    }
+
+    #[test]
+    fn regex_search_does_not_see_line_endings() {
+        for text in ["a  \nb\t\nc ", "a  \r\nb\t\r\nc "] {
+            let mut b = TextBuffer::from_text(text);
+            let mut s = SearchState::new_with_replace(r"\s+$".to_string(), String::new(), true)
+                .with_regex(true);
+            perform_search(&b, &mut s);
+            assert_eq!(s.matches.len(), 3, "{text:?}");
+            replace_all_matches(&mut b, &s).unwrap();
+            assert_eq!(b.line_count(), 3, "{text:?}");
+            assert_eq!(b.line_cow(0).unwrap().trim_end_matches(['\r', '\n']), "a");
+            assert_eq!(b.line_cow(2).unwrap(), "c");
+        }
+
+        let b = TextBuffer::from_text("foo\nfoo\nfoo");
+        let mut s = SearchState::new("foo$".to_string(), true).with_regex(true);
+        perform_search(&b, &mut s);
+        assert_eq!(s.matches.len(), 3);
+    }
+
+    #[test]
+    fn replace_all_is_one_undo_step() {
+        let mut b = TextBuffer::from_text("x y x y x");
+        let mut s = SearchState::new_with_replace("x".to_string(), "zz".to_string(), true);
+        perform_search(&b, &mut s);
+        assert_eq!(replace_all_matches(&mut b, &s).unwrap(), 3);
+        assert_eq!(b.text(), "zz y zz y zz");
+        b.undo().unwrap();
+        assert_eq!(b.text(), "x y x y x");
+    }
+
+    #[test]
+    fn replacing_one_match_is_one_undo_step_and_lands_after_a_multiline_replacement() {
+        let mut b = TextBuffer::from_text("a,b");
+        let r = replace_at_position(&mut b, &Cursor::at(0, 1), 1, "\n").unwrap();
+        assert_eq!(b.text(), "a\nb");
+        assert_eq!(r.new_cursor, Cursor::at(1, 0));
+        b.undo().unwrap();
+        assert_eq!(b.text(), "a,b");
     }
 
     /// Case-insensitive matches of `query` in `text`: (column, length).

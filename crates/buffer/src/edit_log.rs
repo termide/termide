@@ -20,8 +20,8 @@ static NEXT_DOCUMENT_ID: AtomicU64 = AtomicU64::new(1);
 ///
 /// The row is the rope's line index. The column counts bytes since the last
 /// `\n`, which is tree-sitter's own convention; the two only diverge from a
-/// tree-sitter row count in text using rarer line breaks (lone CR, form
-/// feed, U+2028), where rows are informational and bytes stay exact.
+/// tree-sitter row count in text with a lone CR, which the rope (like LSP)
+/// takes for a line break, where rows are informational and bytes stay exact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct EditPoint {
     pub row: usize,

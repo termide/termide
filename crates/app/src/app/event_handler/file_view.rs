@@ -27,13 +27,22 @@ impl App {
         Ok(())
     }
 
-    /// Handle OpenFileAt event - open file in editor at specific location (for go-to-definition)
+    /// Handle OpenFileAt event - open file in editor at specific location (for go-to-definition).
+    /// `utf16` marks `column` as an LSP `character`, in UTF-16 code units.
     pub(super) fn event_open_file_at(
         &mut self,
         file_path: PathBuf,
         line: usize,
         column: usize,
+        utf16: bool,
     ) -> Result<()> {
+        let goto = |editor: &mut Editor| {
+            if utf16 {
+                editor.goto_lsp_position(line, column);
+            } else {
+                editor.goto_position(line, column);
+            }
+        };
         let filename = file_path
             .file_name()
             .and_then(|n| n.to_str())
@@ -46,7 +55,7 @@ impl App {
             if let Some(editor) = panel.as_editor_mut() {
                 if editor.file_path() == Some(&file_path) {
                     // File is already open - just move cursor to position
-                    editor.goto_position(line, column);
+                    goto(editor);
                     found_existing = true;
                     break;
                 }
@@ -63,7 +72,7 @@ impl App {
         match Editor::open_file_with_config(file_path.clone(), self.state.editor_config()) {
             Ok(mut editor_panel) => {
                 // Move cursor to the requested position
-                editor_panel.goto_position(line, column);
+                goto(&mut editor_panel);
 
                 // Initialize LSP for the editor
                 if let Some(ref mut lsp_manager) = self.state.lsp_manager {

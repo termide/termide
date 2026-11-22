@@ -630,6 +630,15 @@ pub enum PanelEvent {
         column: usize,
     },
 
+    /// Open a file at a position a language server named: 0-based `line`,
+    /// and `character` counted in UTF-16 code units, which the opened buffer
+    /// turns into its own grapheme column.
+    OpenFileAtLsp {
+        path: PathBuf,
+        line: usize,
+        character: usize,
+    },
+
     /// Execute file in a new terminal
     ExecuteFile(PathBuf),
 

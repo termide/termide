@@ -64,15 +64,8 @@ impl App {
         let mut published = Vec::new();
         if let Some(ref lsp_manager) = self.state.lsp_manager {
             while let Some(params) = lsp_manager.poll_diagnostics() {
-                // Convert URI to path - parse as URL then extract file path
-                let uri_str = params.uri.as_str();
-                if let Some(path_str) = uri_str.strip_prefix("file://") {
-                    // On Unix paths start with /, on Windows with drive letter
-                    #[cfg(unix)]
-                    let path = std::path::PathBuf::from(path_str);
-                    #[cfg(windows)]
-                    let path = std::path::PathBuf::from(path_str.trim_start_matches('/'));
-
+                // A file:// URI, percent-decoded, to a path.
+                if let Some(path) = termide_lsp::uri_to_path(&params.uri) {
                     published.push((path, params.diagnostics));
                 }
             }
@@ -204,15 +197,7 @@ impl App {
                     let ref_locations: Vec<termide_core::ReferenceLocation> = locations
                         .into_iter()
                         .filter_map(|loc| {
-                            let uri_str = loc.uri.as_str();
-                            if !uri_str.starts_with("file://") {
-                                return None;
-                            }
-                            let path_str = &uri_str[7..];
-                            #[cfg(unix)]
-                            let path = std::path::PathBuf::from(path_str);
-                            #[cfg(windows)]
-                            let path = std::path::PathBuf::from(path_str.trim_start_matches('/'));
+                            let path = termide_lsp::uri_to_path(&loc.uri)?;
                             Some(termide_core::ReferenceLocation {
                                 path,
                                 line: loc.range.start.line as usize,

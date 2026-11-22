@@ -1,0 +1,1 @@
+- **A plugin opens a file at the position it names.** `editor/open` landed one line and one column past the requested position, and read the column as characters rather than the UTF-16 units the plugin protocol counts in.

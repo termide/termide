@@ -47,7 +47,15 @@ impl App {
             }
 
             PanelEvent::OpenFileAt { path, line, column } => {
-                self.event_open_file_at(path, line, column)?;
+                self.event_open_file_at(path, line, column, false)?;
+            }
+
+            PanelEvent::OpenFileAtLsp {
+                path,
+                line,
+                character,
+            } => {
+                self.event_open_file_at(path, line, character, true)?;
             }
 
             PanelEvent::ExecuteFile(path) => {

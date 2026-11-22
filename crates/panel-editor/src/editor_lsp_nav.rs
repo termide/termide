@@ -116,7 +116,6 @@ impl Editor {
     /// Returns `Some(PanelEvent::OpenFileAt)` if a definition location was received.
     pub fn poll_definition(&mut self) -> Option<PanelEvent> {
         use lsp_types::GotoDefinitionResponse;
-        use std::path::PathBuf;
 
         let response = self.lsp.poll_definition()?;
 
@@ -133,22 +132,15 @@ impl Editor {
             }
         };
 
-        // Convert file:// URI to PathBuf
-        let uri_str = uri.as_str();
-        if !uri_str.starts_with("file://") {
-            return None;
-        }
-        let path_str = &uri_str[7..]; // Skip "file://"
-        #[cfg(unix)]
-        let path = PathBuf::from(path_str);
-        #[cfg(windows)]
-        let path = PathBuf::from(path_str.trim_start_matches('/'));
+        // A file:// URI, percent-decoded, to a path.
+        let path = termide_lsp::uri_to_path(&uri)?;
 
-        // LSP uses 0-based line/column
-        let line = position.line as usize;
-        let column = position.character as usize;
-
-        Some(PanelEvent::OpenFileAt { path, line, column })
+        // LSP uses 0-based lines and UTF-16 columns.
+        Some(PanelEvent::OpenFileAtLsp {
+            path,
+            line: position.line as usize,
+            character: position.character as usize,
+        })
     }
 
     // =========================================================================

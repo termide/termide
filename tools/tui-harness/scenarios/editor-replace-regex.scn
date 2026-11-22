@@ -1,0 +1,27 @@
+# Regex Replace all of `\s+$` trims trailing whitespace line by line: each
+# line is matched without its line break, so the lines stay apart. One
+# Ctrl+Z takes the whole replacement back.
+setup "printf 'alpha   \nbeta\t\ngamma \n' > ws.txt; printf 'alpha\nbeta\ngamma\n' > trimmed.txt; cp ws.txt original.txt"
+start {project}/ws.txt
+wait "alpha"
+# Ctrl+H focuses Replace; the Find field is above it, the buttons below.
+key Ctrl+H
+key Shift+Tab
+type "\\s+$"
+key Down Down Right Enter
+wait "[✓] .*"
+# From [.*]: Prev, Next, Replace, Replace all.
+key Right Right Right Right Enter
+wait "[ Replace all ]"
+wait "ws.txt*"
+key Esc
+key Ctrl+S
+wait-gone "ws.txt*"
+run "cmp ws.txt trimmed.txt"
+key Ctrl+Z
+wait "ws.txt*"
+key Ctrl+S
+wait-gone "ws.txt*"
+run "cmp ws.txt original.txt"
+snapshot undone
+quit

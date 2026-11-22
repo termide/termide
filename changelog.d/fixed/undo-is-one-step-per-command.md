@@ -1,0 +1,1 @@
+- **Undo takes back one command at a time and drops the selection.** Indent, outdent, toggle comment, Replace all and a language server's edit to an open file were undone line by line or edit by edit; each is now one undo step. Undo and redo also kept the old selection, so the next key typed deleted whatever text had moved under it.

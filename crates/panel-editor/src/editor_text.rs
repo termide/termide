@@ -7,7 +7,7 @@
 //! - Newline insertion with auto-indentation
 
 use anyhow::Result;
-use termide_buffer::{Cursor, Selection};
+use termide_buffer::{columns, Cursor, Selection};
 
 use crate::{auto_pairs, clipboard, cursor, selection, text_editing};
 
@@ -296,10 +296,14 @@ impl Editor {
             let char_after = self.char_at_cursor();
             if let (Some(before), Some(after)) = (char_before, char_after) {
                 if auto_pairs::is_matching_pair(before, after) {
-                    // Delete the closing character first (at cursor position)
-                    self.buffer.delete_char(&self.cursor)?;
-                    // Then backspace the opening character
-                    if let Some(result) = text_editing::backspace(&mut self.buffer, &self.cursor)? {
+                    // Delete the closing character first (at cursor position),
+                    // then backspace the opening one, as one undo step.
+                    let cursor = self.cursor;
+                    let result = self.as_one_undo_step(|e| {
+                        e.buffer.delete_char(&cursor)?;
+                        text_editing::backspace(&mut e.buffer, &cursor)
+                    })?;
+                    if let Some(result) = result {
                         self.cursor = result.new_cursor;
                         self.input.preferred_column = None;
                         self.clamp_cursor();
@@ -394,6 +398,10 @@ impl Editor {
 
     /// Indent selected lines (or current line if no selection)
     pub(crate) fn indent_lines(&mut self) -> Result<()> {
+        self.as_one_undo_step(Self::indent_lines_ungrouped)
+    }
+
+    fn indent_lines_ungrouped(&mut self) -> Result<()> {
         // Close search mode when editing begins
         self.close_search();
 
@@ -434,6 +442,10 @@ impl Editor {
 
     /// Unindent selected lines (or current line if no selection)
     pub(crate) fn unindent_lines(&mut self) -> Result<()> {
+        self.as_one_undo_step(Self::unindent_lines_ungrouped)
+    }
+
+    fn unindent_lines_ungrouped(&mut self) -> Result<()> {
         // Close search mode when editing begins
         self.close_search();
 
@@ -506,6 +518,10 @@ impl Editor {
 
     /// Toggle line comment for current line or selected lines
     pub(crate) fn toggle_comment(&mut self) -> Result<()> {
+        self.as_one_undo_step(Self::toggle_comment_ungrouped)
+    }
+
+    fn toggle_comment_ungrouped(&mut self) -> Result<()> {
         self.close_search();
 
         // Determine comment prefix from syntax
@@ -618,21 +634,33 @@ impl Editor {
     // Cursor Helpers (Private)
     // =========================================================================
 
-    /// Get the character at the cursor position (the character the cursor is on).
+    /// The first char of the grapheme the cursor is on.
     fn char_at_cursor(&self) -> Option<char> {
-        let line = self.buffer.line(self.cursor.line)?;
-        let line = line.trim_end_matches('\n');
-        line.chars().nth(self.cursor.column)
+        let line = self.buffer.line_cow(self.cursor.line)?;
+        let line = columns::trim_line_ending(&line);
+        columns::grapheme_at(line, self.cursor.column)?
+            .chars()
+            .next()
     }
 
-    /// Get the character immediately before the cursor position.
+    /// The first char of the grapheme immediately before the cursor.
     fn char_before_cursor(&self) -> Option<char> {
-        if self.cursor.column == 0 {
-            return None;
-        }
-        let line = self.buffer.line(self.cursor.line)?;
-        let line = line.trim_end_matches('\n');
-        line.chars().nth(self.cursor.column - 1)
+        let line = self.buffer.line_cow(self.cursor.line)?;
+        let line = columns::trim_line_ending(&line);
+        columns::grapheme_before(line, self.cursor.column)?
+            .chars()
+            .next()
+    }
+
+    /// Run `edit` as one undo step.
+    pub(crate) fn as_one_undo_step<T>(
+        &mut self,
+        edit: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        self.buffer.begin_undo_group();
+        let result = edit(self);
+        self.buffer.end_undo_group();
+        result
     }
 
     /// Clamp cursor position to valid values
@@ -652,6 +680,50 @@ mod tests {
         Panel::context_menu_items(e)
             .iter()
             .any(|(_, action)| action == SEND_TO_AGENT_ACTION)
+    }
+
+    fn editor_at(text: &str, line: usize, column: usize) -> Editor {
+        let mut e = Editor::from_text(text, "t.txt".into());
+        e.config.auto_close_brackets = true;
+        e.cursor = Cursor::at(line, column);
+        e
+    }
+
+    /// The pair check looks at the graphemes around the cursor, not at the
+    /// chars counted from the line start: after a flag (two chars, one
+    /// column) it still sees the brackets.
+    #[test]
+    fn auto_pair_backspace_after_a_cluster_removes_both_brackets_as_one_step() {
+        let mut e = editor_at("🇩🇪()", 0, 2);
+        e.backspace().unwrap();
+        assert_eq!(e.buffer.text(), "🇩🇪");
+        e.handle_undo_redo(|b| b.undo()).unwrap();
+        assert_eq!(e.buffer.text(), "🇩🇪()");
+
+        // Not a pair at the cursor's columns: one plain backspace.
+        let mut e = editor_at("🇩🇪(x)", 0, 2);
+        e.backspace().unwrap();
+        assert_eq!(e.buffer.text(), "🇩🇪x)");
+    }
+
+    #[test]
+    fn indent_unindent_and_comment_are_one_undo_step_each() {
+        let text = "a\nb\nc\n";
+        let mut e = editor_at(text, 0, 0);
+        e.selection = Some(Selection::new(Cursor::at(0, 0), Cursor::at(2, 1)));
+        e.indent_lines().unwrap();
+        assert_eq!(e.buffer.text(), "    a\n    b\n    c\n");
+        e.unindent_lines().unwrap();
+        assert_eq!(e.buffer.text(), text);
+        e.toggle_comment().unwrap();
+        assert_eq!(e.buffer.text(), "// a\n// b\n// c\n");
+
+        e.handle_undo_redo(|b| b.undo()).unwrap();
+        assert_eq!(e.buffer.text(), text);
+        e.handle_undo_redo(|b| b.undo()).unwrap();
+        assert_eq!(e.buffer.text(), "    a\n    b\n    c\n");
+        e.handle_undo_redo(|b| b.undo()).unwrap();
+        assert_eq!(e.buffer.text(), text);
     }
 
     /// The menu offers the selection only while there is one, and lines a
