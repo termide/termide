@@ -151,6 +151,7 @@ impl App {
         let mut fs_paths: HashSet<std::path::PathBuf> = HashSet::new();
 
         let mut gitignore_changed_repos: Vec<std::path::PathBuf> = Vec::new();
+        let mut rescan = false;
 
         for event in events {
             match event {
@@ -165,6 +166,17 @@ impl App {
                 }
                 WatchEvent::GitignoreChanged(repo_root) => {
                     gitignore_changed_repos.push(repo_root);
+                }
+                WatchEvent::Rescan => rescan = true,
+            }
+        }
+
+        // Changes may have been lost: every panel looks at its files again,
+        // as after a git pull. Editors keep unsaved work and flag a conflict.
+        if rescan {
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if panel.handle_command(PanelCommand::Reload).needs_redraw() {
+                    self.state.needs_redraw = true;
                 }
             }
         }

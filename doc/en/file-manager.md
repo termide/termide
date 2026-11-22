@@ -100,6 +100,20 @@ the copy, never written through. Copies and moves between filesystems
 keep the permission bits and the modification and access times of files,
 directories and links.
 
+A symbolic link is copied as the link itself, a dangling one too, and
+anything already at the destination — a dangling link included — is asked
+about before it is replaced. Pipes, sockets and devices are not copied: the
+copy stops with an error naming the entry. A file whose name is not valid
+UTF-8 is not sent to a server, since the name could not be kept there; it
+is reported instead. Creating a file under a name that is taken fails with
+"already exists" and leaves the existing entry alone.
+
+When a copy of several items is cancelled, **Delete copied** removes only
+what this copy created — under the name it was written as, a rename
+included — never an entry that was already there (an overwritten file or a
+directory it was merged into). A cancelled move offers nothing to delete:
+the items it moved no longer have their originals.
+
 ### Destination path
 
 Copy, move, [pack](vfs.md#packing), [unpack](vfs.md#unpacking) and Save As

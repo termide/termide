@@ -489,21 +489,25 @@ impl App {
             return Ok(());
         };
 
-        // Create temp directory for remote files
-        let temp_dir = std::env::temp_dir().join("termide-remote-edit");
-        if let Err(e) = std::fs::create_dir_all(&temp_dir) {
-            let error_msg = termide_i18n::t().fv_temp_dir_failed_fmt(&e.to_string());
-            log::error!("{}", error_msg);
-            self.show_error_modal(error_msg);
-            return Ok(());
-        }
+        // The local copy lives where only this user can reach it.
+        let temp_path = match remote_edit_copy(&filename) {
+            Ok(path) => path,
+            Err(e) => {
+                let error_msg = termide_i18n::t().fv_temp_dir_failed_fmt(&e.to_string());
+                log::error!("{}", error_msg);
+                self.show_error_modal(error_msg);
+                return Ok(());
+            }
+        };
 
-        // Generate unique temp file name
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        let temp_path = temp_dir.join(format!("{}_{}", timestamp, filename));
+        // The server's time before the download, so a change made there
+        // while the file is open — or while it downloads — is asked about
+        // before a save overwrites it.
+        let remote_mtime = vfs_manager
+            .metadata(&vfs_path)
+            .recv()
+            .ok()
+            .and_then(|metadata| metadata.modified);
 
         // Create download request via OperationManager
         let request =
@@ -529,12 +533,14 @@ impl App {
                     temp_path,
                     config: self.state.editor_config(),
                     vfs_manager,
+                    remote_mtime,
                 });
 
                 // Open operations panel to show progress
                 self.open_operations_panel()?;
             }
             Err(e) => {
+                let _ = std::fs::remove_file(&temp_path);
                 let error_msg = termide_i18n::t().fv_download_failed_fmt(&e.to_string());
                 log::error!("{}", error_msg);
                 self.show_error_modal(error_msg);
@@ -542,5 +548,57 @@ impl App {
         }
 
         Ok(())
+    }
+}
+
+/// A fresh, empty file for the local copy of the remote file `filename`,
+/// in a directory only this user can reach and readable by this user
+/// alone (`0600`). A download keeps the mode of the file it replaces, so
+/// the copy stays private once it holds the content.
+fn remote_edit_copy(filename: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = termide_fsutil::private_temp_dir("remote-edit")?;
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let mut options = std::fs::File::options();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    let mut n = 0u32;
+    loop {
+        let path = dir.join(match n {
+            0 => format!("{timestamp}_{filename}"),
+            n => format!("{timestamp}-{n}_{filename}"),
+        });
+        match options.open(&path) {
+            Ok(_) => return Ok(path),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && n < 100 => n += 1,
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_remote_edit_copy_is_private_and_fresh() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let a = remote_edit_copy("notes.txt").unwrap();
+        let b = remote_edit_copy("notes.txt").unwrap();
+        assert_ne!(a, b);
+        for path in [&a, &b] {
+            let meta = std::fs::symlink_metadata(path).unwrap();
+            assert!(meta.is_file());
+            assert_eq!(meta.len(), 0);
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600);
+        }
+        let dir = a.parent().unwrap();
+        let mode = std::fs::metadata(dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        let _ = std::fs::remove_file(&a);
+        let _ = std::fs::remove_file(&b);
     }
 }

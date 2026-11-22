@@ -16,6 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::error::{VfsError, VfsResult};
+use crate::local_part::{is_plain_entry_name, LocalPart};
 use crate::types::{
     DownloadProgress, UploadProgress, VfsDownloadOperation, VfsEntry, VfsFileType, VfsMetadata,
     VfsOperation, VfsPath, VfsUploadOperation,
@@ -280,7 +281,8 @@ fn download_file(
     };
     let _ = progress.send(tally.download(&file));
     let mut reader = remote.open_read(source)?;
-    let mut target = fs::File::create(local)?;
+    // Into a sibling, put in place once whole; dropped on an early return.
+    let mut target = LocalPart::create(local)?;
     loop {
         flags.checkpoint()?;
         let Some(piece) = reader.next_chunk()? else {
@@ -292,6 +294,7 @@ fn download_file(
         let _ = progress.send(tally.download(&file));
     }
     target.flush()?;
+    target.persist(local)?;
     tally.files_done += 1;
     let _ = progress.send(tally.download(&file));
     Ok(())
@@ -309,9 +312,19 @@ fn download_tree(
     fs::create_dir_all(local)?;
     for entry in remote.list(source)? {
         flags.checkpoint()?;
+        if !is_plain_entry_name(&entry.name) {
+            return Err(VfsError::InvalidPath(entry.name));
+        }
         let child = local.join(&entry.name);
         match entry.metadata.file_type {
-            VfsFileType::Directory if depth < MAX_RECURSION_DEPTH => {
+            // An error, not a skip: a move deletes its source once this returns.
+            VfsFileType::Directory if depth >= MAX_RECURSION_DEPTH => {
+                return Err(VfsError::InvalidPath(format!(
+                    "{}: nested too deep",
+                    entry.path
+                )));
+            }
+            VfsFileType::Directory => {
                 download_tree(
                     remote,
                     &entry.path,
@@ -454,4 +467,116 @@ pub(crate) fn download_with_progress(
         started.flags.pause,
         started.flags.cancel,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::VfsProtocol;
+
+    /// A remote holding one directory `/d` with `entries`, every file of
+    /// which reads as `pieces`, `Err` ending the read with a failure.
+    struct Fake {
+        entries: Vec<VfsEntry>,
+        pieces: Vec<Option<Vec<u8>>>,
+    }
+
+    struct Pieces(std::vec::IntoIter<Option<Vec<u8>>>);
+
+    impl ChunkRead for Pieces {
+        fn next_chunk(&mut self) -> VfsResult<Option<Vec<u8>>> {
+            match self.0.next() {
+                Some(Some(piece)) => Ok(Some(piece)),
+                Some(None) => Err(VfsError::Nfs("connection lost".into())),
+                None => Ok(None),
+            }
+        }
+    }
+
+    impl ChunkedRemote for Fake {
+        fn metadata(&self, path: &VfsPath) -> VfsResult<VfsMetadata> {
+            Ok(if path.path == Path::new("/d") {
+                VfsMetadata::directory()
+            } else {
+                VfsMetadata::file(3)
+            })
+        }
+        fn list(&self, _: &VfsPath) -> VfsResult<Vec<VfsEntry>> {
+            Ok(self.entries.clone())
+        }
+        fn create_dir_all(&self, _: &VfsPath) -> VfsResult<()> {
+            Ok(())
+        }
+        fn open_read(&self, _: &VfsPath) -> VfsResult<Box<dyn ChunkRead>> {
+            Ok(Box::new(Pieces(self.pieces.clone().into_iter())))
+        }
+        fn open_write(&self, _: &VfsPath) -> VfsResult<Box<dyn ChunkWrite>> {
+            unimplemented!()
+        }
+    }
+
+    fn at(path: &str) -> VfsPath {
+        VfsPath::remote(VfsProtocol::Nfs, "host", path)
+    }
+
+    fn names(dir: &Path) -> Vec<String> {
+        let mut names: Vec<_> = fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn a_listed_name_with_a_parent_is_not_downloaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let fake = Fake {
+            entries: vec![VfsEntry::new(
+                "../escaped",
+                at("/d/../escaped"),
+                VfsMetadata::file(3),
+            )],
+            pieces: vec![Some(b"bad".to_vec())],
+        };
+        let (tx, _rx) = mpsc::channel();
+        let dest = tmp.path().join("d");
+        let result = run_download(&fake, &at("/d"), &dest, &Flags::new(), &tx);
+        assert!(
+            matches!(result, Err(VfsError::InvalidPath(_))),
+            "{result:?}"
+        );
+        assert_eq!(names(tmp.path()), ["d"]);
+        assert!(names(&dest).is_empty());
+    }
+
+    #[test]
+    fn a_failed_download_leaves_the_file_it_was_to_replace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let local = tmp.path().join("f");
+        fs::write(&local, b"old content").unwrap();
+        let (tx, _rx) = mpsc::channel();
+
+        let cut = Fake {
+            entries: vec![],
+            pieces: vec![Some(b"ne".to_vec()), None],
+        };
+        assert!(run_download(&cut, &at("/f"), &local, &Flags::new(), &tx).is_err());
+        assert_eq!(fs::read(&local).unwrap(), b"old content");
+        assert_eq!(names(tmp.path()), ["f"]);
+
+        let cancelled = Flags::new();
+        cancelled.cancel.store(true, Ordering::Relaxed);
+        let whole = Fake {
+            entries: vec![],
+            pieces: vec![Some(b"new".to_vec())],
+        };
+        let result = run_download(&whole, &at("/f"), &local, &cancelled, &tx);
+        assert!(matches!(result, Err(VfsError::Cancelled)), "{result:?}");
+        assert_eq!(fs::read(&local).unwrap(), b"old content");
+
+        run_download(&whole, &at("/f"), &local, &Flags::new(), &tx).unwrap();
+        assert_eq!(fs::read(&local).unwrap(), b"new");
+        assert_eq!(names(tmp.path()), ["f"]);
+    }
 }

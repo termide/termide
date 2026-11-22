@@ -288,6 +288,7 @@ impl Translation for RuntimeTranslation {
         editor_cancel,
         editor_close_external,
         editor_close_external_question,
+        editor_remote_changed_question,
         editor_overwrite_disk,
         editor_keep_disk_close,
         editor_reload_into_editor,
@@ -3057,6 +3058,14 @@ impl Translation for RuntimeTranslation {
         self.format("projects_transfer_exists_fmt", &[("path", path)])
     }
 
+    fn save_as_replace_fmt(&self, path: &str) -> String {
+        self.format("save_as_replace_fmt", &[("path", path)])
+    }
+
+    fn op_name_not_utf8_fmt(&self, path: &str) -> String {
+        self.format("op_name_not_utf8_fmt", &[("path", path)])
+    }
+
     fn projects_move_nested_open_fmt(&self, path: &str) -> String {
         self.format("projects_move_nested_open_fmt", &[("path", path)])
     }
@@ -3146,6 +3155,17 @@ impl Translation for RuntimeTranslation {
         self.format(
             "replace_confirm_fmt",
             &[("count", &count.to_string()), ("files", &files.to_string())],
+        )
+    }
+
+    fn replace_failed_fmt(&self, failed: usize, path: &str, error: &str) -> String {
+        self.format(
+            "replace_failed_fmt",
+            &[
+                ("failed", &failed.to_string()),
+                ("path", path),
+                ("error", error),
+            ],
         )
     }
 

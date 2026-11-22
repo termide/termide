@@ -93,9 +93,11 @@ pub(super) enum SftpCommand {
     },
     /// Open a remote file for writing (CREATE | WRITE | TRUNCATE), or
     /// with `exclusive` one that must not exist yet (CREATE | EXCLUDE).
+    /// A file created gets `mode`, as the server's umask leaves it.
     OpenWrite {
         path: PathBuf,
         exclusive: bool,
+        mode: Option<u32>,
         reply: Reply<u64>,
     },
     /// Set the permission bits of `path`.
@@ -277,6 +279,7 @@ pub(super) async fn sftp_actor(
             SftpCommand::OpenWrite {
                 path,
                 exclusive,
+                mode,
                 reply,
             } => {
                 let flags = if exclusive {
@@ -284,8 +287,12 @@ pub(super) async fn sftp_actor(
                 } else {
                     OpenFlags::CREATE | OpenFlags::WRITE | OpenFlags::TRUNCATE
                 };
+                let attrs = FileAttributes {
+                    permissions: mode,
+                    ..FileAttributes::empty()
+                };
                 let res = sftp!()
-                    .open_with_flags(path_to_string(&path), flags)
+                    .open_with_flags_and_attributes(path_to_string(&path), flags, attrs)
                     .await
                     .map_err(map_sftp_err);
                 match res {

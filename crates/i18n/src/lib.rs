@@ -94,6 +94,7 @@ pub trait Translation: Send + Sync {
     fn editor_cancel(&self) -> &str;
     fn editor_close_external(&self) -> &str;
     fn editor_close_external_question(&self) -> &str;
+    fn editor_remote_changed_question(&self) -> &str;
     fn editor_overwrite_disk(&self) -> &str;
     fn editor_keep_disk_close(&self) -> &str;
     fn editor_reload_into_editor(&self) -> &str;
@@ -1749,6 +1750,10 @@ pub trait Translation: Send + Sync {
     fn projects_move_title(&self) -> &str;
     fn projects_transfer_busy(&self) -> &str;
     fn projects_transfer_exists_fmt(&self, path: &str) -> String;
+    /// Save As onto an existing file: asks whether to replace it.
+    fn save_as_replace_fmt(&self, path: &str) -> String;
+    /// A batch item bound for a server whose local name is not UTF-8.
+    fn op_name_not_utf8_fmt(&self, path: &str) -> String;
     fn projects_move_nested_open_fmt(&self, path: &str) -> String;
     fn project_moved_to_fmt(&self, path: &str) -> String;
     fn projects_relink_title_fmt(&self, name: &str) -> String;
@@ -2043,6 +2048,7 @@ pub trait Translation: Send + Sync {
     fn replace_done_title(&self) -> &str;
     fn replace_done_fmt(&self, count: usize, files: usize) -> String;
     fn replace_confirm_fmt(&self, count: usize, files: usize) -> String;
+    fn replace_failed_fmt(&self, failed: usize, path: &str, error: &str) -> String;
     fn replace_no_files_selected(&self) -> &str;
     fn replace_selection_fmt(&self, selected: usize, total: usize, matches: usize) -> String;
 

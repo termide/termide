@@ -126,7 +126,16 @@ impl FileManager {
                     log::error!("remote create failed: {}", e);
                     if !self.is_stale {
                         let t = termide_i18n::t();
-                        self.show_info_modal(t.connection_error_title(), &format!("{}", e));
+                        if let termide_vfs::VfsError::AlreadyExists { path } = &e {
+                            // The name is taken: nothing is wrong with the
+                            // connection, so do not say so.
+                            self.show_info_modal(
+                                t.modal_error_title(),
+                                &format!("{}: {}", t.op_error_already_exists(), path.display()),
+                            );
+                        } else {
+                            self.show_info_modal(t.connection_error_title(), &format!("{}", e));
+                        }
                         events.push(PanelEvent::ClearStatus);
                         events.push(PanelEvent::NeedsRedraw);
                         return events;

@@ -152,6 +152,9 @@ pub struct PendingEditorDownload {
     pub config: termide_panel_editor::EditorConfig,
     /// VFS manager reference for opening the editor
     pub vfs_manager: Arc<VfsManager>,
+    /// The server's modification time of the file before the download,
+    /// checked before the editor uploads a save over it
+    pub remote_mtime: Option<std::time::SystemTime>,
 }
 
 impl std::fmt::Debug for PendingEditorDownload {

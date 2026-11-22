@@ -108,7 +108,7 @@ impl Editor {
         let Some(file_path) = self.buffer.file_path().map(Path::to_path_buf) else {
             return;
         };
-        if !file_io::was_modified_externally(&file_path, self.file_state.mtime) {
+        if !self.file_state.changed_on_disk(&file_path) {
             return;
         }
         // A buffer without unsaved work follows the file, as VS Code, Zed and
@@ -117,6 +117,8 @@ impl Editor {
         if self.buffer.is_modified() {
             self.file_state.external_change_detected = true;
         } else if let Err(error) = self.reload_from_disk() {
+            // A file grown past the size limit lands here too: the buffer
+            // keeps the old text and shows the conflict.
             log::warn!("cannot reload {}: {error}", file_path.display());
             self.file_state.external_change_detected = true;
         }

@@ -1,0 +1,1 @@
+- **Replace in files says which files it could not change.** A file that could not be read or written was skipped without a word, and one cut off mid-write was left truncated. Each file is now replaced whole or not at all, and the summary counts the files left unchanged and names the first with its reason.

@@ -277,16 +277,19 @@ fn image_into_placeholder(
     }
 }
 
-/// Write fetched image bytes to a temp file named after the URL.
+/// Write fetched image bytes to a temp file named after the URL, in a
+/// directory only this user can reach: in a shared temp directory another
+/// account could plant a link at the name and have the write go through it.
 fn cache_image(bytes: &[u8], ext: &str, url: &str) -> std::io::Result<std::path::PathBuf> {
+    let dir = termide_fsutil::private_temp_dir("web")?;
     let title = fetch_title(url);
     let raw_stem = title.rsplit_once('.').map_or(title.as_str(), |(s, _)| s);
     let mut stem = sanitize_filename(raw_stem);
     if stem.is_empty() {
         stem = "image".to_string();
     }
-    let path = std::env::temp_dir().join(format!("termide-web-{stem}.{ext}"));
-    std::fs::write(&path, bytes)?;
+    let path = dir.join(format!("{stem}.{ext}"));
+    termide_fsutil::write_atomic(&path, bytes)?;
     Ok(path)
 }
 
@@ -380,6 +383,25 @@ mod tests {
 
     fn placeholder(id: u64) -> Box<dyn Panel> {
         Box::new(HtmlPanel::loading(id, "https://ex.com/a".to_string()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_fetched_image_is_cached_where_only_this_user_reaches() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let url = "https://ex.com/pics/bg-fetch-test-cat.png";
+        let path = cache_image(b"png bytes", "png", url).unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"png bytes");
+        assert!(
+            path.ends_with("bg-fetch-test-cat.png"),
+            "{}",
+            path.display()
+        );
+        let dir = path.parent().unwrap();
+        assert_eq!(dir, termide_fsutil::private_temp_dir("web").unwrap());
+        let mode = std::fs::symlink_metadata(dir).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

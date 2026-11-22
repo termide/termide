@@ -144,36 +144,60 @@ impl FileSearchState {
     }
 
     /// Apply `replace_with` to every matched file on disk, re-matching at
-    /// apply time. Returns (files_changed, occurrences_replaced).
-    pub fn replace_all(&self, replace_with: &str) -> (usize, usize) {
+    /// apply time. Each file is replaced atomically, so a failed write
+    /// leaves it as it was; the files that could not be read or written
+    /// are reported, not skipped silently.
+    pub fn replace_all(&self, replace_with: &str) -> ReplaceOutcome {
+        let mut outcome = ReplaceOutcome::default();
         if self.mode != FileSearchMode::Content || self.search_pattern.is_empty() {
-            return (0, 0);
+            return outcome;
         }
         let re = match self.compiled_pattern() {
             Some(r) => r,
-            None => return (0, 0),
+            None => return outcome,
         };
 
-        let mut files_changed = 0;
-        let mut occurrences = 0;
         for (idx, node) in self.tree_nodes.iter().enumerate() {
             if !node.is_file_header || !self.selected_headers.contains(&idx) {
                 continue;
             }
             let content = match std::fs::read_to_string(&node.full_path) {
                 Ok(c) => c,
-                Err(_) => continue,
+                Err(e) => {
+                    outcome.failed.push((node.full_path.clone(), e.to_string()));
+                    continue;
+                }
             };
             let n = re.find_iter(&content).count();
             if n == 0 {
                 continue;
             }
             let new_content = self.apply_replacement(&re, &content, replace_with);
-            if new_content != content && std::fs::write(&node.full_path, new_content).is_ok() {
-                files_changed += 1;
-                occurrences += n;
+            if new_content == content {
+                continue;
+            }
+            match termide_fsutil::write_atomic(&node.full_path, new_content.as_bytes()) {
+                Ok(()) => {
+                    outcome.files += 1;
+                    outcome.occurrences += n;
+                }
+                Err(e) => {
+                    log::warn!("Replace: {}: {e}", node.full_path.display());
+                    outcome.failed.push((node.full_path.clone(), e.to_string()));
+                }
             }
         }
-        (files_changed, occurrences)
+        outcome
     }
+}
+
+/// What a replace across files did.
+#[derive(Debug, Default, PartialEq)]
+pub struct ReplaceOutcome {
+    /// Files changed.
+    pub files: usize,
+    /// Occurrences replaced in them.
+    pub occurrences: usize,
+    /// Files that could not be read or written, with the reason.
+    pub failed: Vec<(std::path::PathBuf, String)>,
 }

@@ -166,8 +166,13 @@ pub struct BatchOperation {
     pub skipped_count: usize,
     /// Pause state for batch operation
     pub pause_state: PauseState,
-    /// Paths of successfully copied/moved destinations (for cleanup on cancel)
+    /// What a copy batch created and finished — what "Delete copied" removes
+    /// after a cancel. Only entries the batch brought into being: nothing
+    /// that existed before, nothing a move left (its source is gone).
     pub completed_destinations: Vec<PathBuf>,
+    /// Where the item in flight lands, when the batch creates it there;
+    /// recorded into `completed_destinations` once it completes.
+    pub item_destination: Option<PathBuf>,
     /// Cumulative files completed from previous batch items (for multi-folder downloads)
     pub cumulative_files_completed: usize,
     /// Cumulative bytes completed from previous batch items
@@ -201,6 +206,7 @@ impl BatchOperation {
             skipped_count: 0,
             pause_state: PauseState::Running,
             completed_destinations: Vec::new(),
+            item_destination: None,
             cumulative_files_completed: 0,
             cumulative_bytes_completed: 0,
             cumulative_total_files: 0,
@@ -220,7 +226,8 @@ impl BatchOperation {
     /// a remote or archive path that also exists locally (`/etc`, `/usr`).
     pub fn source_is_remote(&self, source: &Path) -> bool {
         match self.source_location {
-            SourceLocation::Unknown => !source.exists(),
+            // Not `exists`: a dangling local symlink is still local.
+            SourceLocation::Unknown => std::fs::symlink_metadata(source).is_err(),
             SourceLocation::Local => false,
             SourceLocation::Vfs { .. } => true,
         }
@@ -235,6 +242,24 @@ impl BatchOperation {
     /// Add a successfully completed destination path
     pub fn add_completed_destination(&mut self, path: PathBuf) {
         self.completed_destinations.push(path);
+    }
+
+    /// Note the exact local path the current item is written to, as the
+    /// sub-operation is started. It is kept for cancel cleanup only when the
+    /// batch copies and nothing is there yet: an overwrite or a merge into
+    /// an existing directory would otherwise offer pre-existing data for
+    /// deletion, and a move has no copy to delete.
+    pub fn note_item_destination(&mut self, dest: &Path) {
+        let fresh = self.operation_type == BatchOperationType::Copy
+            && std::fs::symlink_metadata(dest).is_err();
+        self.item_destination = fresh.then(|| dest.to_path_buf());
+    }
+
+    /// The current item completed: keep what `note_item_destination` noted.
+    pub fn record_item_destination(&mut self) {
+        if let Some(dest) = self.item_destination.take() {
+            self.completed_destinations.push(dest);
+        }
     }
 
     /// Set rename pattern
@@ -261,6 +286,9 @@ impl BatchOperation {
 
     /// Advance to next file
     pub fn advance(&mut self) {
+        // A note left by an item that failed or was skipped must not be
+        // taken for the next item's destination.
+        self.item_destination = None;
         self.current_index += 1;
     }
 
@@ -448,6 +476,45 @@ mod tests {
 
         op.add_completed_destination(PathBuf::from("/dest/a"));
         assert_eq!(op.completed_destinations.len(), 1);
+    }
+
+    /// "Delete copied" after a cancel removes only what the batch created:
+    /// the path actually written (a rename included), never something that
+    /// was there before, and nothing for a move.
+    #[test]
+    fn cancel_cleanup_records_only_what_a_copy_created() {
+        let fresh = Path::new("/definitely/not/here/42/renamed (1).txt");
+        let existing = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let batch = |kind| {
+            BatchOperation::new(
+                kind,
+                vec![
+                    PathBuf::from("/a"),
+                    PathBuf::from("/b"),
+                    PathBuf::from("/c"),
+                ],
+                PathBuf::from("/dest"),
+            )
+        };
+
+        let mut copy = batch(BatchOperationType::Copy);
+        copy.note_item_destination(fresh);
+        copy.record_item_destination();
+        copy.advance();
+        // An overwrite or a merge into an existing directory.
+        copy.note_item_destination(existing);
+        copy.record_item_destination();
+        copy.advance();
+        // A note from an item that failed does not carry over.
+        copy.note_item_destination(fresh);
+        copy.advance();
+        copy.record_item_destination();
+        assert_eq!(copy.completed_destinations, vec![fresh.to_path_buf()]);
+
+        let mut moved = batch(BatchOperationType::Move);
+        moved.note_item_destination(fresh);
+        moved.record_item_destination();
+        assert!(moved.completed_destinations.is_empty());
     }
 
     #[test]

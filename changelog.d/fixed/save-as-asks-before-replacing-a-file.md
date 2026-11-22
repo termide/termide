@@ -1,0 +1,1 @@
+- **Save As asks before replacing a file.** Saving the editor under the name of another existing file, or exporting a viewer's content (a diagram's source, a web page, a chat) onto one, overwrote it silently. It now asks first; an export is also written atomically, so a failure leaves the old file whole.

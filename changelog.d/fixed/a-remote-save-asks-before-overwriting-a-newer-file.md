@@ -1,0 +1,1 @@
+- **Saving a file opened from a server asks before overwriting a newer one.** The upload replaced the file on the server whatever happened to it there since it was opened. Now, when the file changed on the server since it was opened or last saved, the editor asks whether to overwrite it; declining keeps the edits unsaved.

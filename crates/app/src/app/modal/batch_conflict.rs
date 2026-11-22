@@ -5,7 +5,7 @@
 use anyhow::Result;
 
 use super::super::App;
-use super::batch_handler::make_copy_or_move_request;
+use super::batch_handler::{is_copyable_local_source, make_copy_or_move_request};
 use crate::state::{
     ActiveModal, BatchOperation, BatchOperationType, ConflictMode, PendingAction,
     PendingRemoteDelete,
@@ -63,6 +63,7 @@ impl App {
                                     operation.sources.len() == 1,
                                     operation.destination_is_directory(),
                                 );
+                                operation.note_item_destination(&final_dest);
                                 let request =
                                     OperationRequest::download(vfs_source.clone(), final_dest);
                                 if is_move {
@@ -77,7 +78,7 @@ impl App {
                         }
 
                         // Local file or directory - use OperationManager for async copy
-                        if source.is_file() || source.is_dir() {
+                        if is_copyable_local_source(&source) {
                             use termide_file_ops::ConflictMode as FileOpsConflictMode;
 
                             let final_dest = path_utils::resolve_batch_destination_path(
@@ -87,6 +88,7 @@ impl App {
                                 operation.destination_is_directory(),
                             );
                             let is_move = operation.operation_type == BatchOperationType::Move;
+                            operation.note_item_destination(&final_dest);
                             let worker_dest = if source.is_dir() && final_dest.is_dir() {
                                 final_dest
                                     .parent()
@@ -252,7 +254,7 @@ impl App {
                         operation.destination_is_directory(),
                     );
 
-                    if new_dest.exists() {
+                    if std::fs::symlink_metadata(&new_dest).is_ok() {
                         // Show ConflictModal again
                         let remaining_items = operation
                             .sources
@@ -270,6 +272,9 @@ impl App {
                     // directory for subsequent files in the batch. Instead, run the
                     // operation for this single file using new_dest directly
                     // (same approach as the Overwrite handler).
+                    // The renamed path is what this item writes, and what
+                    // a cancel may clean up.
+                    operation.note_item_destination(&new_dest);
                     if operation.source_is_remote(&source) {
                         if let Some((vfs_manager, _, vfs_source)) =
                             self.remote_batch_source(&operation, &source)

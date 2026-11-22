@@ -52,6 +52,9 @@ pub mod ssh_config;
 #[cfg(feature = "ftp")]
 pub mod ftp;
 
+#[cfg(any(feature = "sftp", feature = "ftp", feature = "smb", feature = "nfs"))]
+mod local_part;
+
 #[cfg(any(feature = "smb", feature = "nfs"))]
 mod chunked;
 #[cfg(any(feature = "smb", feature = "nfs"))]

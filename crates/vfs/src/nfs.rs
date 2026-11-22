@@ -417,6 +417,13 @@ impl Mount {
                 if name == "." || name == ".." {
                     continue;
                 }
+                // No POSIX file system holds such a name; a server that
+                // lists one is not trusted with where the entry would land.
+                // (A download checks the stricter `is_plain_entry_name`.)
+                if name.is_empty() || name.contains(['/', '\0']) {
+                    log::warn!("NFS: {inner}: skipped an entry named {name:?}");
+                    continue;
+                }
                 let attr = match entry.name_attributes {
                     Nfs3Option::Some(attr) => attr,
                     Nfs3Option::None => match entry.name_handle {

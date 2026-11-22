@@ -23,6 +23,20 @@ pub(in crate::app::modal) fn source_name(path: &Path) -> String {
         .unwrap_or_else(|| "file".to_string())
 }
 
+/// Whether the file name of `path` is not UTF-8. Such a name has no
+/// faithful text form, so it is never sent to a server: written lossily,
+/// two of them could land on one remote name.
+pub(in crate::app::modal) fn name_is_not_utf8(path: &Path) -> bool {
+    path.file_name().is_some_and(|n| n.to_str().is_none())
+}
+
+/// Whether a local batch source can be handed to the copy worker: a file,
+/// a directory, or a symlink, which the worker copies as a link — even a
+/// dangling one. Pipes, sockets and devices are not.
+pub(in crate::app::modal) fn is_copyable_local_source(path: &Path) -> bool {
+    std::fs::symlink_metadata(path).is_ok_and(|m| m.is_file() || m.is_dir() || m.is_symlink())
+}
+
 /// Create a copy or move OperationRequest based on operation type.
 pub(in crate::app::modal) fn make_copy_or_move_request(
     source: OperationPath,
@@ -556,10 +570,29 @@ impl App {
             return;
         };
 
-        let item_name = path_utils::get_file_name_string(&source);
+        // The name as text, for a rename pattern and a remote destination.
+        // A local copy without a pattern keeps the name as it is, so only a
+        // remote destination refuses a name that is not UTF-8.
+        let item_name = source
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
 
         let dest_str = operation.destination.to_string_lossy().into_owned();
         let is_remote_dest = termide_vfs::is_vfs_url(&dest_str);
+
+        if is_remote_dest && name_is_not_utf8(&source) {
+            log::error!(
+                "Not uploading {}: its name is not valid UTF-8",
+                source.display()
+            );
+            self.state
+                .set_error(i18n::t().op_name_not_utf8_fmt(&source.display().to_string()));
+            operation.increment_error();
+            operation.advance();
+            self.state.pending_action = Some(PendingAction::ContinueBatchOperation { operation });
+            return;
+        }
 
         // Apply the rename pattern, if set (counter first, then the pattern).
         let new_name = if operation.rename_pattern.is_some() {
@@ -610,7 +643,8 @@ impl App {
             && termide_file_ops::destination_overlap(&source, &final_dest)
                 == termide_file_ops::DestinationOverlap::SameAsSource;
 
-        if final_dest.exists() && !onto_itself {
+        // A dangling symlink at the destination is a conflict too.
+        if std::fs::symlink_metadata(&final_dest).is_ok() && !onto_itself {
             match self.settle_batch_conflict(operation, &source, &final_dest) {
                 Some(proceed) => operation = proceed,
                 None => return,
@@ -622,6 +656,7 @@ impl App {
             if let Some((vfs_manager, _, vfs_source)) =
                 self.remote_batch_source(&operation, &source)
             {
+                operation.note_item_destination(&final_dest);
                 let request = OperationRequest::download(vfs_source.clone(), final_dest);
                 if operation.operation_type == BatchOperationType::Move {
                     self.state.batch.pending_delete = Some(PendingRemoteDelete {
@@ -634,9 +669,10 @@ impl App {
             }
         }
 
-        // Local file or directory - use OperationManager for async copy with progress
+        // Local file, directory or symlink (copied as a link, dangling or
+        // not) - use OperationManager for async copy with progress.
         // Applies to both Copy and Move (move may need copy+delete for cross-filesystem)
-        if source.is_file() || source.is_dir() {
+        if is_copyable_local_source(&source) {
             use termide_file_ops::ConflictMode as FileOpsConflictMode;
 
             let is_move = operation.operation_type == BatchOperationType::Move;
@@ -645,6 +681,7 @@ impl App {
                 ConflictMode::SkipAll => FileOpsConflictMode::SkipAll,
                 _ => FileOpsConflictMode::Ask,
             };
+            operation.note_item_destination(&final_dest);
             let worker_dest = if source.is_dir() && final_dest.is_dir() {
                 final_dest
                     .parent()
@@ -726,5 +763,22 @@ impl App {
 
             self.state.set_info(parts.join(", "));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A name that is not UTF-8 is refused for a server rather than sent
+    /// lossily, where two such names would become one "?"-like name.
+    #[cfg(unix)]
+    #[test]
+    fn a_name_that_is_not_utf8_is_spotted() {
+        use std::os::unix::ffi::OsStrExt;
+        let bad = Path::new("/tmp").join(std::ffi::OsStr::from_bytes(b"caf\xe9.txt"));
+        assert!(name_is_not_utf8(&bad));
+        assert!(!name_is_not_utf8(Path::new("/tmp/café.txt")));
+        assert!(!name_is_not_utf8(Path::new("/")));
     }
 }

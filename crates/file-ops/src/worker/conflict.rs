@@ -41,8 +41,9 @@ impl ConflictContext {
         dest: &Path,
         remaining_items: usize,
     ) -> Result<ConflictAction, OperationError> {
-        // Check if destination exists
-        if !dest.exists() {
+        // Anything at the destination is a conflict, a dangling symlink too:
+        // `exists` follows links and would let the copy replace it unasked.
+        if fs::symlink_metadata(dest).is_err() {
             return Ok(ConflictAction::Proceed); // No conflict
         }
 
@@ -133,7 +134,8 @@ pub(crate) fn generate_unique_path(path: &Path) -> PathBuf {
             format!("{} ({})", stem, i)
         };
         let new_path = parent.join(&new_name);
-        if !new_path.exists() {
+        // Not `exists`: a dangling link would count as a free name.
+        if fs::symlink_metadata(&new_path).is_err() {
             return new_path;
         }
     }

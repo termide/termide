@@ -5594,6 +5594,7 @@ dependencies = [
 name = "termide-fsutil"
 version = "0.50.0"
 dependencies = [
+ "libc",
  "tempfile",
 ]
 
@@ -5917,6 +5918,7 @@ dependencies = [
  "tempfile",
  "termide-config",
  "termide-core",
+ "termide-fsutil",
  "termide-git",
  "termide-i18n",
  "termide-keyboard",

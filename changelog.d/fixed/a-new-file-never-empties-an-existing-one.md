@@ -1,0 +1,1 @@
+- **A new file never empties an existing one.** Creating a file in the file manager under a name that was already taken truncated that file, locally and on SFTP, FTP, SMB or NFS. It now fails with "already exists" and leaves the entry as it was, a dangling link included.

@@ -9,5 +9,9 @@ repository.workspace = true
 description = "File-system helpers shared across termide crates"
 publish = false
 
+[target.'cfg(unix)'.dependencies]
+# The effective uid a private directory must belong to.
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

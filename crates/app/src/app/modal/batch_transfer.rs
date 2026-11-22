@@ -6,7 +6,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::super::App;
-use super::batch_handler::{make_copy_or_move_request, source_name};
+use super::batch_handler::{make_copy_or_move_request, name_is_not_utf8, source_name};
 use crate::state::{
     ActiveModal, BatchOperation, BatchOperationType, PendingAction, SourceLocation,
 };
@@ -194,6 +194,19 @@ impl App {
         use crate::state::OperationType;
 
         if sources.is_empty() {
+            return Ok(());
+        }
+
+        // A name that is not UTF-8 has no faithful form on the server:
+        // lossily, two such names could land on one remote file.
+        if let Some(bad) = sources.iter().find(|s| name_is_not_utf8(s)) {
+            log::error!(
+                "Not uploading {}: its name is not valid UTF-8",
+                bad.display()
+            );
+            self.show_error_modal(
+                termide_i18n::t().op_name_not_utf8_fmt(&bad.display().to_string()),
+            );
             return Ok(());
         }
 

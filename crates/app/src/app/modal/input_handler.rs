@@ -6,6 +6,7 @@ use anyhow::Result;
 use std::path::PathBuf;
 
 use super::super::App;
+use crate::state::{ActiveModal, PendingAction};
 use crate::PanelExt;
 use termide_i18n as i18n;
 use termide_modal::SaveAsResult;
@@ -18,6 +19,36 @@ fn is_database_url(s: &str) -> bool {
         || s.starts_with("mysql://")
         || s.starts_with("mariadb://")
         || s.starts_with("sqlite://")
+}
+
+/// The path a Save As answer names: `~` expanded, a relative name taken
+/// against `directory`.
+fn save_as_target(directory: &std::path::Path, input: &str) -> PathBuf {
+    let input_path = termide_ui::expand_tilde(input);
+    if input_path.is_absolute() {
+        input_path
+    } else {
+        directory.join(input)
+    }
+}
+
+/// Whether saving as `target` would replace something other than `current`,
+/// the file being saved: anything there — a dangling link too — is asked
+/// about first.
+fn save_as_replaces(target: &std::path::Path, current: Option<&std::path::Path>) -> bool {
+    if std::fs::symlink_metadata(target).is_err() {
+        return false;
+    }
+    let Some(current) = current else {
+        return true;
+    };
+    if target == current {
+        return false;
+    }
+    match (dunce::canonicalize(target), dunce::canonicalize(current)) {
+        (Ok(a), Ok(b)) => a != b,
+        _ => true,
+    }
 }
 
 impl App {
@@ -174,36 +205,83 @@ impl App {
         Ok(())
     }
 
-    /// Handle saving file with new name
+    /// Handle saving file with new name. A name that is taken by another
+    /// file is replaced only once the user confirms it.
     pub(in crate::app) fn handle_save_file_as(
         &mut self,
         directory: PathBuf,
         value: termide_modal::ModalOutput,
     ) -> Result<()> {
+        let Some(result) = value.get::<SaveAsResult>() else {
+            return Ok(());
+        };
+        let file_path = save_as_target(&directory, &result.path);
+        let executable = result.executable;
+        let current = self
+            .layout_manager
+            .active_panel_mut()
+            .and_then(|panel| panel.as_editor_mut())
+            .and_then(|editor| editor.file_path().map(PathBuf::from));
+        if save_as_replaces(&file_path, current.as_deref()) {
+            self.confirm_save_as_replace(
+                &file_path,
+                PendingAction::ConfirmSaveFileAs {
+                    path: file_path.clone(),
+                    executable,
+                },
+            );
+            return Ok(());
+        }
+        self.save_editor_as(file_path, executable);
+        Ok(())
+    }
+
+    /// Save As onto a taken name, answered.
+    pub(in crate::app) fn handle_confirm_save_file_as(
+        &mut self,
+        path: PathBuf,
+        executable: bool,
+        value: termide_modal::ModalOutput,
+    ) -> Result<()> {
+        if value.get::<bool>().copied().unwrap_or(false) {
+            self.save_editor_as(path, executable);
+        }
+        Ok(())
+    }
+
+    /// Ask whether to replace the existing `path`; `action` carries on.
+    fn confirm_save_as_replace(&mut self, path: &std::path::Path, action: PendingAction) {
+        let t = i18n::t();
+        let modal = termide_modal::ConfirmModal::new(
+            t.modal_confirm_title(),
+            // The name alone: the confirm box does not wrap a long path.
+            t.save_as_replace_fmt(&path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into(),
+            )),
+        );
+        self.state
+            .set_pending_action(action, ActiveModal::Confirm(Box::new(modal)));
+    }
+
+    /// Save the active editor as `file_path`, set its executable bit when
+    /// asked, and tell its language server.
+    fn save_editor_as(&mut self, file_path: PathBuf, executable: bool) {
         // Store info needed for LSP notification (before mutable borrow)
         let mut lsp_info: Option<(String, PathBuf)> = None;
         #[cfg(unix)]
         let mut saved_path: Option<PathBuf> = None;
         #[cfg(unix)]
-        let mut make_executable = false;
+        let make_executable = executable;
+        #[cfg(not(unix))]
+        let _ = executable;
 
-        if let Some(result) = value.get::<SaveAsResult>() {
+        {
             let t = i18n::t();
-            #[cfg(unix)]
-            {
-                make_executable = result.executable;
-            }
 
             // Get active Editor panel and save file
             if let Some(panel) = self.layout_manager.active_panel_mut() {
                 if let Some(editor) = panel.as_editor_mut() {
-                    // Resolve path: expand ~ and handle absolute/relative paths
-                    let input_path = termide_ui::expand_tilde(&result.path);
-                    let file_path = if input_path.is_absolute() {
-                        input_path
-                    } else {
-                        directory.join(&result.path)
-                    };
                     let display_path = file_path.display().to_string();
 
                     match editor.save_file_as(file_path.clone()) {
@@ -252,8 +330,6 @@ impl App {
                 lsp_manager.did_save(&lang, &file_path, None);
             }
         }
-
-        Ok(())
     }
 
     /// Write in-memory `content` to a Save-As-chosen path (used by read-only
@@ -265,24 +341,47 @@ impl App {
         content: String,
         value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        if let Some(result) = value.get::<SaveAsResult>() {
-            let t = i18n::t();
-            let input_path = termide_ui::expand_tilde(&result.path);
-            let file_path = if input_path.is_absolute() {
-                input_path
-            } else {
-                directory.join(&result.path)
-            };
-            let display_path = file_path.display().to_string();
-            match std::fs::write(&file_path, content.as_bytes()) {
-                Ok(()) => self.state.set_info(t.status_file_saved(&display_path)),
-                Err(e) => {
-                    log::error!("Save error '{}': {}", display_path, e);
-                    self.show_error_modal(t.status_error_save(&e.to_string()));
-                }
-            }
+        let Some(result) = value.get::<SaveAsResult>() else {
+            return Ok(());
+        };
+        let file_path = save_as_target(&directory, &result.path);
+        if save_as_replaces(&file_path, None) {
+            self.confirm_save_as_replace(
+                &file_path,
+                PendingAction::ConfirmSaveContentAs {
+                    path: file_path.clone(),
+                    content,
+                },
+            );
+            return Ok(());
+        }
+        self.write_content_as(&file_path, &content);
+        Ok(())
+    }
+
+    /// Exporting a viewer's content onto a taken name, answered.
+    pub(in crate::app) fn handle_confirm_save_content_as(
+        &mut self,
+        path: PathBuf,
+        content: String,
+        value: termide_modal::ModalOutput,
+    ) -> Result<()> {
+        if value.get::<bool>().copied().unwrap_or(false) {
+            self.write_content_as(&path, &content);
         }
         Ok(())
+    }
+
+    fn write_content_as(&mut self, file_path: &std::path::Path, content: &str) {
+        let t = i18n::t();
+        let display_path = file_path.display().to_string();
+        match termide_fsutil::write_atomic(file_path, content.as_bytes()) {
+            Ok(()) => self.state.set_info(t.status_file_saved(&display_path)),
+            Err(e) => {
+                log::error!("Save error '{}': {}", display_path, e);
+                self.show_error_modal(t.status_error_save(&e.to_string()));
+            }
+        }
     }
 
     /// Handle git stash push: user provided stash message.
@@ -334,5 +433,44 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Save As asks before replacing anything but the file being saved.
+    #[test]
+    fn save_as_asks_before_replacing_another_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let current = dir.path().join("current.txt");
+        let other = dir.path().join("other.txt");
+        std::fs::write(&current, "a").unwrap();
+        std::fs::write(&other, "b").unwrap();
+
+        assert!(!save_as_replaces(
+            &dir.path().join("new.txt"),
+            Some(&current)
+        ));
+        assert!(!save_as_replaces(&current, Some(&current)));
+        assert!(save_as_replaces(&other, Some(&current)));
+        // An unnamed buffer or a viewer export has no file of its own.
+        assert!(save_as_replaces(&other, None));
+        #[cfg(unix)]
+        {
+            let dangling = dir.path().join("dangling");
+            std::os::unix::fs::symlink(dir.path().join("gone"), &dangling).unwrap();
+            assert!(save_as_replaces(&dangling, None));
+        }
+
+        assert_eq!(
+            save_as_target(dir.path(), "x.txt"),
+            dir.path().join("x.txt")
+        );
+        assert_eq!(
+            save_as_target(dir.path(), "/abs/y"),
+            PathBuf::from("/abs/y")
+        );
     }
 }

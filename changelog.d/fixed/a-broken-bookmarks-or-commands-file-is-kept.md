@@ -1,0 +1,1 @@
+- **A bookmarks or commands file that does not load is kept.** A `bookmarks.toml` with a syntax error loaded as an empty list, and the next bookmark added replaced the file, losing every entry; a `commands.toml` that did not parse was replaced the same way. The file is now copied to `bookmarks.toml.bak` (`commands.toml.bak`) before it is replaced, and both are written atomically.

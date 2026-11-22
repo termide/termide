@@ -78,11 +78,13 @@ impl FileManager {
     }
 
     /// Apply `replace_with` to every matched file of the active content search.
-    /// Returns (files_changed, occurrences_replaced).
-    pub fn replace_all_in_content_results(&mut self, replace_with: &str) -> (usize, usize) {
+    pub fn replace_all_in_content_results(
+        &mut self,
+        replace_with: &str,
+    ) -> file_search::ReplaceOutcome {
         match self.file_search.as_ref() {
             Some(state) => state.replace_all(replace_with),
-            None => (0, 0),
+            None => Default::default(),
         }
     }
 

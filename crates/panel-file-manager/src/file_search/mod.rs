@@ -15,6 +15,7 @@ mod replace;
 mod result_tree;
 mod search_worker;
 
+pub use replace::ReplaceOutcome;
 use result_tree::{build_tree_nodes, TreeBuildItem};
 use search_worker::{search_content, search_files};
 
@@ -584,6 +585,64 @@ mod tests {
         assert_eq!(s.cursor, 0); // first header
     }
 
+    /// (files, occurrences) of a replace that had no failure.
+    fn counts(outcome: replace::ReplaceOutcome) -> (usize, usize) {
+        assert!(outcome.failed.is_empty(), "{:?}", outcome.failed);
+        (outcome.files, outcome.occurrences)
+    }
+
+    #[test]
+    fn replace_all_reports_the_files_it_could_not_change() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone.txt");
+        let ok = dir.path().join("ok.txt");
+        std::fs::write(&ok, "foo\n").unwrap();
+
+        let mut state = FileSearchState::new_content(dir.path().to_path_buf(), 1 << 20);
+        state.tree_nodes = vec![header(gone.clone()), header(ok.clone())];
+        state.selected_headers.extend([0, 1]);
+        state.search_pattern = regex::escape("foo");
+        state.search_use_regex = false;
+        state.search_case_sensitive = true;
+
+        let outcome = state.replace_all("X");
+        assert_eq!((outcome.files, outcome.occurrences), (1, 1));
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(outcome.failed[0].0, gone);
+        assert_eq!(std::fs::read_to_string(&ok).unwrap(), "X\n");
+    }
+
+    /// A file that cannot be written is left whole and reported.
+    #[cfg(unix)]
+    #[test]
+    fn replace_all_leaves_an_unwritable_file_whole() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let locked = dir.path().join("locked");
+        std::fs::create_dir(&locked).unwrap();
+        let f = locked.join("ro.txt");
+        std::fs::write(&f, "foo\n").unwrap();
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o444)).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+        // Root writes anyway; nothing to check then.
+        let writable = std::fs::OpenOptions::new().write(true).open(&f).is_ok();
+
+        let mut state = FileSearchState::new_content(dir.path().to_path_buf(), 1 << 20);
+        state.tree_nodes = vec![header(f.clone())];
+        state.selected_headers.insert(0);
+        state.search_pattern = regex::escape("foo");
+        state.search_use_regex = false;
+        state.search_case_sensitive = true;
+        let outcome = state.replace_all("X");
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if writable {
+            return;
+        }
+        assert_eq!((outcome.files, outcome.occurrences), (0, 0));
+        assert_eq!(outcome.failed.len(), 1);
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), "foo\n");
+    }
+
     #[test]
     fn replace_all_literal_rewrites_matched_files() {
         let dir = tempfile::tempdir().unwrap();
@@ -597,7 +656,7 @@ mod tests {
         state.search_use_regex = false;
         state.search_case_sensitive = true;
 
-        assert_eq!(state.replace_all("X"), (1, 2));
+        assert_eq!(counts(state.replace_all("X")), (1, 2));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "X bar X\nbaz\n");
     }
 
@@ -614,7 +673,7 @@ mod tests {
         state.search_use_regex = true;
         state.search_case_sensitive = true;
 
-        assert_eq!(state.replace_all("fetch_$1"), (1, 1));
+        assert_eq!(counts(state.replace_all("fetch_$1")), (1, 1));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "fetch_user(id)\n");
     }
 
@@ -631,7 +690,7 @@ mod tests {
         state.search_use_regex = false;
         state.search_case_sensitive = true;
 
-        assert_eq!(state.replace_all("$1"), (1, 1));
+        assert_eq!(counts(state.replace_all("$1")), (1, 1));
         assert_eq!(std::fs::read_to_string(&f).unwrap(), "a$1b\n");
     }
 

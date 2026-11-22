@@ -45,7 +45,7 @@ its new column.
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
 | `Ctrl+S` / `F2`   | Save file                                  |
-| `Ctrl+Shift+S`    | Save As (with executable checkbox)         |
+| `Ctrl+Shift+S`    | Save As (with executable checkbox); asks before replacing another file |
 | `Ctrl+Z`          | Undo last action                           |
 | `Ctrl+Y` / `Ctrl+Shift+Z` | Redo undone action               |
 | `Ctrl+D`          | Duplicate current line or selection        |
@@ -67,6 +67,18 @@ the cursor and the scroll position, clamped if the file got shorter. A buffer
 with unsaved work keeps it: the title shows `[changed on disk]`, saving is
 refused, and you choose between `Ctrl+Shift+R` to take the disk version
 (discarding your changes) and `Ctrl+Shift+S` to save yours elsewhere.
+
+Saving looks at the file itself first, so a write made a moment earlier is
+caught even before the file watcher reports it: any other modification time,
+older or newer, or another size counts as a change. A file that grew past the
+50 MB limit while open is not reloaded, as it would not be opened: the buffer
+keeps its text, the title shows `[changed on disk]`, and `Ctrl+Shift+R` says
+the file is too large.
+
+A file opened from a server is checked against the server before each save:
+when it changed there since it was opened or last saved, the editor asks
+whether to overwrite it with your version. Declining keeps your edits
+unsaved.
 
 A file without write permission opens read-only, and the editor follows the
 permission afterwards: once a version control system that keeps files

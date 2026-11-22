@@ -106,6 +106,12 @@ pub enum PendingAction {
     /// viewer such as the diagram panel). Relative names resolve against
     /// `directory`.
     SaveContentAs { directory: PathBuf, content: String },
+    /// Save the editor as `path`, which already exists, once replacing it
+    /// is confirmed.
+    ConfirmSaveFileAs { path: PathBuf, executable: bool },
+    /// Write `content` to `path`, which already exists, once replacing it
+    /// is confirmed.
+    ConfirmSaveContentAs { path: PathBuf, content: String },
     /// Close panel (with confirmation if there are unsaved changes)
     ClosePanel,
     /// Close editor with choice: save, don't save, cancel
@@ -131,6 +137,15 @@ pub enum PendingAction {
     CloseEditorExternal,
     /// Close editor with conflict (local changes + external changes)
     CloseEditorConflict,
+    /// The remote file of the editor whose local copy is `editor_path`
+    /// changed on the server, which now reports `server_mtime`: on accept
+    /// the save is uploaded over it, then the editor closes if
+    /// `close_after`.
+    OverwriteRemoteSave {
+        editor_path: PathBuf,
+        server_mtime: std::time::SystemTime,
+        close_after: bool,
+    },
     /// Batch file operation (copy/move)
     BatchFileOperation { operation: BatchOperation },
     /// Continue batch operation after conflict resolution

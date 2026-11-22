@@ -257,6 +257,10 @@ impl LocalCopyWorker {
                 fs::copy(source, dest)?;
             }
             *files_copied += 1;
+        } else if !metadata.is_file() {
+            // Opening a FIFO blocks until a writer comes; a device such as
+            // /dev/zero never ends; a socket cannot be opened at all.
+            return Err(OperationError::SpecialFile(source.to_path_buf()));
         } else {
             // Copy regular file with chunked reading
             let file_size = metadata.len();
@@ -1083,8 +1087,9 @@ mod tests {
     }
 
     /// A failed copy over an existing file must leave the original intact
-    /// and no temporary sibling behind. A FIFO source fails deterministically
-    /// mid-copy: it reports size 0 but yields bytes, a size mismatch.
+    /// and no temporary sibling behind. A FIFO source fails deterministically:
+    /// it is refused as a special file, and must not be opened — the writer
+    /// would otherwise feed the copy, and without one the open would block.
     #[cfg(unix)]
     #[test]
     fn failed_overwrite_keeps_the_original() {
@@ -1103,7 +1108,13 @@ mod tests {
         fs::create_dir(&dest_dir).unwrap();
         fs::write(dest_dir.join("src"), b"original").unwrap();
 
-        let result = run_overwriting(LocalCopyWorker::new(vec![fifo], dest_dir.clone(), false));
+        let result = run_overwriting(LocalCopyWorker::new(
+            vec![fifo.clone()],
+            dest_dir.clone(),
+            false,
+        ));
+        // The copy left the FIFO alone; drain it so the writer finishes.
+        assert_eq!(fs::read(&fifo).unwrap(), b"surprise");
         writer.join().unwrap();
 
         assert!(matches!(result, OperationResult::Failed(_)), "{result:?}");
@@ -1411,5 +1422,71 @@ mod tests {
         assert!(source_gone, "cross-device move left the source behind");
         let last = updates.last().expect("progress updates");
         assert_eq!(last.total_files, 3, "placeholder count was not replaced");
+    }
+
+    /// A socket (like a pipe or a device) is refused with a clear error
+    /// rather than opened: a FIFO would block the copy forever, /dev/zero
+    /// would never end.
+    #[cfg(unix)]
+    #[test]
+    fn special_files_are_refused() {
+        let tmp = TempDir::new().unwrap();
+        let socket = tmp.path().join("s.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let dest = tmp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+
+        let (result, _) = run(LocalCopyWorker::new(vec![socket], dest.clone(), false));
+        match result {
+            OperationResult::Failed(message) => {
+                assert!(message.contains("not a regular file"), "{message}")
+            }
+            other => panic!("socket copy was not refused: {other:?}"),
+        }
+        assert!(fs::symlink_metadata(dest.join("s.sock")).is_err());
+    }
+
+    /// A dangling symlink at the destination is a conflict: with "skip all"
+    /// it stays, and an auto-renamed copy does not take its name.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_destination_link_is_a_conflict() {
+        use crate::types::{ConflictMode, OperationId};
+        let tmp = TempDir::new().unwrap();
+        let link = tmp.path().join("a.txt");
+        std::os::unix::fs::symlink(tmp.path().join("gone"), &link).unwrap();
+        let (event_tx, _events) = mpsc::channel();
+        let (_resolution_tx, resolution_rx) = mpsc::channel();
+        let mut ctx = ConflictContext {
+            operation_id: OperationId::new(1),
+            conflict_mode: ConflictMode::SkipAll,
+            event_tx,
+            resolution_rx,
+        };
+        assert!(matches!(
+            ctx.check_conflict(Path::new("/src/a.txt"), &link, 0),
+            Ok(ConflictAction::Skip)
+        ));
+
+        std::os::unix::fs::symlink(tmp.path().join("gone"), tmp.path().join("a (1).txt")).unwrap();
+        assert_eq!(generate_unique_path(&link), tmp.path().join("a (2).txt"));
+    }
+
+    /// A dangling symlink source is copied as the link itself.
+    #[cfg(unix)]
+    #[test]
+    fn a_dangling_source_link_is_copied_as_a_link() {
+        let tmp = TempDir::new().unwrap();
+        let link = tmp.path().join("link");
+        std::os::unix::fs::symlink("nowhere", &link).unwrap();
+        let dest = tmp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+
+        let (result, _) = run(LocalCopyWorker::new(vec![link], dest.clone(), false));
+        assert_success(&result);
+        assert_eq!(
+            fs::read_link(dest.join("link")).unwrap(),
+            Path::new("nowhere")
+        );
     }
 }

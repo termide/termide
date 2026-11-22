@@ -3,6 +3,7 @@
 //! This crate provides configuration loading, saving, and validation
 //! with support for TOML format and XDG directory conventions.
 
+mod backup;
 pub mod bookmarks;
 pub mod commands;
 pub mod conflicts;

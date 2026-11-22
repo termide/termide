@@ -191,6 +191,8 @@ impl App {
                             // Settings save as they change; closing is all
                             // that is left of them.
                             PendingAction::Settings => {}
+                            // Declined: the edits stay unsaved in the editor.
+                            PendingAction::OverwriteRemoteSave { .. } => {}
                             other => self.state.pending_action = Some(other),
                         }
                     }
@@ -507,6 +509,12 @@ impl App {
                 PendingAction::SaveContentAs { directory, content } => {
                     self.handle_save_content_as(directory, content, value)?;
                 }
+                PendingAction::ConfirmSaveFileAs { path, executable } => {
+                    self.handle_confirm_save_file_as(path, executable, value)?;
+                }
+                PendingAction::ConfirmSaveContentAs { path, content } => {
+                    self.handle_confirm_save_content_as(path, content, value)?;
+                }
                 PendingAction::SaveBinary => {
                     if value.get::<bool>().copied().unwrap_or(false) {
                         if let Some(panel) = self.layout_manager.active_panel_mut() {
@@ -548,6 +556,15 @@ impl App {
                 }
                 PendingAction::CloseEditorConflict => {
                     self.handle_close_editor_conflict(value)?;
+                }
+                PendingAction::OverwriteRemoteSave {
+                    editor_path,
+                    server_mtime,
+                    close_after,
+                } => {
+                    if value.get::<bool>().copied().unwrap_or(false) {
+                        self.overwrite_remote_save(editor_path, server_mtime, close_after);
+                    }
                 }
                 PendingAction::CopyPath {
                     sources,
@@ -672,10 +689,23 @@ impl App {
                     // User confirmed replacing all content-search matches.
                     if value.get::<bool>().copied().unwrap_or(false) {
                         if let Some(fm) = self.active_file_manager_mut() {
-                            let (files, count) = fm.replace_all_in_content_results(&replace_with);
+                            let outcome = fm.replace_all_in_content_results(&replace_with);
                             fm.close_file_search();
                             let t = termide_i18n::t();
-                            let lines = vec![(String::new(), t.replace_done_fmt(count, files))];
+                            let mut lines = vec![(
+                                String::new(),
+                                t.replace_done_fmt(outcome.occurrences, outcome.files),
+                            )];
+                            if let Some((path, error)) = outcome.failed.first() {
+                                lines.push((
+                                    String::new(),
+                                    t.replace_failed_fmt(
+                                        outcome.failed.len(),
+                                        &path.display().to_string(),
+                                        error,
+                                    ),
+                                ));
+                            }
                             let modal =
                                 termide_modal::InfoModal::new(t.replace_done_title(), lines);
                             self.state.active_modal =

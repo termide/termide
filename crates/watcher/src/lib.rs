@@ -13,7 +13,9 @@ use notify_debouncer_mini::{new_debouncer, Debouncer};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Debounce duration for filesystem events.
@@ -39,6 +41,9 @@ pub enum WatchEvent {
     GitCommit(PathBuf),
     /// .gitignore changed - watcher needs reinitialization
     GitignoreChanged(PathBuf),
+    /// The OS watcher reported an error, so changes may have been lost:
+    /// whatever shows files should look at them again.
+    Rescan,
 }
 
 /// Where a repository keeps its git state.
@@ -423,6 +428,9 @@ pub struct UnifiedWatcher {
     os_watches: PathWatches,
     /// Changed paths from the debouncer callback, classified on poll.
     internal_rx: Receiver<PathBuf>,
+    /// Set by the debouncer callback when the OS watcher reported an
+    /// error; taken on poll as one [`WatchEvent::Rescan`].
+    rescan: Arc<AtomicBool>,
     /// Pending git events waiting for the `GIT_DEBOUNCE_MS` debounce
     pending_git: HashMap<PathBuf, Instant>,
     /// Pending gitignore changes waiting for debounce
@@ -435,15 +443,20 @@ impl UnifiedWatcher {
     /// Create a new UnifiedWatcher.
     pub fn new() -> Result<Self> {
         let (internal_tx, internal_rx) = channel();
+        let rescan = Arc::new(AtomicBool::new(false));
+        let rescan_tx = Arc::clone(&rescan);
 
         let debouncer = new_debouncer(
             Duration::from_millis(FS_DEBOUNCE_MS),
-            move |result: notify_debouncer_mini::DebounceEventResult| {
-                if let Ok(events) = result {
+            move |result: notify_debouncer_mini::DebounceEventResult| match result {
+                Ok(events) => {
                     for event in events {
                         let _ = internal_tx.send(event.path);
                     }
                 }
+                // An error carries no path, and the events it stands for
+                // may be gone: have the listeners look again.
+                Err(_) => rescan_tx.store(true, Ordering::Relaxed),
             },
         )
         .context("Failed to create filesystem watcher")?;
@@ -454,6 +467,7 @@ impl UnifiedWatcher {
             watched_dirs: HashMap::new(),
             os_watches: PathWatches::default(),
             internal_rx,
+            rescan,
             pending_git: HashMap::new(),
             pending_gitignore: HashMap::new(),
             pending_fs: HashSet::new(),
@@ -826,6 +840,9 @@ impl UnifiedWatcher {
         }
 
         let mut events = Vec::new();
+        if self.rescan.swap(false, Ordering::Relaxed) {
+            events.push(WatchEvent::Rescan);
+        }
         let now = Instant::now();
 
         // Emit git events that have waited out GIT_DEBOUNCE_MS
@@ -1680,6 +1697,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(25));
         }
         panic!("git events for {expect:?} never arrived, got {seen:?}");
+    }
+
+    #[test]
+    fn a_watcher_error_is_reported_once_as_a_rescan() {
+        let mut w = UnifiedWatcher::new().unwrap();
+        assert!(!w.poll_events().contains(&WatchEvent::Rescan));
+        // What the debouncer callback does on an error.
+        w.rescan.store(true, Ordering::Relaxed);
+        assert!(w.poll_events().contains(&WatchEvent::Rescan));
+        assert!(!w.poll_events().contains(&WatchEvent::Rescan));
     }
 
     /// Let events from the setup pass before the changes a test checks.
