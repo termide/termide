@@ -17,7 +17,7 @@ use termide_agent_core::{
 use crate::args::{optional_str, optional_u64};
 use crate::clean::{clean_output, resolve_screen};
 use crate::shell::{check_session_name, session_dir};
-use crate::truncate::{head_tail, SHELL_MAX_BYTES};
+use crate::truncate::{head_tail, omitted_text, SHELL_MAX_BYTES};
 
 const NAME: &str = "terminals";
 /// How long `send` waits for the output to stop, when told nothing.
@@ -404,8 +404,10 @@ fn output_body(name: &str, output: &TerminalOutput, note: &str) -> String {
     let mut body = match head_tail(&cleaned.text, SHELL_MAX_BYTES) {
         None => cleaned.text.clone(),
         Some(cut) => format!(
-            "{}\n[... {} lines omitted ...]\n{}",
-            cut.head, cut.omitted_lines, cut.tail
+            "{}\n[... {} omitted ...]\n{}",
+            cut.head,
+            omitted_text(&cut, 0, 0),
+            cut.tail
         ),
     };
     if body.trim().is_empty() {

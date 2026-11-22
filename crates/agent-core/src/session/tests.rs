@@ -1,7 +1,9 @@
 use super::*;
 use crate::agent::test_support::text_reply;
 use crate::failure::FailureKind;
-use crate::message::{AssistantMessage, UserMessage};
+use crate::message::{
+    AssistantContent, AssistantMessage, ToolCall, ToolResultMessage, UserMessage,
+};
 
 #[test]
 fn a_fork_counter_is_only_the_suffix_forks_write() {
@@ -821,6 +823,107 @@ fn compaction_entry_rebuilds_the_context() {
     assert!(matches!(&context[1], Message::User(u) if u.plain_text() == "three"));
     assert!(matches!(&context[3], Message::User(u) if u.plain_text() == "four"));
     assert_eq!(SessionSummary::from(&reopened).message_count, 7);
+}
+
+/// A failed reply the agent took out to try again is taken out on replay
+/// too, so a later compaction's kept tail starts where the agent's did:
+/// at the call, not at its result.
+#[test]
+fn a_dropped_reply_is_left_out_on_replay_and_a_later_compaction_counts_without_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+    let call = ToolCall {
+        id: "c1".into(),
+        name: "read".into(),
+        arguments: serde_json::json!({}),
+        extra_content: None,
+    };
+    let mut calling = text_reply("");
+    calling.content = vec![AssistantContent::ToolCall(call.clone())];
+    calling.stop_reason = StopReason::ToolUse;
+    session
+        .append_message(&Message::User(UserMessage::text("go")))
+        .unwrap();
+    session
+        .append_message(&Message::Assistant(calling))
+        .unwrap();
+    session
+        .append_message(&Message::ToolResult(ToolResultMessage::text(&call, "out")))
+        .unwrap();
+    session
+        .append_message(&Message::Assistant(AssistantMessage::failed(
+            "p",
+            "m",
+            StopReason::Error,
+            "limit",
+        )))
+        .unwrap();
+    session.append_reply_dropped().unwrap();
+    // The agent then kept its last two messages: the call and its result.
+    session.append_compaction("the gist", 5_000, 2).unwrap();
+    session
+        .append_message(&Message::Assistant(text_reply("done")))
+        .unwrap();
+
+    let reopened = Session::open(session.path()).unwrap();
+    let context = reopened.context_messages();
+    let roles: Vec<&str> = context
+        .iter()
+        .map(|m| match m {
+            Message::User(_) => "user",
+            Message::Assistant(_) => "assistant",
+            Message::ToolResult(_) => "tool_result",
+        })
+        .collect();
+    assert_eq!(roles, ["user", "assistant", "tool_result", "assistant"]);
+    let timed = reopened.context_messages_with_times(&CompactionPrompts::default());
+    assert_eq!(timed.len(), 4);
+    // The history shown still has the failure.
+    let history = reopened.history_with_times(&CompactionPrompts::default());
+    assert!(history.iter().any(|step| matches!(
+        step,
+        HistoryStep::Message(LoggedMessage { message: Message::Assistant(reply), .. })
+            if reply.stop_reason == StopReason::Error
+    )));
+    // Dropping applies to a failed reply only.
+    let mut plain = vec![Message::User(UserMessage::text("hi"))];
+    drop_failed_reply(&mut plain, |m| m);
+    assert_eq!(plain.len(), 1);
+}
+
+/// A kept reply's usage measured the context before the compaction, as the
+/// live compaction knows: replayed, it is cleared too, so a reopened session
+/// does not read its old size and compact again at once.
+#[test]
+fn a_replayed_compaction_forgets_the_usage_of_the_replies_it_kept() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();
+    for text in ["one", "two"] {
+        session
+            .append_message(&Message::User(UserMessage::text(text)))
+            .unwrap();
+        let mut reply = text_reply(&format!("answer {text}"));
+        reply.usage.input = 90_000;
+        session.append_message(&Message::Assistant(reply)).unwrap();
+    }
+    session.append_compaction("the gist", 90_000, 2).unwrap();
+
+    let reopened = Session::open(session.path()).unwrap();
+    let context = reopened.context_messages();
+    assert_eq!(context.len(), 3);
+    assert!(context_tokens(&context) < 1_000);
+    let timed = reopened.context_messages_with_times(&CompactionPrompts::default());
+    assert!(timed.iter().all(|logged| match &logged.message {
+        Message::Assistant(reply) => reply.usage == Usage::default(),
+        _ => true,
+    }));
+    // The history shown keeps what the replies reported.
+    let history = reopened.history_with_times(&CompactionPrompts::default());
+    assert!(history.iter().any(|step| matches!(
+        step,
+        HistoryStep::Message(LoggedMessage { message: Message::Assistant(reply), .. })
+            if reply.usage.input == 90_000
+    )));
 }
 
 #[test]

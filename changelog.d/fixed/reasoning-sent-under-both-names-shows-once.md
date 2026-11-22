@@ -1,0 +1,1 @@
+- **Reasoning sent under both names shows once.** vllm-mlx sends each piece of reasoning as both `reasoning_content` and `reasoning`, and both were taken: the thinking showed twice in the transcript and went back to the server twice. The first non-empty of the two is now taken.

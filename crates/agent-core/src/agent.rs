@@ -606,6 +606,10 @@ pub enum AgentEvent {
         result: ToolResultMessage,
     },
     TurnEnd,
+    /// The failed reply that ended the transcript, with no calls, was taken
+    /// out of it to try its request again (see [`Agent::retry`]); consumers
+    /// mirroring the transcript drop it too.
+    ReplyDropped,
     /// Queue lengths after the loop drained messages: `(steering, follow_up)`.
     QueueUpdate {
         steering: usize,
@@ -1150,6 +1154,7 @@ impl Agent {
         };
         if failed == Some(false) {
             self.messages.pop();
+            emit(AgentEvent::ReplyDropped);
         } else if failed == Some(true) {
             for call in self.unanswered_calls() {
                 let result = ToolResultMessage::error(
@@ -1195,15 +1200,17 @@ impl Agent {
                 match outcome {
                     TurnOutcome::Halt => break 'outer,
                     TurnOutcome::Continue { had_tool_calls } => {
-                        pending.extend(self.drain_steering(emit));
-                        let more = had_tool_calls || !pending.is_empty();
+                        let more = had_tool_calls || self.queues.lens().0 > 0;
                         // A graceful pause stops between steps, but only when
                         // there is still work to do — a finished turn ends on
-                        // its own and needs no pause.
+                        // its own and needs no pause. It is taken before the
+                        // steering is: what was typed stays queued for the
+                        // resumed run rather than being dropped with the loop.
                         if more && self.queues.take_pause() {
                             emit(AgentEvent::Paused);
                             break 'outer;
                         }
+                        pending.extend(self.drain_steering(emit));
                         if !had_tool_calls && pending.is_empty() {
                             break;
                         }
@@ -1833,10 +1840,7 @@ impl Agent {
         cancel: &CancelToken,
         emit: &mut dyn FnMut(AgentEvent),
     ) -> Result<GoalVerdict, String> {
-        let mut messages = self.messages.clone();
-        messages.push(Message::User(UserMessage::text(
-            self.goal_prompt.request.clone(),
-        )));
+        let messages = self.side_request(&self.goal_prompt.request);
         let system_prompt = self.goal_prompt.system_prompt(goal);
         let (provider, model) = self
             .side_models
@@ -1891,15 +1895,27 @@ impl Agent {
         }
     }
 
+    /// A copy of the transcript ending in `request`, for a read-only side
+    /// call. Calls a pause or a stop left unanswered get a result saying so,
+    /// as in [`Agent::run`]: the provider rejects a call without one.
+    fn side_request(&self, request: &str) -> Vec<Message> {
+        let mut messages = self.messages.clone();
+        for call in unanswered_calls(&messages) {
+            messages.push(Message::ToolResult(ToolResultMessage::error(
+                &call,
+                "Not run: the run stopped before this call.",
+            )));
+        }
+        messages.push(Message::User(UserMessage::text(request.to_string())));
+        messages
+    }
+
     /// Write a handoff brief: a forward-looking summary of the unfinished work
     /// for a fresh session or another agent. A read-only call on a copy of the
     /// transcript with the handoff prompts and no tools; the transcript is
     /// untouched. Emits [`AgentEvent::Handoff`] with the brief, or an error.
     pub fn handoff(&self, cancel: &CancelToken, emit: &mut dyn FnMut(AgentEvent)) {
-        let mut messages = self.messages.clone();
-        messages.push(Message::User(UserMessage::text(
-            self.handoff_prompt.request.clone(),
-        )));
+        let messages = self.side_request(&self.handoff_prompt.request);
         let (provider, model) = self
             .side_models
             .handoff

@@ -17,7 +17,7 @@ use termide_agent_core::{TerminalRun, TerminalRunEnd, TerminalSessions, ToolText
 use crate::args::{optional_bool, optional_str, optional_u64, required_str};
 use crate::capture::{Capture, Captured, LiveView};
 use crate::clean::{clean_output, Cleaned};
-use crate::truncate::{head_tail, head_tail_split, SHELL_MAX_BYTES};
+use crate::truncate::{head_tail, head_tail_split, omitted_text, SHELL_MAX_BYTES};
 
 /// How often the accumulated output is pushed to the UI while running.
 const UPDATE_INTERVAL: Duration = Duration::from_millis(200);
@@ -545,7 +545,7 @@ impl ShellTool {
                     // Save the raw output, not the cleaned text: the log is
                     // the full record for the user.
                     let path = self.save_log(call, &raw);
-                    let marker = omission_marker(cut.omitted_lines, path.as_deref(), 0);
+                    let marker = omission_marker(&omitted_text(&cut, 0, 0), path.as_deref(), 0);
                     full_output_path = path;
                     format!("{}{marker}{}", cut.head, cut.tail)
                 }
@@ -554,23 +554,27 @@ impl ShellTool {
         } else {
             // The middle was never kept: clean the two ends on their own
             // whole lines and count the dropped lines as omitted.
-            let head = &output.head[..output
-                .head
-                .iter()
-                .rposition(|&b| b == b'\n')
-                .map_or(output.head.len(), |i| i + 1)];
-            let tail = &output.tail[output
-                .tail
-                .iter()
-                .position(|&b| b == b'\n')
-                .map_or(0, |i| i + 1)..];
+            let head_break = output.head.iter().rposition(|&b| b == b'\n');
+            let tail_break = output.tail.iter().position(|&b| b == b'\n');
+            let head = &output.head[..head_break.map_or(output.head.len(), |i| i + 1)];
+            let tail = &output.tail[tail_break.map_or(0, |i| i + 1)..];
+            let trimmed = output.head.len() - head.len() + output.tail.len() - tail.len();
             let head = self.clean(&String::from_utf8_lossy(head), command);
             let tail = self.clean(&String::from_utf8_lossy(tail), command);
-            let cut = head_tail_split(&head.text, &tail.text, self.max_output_bytes);
-            let omitted = cut.omitted_lines + output.dropped_lines as usize;
+            let mut cut = head_tail_split(&head.text, &tail.text, self.max_output_bytes);
+            // An end with no line break is a piece of one long line: what
+            // is gone is then counted in bytes, not lines.
+            cut.whole_lines &= head_break.is_some() && tail_break.is_some();
+            let omitted = omitted_text(
+                &cut,
+                output.dropped_lines as usize,
+                usize::try_from(output.dropped)
+                    .unwrap_or(usize::MAX)
+                    .saturating_add(trimmed),
+            );
             let skipped = output.log.as_ref().map_or(0, |log| log.skipped);
             let path = output.log.as_ref().map(|log| log.path.clone());
-            let marker = omission_marker(omitted, path.as_deref(), skipped);
+            let marker = omission_marker(&omitted, path.as_deref(), skipped);
             let body = format!("{}{marker}{}", cut.head, cut.tail);
             full_output_path = path;
             // The cleaning stats cover what was cleaned, not what was cut.
@@ -682,17 +686,18 @@ pub(crate) fn session_dir(
     }
 }
 
-fn omission_marker(omitted_lines: usize, log: Option<&Path>, skipped: u64) -> String {
+/// `omitted` says what was cut: "N lines" or "N bytes".
+fn omission_marker(omitted: &str, log: Option<&Path>, skipped: u64) -> String {
     match log {
         Some(path) if skipped > 0 => format!(
-            "\n[... {omitted_lines} lines omitted; output saved to {} except its last {skipped} bytes ...]\n",
+            "\n[... {omitted} omitted; output saved to {} except its last {skipped} bytes ...]\n",
             path.display()
         ),
         Some(path) => format!(
-            "\n[... {omitted_lines} lines omitted; full output saved to {} ...]\n",
+            "\n[... {omitted} omitted; full output saved to {} ...]\n",
             path.display()
         ),
-        None => format!("\n[... {omitted_lines} lines omitted ...]\n"),
+        None => format!("\n[... {omitted} omitted ...]\n"),
     }
 }
 
@@ -1102,6 +1107,32 @@ mod tests {
         assert_eq!(details["truncated"], true);
         let saved = std::fs::read_to_string(details["full_output_path"].as_str().unwrap()).unwrap();
         assert_eq!(saved.lines().count(), 5000);
+    }
+
+    /// Output that is one long line keeps both ends, cut inside the line,
+    /// and says how many bytes went.
+    #[test]
+    fn one_long_line_is_cut_inside_and_counted_in_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = ShellTool {
+            max_output_bytes: 2048,
+            ..tool(dir.path())
+        };
+        let (result, _) = run_with(
+            &tool,
+            dir.path(),
+            json!({ "command": "printf 'a%.0s' $(seq 1 10000); printf 'z'" }),
+            &CancelToken::new(),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        let text = result.plain_text();
+        assert!(text.starts_with("aaaa"), "{text}");
+        assert!(text.trim_end().ends_with("aaz"), "{text}");
+        assert!(
+            text.contains(" bytes omitted; full output saved to"),
+            "{text}"
+        );
+        assert!(!text.contains("0 lines omitted"), "{text}");
     }
 
     /// A command printing far more than is kept inline holds only both ends

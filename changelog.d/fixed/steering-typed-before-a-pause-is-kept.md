@@ -1,0 +1,1 @@
+- **A message typed before a pause is kept.** A message sent to steer the run in the step a `/pause` stopped after was taken off the queue and then lost with the run. It now stays queued, and `/continue` or the next request delivers it.

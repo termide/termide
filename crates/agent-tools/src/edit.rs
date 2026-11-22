@@ -272,7 +272,9 @@ fn leading_whitespace(text: &str) -> &str {
     &text[..end]
 }
 
-/// Swap `from` for `to` at the start of every non-blank line of `text`.
+/// Swap `from` for `to` at the start of every non-blank line of `text`. A
+/// line indented less than `from` keeps its outdent relative to it: a
+/// `return` after a block stays out of the block.
 fn reindent(text: &str, from: &str, to: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for (index, line) in text.split('\n').enumerate() {
@@ -285,11 +287,40 @@ fn reindent(text: &str, from: &str, to: &str) -> String {
             out.push_str(to);
             out.push_str(rest);
         } else {
-            out.push_str(to);
-            out.push_str(line.trim_start_matches([' ', '\t']));
+            let indent = leading_whitespace(line);
+            out.push_str(&outdented(indent, from, to));
+            out.push_str(&line[indent.len()..]);
         }
     }
     out
+}
+
+/// The file's indentation for a line indented `indent` where the needle's
+/// first line was indented `from` and the file's `to`, `indent` being less
+/// than `from`.
+fn outdented(indent: &str, from: &str, to: &str) -> String {
+    let Some(dropped) = from.strip_prefix(indent) else {
+        // Not on the needle's indentation at all: the first line's it is.
+        return to.to_string();
+    };
+    if let Some(kept) = to.strip_suffix(dropped) {
+        return kept.to_string();
+    }
+    // Different indentation characters (spaces for tabs, or another
+    // width): scale the depth, when both are of one character each.
+    let uniform = |text: &str| {
+        let mut chars = text.chars();
+        let first = chars.next()?;
+        chars.all(|c| c == first).then_some(first)
+    };
+    match (uniform(from), uniform(to)) {
+        (Some(_), Some(unit)) => {
+            let depth = (to.len() * indent.len() + from.len() / 2) / from.len();
+            unit.to_string().repeat(depth)
+        }
+        // Already at the margin, or mixed: the first line's indentation.
+        _ => to.to_string(),
+    }
 }
 
 fn find_matches(haystack: &str, needle: &str) -> Vec<Found> {
@@ -510,6 +541,35 @@ mod tests {
             "fn main() {\n        if x {\n            go();\n            stop();\n        }\n}\n"
         );
         assert_eq!(result.details.unwrap()["strategy"], "ignoring indentation");
+    }
+
+    /// A replacement line indented less than the needle's first line keeps
+    /// that outdent in the file: the `return` stays out of the `if`.
+    #[test]
+    fn a_reindented_replacement_keeps_its_relative_outdent() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = file(
+            dir.path(),
+            "def f(xs):\n    for x in xs:\n        if x:\n            go(x)\n",
+        );
+        let result = run(
+            dir.path(),
+            json!({
+                "path": "f.rs",
+                "old_string": "    if x:\n        go(x)",
+                "new_string": "    if x:\n        go(x)\nreturn xs"
+            }),
+        );
+        assert!(!result.is_error, "{}", result.plain_text());
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "def f(xs):\n    for x in xs:\n        if x:\n            go(x)\n    return xs\n"
+        );
+        // Spaces in the needle, tabs in the file: the depth is scaled.
+        assert_eq!(outdented("    ", "        ", "\t\t"), "\t");
+        assert_eq!(outdented("", "    ", "\t"), "");
+        // Already at the file's margin, the line can go no further out.
+        assert_eq!(outdented("", "    ", ""), "");
     }
 
     #[test]
