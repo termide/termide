@@ -1,0 +1,1 @@
+- **PostgreSQL rows keep their page after an edit.** An unsorted PostgreSQL table was paged in whatever order the server returned, so an edited row could jump to another page and another row show up twice. Pages now follow the primary key, after the sort chosen in the panel when there is one.

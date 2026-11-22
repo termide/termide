@@ -1,0 +1,1 @@
+- **A narrow plugin list panel no longer crashes termide.** A plugin list with several buttons wrapped them onto more lines than a short or narrow panel had, and drawing it crashed. The buttons are now left out when they do not fit with the line above them and two rows of the list; Tab still reaches them.

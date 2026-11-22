@@ -1,0 +1,1 @@
+- **A refreshed CSV table keeps its sort right.** Re-reading a sorted table (Ctrl+R, or a change to the file on disk) sorted it again before the new pass had found the delimiter and the header, so the rows came back in a wrong order with the header among them. The sort now waits for the file to be read far enough.

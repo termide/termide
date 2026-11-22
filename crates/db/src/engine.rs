@@ -295,6 +295,69 @@ pub(crate) async fn primary_key(pool: &Pool, table: &str) -> Result<Vec<String>,
     }
 }
 
+/// Column name → its type, as a cast target (`"pg_catalog"."timestamp"`).
+///
+/// Postgres does not cast a `text` parameter to the column's type on its own
+/// (`timestamp > text`, `uuid = text` have no operator, and a `text` value is
+/// not assigned to a `date` column), while the panel binds what the user typed
+/// as text. Statements on Postgres therefore cast such parameters to the
+/// column's type; the other engines convert implicitly and get an empty map.
+type ColumnTypes = std::collections::HashMap<String, String>;
+
+/// The types of `table`'s columns on Postgres, quoted for use as a cast
+/// target; empty for the other engines. Built from the catalog's schema and
+/// type names through [`quote_ident`], so nothing is interpolated unquoted.
+/// The base type name drops a modifier like `varchar(20)`, which a comparison
+/// does not need and an assignment applies from the column.
+async fn column_types(pool: &Pool, table: &str) -> Result<ColumnTypes, DbError> {
+    let Pool::Postgres(p) = pool else {
+        return Ok(ColumnTypes::new());
+    };
+    let sql = "SELECT a.attname::text, n.nspname::text, t.typname::text \
+               FROM pg_catalog.pg_attribute a \
+               JOIN pg_catalog.pg_type t ON t.oid = a.atttypid \
+               JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace \
+               WHERE a.attrelid = to_regclass($1) AND a.attnum > 0 AND NOT a.attisdropped";
+    let rows = sqlx::query(sql)
+        .bind(quote_ident(DbBackend::Postgres, table))
+        .fetch_all(p)
+        .await?;
+    rows.iter()
+        .map(|r| {
+            let column: String = r.try_get(0)?;
+            let schema: String = r.try_get(1)?;
+            let ty: String = r.try_get(2)?;
+            Ok((column, pg_type_ref(&schema, &ty)))
+        })
+        .collect()
+}
+
+/// A Postgres type named by its schema and name, quoted.
+fn pg_type_ref(schema: &str, name: &str) -> String {
+    format!(
+        "{}.{}",
+        quote_ident(DbBackend::Postgres, schema),
+        quote_ident(DbBackend::Postgres, name)
+    )
+}
+
+/// The placeholder for bind `idx` holding `value` for column `column`: cast
+/// to the column's type when `types` knows it and the value is text or NULL
+/// (both bound as `text`), plain otherwise.
+fn typed_placeholder(
+    backend: DbBackend,
+    idx: usize,
+    value: &DbValue,
+    column: &str,
+    types: &ColumnTypes,
+) -> String {
+    let ph = placeholder(backend, idx);
+    match (value, types.get(column)) {
+        (DbValue::Text(_) | DbValue::Null, Some(ty)) => format!("{ph}::{ty}"),
+        _ => ph,
+    }
+}
+
 /// Set one column of one row, addressed by its primary key.
 ///
 /// Returns the number of rows the server reports as changed, which the caller
@@ -313,31 +376,8 @@ pub(crate) async fn update_cell(
             "table has no primary key, cannot address a row".to_string(),
         ));
     }
-    let backend = match pool {
-        Pool::Sqlite(_) => DbBackend::Sqlite,
-        Pool::Postgres(_) => DbBackend::Postgres,
-        Pool::MySql(_) => DbBackend::MySql,
-    };
-
-    // Binds go in statement order: the new value first, then the key values.
-    let mut binds: Vec<DbValue> = Vec::with_capacity(key.len() + 1);
-    binds.push(value.clone());
-    let mut conditions = Vec::with_capacity(key.len());
-    for (name, key_value) in key {
-        binds.push(key_value.clone());
-        conditions.push(format!(
-            "{} = {}",
-            quote_ident(backend, name),
-            placeholder(backend, binds.len())
-        ));
-    }
-    let sql = format!(
-        "UPDATE {} SET {} = {} WHERE {}",
-        quote_ident(backend, table),
-        quote_ident(backend, column),
-        placeholder(backend, 1),
-        conditions.join(" AND ")
-    );
+    let types = column_types(pool, table).await?;
+    let (sql, binds) = build_update(backend(pool), table, key, column, value, &types);
 
     let affected = match pool {
         Pool::Sqlite(p) => bind_values!(sqlx::query(&sql), binds)
@@ -356,6 +396,50 @@ pub(crate) async fn update_cell(
     Ok(affected)
 }
 
+/// The `UPDATE` of [`update_cell`] and its binds, in statement order: the
+/// new value first, then the key values.
+fn build_update(
+    backend: DbBackend,
+    table: &str,
+    key: &[(String, DbValue)],
+    column: &str,
+    value: &DbValue,
+    types: &ColumnTypes,
+) -> (String, Vec<DbValue>) {
+    let mut binds: Vec<DbValue> = Vec::with_capacity(key.len() + 1);
+    binds.push(value.clone());
+    let mut conditions = Vec::with_capacity(key.len());
+    for (name, key_value) in key {
+        binds.push(key_value.clone());
+        conditions.push(format!(
+            "{} = {}",
+            quote_ident(backend, name),
+            typed_placeholder(backend, binds.len(), key_value, name, types)
+        ));
+    }
+    let sql = format!(
+        "UPDATE {} SET {} = {} WHERE {}",
+        quote_ident(backend, table),
+        quote_ident(backend, column),
+        typed_placeholder(backend, 1, value, column, types),
+        conditions.join(" AND ")
+    );
+    (sql, binds)
+}
+
+/// The column types [`build_where`] casts to: only Postgres needs them, and
+/// only when there is a condition to cast for.
+async fn filter_types(
+    pool: &Pool,
+    table: &str,
+    filters: &[Condition],
+) -> Result<ColumnTypes, DbError> {
+    if filters.is_empty() {
+        return Ok(ColumnTypes::new());
+    }
+    column_types(pool, table).await
+}
+
 /// Count rows matching `filters` (`SELECT COUNT(*)` + the same `WHERE`).
 pub(crate) async fn count_rows(
     pool: &Pool,
@@ -363,7 +447,8 @@ pub(crate) async fn count_rows(
     filters: &[Condition],
 ) -> Result<i64, DbError> {
     let b = backend(pool);
-    let (where_sql, binds) = build_where(b, filters);
+    let types = filter_types(pool, table, filters).await?;
+    let (where_sql, binds) = build_where(b, filters, &types);
     let sql = format!(
         "SELECT COUNT(*) FROM {}{}",
         quote_ident(b, table),
@@ -393,8 +478,18 @@ pub(crate) async fn fetch_page(pool: &Pool, req: &PageRequest) -> Result<Page, D
     let limit = req.limit.max(1);
     let probe = limit.saturating_add(1);
     let table = quote_ident(b, &req.table);
-    let (where_sql, binds) = build_where(b, &req.filters);
-    let order_sql = build_order(b, &req.order_by);
+    let types = filter_types(pool, &req.table, &req.filters).await?;
+    let (where_sql, binds) = build_where(b, &req.filters, &types);
+    // Postgres returns unordered rows in no stable order: an updated row is
+    // written elsewhere in the heap and moves to another page. Order by the
+    // primary key, after the user's sort, so pages hold still; a table
+    // without one keeps the server's order.
+    let order_by = if b == DbBackend::Postgres {
+        with_key_order(&req.order_by, primary_key(pool, &req.table).await?)
+    } else {
+        req.order_by.clone()
+    };
+    let order_sql = build_order(b, &order_by);
     let sql = format!(
         "SELECT * FROM {table}{where_sql}{order_sql} LIMIT {probe} OFFSET {}",
         req.offset
@@ -446,8 +541,14 @@ fn escape_like(s: &str) -> String {
 
 /// Build the ` WHERE …` clause (with leading space) plus the ordered bind
 /// values. Identifiers are quoted; operands are returned for binding, never
-/// inlined. Conditions are joined with `AND`.
-fn build_where(backend: DbBackend, conds: &[Condition]) -> (String, Vec<DbValue>) {
+/// inlined. Conditions are joined with `AND`. On Postgres a comparison casts
+/// its operand to the column's type from `types`, and a pattern match reads
+/// the column as text, so both work on dates, UUIDs, enums and the like.
+fn build_where(
+    backend: DbBackend,
+    conds: &[Condition],
+    types: &ColumnTypes,
+) -> (String, Vec<DbValue>) {
     if conds.is_empty() {
         return (String::new(), Vec::new());
     }
@@ -462,14 +563,16 @@ fn build_where(backend: DbBackend, conds: &[Condition]) -> (String, Vec<DbValue>
             FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith => {
                 // Case-insensitive contains: PG needs ILIKE; SQLite LIKE is
                 // ASCII-insensitive and MySQL LIKE is collation-insensitive.
-                let like = if backend == DbBackend::Postgres {
-                    "ILIKE"
+                // PG has no ILIKE on non-text types (uuid, json, enums…), so
+                // the column is read as text there.
+                let (subject, like) = if backend == DbBackend::Postgres {
+                    (format!("CAST({col} AS text)"), "ILIKE")
                 } else {
-                    "LIKE"
+                    (col, "LIKE")
                 };
                 let ph = placeholder(backend, idx);
                 idx += 1;
-                parts.push(format!("{col} {like} {ph} ESCAPE '!'"));
+                parts.push(format!("{subject} {like} {ph} ESCAPE '!'"));
                 let raw = match &c.value {
                     Some(DbValue::Text(s)) => s.clone(),
                     Some(v) => v.display(),
@@ -494,14 +597,28 @@ fn build_where(backend: DbBackend, conds: &[Condition]) -> (String, Vec<DbValue>
                     FilterOp::Le => "<=",
                     _ => unreachable!(),
                 };
-                let ph = placeholder(backend, idx);
+                let value = c.value.clone().unwrap_or(DbValue::Null);
+                let ph = typed_placeholder(backend, idx, &value, &c.column, types);
                 idx += 1;
                 parts.push(format!("{col} {sym} {ph}"));
-                binds.push(c.value.clone().unwrap_or(DbValue::Null));
+                binds.push(value);
             }
         }
     }
     (format!(" WHERE {}", parts.join(" AND ")), binds)
+}
+
+/// `order` followed by the key columns it does not sort by yet, ascending:
+/// rows tied under the user's sort, or all rows when there is none, then come
+/// in one fixed order.
+fn with_key_order(order: &[(String, SortDir)], key: Vec<String>) -> Vec<(String, SortDir)> {
+    let mut order = order.to_vec();
+    for column in key {
+        if !order.iter().any(|(c, _)| *c == column) {
+            order.push((column, SortDir::Asc));
+        }
+    }
+    order
 }
 
 /// Build the ` ORDER BY …` clause (with leading space), or empty.
@@ -685,7 +802,108 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::refuse_redirecting_query;
+    use super::*;
+
+    fn types() -> ColumnTypes {
+        [
+            ("at", pg_type_ref("pg_catalog", "timestamp")),
+            ("id", pg_type_ref("pg_catalog", "uuid")),
+            ("mood", pg_type_ref("my \"app\"", "mood")),
+        ]
+        .into_iter()
+        .map(|(c, t)| (c.to_string(), t))
+        .collect()
+    }
+
+    fn cond(column: &str, op: FilterOp, value: DbValue) -> Condition {
+        Condition {
+            column: column.into(),
+            op,
+            value: Some(value),
+        }
+    }
+
+    /// Postgres compares a typed column with the typed text only after a
+    /// cast, and matches a pattern only against text; the type is quoted.
+    #[test]
+    fn postgres_filters_cast_to_the_column_type() {
+        let conds = [
+            cond("at", FilterOp::Gt, DbValue::Text("2024-01-01".into())),
+            cond("mood", FilterOp::Eq, DbValue::Text("ok".into())),
+            cond("n", FilterOp::Le, DbValue::Int(3)),
+            cond("id", FilterOp::Contains, DbValue::Text("ab".into())),
+        ];
+        let (sql, binds) = build_where(DbBackend::Postgres, &conds, &types());
+        assert_eq!(
+            sql,
+            " WHERE \"at\" > $1::\"pg_catalog\".\"timestamp\" \
+             AND \"mood\" = $2::\"my \"\"app\"\"\".\"mood\" \
+             AND \"n\" <= $3 \
+             AND CAST(\"id\" AS text) ILIKE $4 ESCAPE '!'"
+        );
+        assert_eq!(binds.len(), 4);
+    }
+
+    /// SQLite and MySQL convert on their own and keep the plain SQL.
+    #[test]
+    fn other_engines_filter_without_casts() {
+        let conds = [
+            cond("at", FilterOp::Gt, DbValue::Text("2024".into())),
+            cond("id", FilterOp::StartsWith, DbValue::Text("ab".into())),
+        ];
+        let (sql, _) = build_where(DbBackend::Sqlite, &conds, &ColumnTypes::new());
+        assert_eq!(sql, " WHERE \"at\" > ? AND \"id\" LIKE ? ESCAPE '!'");
+        let (sql, _) = build_where(DbBackend::MySql, &conds, &ColumnTypes::new());
+        assert_eq!(sql, " WHERE `at` > ? AND `id` LIKE ? ESCAPE '!'");
+    }
+
+    /// An edit of a date or a NULL into it, addressed by a UUID key, casts
+    /// both the new value and the key on Postgres.
+    #[test]
+    fn postgres_updates_cast_the_value_and_the_key() {
+        let key = [("id".to_string(), DbValue::Text("a0ee-…".into()))];
+        let (sql, binds) = build_update(
+            DbBackend::Postgres,
+            "t",
+            &key,
+            "at",
+            &DbValue::Null,
+            &types(),
+        );
+        assert_eq!(
+            sql,
+            "UPDATE \"t\" SET \"at\" = $1::\"pg_catalog\".\"timestamp\" \
+             WHERE \"id\" = $2::\"pg_catalog\".\"uuid\""
+        );
+        assert_eq!(binds, vec![DbValue::Null, key[0].1.clone()]);
+
+        let int_key = [("n".to_string(), DbValue::Int(7))];
+        let (sql, _) = build_update(
+            DbBackend::Sqlite,
+            "t",
+            &int_key,
+            "at",
+            &DbValue::Text("x".into()),
+            &ColumnTypes::new(),
+        );
+        assert_eq!(sql, "UPDATE \"t\" SET \"at\" = ? WHERE \"n\" = ?");
+    }
+
+    /// The key orders the rows after the user's sort, once.
+    #[test]
+    fn the_key_follows_the_user_sort() {
+        let key = vec!["id".to_string(), "part".to_string()];
+        assert_eq!(
+            build_order(DbBackend::Postgres, &with_key_order(&[], key.clone())),
+            " ORDER BY \"id\" ASC, \"part\" ASC"
+        );
+        let user = [("part".to_string(), SortDir::Desc)];
+        assert_eq!(
+            build_order(DbBackend::Postgres, &with_key_order(&user, key)),
+            " ORDER BY \"part\" DESC, \"id\" ASC"
+        );
+        assert_eq!(with_key_order(&user, vec![]), user.to_vec());
+    }
 
     #[test]
     fn a_query_naming_another_server_or_login_is_refused() {

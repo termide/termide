@@ -62,6 +62,9 @@ pub struct CsvPanel {
     sort: Option<(usize, ColumnSort)>,
     /// The sort being worked out, while it is.
     sorting: Option<SortJob>,
+    /// The sort asked for waits for the indexer to report the delimiter and
+    /// the first record, which its spec is made of.
+    sort_waits: bool,
     /// The sort on screen: the record offsets of the data rows in its order.
     sorted: Option<Sorted>,
 
@@ -123,6 +126,7 @@ impl CsvPanel {
             error: None,
             sort: None,
             sorting: None,
+            sort_waits: false,
             sorted: None,
             cursor: 0,
             top: 0,
@@ -154,12 +158,20 @@ impl CsvPanel {
     /// screen when none is.
     fn start_sort(&mut self) {
         self.sorting = None;
+        self.sort_waits = false;
         let Some((column, dir)) = self.sort else {
             if self.sorted.take().is_some() {
                 self.window = Window::default();
             }
             return;
         };
+        // Right after (re)indexing starts, the index holds no delimiter and
+        // no first record yet: a sort now would split the lines by NUL and
+        // take the header for data. `poll` starts it once they are known.
+        if !self.index_ready() {
+            self.sort_waits = true;
+            return;
+        }
         let spec = SortSpec {
             delimiter: self.delimiter.unwrap_or(self.index.delimiter),
             skip_first: self.has_header(),
@@ -194,6 +206,10 @@ impl CsvPanel {
                 }
             }
         }
+        if self.sort_waits && self.index_ready() {
+            changed = true;
+            self.start_sort();
+        }
         if let Some(job) = &self.sorting {
             let result = match job.result.try_recv() {
                 Ok(result) => Some(result),
@@ -214,6 +230,12 @@ impl CsvPanel {
             }
         }
         changed
+    }
+
+    /// Whether the index knows what a sort is made of: the delimiter and the
+    /// first record, or that the file has none to give.
+    fn index_ready(&self) -> bool {
+        self.indexing.is_none() || self.index.first.is_some()
     }
 
     /// Whether the first record names the columns.
@@ -809,6 +831,26 @@ mod tests {
         settle(&mut panel);
         assert_eq!(column(&mut panel, 0), vec!["10", "9", "", "100"]);
         assert!(panel.sorted.is_none());
+    }
+
+    /// Re-reading the file redoes the sort with the delimiter and the header
+    /// the new pass finds, not with the empty index it starts from.
+    #[test]
+    fn a_refresh_keeps_the_sort_by_the_right_delimiter_and_header() {
+        let (_dir, mut panel) = open("id;name\n2;b\n1;a\n", "t.csv");
+        press(&mut panel, KeyCode::Char('s'));
+        settle(&mut panel);
+        assert_eq!(column(&mut panel, 0), vec!["1", "2"]);
+
+        panel.refresh();
+        settle(&mut panel);
+        assert_eq!(
+            panel.sorted.as_ref().unwrap().by,
+            (0, ColumnSort::Ascending)
+        );
+        assert_eq!(panel.row_count(), 2);
+        assert_eq!(column(&mut panel, 0), vec!["1", "2"]);
+        assert_eq!(column(&mut panel, 1), vec!["a", "b"]);
     }
 
     #[test]

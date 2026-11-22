@@ -436,15 +436,12 @@ impl PluginListPanel {
     /// are any; the area left for the rows.
     fn render_buttons(&mut self, area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
         let labels: Vec<String> = self.list.buttons.iter().map(|b| b.label.clone()).collect();
-        self.button_areas = if labels.is_empty() || area.height < 4 {
-            Vec::new()
-        } else {
-            button_areas(&labels, area)
-        };
+        self.button_areas = button_areas(&labels, area);
         let Some(first) = self.button_areas.first() else {
             return area;
         };
         let theme = &self.theme;
+        // `button_areas` leaves room for the line and rows above it.
         let line_y = first.y - 1;
         let line = Style::default().bg(theme.bg).fg(theme.disabled);
         for x in area.left()..area.right() {
@@ -461,7 +458,7 @@ impl PluginListPanel {
             };
             let text = format!(
                 "[{}]",
-                truncate_right(&labels[index], rect.width as usize - 2)
+                truncate_right(&labels[index], (rect.width as usize).saturating_sub(2))
             );
             buf.set_stringn(rect.x, rect.y, &text, rect.width as usize, style);
         }
@@ -568,9 +565,18 @@ impl PluginListPanel {
     }
 }
 
+/// The fewest rows of the list kept above the buttons.
+const MIN_LIST_ROWS: u16 = 2;
+
 /// Where each of `labels`, drawn `[label]`, goes on the bottom rows of
-/// `area`, wrapping to the next row when one is full.
+/// `area`, wrapping to the next row when one is full. None when they do not
+/// all fit with a line and [`MIN_LIST_ROWS`] above them, or a button would
+/// be too narrow to show a character of its label.
 fn button_areas(labels: &[String], area: Rect) -> Vec<Rect> {
+    // `[`, a character and `]`, inside a column of margin on either side.
+    if labels.is_empty() || area.width < 5 {
+        return Vec::new();
+    }
     let mut placed: Vec<(u16, u16, u16)> = Vec::new();
     let (mut x, mut line) = (0u16, 0u16);
     for label in labels {
@@ -583,7 +589,10 @@ fn button_areas(labels: &[String], area: Rect) -> Vec<Rect> {
         x += width + 1;
     }
     let lines = line + 1;
-    let top = area.bottom().saturating_sub(lines);
+    if u32::from(lines) + 1 + u32::from(MIN_LIST_ROWS) > u32::from(area.height) {
+        return Vec::new();
+    }
+    let top = area.bottom() - lines;
     placed
         .into_iter()
         .map(|(x, line, width)| Rect::new(area.left() + 1 + x, top + line, width, 1))
@@ -1156,5 +1165,56 @@ mod tests {
         let areas = button_areas(&labels, Rect::new(0, 0, 24, 10));
         let lines: Vec<u16> = areas.iter().map(|r| r.y).collect();
         assert_eq!(lines, [7, 8, 9]);
+    }
+
+    /// However small the panel, many buttons render without a panic: the
+    /// bar is left out when it does not fit with a line and some rows.
+    #[test]
+    fn many_buttons_render_into_tiny_areas() {
+        let mut panel = panel();
+        let mut many = list();
+        many.buttons = (0..12)
+            .map(|i| action(&format!("Button {i}"), &format!("b{i}"), None))
+            .collect();
+        panel.set_list(None, many);
+        let colors = ThemeColors::default();
+        let config = termide_core::PanelConfig {
+            tab_size: 4,
+            word_wrap: false,
+            show_line_numbers: false,
+            show_hidden_files: false,
+        };
+        let sizes = [(4, 12), (12, 4), (3, 3), (1, 1), (0, 0), (5, 6), (20, 5)];
+        for (width, height) in sizes {
+            // Off the origin, inside a larger buffer, as in a real layout.
+            let area = Rect::new(3, 2, width, height);
+            let mut buf = Buffer::empty(Rect::new(0, 0, 40, 30));
+            let ctx = RenderContext {
+                theme: &colors,
+                config: &config,
+                is_focused: true,
+                panel_index: 0,
+                terminal_width: 40,
+                terminal_height: 30,
+                border_right_x: None,
+                border_left_x: None,
+                border_bottom_y: None,
+            };
+            panel.render(area, &mut buf, &ctx);
+            for rect in &panel.button_areas {
+                assert!(
+                    area.contains(rect.as_position()),
+                    "{width}x{height}: {rect:?}"
+                );
+                assert!(rect.right() <= area.right(), "{width}x{height}: {rect:?}");
+                assert!(rect.y > area.top() + MIN_LIST_ROWS, "{width}x{height}");
+            }
+        }
+        assert!(button_areas(&["Sync".into()], Rect::new(0, 0, 4, 10)).is_empty());
+        assert!(button_areas(&["Sync".into()], Rect::new(0, 0, 10, 3)).is_empty());
+        assert_eq!(
+            button_areas(&["Sync".into()], Rect::new(0, 0, 10, 4)).len(),
+            1
+        );
     }
 }
