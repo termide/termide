@@ -79,6 +79,17 @@ case "$(cat "$cfg")" in *'${TERMIDE_API_KEY}'*)
   ;;
 esac
 
+# Harbor's own agents (opencode, qwen-coder) read the endpoint key from
+# OPENAI_API_KEY, as run.sh exports it; a job on the local OMLX takes it from there.
+case "$(cat "$dir/bench-meta.json" 2>/dev/null)" in
+  *:10000/*)
+    if [ -z "${OPENAI_API_KEY:-}" ]; then
+      OPENAI_API_KEY=$(python3 -I -c 'import json,os;print(json.load(open(os.path.expanduser("~/.omlx/settings.json")))["auth"]["api_key"])' 2>/dev/null || true)
+      export OPENAI_API_KEY
+    fi
+    ;;
+esac
+
 port=${MIRROR_PORT:-10001}
 if [ -d "$bench/mirror" ] && ! curl -sf -o /dev/null "http://127.0.0.1:$port/simple/pytest/"; then
   echo "$(date +%T) resume.sh: starting the mirror"
