@@ -11,6 +11,8 @@ wait "Cargo.toml"
 key Home Down Enter
 wait "main.rs"
 key Down F4
+wait "Start the language server?" 30
+key y
 wait "[E0308]" 30
 # Back to the project in the file manager, where the agent then works.
 key Alt+Left

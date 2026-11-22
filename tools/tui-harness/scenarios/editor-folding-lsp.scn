@@ -10,6 +10,10 @@ run "true"
 key Down Enter
 wait "main.rs"
 key End F4
+# rust-analyzer builds the workspace, so it starts once trusted; the
+# question covers the file until it is answered.
+wait "Start the language server?" 30
+key y
 wait "use std::mem;"
 # The server is warm once it reports the unused imports and has indexed.
 wait "[unused_imports]" 120

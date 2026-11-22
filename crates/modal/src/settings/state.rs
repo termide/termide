@@ -826,17 +826,20 @@ impl SettingsModal {
 
     /// Whether field `index` of the tab shown is one a project may not set
     /// while the settings are stored in the project: a program termide
-    /// starts, a file it writes, where a key is sent, or the agent's mode.
-    /// The config loader drops these from a project file, so editing one
-    /// here would last only until the next load.
+    /// starts, a file it writes, where a key is sent, the agent's mode, or a
+    /// limit the user set (agent messages, the vault's lock time). The
+    /// config loader drops these from a project file, so editing one here
+    /// would last only until the next load.
     pub(super) fn is_global_only(&self, index: usize) -> bool {
         use super::{connection, debugger, fields, lsp_server};
         self.in_project
             && match self.field_tab() {
                 SettingsTab::Terminal | SettingsTab::Logging => index == 0,
+                SettingsTab::Vfs => index == 1,
                 SettingsTab::Ai => {
                     index == fields::AI_CHROME_PATH_FIELD
                         || index == fields::AI_PERMISSION_MODE_FIELD
+                        || index == fields::AI_MAX_AGENT_MESSAGES_FIELD
                 }
                 SettingsTab::Connection => {
                     index == connection::BASE_URL || index == connection::API_KEY_ENV
@@ -1158,6 +1161,19 @@ mod content_row_tests {
             modal.config.ai.max_agent_messages,
             Config::default().ai.max_agent_messages
         );
+    }
+
+    #[test]
+    fn the_users_limits_are_global_only_in_a_project() {
+        let field = super::super::fields::AI_MAX_AGENT_MESSAGES_FIELD;
+        let mut modal = SettingsModal::new(Config::default(), Config::default(), false);
+        modal.active_tab = SettingsTab::Ai;
+        assert!(!modal.is_global_only(field));
+        modal.in_project = true;
+        assert!(modal.is_global_only(field));
+        modal.active_tab = SettingsTab::Vfs;
+        assert!(modal.is_global_only(1), "the vault's lock time");
+        assert!(!modal.is_global_only(0), "the connection timeout");
     }
 }
 

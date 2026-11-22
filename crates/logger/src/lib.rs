@@ -11,7 +11,7 @@ use log::{Level, LevelFilter, Log, Metadata, Record};
 use std::collections::VecDeque;
 use std::fs::{self, OpenOptions};
 use std::io::Write as IoWrite;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 // Re-export log macros for convenient use
@@ -144,12 +144,20 @@ impl Logger {
             .parent()
             .map_or(Ok(()), fs::create_dir_all)
             .and_then(|()| {
-                OpenOptions::new()
+                let file = log_options()
                     .write(true)
-                    .create(true)
                     .truncate(truncate)
                     .append(!truncate)
-                    .open(&self.file_path)
+                    .open(&self.file_path)?;
+                // Termide's own log, started afresh, is the user's alone
+                // whatever mode an older one had; one the user names keeps
+                // its own.
+                #[cfg(unix)]
+                if truncate {
+                    use std::os::unix::fs::PermissionsExt as _;
+                    file.set_permissions(fs::Permissions::from_mode(0o600))?;
+                }
+                Ok(file)
             })
             .and_then(|mut file| writeln!(file, "{header}"));
         if let Err(error) = opened {
@@ -199,12 +207,11 @@ impl Logger {
         }
 
         // Write to file (create if deleted)
-        if let Ok(mut file) = OpenOptions::new()
-            .append(true)
-            .create(true)
-            .open(&self.file_path)
-        {
+        if let Ok(mut file) = log_options().append(true).open(&self.file_path) {
             let _ = writeln!(file, "[{}] {}: {}", timestamp, level.to_str(), message);
+            if file.metadata().is_ok_and(|m| m.len() > MAX_LOG_BYTES) {
+                rotate(&self.file_path);
+            }
         }
     }
 
@@ -217,6 +224,31 @@ impl Logger {
     fn get_entries_from(&self, start_idx: usize) -> Vec<LogEntry> {
         self.entries.iter().skip(start_idx).cloned().collect()
     }
+}
+
+/// The size past which the log file is set aside as `<name>.1`, replacing
+/// the one set aside before, and a new one begun: a long session's log
+/// does not fill the disk.
+const MAX_LOG_BYTES: u64 = 10 * 1024 * 1024;
+
+/// How the log file is opened: created when missing, readable by the user
+/// alone, since what it says of the projects and the agents is theirs.
+fn log_options() -> OpenOptions {
+    let mut options = OpenOptions::new();
+    options.create(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(0o600);
+    }
+    options
+}
+
+/// Set the full log file `path` aside as `<path>.1`.
+fn rotate(path: &Path) {
+    let mut aside = path.as_os_str().to_owned();
+    aside.push(".1");
+    let _ = fs::rename(path, aside);
 }
 
 /// Global logger instance that persists for the application lifetime.
@@ -422,6 +454,40 @@ mod tests {
             .map(|e| e.message)
             .collect();
         assert_eq!(messages, ["kept", "warned"]);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_log_file_is_readable_by_the_user_alone() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile_dir("mode");
+        let path = dir.join("l.log");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        let _logger = Logger::new(path.clone(), None, 10, LogLevel::Info);
+        let mode = fs::metadata(&path).unwrap().permissions().mode();
+        fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(mode & 0o777, 0o600);
+    }
+
+    #[test]
+    fn a_full_log_file_is_set_aside_and_begun_afresh() {
+        let dir = tempfile_dir("rotate");
+        let path = dir.join("l.log");
+        let mut logger = Logger::new(path.clone(), None, 10, LogLevel::Info);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_len(MAX_LOG_BYTES)
+            .unwrap();
+        logger.add_entry(LogLevel::Info, "over the limit".into());
+        logger.add_entry(LogLevel::Info, "afresh".into());
+        let aside = fs::metadata(dir.join("l.log.1")).map(|m| m.len());
+        let text = fs::read_to_string(&path).unwrap();
+        fs::remove_dir_all(&dir).unwrap();
+        assert!(aside.unwrap() > MAX_LOG_BYTES);
+        assert!(text.contains("afresh") && !text.contains("over the limit"));
     }
 
     /// A fresh directory for one test.

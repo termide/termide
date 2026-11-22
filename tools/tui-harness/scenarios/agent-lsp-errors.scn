@@ -2,11 +2,24 @@
 # project with rust-analyzer running (`lsp` needs it on PATH): the mock
 # model makes a number a string in src/main.rs, which no editor has open,
 # and answers with what the edit's result said of the server's errors.
+# The workspace is trusted with rust-analyzer first, from an editor closed
+# again before the agent works.
 project empty
 lsp
 mock-llm
 start
 run "mkdir src && printf '[package]\nname = \"count\"\nversion = \"0.1.0\"\nedition = \"2021\"\n' > Cargo.toml && printf 'fn main() {\n    let count: u32 = 3;\n    println!(\"{count}\");\n}\n' > src/main.rs"
+wait "Cargo.toml"
+key Home Down Enter
+wait "main.rs"
+key Down F4
+wait "Start the language server?" 30
+key y
+wait-gone "Start the language server?"
+key Alt+X
+wait-gone "fn main()"
+key Alt+Left
+key Home Enter
 wait "Cargo.toml"
 key Alt+A
 wait "Agent"

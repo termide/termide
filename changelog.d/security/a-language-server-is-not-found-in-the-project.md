@@ -1,0 +1,1 @@
+- **A language server, git, cargo, go or p4 is not looked for in the project.** Started by name in the project's directory, they were found through a relative `PATH` entry such as `.` there, so a repository could plant one; they are now looked for, and run with, only the absolute directories of `PATH`, as the debuggers and plugins already were.

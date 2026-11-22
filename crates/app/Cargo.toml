@@ -45,6 +45,7 @@ termide-lsp = { path = "../lsp" }
 termide-vfs = { path = "../vfs" }
 termide-secrets = { path = "../secrets" }
 termide-file-ops = { path = "../file-ops" }
+termide-fsutil = { path = "../fsutil" }
 termide-watcher = { path = "../watcher" }
 termide-logger = { path = "../logger" }
 termide-system-monitor = { path = "../system-monitor" }

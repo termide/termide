@@ -46,6 +46,11 @@ saved with the layout: when the panel is restored, it takes the password
 from the vault or asks for it, as above. When you save such a URL as a
 bookmark, Termide offers to move the password into the vault.
 
+The vault keeps a password for the server, port and user in the URL's
+address, so a PostgreSQL URL may not name others in its query: one with
+`?host=`, `?hostaddr=`, `?port=`, `?user=` or `?password=` is refused.
+A Unix socket directory (`?host=/run/postgresql`) is still accepted.
+
 ## Layout
 
 ```

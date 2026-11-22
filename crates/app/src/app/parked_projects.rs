@@ -202,6 +202,11 @@ impl App {
     pub(super) fn set_project_root(&mut self, root: PathBuf) {
         self.project_root = root;
         self.state.project_root = self.project_root.clone();
+        *self
+            .state
+            .lsp_trust_root
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = self.project_root.clone();
         self.state.project_bookmarks =
             termide_config::BookmarksConfig::load_from_project(&self.project_root);
 
@@ -521,7 +526,15 @@ impl App {
         let home_layout = std::mem::replace(&mut self.layout_manager, layout);
         let home_root = std::mem::replace(&mut self.project_root, parked_root.clone());
         let home_state_root = std::mem::replace(&mut self.state.project_root, parked_root.clone());
+        let trust_root = std::sync::Arc::clone(&self.state.lsp_trust_root);
+        let lock = || {
+            trust_root
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        };
+        let home_trust_root = std::mem::replace(&mut *lock(), parked_root.clone());
         let result = act(self);
+        *lock() = home_trust_root;
         let layout = std::mem::replace(&mut self.layout_manager, home_layout);
         self.project_root = home_root;
         self.state.project_root = home_state_root;

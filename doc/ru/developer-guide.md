@@ -390,7 +390,8 @@ WARN Missing translation key: my_key (using English fallback)
 Каждый запуск пишет свой лог в `logs/<дата>-<время>.log` в каталоге
 данных проекта (`~/.local/share/termide/projects/<имя>-<хеш>/` в Linux,
 `~/Library/Application Support/termide/projects/<имя>-<хеш>/` в macOS); логи
-старше 24 часов удаляются при запуске. Раздел `[logging]` меняет это:
+старше 24 часов удаляются при запуске, а журнал больше 10 МБ откладывается
+как `<имя>.1` и начинается заново. Файл доступен на чтение только вам. Раздел `[logging]` меняет это:
 
 ```toml
 [logging]

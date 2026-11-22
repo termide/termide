@@ -59,6 +59,32 @@ pub(crate) async fn connect_writable(url: &str) -> Result<Pool, DbError> {
     connect_with_writes(url, true).await
 }
 
+/// Refuse a Postgres URL whose query names another server, port or login
+/// than its address: the password filled in from the vault is the one kept
+/// for the address, and a bookmark from a cloned repository could otherwise
+/// show `prod-db` and send that password to `?host=elsewhere`. A socket
+/// directory (`host=/run/postgresql`) stays local and is let through.
+fn refuse_redirecting_query(url: &str) -> Result<(), DbError> {
+    let Some((_, query)) = url.split_once('?') else {
+        return Ok(());
+    };
+    for pair in query.split('&') {
+        let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+        let socket_dir = value.starts_with('/') || value.to_ascii_lowercase().starts_with("%2f");
+        let redirects = match key {
+            "host" | "hostaddr" => !socket_dir,
+            "port" | "user" | "password" => true,
+            _ => false,
+        };
+        if redirects {
+            return Err(DbError::Rejected(format!(
+                "`{key}=` in the URL's query is not supported: put the server, port and user in the address"
+            )));
+        }
+    }
+    Ok(())
+}
+
 async fn connect_with_writes(url: &str, writable: bool) -> Result<Pool, DbError> {
     match DbBackend::from_url(url)? {
         DbBackend::Sqlite => {
@@ -70,6 +96,7 @@ async fn connect_with_writes(url: &str, writable: bool) -> Result<Pool, DbError>
             Ok(Pool::Sqlite(pool))
         }
         DbBackend::Postgres => {
+            refuse_redirecting_query(url)?;
             let mut opts = PgConnectOptions::from_str(url)?;
             // PostgreSQL requires a database to connect to. When the URL omits
             // one, bootstrap on the standard `postgres` maintenance DB so we can
@@ -654,4 +681,34 @@ where
         return v.map_or(DbValue::Null, DbValue::Bytes);
     }
     DbValue::Null
+}
+
+#[cfg(test)]
+mod tests {
+    use super::refuse_redirecting_query;
+
+    #[test]
+    fn a_query_naming_another_server_or_login_is_refused() {
+        for url in [
+            "postgres://admin@prod-db/app?host=evil.example",
+            "postgres://admin@prod-db/app?sslmode=disable&hostaddr=10.0.0.9",
+            "postgres://admin@prod-db/app?port=6543",
+            "postgres://admin@prod-db/app?user=root",
+            "postgres://admin@prod-db/app?password=x",
+        ] {
+            assert!(refuse_redirecting_query(url).is_err(), "{url}");
+        }
+    }
+
+    #[test]
+    fn a_socket_directory_and_other_options_pass() {
+        for url in [
+            "postgres://admin@prod-db/app",
+            "postgres://admin@prod-db/app?sslmode=require&application_name=termide",
+            "postgres:///app?host=/run/postgresql",
+            "postgres:///app?host=%2Frun%2Fpostgresql",
+        ] {
+            assert!(refuse_redirecting_query(url).is_ok(), "{url}");
+        }
+    }
 }

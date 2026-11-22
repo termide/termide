@@ -537,8 +537,9 @@ impl Terminal {
         Ok(term)
     }
 
-    /// Create new terminal that runs a specific command (e.g., ssh user@host)
-    pub fn new_with_command(rows: u16, cols: u16, command: &str) -> Result<Self> {
+    /// Create new terminal that runs `argv` (e.g. `ssh -- user@host`), the
+    /// program first; no shell reads it.
+    pub fn new_with_command(rows: u16, cols: u16, argv: &[String]) -> Result<Self> {
         let pty_system = native_pty_system();
         let size = PtySize {
             rows,
@@ -548,15 +549,11 @@ impl Terminal {
         };
         let pair = pty_system.openpty(size)?;
 
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.is_empty() {
-            anyhow::bail!("Empty command");
-        }
-
-        let mut cmd = CommandBuilder::new(parts[0]);
-        for arg in &parts[1..] {
-            cmd.arg(*arg);
-        }
+        let (program, args) = argv
+            .split_first()
+            .ok_or_else(|| anyhow::anyhow!("Empty command"))?;
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
 
         let working_dir = std::env::current_dir().unwrap_or_else(|_| "/".into());
         cmd.cwd(&working_dir);
@@ -594,7 +591,13 @@ impl Terminal {
             is_alive,
             has_new_data,
         );
-        term.title = TitleSource::Command(command.to_string());
+        term.title = TitleSource::Command(
+            argv.iter()
+                .filter(|a| *a != "--")
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
         term.initial_cwd = working_dir;
         Ok(term)
     }

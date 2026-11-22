@@ -41,6 +41,10 @@ Termide 内置了一个数据库浏览器，支持 **SQLite**、**PostgreSQL** �
 仍会被使用，但不会随布局保存：恢复面板时，它会如上所述从密码库获取密码或询问密码。
 将这样的 URL 保存为书签时，Termide 会提议将密码移入密码库。
 
+密码库按 URL 地址中的服务器、端口和用户保存密码，因此 PostgreSQL URL 不能在查询中
+指定其他值：带有 `?host=`、`?hostaddr=`、`?port=`、`?user=` 或 `?password=` 的 URL
+会被拒绝。Unix 套接字目录（`?host=/run/postgresql`）仍然可用。
+
 ## 布局
 
 ```

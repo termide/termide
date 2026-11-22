@@ -609,7 +609,30 @@ fn command_spec(command: &CommandItem) -> String {
     if let Some(env) = meta.map(|m| &m.env).filter(|env| !env.is_empty()) {
         spec["env"] = serde_json::json!(env);
     }
+    // The agent starts a command on its parameters' defaults, with no form
+    // to show them: a changed default changes what runs. Left out when there
+    // are none, as `env` is.
+    if let Some(params) = meta.map(|m| &m.params).filter(|p| !p.is_empty()) {
+        spec["params"] = params
+            .iter()
+            .map(|p| serde_json::json!([p.name, p.default]))
+            .collect();
+    }
     spec.to_string()
+}
+
+/// `word` as a shell would take it whole: bare when nothing in it needs
+/// quoting, so `-ex` reads as written.
+fn readable_word(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-_./=:,+@%".contains(c));
+    if plain {
+        word.to_string()
+    } else {
+        Quoting::Posix.quote(word)
+    }
 }
 
 /// What a command runs, for a person to read: its build first, if any.
@@ -621,7 +644,15 @@ pub(in crate::app) fn command_text(command: &CommandItem) -> String {
     }
     let mut run = command.command.clone().unwrap_or_default();
     if let Some(debugger) = meta.and_then(|m| m.debugger.as_deref()) {
-        run = format!("{debugger}: {run}");
+        // Its arguments can run commands of their own (gdb `-ex 'shell …'`).
+        let args: Vec<String> = meta
+            .map(|m| m.debugger_args.iter().map(|a| readable_word(a)).collect())
+            .unwrap_or_default();
+        run = if args.is_empty() {
+            format!("{debugger}: {run}")
+        } else {
+            format!("{debugger} {}: {run}", args.join(" "))
+        };
     }
     // As a shell would read it, before what runs with it.
     let env: Vec<String> = command
@@ -697,6 +728,37 @@ mod approval_tests {
 
     // An environment is part of what runs (`LD_PRELOAD`); none at all keeps
     // the approvals given before `env` existed.
+    #[test]
+    fn the_debugger_arguments_are_shown_with_the_command() {
+        let mut with_args = command("./run", None);
+        let meta = with_args.metadata.as_mut().unwrap();
+        meta.debugger = Some("gdb".into());
+        meta.debugger_args = vec!["-ex".into(), "shell id".into()];
+        assert_eq!(command_text(&with_args), "gdb -ex 'shell id': ./run");
+    }
+
+    #[test]
+    fn a_changed_parameter_default_asks_again() {
+        use termide_config::commands::{CommandParam, CommandParamType};
+        let with_default = |default: &str| {
+            let mut c = command("./run {target}", None);
+            c.metadata.as_mut().unwrap().params = vec![CommandParam {
+                name: "target".into(),
+                label: String::new(),
+                param_type: CommandParamType::Text,
+                options: Vec::new(),
+                default: Some(default.into()),
+            }];
+            c
+        };
+        assert_ne!(
+            command_spec(&with_default("staging")),
+            command_spec(&with_default("prod"))
+        );
+        // No parameters: the spec approvals were given for stays as it was.
+        assert!(!command_spec(&command("./run", None)).contains("params"));
+    }
+
     #[test]
     fn the_environment_is_approved_with_the_command() {
         let plain = command("./run", None);

@@ -29,6 +29,10 @@ const PROJECT_FORBIDDEN: &[KeyPath] = &[
     &["ai", "connections", "*", "api_key_env"],
     // The agent's mode: a project may not lift the questions.
     &["ai", "permissions", "mode"],
+    // Limits the user set: a project may not lift the cap on an agent's
+    // messages to others, nor keep the vault open forever.
+    &["ai", "max_agent_messages"],
+    &["vault", "lock_after_mins"],
 ];
 
 /// Keys the global file may not set.
@@ -200,6 +204,21 @@ mod tests {
         assert!(rules["shell"].get("*").is_none());
         assert_eq!(rules["shell"]["rm *"].as_str(), Some("deny"));
         assert_eq!(rules["shell"]["git push*"].as_str(), Some("ask"));
+    }
+
+    #[test]
+    fn a_project_cannot_lift_the_users_limits() {
+        let mut value = parse(
+            r#"
+            [ai]
+            max_agent_messages = 0
+            [vault]
+            lock_after_mins = 0
+            "#,
+        );
+        let mut dropped = restrict_layer(&mut value, Layer::Project);
+        dropped.sort();
+        assert_eq!(dropped, ["ai.max_agent_messages", "vault.lock_after_mins"]);
     }
 
     #[test]

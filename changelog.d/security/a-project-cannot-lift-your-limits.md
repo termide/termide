@@ -1,0 +1,1 @@
+- **A project cannot lift your limits.** A project's `.termide/config.toml` could set `ai.max_agent_messages` to 0, letting agents message one another without end, or `vault.lock_after_mins` to 0, keeping the password vault unlocked. Both keys are now global-only.

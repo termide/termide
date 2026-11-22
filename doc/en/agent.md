@@ -1538,6 +1538,14 @@ rule, in `configured` they ask; in `auto` a search runs and a fetch, whose
 URL can carry data out, goes to the reviewer. "Allow" beyond once for `fetch` covers the
 whole site (`https://docs.rs/*`), for `web_search` every query.
 
+A fetch of this machine or a private network asks in `plan` and `edit` too:
+a loopback, private or link-local address in any spelling a browser reads
+(`127.1`, `[::1]`, `169.254.169.254`), `localhost`, a name under `.local`,
+`.internal`, `.lan`, `.home.arpa` or `.intranet`, or a name without a dot.
+A page the agent has read could otherwise have it reach a service there.
+Only the address as written is judged: a public name that resolves to a
+private address is not caught.
+
 A file the agent edits while it is open in an editor is reloaded there at
 once, cursor and scroll position kept, unless that editor has unsaved changes;
 then the editor keeps them and marks the conflict, as with any change on disk
@@ -1876,7 +1884,7 @@ for the current panel only.
 | read inside the project | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | read outside it | ? | ? | ? | rules / ? | rules / R | ✓ |
 | web search | ? | ✓ | ✓ | rules / ? | ✓ | ✓ |
-| fetch a page | ? | ✓ | ✓ | rules / ? | rules / R | ✓ |
+| fetch a page | ? | ✓ ³ | ✓ ³ | rules / ? | rules / R | ✓ |
 | edit inside the project | ? | ✗ | ✓ | rules / ? | ✓ | ✓ |
 | edit outside it | ? | ✗ | ? | rules / ? | rules / R | ✓ |
 | look-only command | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
@@ -1906,6 +1914,7 @@ shell command unasked, so a prompt there would guard nothing.
 ¹ In `plan` an MCP tool counts the configured `allow` rules too, and one its
 server marks read-only (`readOnlyHint`) runs without asking.
 ² In `edit` too an MCP tool its server marks read-only runs without asking.
+³ A page on this machine or a private network asks (see the web tools above).
 
 The look-only commands are a short list that only look at things (`ls`,
 `cat`, `rg`, `git status`, `git log`, `find`, `cd`, and similar); a

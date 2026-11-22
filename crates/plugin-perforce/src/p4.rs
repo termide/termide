@@ -108,6 +108,7 @@ impl P4 {
         let mut child = Command::new(&self.program)
             .args(&args)
             .current_dir(cwd)
+            .env("PATH", termide_fsutil::absolute_path_var())
             .env("PWD", cwd)
             .stdin(if input.is_some() {
                 Stdio::piped()

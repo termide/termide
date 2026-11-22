@@ -27,6 +27,9 @@ key Tab Enter
 wait "LSP enabled             [✓]"
 key Esc Esc
 wait-gone "LSP enabled"
+# rust-analyzer builds the workspace, so it starts once trusted.
+wait "Start the language server?" 30
+key y
 wait "[unused_imports]" 120
 snapshot lsp-on
 

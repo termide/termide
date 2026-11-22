@@ -232,6 +232,10 @@ impl App {
 
         // Load project-local bookmarks from .termide/ if present
         state.project_root = project_root.clone();
+        *state
+            .lsp_trust_root
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = project_root.clone();
         state.project_bookmarks = termide_config::BookmarksConfig::load_from_project(&project_root);
 
         // Initialize logger in the project directory (before other initializations that log)

@@ -91,14 +91,16 @@ pub(super) fn build_global_hotkey_table(kb: &GlobalKeybindings) -> HotkeyTable {
 }
 
 /// Whether the key `key_str` names may ask to approve a project's command:
-/// one held with Ctrl or Alt, or an F-key, never a key text is typed with.
-fn asks_without_typing(key_str: &str) -> bool {
+/// one held with Ctrl or Alt, or an F-key, never a key text is typed with,
+/// and none of `bound`, the keys termide's own actions take.
+fn unapproved_may_take(key_str: &str, bound: &[termide_config::ParsedKeyBinding]) -> bool {
     use crossterm::event::{KeyCode, KeyModifiers};
     termide_config::parse_keybinding(key_str).is_ok_and(|binding| {
-        binding
+        (binding
             .modifiers
             .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
-            || matches!(binding.key, KeyCode::F(_))
+            || matches!(binding.key, KeyCode::F(_)))
+            && !bound.contains(&binding)
     })
 }
 
@@ -110,14 +112,19 @@ impl App {
         }
         let mut table = build_global_hotkey_table(&self.state.config.general.keybindings);
         if let Some(registry) = self.commands_registry() {
+            let bound: Vec<_> = termide_config::enumerate_bindings(&self.state.config)
+                .into_iter()
+                .map(|(_, parsed, _)| parsed)
+                .collect();
             for (command, key_str) in registry.commands_with_hotkeys() {
                 // A project's command not yet approved takes only a key no
                 // text is typed with — one with Ctrl or Alt, or an F-key —
-                // and pressing it asks first, as the menu does: a
-                // repository could bind any key, a letter typed in the
-                // editor included, and every press would ask.
+                // and no key termide binds, and pressing it asks first, as
+                // the menu does: a repository could bind any key, a letter
+                // typed in the editor or the editor's save included, and
+                // every press would ask.
                 if command.is_project
-                    && !asks_without_typing(key_str)
+                    && !unapproved_may_take(key_str, &bound)
                     && !self.project_command_approved(command)
                 {
                     continue;
@@ -656,8 +663,12 @@ impl App {
 const PANEL_VERTICAL_RESIZE_STEP: u16 = 1;
 
 #[cfg(test)]
-mod asks_without_typing_tests {
-    use super::asks_without_typing;
+mod unapproved_may_take_tests {
+    use super::unapproved_may_take;
+
+    fn asks_without_typing(key: &str) -> bool {
+        unapproved_may_take(key, &[])
+    }
 
     #[test]
     fn only_a_key_no_text_is_typed_with_asks() {
@@ -669,5 +680,18 @@ mod asks_without_typing_tests {
         assert!(!asks_without_typing("Shift+B"));
         assert!(!asks_without_typing("Enter"));
         assert!(!asks_without_typing("not a key"));
+    }
+
+    #[test]
+    fn a_key_termide_binds_is_not_taken() {
+        let mut config = termide_config::Config::default();
+        config.normalize();
+        let bound: Vec<_> = termide_config::enumerate_bindings(&config)
+            .into_iter()
+            .map(|(_, parsed, _)| parsed)
+            .collect();
+        assert!(!unapproved_may_take("Ctrl+S", &bound));
+        assert!(!unapproved_may_take("F3", &bound));
+        assert!(unapproved_may_take("Ctrl+Alt+F12", &bound));
     }
 }

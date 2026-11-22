@@ -510,6 +510,8 @@ pub trait Translation: Send + Sync {
     fn command_run_label_fmt(&self, name: &str) -> String;
     fn command_confirm_project_title(&self) -> &str;
     fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String;
+    fn lsp_trust_title(&self) -> &str;
+    fn lsp_trust_fmt(&self, server: &str, root: &str) -> String;
 
     // Command config modal (create/edit)
     fn command_config_label_command(&self) -> &str;

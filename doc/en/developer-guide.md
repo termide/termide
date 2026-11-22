@@ -389,7 +389,8 @@ When making changes, test:
 Each run writes its log to `logs/<date>-<time>.log` in the project's data
 directory (`~/.local/share/termide/projects/<name>-<hash>/` on Linux,
 `~/Library/Application Support/termide/projects/<name>-<hash>/` on macOS); logs
-older than 24 hours are removed at startup. The `[logging]` section changes
+older than 24 hours are removed at startup, and a log past 10 MB is set aside
+as `<name>.1` and begun afresh. The file is readable by you alone. The `[logging]` section changes
 this:
 
 ```toml

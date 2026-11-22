@@ -99,6 +99,7 @@ pub fn run_git(
         .arg("-C")
         .arg(dir)
         .args(args)
+        .env("PATH", termide_fsutil::absolute_path_var())
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

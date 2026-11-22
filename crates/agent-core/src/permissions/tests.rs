@@ -3861,3 +3861,50 @@ fn always_for_a_bundle_records_a_rule_for_each_part() {
         ToolDecision::Allow
     );
 }
+
+#[test]
+fn a_fetch_into_this_network_is_asked_about() {
+    for url in [
+        "http://127.0.0.1:8080/",
+        "http://localhost/admin",
+        "http://169.254.169.254/latest/meta-data/",
+        "http://10.1.2.3",
+        "http://192.168.0.1",
+        "http://[::1]:3000",
+        "http://[fd00::1]/",
+        "http://[::ffff:10.0.0.1]/",
+        "http://127.1/",
+        "http://2130706433/",
+        "http://0x7f000001/",
+        "http://0/",
+        "http://user@printer/",
+        "http://nas.local/",
+        "http://db.internal:5432",
+        "http://app.localhost.",
+    ] {
+        assert!(reaches_this_network(url), "{url}");
+    }
+    for url in [
+        "https://docs.rs/x",
+        "https://8.8.8.8/",
+        "https://[2606:4700::1]/",
+        "https://example.com:8443/a@b",
+        "https://localhost.example.com/",
+    ] {
+        assert!(!reaches_this_network(url), "{url}");
+    }
+
+    let local = call("fetch", json!({ "url": "http://169.254.169.254/" }));
+    let public = call("fetch", json!({ "url": "https://docs.rs/x" }));
+    for mode in [Mode::Plan, Mode::Edit] {
+        let (hooks, _) = hooks(
+            PermissionRules {
+                mode,
+                ..Default::default()
+            },
+            vec![],
+        );
+        assert_eq!(hooks.decide(&local, &ctx()), Decision::Ask, "{mode:?}");
+        assert_eq!(hooks.decide(&public, &ctx()), Decision::Allow, "{mode:?}");
+    }
+}

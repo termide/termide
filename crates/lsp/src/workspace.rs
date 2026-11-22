@@ -85,6 +85,8 @@ fn go_root() -> Option<&'static Path> {
     .as_deref()
 }
 
+pub(crate) use termide_fsutil::absolute_path_var;
+
 /// The directory of the workspace manifest cargo assigns the package to.
 /// For a crate outside any workspace that is its own directory; for a crate
 /// that sits under a workspace without being a member cargo errors out and
@@ -93,6 +95,7 @@ fn cargo_workspace_root(package_root: &Path) -> Option<PathBuf> {
     let mut command = Command::new("cargo");
     command
         .args(["locate-project", "--workspace", "--message-format", "plain"])
+        .env("PATH", absolute_path_var())
         // A `rust-toolchain.toml` naming a missing toolchain must not
         // start a download on file open.
         .env("RUSTUP_AUTO_INSTALL", "0");
@@ -124,6 +127,7 @@ fn go_command(args: &[&str]) -> Command {
     let mut command = Command::new("go");
     command
         .args(args)
+        .env("PATH", absolute_path_var())
         // A `toolchain` line in go.mod or go.work must not start a
         // download on file open.
         .env("GOTOOLCHAIN", "local");

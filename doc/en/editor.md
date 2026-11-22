@@ -552,6 +552,18 @@ its build of build scripts and proc macros go to `target/rust-analyzer`, so a
 directory's lock while it checks. The price is building those artifacts twice;
 the first start after an update builds them once.
 
+rust-analyzer runs the code of the workspace it analyses: it builds its build
+scripts and proc macros, and the cargo and rustup it calls follow the
+workspace's `.cargo/config.toml`, `rust-toolchain.toml` and
+`rust-analyzer.toml`, which can name programs of their own. No setting turns
+all of that off, so it starts only in a workspace you trust. Opening a Rust
+file of a workspace not trusted yet asks "Start the language server?", naming
+the workspace, with No as the default; Yes keeps the trust with the project,
+in termide's data directory, beside its approved commands, and the server
+starts for the open editors. Declined, it is not asked again until termide
+restarts or you pick "Restart language server" in an editor of that
+workspace. An agent's edit of such a file asks the same way.
+
 
 ### Go to Definition
 

@@ -421,9 +421,88 @@ impl BookmarksConfig {
     }
 }
 
+/// The `ssh` command line for an `ssh://[user@]host[:port][/path]` bookmark,
+/// `ssh` itself first, or `None` when the address is not one.
+///
+/// The destination goes after `--` and must not start with `-` or hold
+/// whitespace or control characters: a bookmark can come from a cloned
+/// repository, and a host such as `-oProxyCommand=…` would otherwise reach
+/// ssh as an option, which runs a command.
+#[must_use]
+pub fn ssh_command_args(url: &str) -> Option<Vec<String>> {
+    let rest = url.strip_prefix("ssh://")?;
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let (user, host_port) = match authority.rsplit_once('@') {
+        Some((user, host_port)) => (Some(user), host_port),
+        None => (None, authority),
+    };
+    let (host, port) = if let Some(bracketed) = host_port.strip_prefix('[') {
+        // IPv6 literal: [::1] or [::1]:2222
+        let (host, after) = bracketed.split_once(']')?;
+        let port = match after.strip_prefix(':') {
+            Some(p) => Some(p),
+            None if after.is_empty() => None,
+            None => return None,
+        };
+        (host, port)
+    } else {
+        match host_port.rsplit_once(':') {
+            Some((host, port)) => (host, Some(port)),
+            None => (host_port, None),
+        }
+    };
+    let safe = |s: &str| {
+        !s.is_empty()
+            && !s.starts_with('-')
+            && !s.chars().any(|c| c.is_whitespace() || c.is_control())
+    };
+    if !safe(host) || user.is_some_and(|u| !safe(u)) {
+        return None;
+    }
+    let mut args = vec!["ssh".to_string()];
+    if let Some(port) = port {
+        port.parse::<u16>().ok().filter(|p| *p > 0)?;
+        args.push("-p".to_string());
+        args.push(port.to_string());
+    }
+    args.push("--".to_string());
+    args.push(match user {
+        Some(user) => format!("{user}@{host}"),
+        None => host.to_string(),
+    });
+    Some(args)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn ssh(url: &str) -> Option<Vec<String>> {
+        ssh_command_args(url)
+    }
+
+    #[test]
+    fn ssh_args_put_the_destination_after_the_options() {
+        assert_eq!(
+            ssh("ssh://alice@example.com:2222/srv").unwrap(),
+            ["ssh", "-p", "2222", "--", "alice@example.com"]
+        );
+        assert_eq!(ssh("ssh://host").unwrap(), ["ssh", "--", "host"]);
+        assert_eq!(
+            ssh("ssh://bob@[::1]:22").unwrap(),
+            ["ssh", "-p", "22", "--", "bob@::1"]
+        );
+    }
+
+    #[test]
+    fn ssh_args_refuse_a_destination_read_as_an_option() {
+        assert!(ssh("ssh://-oProxyCommand=sh${IFS}-c${IFS}id x").is_none());
+        assert!(ssh("ssh://-oProxyCommand=id@host").is_none());
+        assert!(ssh("ssh://a b@host").is_none());
+        assert!(ssh("ssh://host:notaport").is_none());
+        assert!(ssh("ssh://").is_none());
+        assert!(ssh("sftp://host").is_none());
+    }
 
     #[test]
     fn test_bookmark_new() {

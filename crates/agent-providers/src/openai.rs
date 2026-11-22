@@ -382,7 +382,12 @@ impl OpenAiCompatProvider {
         let http = attribution::apply(http, self.attribution);
 
         let response = match http.send_string(body) {
-            Ok(response) => response,
+            Ok(response) => {
+                if let Some(message) = crate::retry::redirect(&response) {
+                    return Err(Failure::http(response.status(), "", None, message));
+                }
+                response
+            }
             Err(ureq::Error::Status(code, response)) => {
                 let retry_after = response.header("retry-after").map(str::to_string);
                 let text = response.into_string().unwrap_or_default();
@@ -492,9 +497,14 @@ impl Provider for OpenAiCompatProvider {
         }
         let http = attribution::apply(http, self.attribution);
         let body = match http.call() {
-            Ok(response) => response
-                .into_string()
-                .map_err(|error| format!("cannot read the model list: {error}"))?,
+            Ok(response) => {
+                if let Some(message) = crate::retry::redirect(&response) {
+                    return Err(message);
+                }
+                response
+                    .into_string()
+                    .map_err(|error| format!("cannot read the model list: {error}"))?
+            }
             Err(ureq::Error::Status(code, response)) => {
                 let text = response.into_string().unwrap_or_default();
                 return Err(format!("HTTP {code}: {}", error_text(&text)));
@@ -656,8 +666,11 @@ fn flush_tool_images(messages: &mut Vec<Value>, images: &mut Vec<Value>) {
     messages.push(json!({ "role": "user", "content": parts }));
 }
 
+/// The client of the API. It follows no redirect: one would carry the key
+/// (`Authorization`) to wherever the `Location` points.
 fn build_agent(connect: Duration, read: Duration) -> ureq::Agent {
     termide_http::agent_builder()
+        .redirects(0)
         .timeout_connect(connect)
         .timeout_read(read)
         .user_agent(concat!("termide-agent/", env!("CARGO_PKG_VERSION")))

@@ -13,6 +13,7 @@ pub(crate) fn hardened_git(dir: &Path, args: &[&str]) -> Command {
     let mut cmd = Command::new("git");
     cmd.args(args)
         .current_dir(dir)
+        .env("PATH", termide_fsutil::absolute_path_var())
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null());
     cmd
@@ -52,6 +53,9 @@ pub fn network_command(repo: &Path, args: &[&str], auth: SshAuth) -> Command {
     let mut cmd = Command::new("git");
     cmd.args(args)
         .current_dir(repo)
+        // git and what it starts (ssh, the hooks' programs) are looked for
+        // outside the repository only.
+        .env("PATH", termide_fsutil::absolute_path_var())
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("LC_ALL", "C")
         .stdin(Stdio::null())

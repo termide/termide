@@ -136,6 +136,7 @@ impl LspServer {
         let mut process = Command::new(&config.command)
             .args(&config.args)
             .current_dir(&workspace_root)
+            .env("PATH", crate::workspace::absolute_path_var())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
