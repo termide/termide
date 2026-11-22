@@ -14,7 +14,7 @@ use crate::pty_input::ReplySink;
 
 use super::{
     csi_handlers::{handle_cursor_movement, handle_private_sequence, handle_sgr},
-    Cell, KeyboardProtocolMode, TerminalScreen,
+    Cell, Charset, KeyboardProtocolMode, TerminalScreen,
 };
 
 /// Bells closer together than this ring once: a program printing BEL in
@@ -268,6 +268,13 @@ impl Perform for VtPerformer {
                     screen.bell = true;
                 }
             }
+            // SO / SI: print from G1 / G0, after the text before them.
+            0x0E | 0x0F => {
+                if let Ok(mut screen) = self.screen.write() {
+                    apply_ops(&mut self.pending_ops, &mut screen);
+                    screen.shift_out = byte == 0x0E;
+                }
+            }
             _ => {}
         }
     }
@@ -411,23 +418,20 @@ impl Perform for VtPerformer {
                             screen.force_cache_invalidation = true;
                         }
                         3 => {
-                            // Clear entire screen and scrollback
-                            let is_alt = screen.use_alt_screen;
-                            let buffer = screen.active_buffer_mut();
-                            for row in buffer.iter_mut() {
-                                row.fill(empty_cell);
-                            }
-                            // Clear scrollback only for main screen
-                            if !is_alt {
+                            // Erase the saved lines (xterm): the scrollback
+                            // only; the screen and the cursor stay. `clear`
+                            // sends `CSI 2 J` before it for the screen. The
+                            // scrollback is the main screen's: a full-screen
+                            // program leaves it alone.
+                            if !screen.use_alt_screen {
                                 let dropped = screen.scrollback.len();
                                 screen.marks.drop_front(dropped);
                                 screen.scrollback.clear();
                                 screen.scrollback_wrapped.clear();
+                                screen.scroll_offset = 0;
+                                // Force cache invalidation to show the change immediately
+                                screen.force_cache_invalidation = true;
                             }
-                            screen.erased_below(0);
-                            screen.cursor = (0, 0);
-                            // Force cache invalidation to show cleared screen immediately
-                            screen.force_cache_invalidation = true;
                         }
                         _ => {}
                     }
@@ -716,7 +720,20 @@ impl Perform for VtPerformer {
 
     fn esc_dispatch(&mut self, intermediates: &[u8], _ignore: bool, byte: u8) {
         self.flush();
-        // `ESC # 8`, `ESC ( B` and the like are other functions entirely.
+        if let [slot @ (b'(' | b')')] = intermediates {
+            // SCS: designate a character set into G0 or G1. Sets other than
+            // DEC Special Graphics (`0`) show as ASCII.
+            let set = if byte == b'0' {
+                Charset::DecSpecialGraphics
+            } else {
+                Charset::Ascii
+            };
+            if let Ok(mut screen) = self.screen.write() {
+                screen.charsets[usize::from(*slot == b')')] = set;
+            }
+            return;
+        }
+        // `ESC # 8` and the like are other functions entirely.
         if !intermediates.is_empty() {
             return;
         }
@@ -1137,6 +1154,81 @@ b]133;D;2
         performer.flush();
         assert_eq!(screen.read().unwrap().cursor, (0, 0));
         assert_eq!(row_text(&screen, 0), "x");
+    }
+
+    /// ncurses (6.1+, xterm-256color) enables mouse reporting as
+    /// `CSI ? 1006 ; 1000 h`: every mode in the list applies.
+    #[test]
+    fn every_private_mode_in_a_list_applies() {
+        use crate::terminal::MouseTrackingMode;
+        let (mut performer, _capture, screen) = performer();
+        feed(&mut performer, b"\x1b[?1006;1000;2004h");
+        {
+            let s = screen.read().unwrap();
+            assert!(s.sgr_mouse_mode && s.bracketed_paste_mode);
+            assert!(s.mouse_tracking == MouseTrackingMode::Normal);
+        }
+        feed(&mut performer, b"\x1b[?1000;1006l");
+        let s = screen.read().unwrap();
+        assert!(!s.sgr_mouse_mode);
+        assert!(s.mouse_tracking == MouseTrackingMode::None);
+    }
+
+    /// `ESC ( 0` draws lines from letters (tmux, mc, ncurses without UTF-8
+    /// line drawing), in G0 or in G1 behind Shift Out; `ESC ( B` and Shift
+    /// In bring back ASCII.
+    #[test]
+    fn dec_special_graphics_draw_lines() {
+        let (mut performer, _capture, screen) = performer();
+        feed(&mut performer, b"\x1b(0lqqk\x1b(B lqk\r\n");
+        feed(&mut performer, b"\x1b)0x\x0ex\x0fx\r\n");
+        performer.flush();
+        assert_eq!(row_text(&screen, 0), "┌──┐ lqk");
+        assert_eq!(row_text(&screen, 1), "x│x");
+        // A reset goes back to ASCII.
+        feed(&mut performer, b"\x1b(0\x1bcq");
+        performer.flush();
+        assert_eq!(row_text(&screen, 0), "q");
+    }
+
+    /// A DECSC/DECRC pair inside a full-screen program uses the alternate
+    /// screen's slot: leaving it still puts the cursor back where the
+    /// shell had it.
+    #[test]
+    fn each_screen_keeps_its_own_saved_cursor() {
+        let (mut performer, _capture, screen) = performer();
+        feed(
+            &mut performer,
+            b"\x1b[5;7H\x1b[?1049h\x1b[2;3H\x1b7\x1b[9;9H\x1b8",
+        );
+        assert_eq!(screen.read().unwrap().cursor, (1, 2));
+        feed(&mut performer, b"\x1b[?1049l");
+        assert_eq!(screen.read().unwrap().cursor, (4, 6));
+        // ESC 7 / ESC 8 on the main screen are untouched by the alternate one.
+        feed(
+            &mut performer,
+            b"\x1b[3;3H\x1b7\x1b[?1049h\x1b7\x1b[?1049l\x1b[1;1H\x1b8",
+        );
+        assert_eq!(screen.read().unwrap().cursor, (2, 2));
+    }
+
+    /// `CSI 3 J` erases the scrollback only; the screen and the cursor stay.
+    #[test]
+    fn erase_saved_lines_keeps_the_screen() {
+        let (mut performer, _capture, screen) = performer();
+        for i in 0..30 {
+            feed(&mut performer, format!("line{i}\r\n").as_bytes());
+        }
+        feed(&mut performer, b"$ ");
+        performer.flush();
+        let cursor = screen.read().unwrap().cursor;
+        feed(&mut performer, b"\x1b[3J");
+        let s = screen.read().unwrap();
+        assert!(s.scrollback.is_empty());
+        assert_eq!(s.cursor, cursor);
+        drop(s);
+        assert_eq!(row_text(&screen, 23), "$");
+        assert_eq!(row_text(&screen, 0), "line7");
     }
 
     #[test]

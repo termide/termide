@@ -157,15 +157,35 @@ pub fn get_clipboard_text() -> Option<String> {
     termide_ui::clipboard::paste_text_or_paths()
 }
 
-/// Paste data as one chunk, so nothing interleaves with it, optionally
-/// wrapped in bracketed-paste markers.
+/// Paste data as one chunk, so nothing interleaves with it: wrapped in
+/// bracketed-paste markers when the program asked for them (`CSI ? 2004 h`).
+///
+/// Control characters other than Tab, LF and CR are dropped, as xterm and
+/// other terminals do: an Escape in copied text could otherwise end the
+/// bracketed paste early (`ESC [ 201 ~`) and have the rest run as typed
+/// keys, and a `^C` or `^D` would act on the program. Without bracketed
+/// paste a line break goes as the Return key (CR), as terminals send it.
 pub fn paste_bytes(text: &str, bracketed: bool) -> Vec<u8> {
-    let mut buffer = Vec::with_capacity(text.len() + 14);
+    let mut buffer = Vec::with_capacity(text.len() + 12);
 
     if bracketed {
         buffer.extend_from_slice(b"\x1b[200~");
     }
-    buffer.extend_from_slice(text.as_bytes());
+    let mut chars = text.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\r' | '\n' if !bracketed => {
+                if ch == '\r' && chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+                buffer.push(b'\r');
+            }
+            '\t' | '\n' | '\r' => buffer.push(ch as u8),
+            // C0 controls, DEL and the C1 controls (U+0080..U+009F).
+            ch if ch.is_control() => {}
+            ch => buffer.extend_from_slice(ch.encode_utf8(&mut [0; 4]).as_bytes()),
+        }
+    }
     if bracketed {
         buffer.extend_from_slice(b"\x1b[201~");
     }
@@ -187,6 +207,18 @@ mod tests {
                 ch => screen.put_char(ch),
             }
         }
+    }
+
+    /// Markers go only to a program that enabled bracketed paste; an
+    /// Escape in the text cannot end the paste early and run the rest.
+    #[test]
+    fn a_paste_is_bracketed_only_when_asked_and_carries_no_controls() {
+        assert_eq!(
+            paste_bytes("ls\x1b[201~rm -rf ~\x03\n\tx", true),
+            b"\x1b[200~ls[201~rm -rf ~\n\tx\x1b[201~"
+        );
+        assert_eq!(paste_bytes("a\nb\r\nc\x1bd", false), b"a\rb\rcd");
+        assert_eq!(paste_bytes("ünï\u{9b}", false), "ünï".as_bytes());
     }
 
     /// The tail reaches up into the scrollback, joins a soft-wrapped line

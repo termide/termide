@@ -1,0 +1,1 @@
+- **Closing a terminal ends its background jobs.** A job started with `&` in a terminal panel outlived the panel and kept its terminal, and the panel's reader thread, alive. Closing the panel now hangs up the shell as closing a terminal window does, and the shell ends its jobs.

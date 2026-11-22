@@ -29,6 +29,30 @@ pub(crate) fn arrow_modifier_param(mods: KeyModifiers) -> Option<u8> {
     }
 }
 
+/// Insert, Delete, Page Up/Down and F1–F12 as xterm sends them, with the
+/// modifiers as a second parameter (`CSI 3 ; 5 ~` for Ctrl+Delete, `CSI 1 ;
+/// 2 P` for Shift+F1); `None` for other keys.
+pub(crate) fn function_key_bytes(code: KeyCode, mods: KeyModifiers) -> Option<Vec<u8>> {
+    let modifier = arrow_modifier_param(mods);
+    let tilde = |n: u8| match modifier {
+        Some(m) => format!("\x1b[{n};{m}~").into_bytes(),
+        None => format!("\x1b[{n}~").into_bytes(),
+    };
+    let ss3 = |c: char| match modifier {
+        Some(m) => format!("\x1b[1;{m}{c}").into_bytes(),
+        None => format!("\x1bO{c}").into_bytes(),
+    };
+    Some(match code {
+        KeyCode::Insert => tilde(2),
+        KeyCode::Delete => tilde(3),
+        KeyCode::PageUp => tilde(5),
+        KeyCode::PageDown => tilde(6),
+        KeyCode::F(n @ 1..=4) => ss3(['P', 'Q', 'R', 'S'][usize::from(n - 1)]),
+        KeyCode::F(n @ 5..=12) => tilde([15, 17, 18, 19, 20, 21, 23, 24][usize::from(n - 5)]),
+        _ => return None,
+    })
+}
+
 fn keyboard_modifier_param(mods: KeyModifiers) -> u8 {
     let mut value = 1;
     if mods.contains(KeyModifiers::SHIFT) {
@@ -74,8 +98,27 @@ pub(crate) fn pty_key(chord: termide_core::KeyChord) -> KeyEvent {
     raw
 }
 
-/// A character or Backspace as the legacy encoding sends it: Ctrl masks a
-/// character to its control byte, and Alt puts Escape before the result, as
+/// The control byte xterm sends for `Ctrl` with `c`, or `None` for a key
+/// that has none (`Ctrl+1`, `Ctrl+.`), which then goes as the plain key.
+/// The digits 2–8 stand in for the punctuation of the US layout, and a
+/// host terminal without a keyboard protocol reports 0x1C–0x1F as
+/// `Ctrl+4`..`Ctrl+7`, so `Ctrl+]` may arrive as `Ctrl+5`.
+fn control_byte(c: char) -> Option<u8> {
+    Some(match c {
+        'a'..='z' | 'A'..='Z' => c as u8 & 0x1f,
+        ' ' | '@' | '`' | '2' => 0x00,
+        '[' | '{' | '3' => 0x1b,
+        '\\' | '|' | '4' => 0x1c,
+        ']' | '}' | '5' => 0x1d,
+        '^' | '~' | '6' => 0x1e,
+        '_' | '/' | '-' | '7' => 0x1f,
+        '?' | '8' => 0x7f,
+        _ => return None,
+    })
+}
+
+/// A character or Backspace as the legacy encoding sends it: Ctrl turns a
+/// character into its control byte ([`control_byte`]), and Alt puts Escape before the result, as
 /// terminals with xterm's metaSendsEscape do. Readline, Emacs and Vim read
 /// Alt this way; without the Escape, Alt+D in the shell typed a plain `d`.
 pub(crate) fn legacy_key_bytes(code: KeyCode, mods: KeyModifiers) -> Vec<u8> {
@@ -84,7 +127,10 @@ pub(crate) fn legacy_key_bytes(code: KeyCode, mods: KeyModifiers) -> Vec<u8> {
         bytes.push(0x1b);
     }
     match code {
-        KeyCode::Char(c) if mods.contains(KeyModifiers::CONTROL) => bytes.push((c as u8) & 0x1f),
+        KeyCode::Char(c) if mods.contains(KeyModifiers::CONTROL) => match control_byte(c) {
+            Some(byte) => bytes.push(byte),
+            None => bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
+        },
         KeyCode::Char(c) => bytes.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes()),
         KeyCode::Backspace => bytes.push(0x7f),
         _ => {}
@@ -163,6 +209,43 @@ pub(crate) fn mouse_modifier_bits(mods: KeyModifiers) -> u8 {
         bits |= 16;
     }
     bits
+}
+
+/// A mouse event at 1-based cell (`x`, `y`) as xterm reports it. SGR
+/// (`CSI < b ; x ; y M/m`) names the released button; the X10 encoding
+/// (`CSI M b x y`, each byte offset by 32) has release as button 3 and no
+/// room for a coordinate past 223, where xterm sends nothing.
+pub(crate) fn mouse_report(
+    kind: crossterm::event::MouseEventKind,
+    mods: KeyModifiers,
+    x: u16,
+    y: u16,
+    sgr: bool,
+) -> Option<Vec<u8>> {
+    use crossterm::event::{MouseButton, MouseEventKind};
+
+    let button = |b: MouseButton| match b {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    let (code, release) = match kind {
+        MouseEventKind::Down(b) => (button(b), false),
+        MouseEventKind::Up(b) if sgr => (button(b), true),
+        MouseEventKind::Up(_) => (3, true),
+        MouseEventKind::Drag(b) => (32 + button(b), false),
+        MouseEventKind::Moved => (35, false),
+        MouseEventKind::ScrollUp => (64, false),
+        MouseEventKind::ScrollDown => (65, false),
+        _ => return None,
+    };
+    let code = code + mouse_modifier_bits(mods);
+    if sgr {
+        let suffix = if release { 'm' } else { 'M' };
+        return Some(format!("\x1b[<{code};{x};{y}{suffix}").into_bytes());
+    }
+    let byte = |v: u16| u8::try_from(v.saturating_add(32)).ok();
+    Some(vec![0x1b, b'[', b'M', code + 32, byte(x)?, byte(y)?])
 }
 
 pub(crate) fn can_send_mouse_event(
@@ -334,6 +417,38 @@ mod tests {
         ));
     }
 
+    /// SGR reports which button was released; X10 says 3 and cannot place
+    /// a column past 223, so nothing goes rather than a wrong cell.
+    #[test]
+    fn mouse_reports_name_the_released_button_and_stay_in_range() {
+        let none = KeyModifiers::NONE;
+        let up = |b| MouseEventKind::Up(b);
+        assert_eq!(
+            mouse_report(up(MouseButton::Left), none, 5, 7, true).unwrap(),
+            b"\x1b[<0;5;7m"
+        );
+        assert_eq!(
+            mouse_report(up(MouseButton::Right), KeyModifiers::CONTROL, 300, 2, true).unwrap(),
+            b"\x1b[<18;300;2m"
+        );
+        assert_eq!(
+            mouse_report(MouseEventKind::Down(MouseButton::Middle), none, 1, 1, true).unwrap(),
+            b"\x1b[<1;1;1M"
+        );
+        assert_eq!(
+            mouse_report(up(MouseButton::Right), none, 223, 1, false).unwrap(),
+            [0x1b, b'[', b'M', 35, 255, 33]
+        );
+        assert_eq!(
+            mouse_report(MouseEventKind::ScrollUp, none, 224, 1, false),
+            None
+        );
+        assert_eq!(
+            mouse_report(MouseEventKind::Moved, none, 1, 300, false),
+            None
+        );
+    }
+
     #[test]
     fn mouse_modifier_bits_match_xterm_encoding() {
         assert_eq!(mouse_modifier_bits(KeyModifiers::empty()), 0);
@@ -393,6 +508,56 @@ mod tests {
         );
         assert_eq!(key(KeyCode::Backspace, KeyModifiers::NONE), [0x7f]);
         assert_eq!(key(KeyCode::Backspace, KeyModifiers::ALT), [0x1b, 0x7f]);
+    }
+
+    /// Ctrl with punctuation and digits sends xterm's control bytes, not
+    /// the low five bits of the character (`Ctrl+/` was 0x0F, `^O`).
+    #[test]
+    fn control_chords_send_xterms_control_bytes() {
+        let ctrl = |c: char| legacy_key_bytes(KeyCode::Char(c), KeyModifiers::CONTROL);
+        for (keys, byte) in [
+            ("@ `2", 0x00),
+            ("[{3", 0x1b),
+            ("\\|4", 0x1c),
+            ("]}5", 0x1d),
+            ("^~6", 0x1e),
+            ("_/-7", 0x1f),
+            ("?8", 0x7f),
+            ("aA", 0x01),
+            ("zZ", 0x1a),
+        ] {
+            for c in keys.chars() {
+                assert_eq!(ctrl(c), [byte], "Ctrl+{c}");
+            }
+        }
+        // No control byte: the key itself.
+        assert_eq!(ctrl('1'), b"1");
+        assert_eq!(ctrl('.'), b".");
+        assert_eq!(
+            legacy_key_bytes(
+                KeyCode::Char('/'),
+                KeyModifiers::CONTROL | KeyModifiers::ALT
+            ),
+            [0x1b, 0x1f]
+        );
+    }
+
+    #[test]
+    fn function_keys_carry_their_modifiers() {
+        let key = |code, mods| function_key_bytes(code, mods).unwrap();
+        let none = KeyModifiers::NONE;
+        assert_eq!(key(KeyCode::Insert, none), b"\x1b[2~");
+        assert_eq!(key(KeyCode::Delete, none), b"\x1b[3~");
+        assert_eq!(key(KeyCode::Delete, KeyModifiers::CONTROL), b"\x1b[3;5~");
+        assert_eq!(key(KeyCode::PageUp, KeyModifiers::SHIFT), b"\x1b[5;2~");
+        assert_eq!(key(KeyCode::PageDown, none), b"\x1b[6~");
+        assert_eq!(key(KeyCode::F(1), none), b"\x1bOP");
+        assert_eq!(key(KeyCode::F(1), KeyModifiers::SHIFT), b"\x1b[1;2P");
+        assert_eq!(key(KeyCode::F(4), KeyModifiers::ALT), b"\x1b[1;3S");
+        assert_eq!(key(KeyCode::F(5), KeyModifiers::SHIFT), b"\x1b[15;2~");
+        assert_eq!(key(KeyCode::F(12), none), b"\x1b[24~");
+        assert_eq!(function_key_bytes(KeyCode::F(13), none), None);
+        assert_eq!(function_key_bytes(KeyCode::Tab, none), None);
     }
 
     #[test]
