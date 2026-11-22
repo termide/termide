@@ -45,11 +45,15 @@ pub enum SshAuth<'a> {
 /// non-interactive askpass helper that supplies a passphrase termide already
 /// holds. `stdout`/`stderr` are piped for the caller to capture; the command is
 /// returned ready to `.spawn()`.
+///
+/// The messages are kept in English (`LC_ALL=C`): the credential failures
+/// are recognised by their wording, which a translated git would change.
 pub fn network_command(repo: &Path, args: &[&str], auth: SshAuth) -> Command {
     let mut cmd = Command::new("git");
     cmd.args(args)
         .current_dir(repo)
         .env("GIT_TERMINAL_PROMPT", "0")
+        .env("LC_ALL", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -246,15 +250,20 @@ mod tests {
 
         let mut terminal_prompt = None;
         let mut ssh_command = None;
+        let mut locale = None;
         for (k, v) in cmd.get_envs() {
             if k == OsStr::new("GIT_TERMINAL_PROMPT") {
                 terminal_prompt = v.map(|s| s.to_string_lossy().into_owned());
             } else if k == OsStr::new("GIT_SSH_COMMAND") {
                 ssh_command = v.map(|s| s.to_string_lossy().into_owned());
+            } else if k == OsStr::new("LC_ALL") {
+                locale = v.map(|s| s.to_string_lossy().into_owned());
             }
         }
 
         assert_eq!(terminal_prompt.as_deref(), Some("0"));
+        // The vault recognises credential failures by git's English wording.
+        assert_eq!(locale.as_deref(), Some("C"));
         assert!(
             ssh_command
                 .as_deref()
