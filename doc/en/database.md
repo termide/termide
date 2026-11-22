@@ -109,9 +109,10 @@ Press `s` on a column to sort by it server-side. The cycle is
 the cheapest option on large tables. The sorted column shows a `↑`/`↓` arrow in
 its header. One column at a time.
 
-> On PostgreSQL, paging through an *unsorted* table can return rows in a
-> slightly different order between pages (the engine's natural order isn't
-> stable across `OFFSET`s). Apply a sort if you need a stable order.
+> On PostgreSQL, whose natural order is not stable across pages (an edited row
+> moves), rows are also ordered by the table's primary key — alone when the
+> table is unsorted, after the chosen column otherwise. A table without a
+> primary key keeps the server's order; apply a sort if you need a stable one.
 
 ## Filtering
 

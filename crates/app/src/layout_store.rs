@@ -38,6 +38,39 @@ fn fullscreen_preset(n: usize, focused: usize, area_height: u16) -> Vec<u16> {
     }
     heights
 }
+
+/// Where the item at `index` lands once only the items flagged in `kept`
+/// remain, or `None` when nothing remains. A dropped item hands its place to
+/// the kept one before it (the next one when none precedes it), as closing a
+/// panel does.
+fn remap_index(kept: &[bool], index: usize) -> Option<usize> {
+    let remaining = kept.iter().filter(|&&k| k).count();
+    if remaining == 0 {
+        return None;
+    }
+    let index = index.min(kept.len() - 1);
+    let before = kept[..index].iter().filter(|&&k| k).count();
+    let mapped = if kept[index] {
+        before
+    } else {
+        before.saturating_sub(1)
+    };
+    Some(mapped.min(remaining - 1))
+}
+
+/// The entries of a per-panel vector for the panels flagged in `kept`.
+/// A vector that does not match the panel count is stale and dropped, as
+/// `PanelGroup::from_parts` would; so is one with nothing left.
+fn retain_per_panel(values: Option<Vec<u16>>, kept: &[bool]) -> Option<Vec<u16>> {
+    let values = values.filter(|v| v.len() == kept.len())?;
+    let retained: Vec<u16> = values
+        .into_iter()
+        .zip(kept)
+        .filter_map(|(v, &k)| k.then_some(v))
+        .collect();
+    (!retained.is_empty()).then_some(retained)
+}
+
 use termide_config::AiSettings;
 use termide_panel_editor::{Editor, EditorConfig};
 use termide_panel_file_manager::FileManager;
@@ -73,31 +106,41 @@ pub trait LayoutPersistence {
 
 impl LayoutPersistence for LayoutManager {
     fn to_state(&mut self, project_dir: &Path) -> ProjectLayout {
-        let panel_groups: Vec<PanelGroupState> = self
-            .panel_groups
-            .iter_mut()
-            .map(|group| {
-                let panels: Vec<_> = group
-                    .panels_mut()
-                    .iter_mut()
-                    .filter_map(|panel| panel.to_state(project_dir))
-                    .collect();
-
-                PanelGroupState {
-                    panels,
-                    expanded_index: group.expanded_index(),
-                    width: group.width,
-                    // `mode` is legacy — never written by current code.
-                    mode: GroupLayoutMode::default(),
-                    split_heights: group.split_heights().map(|s| s.to_vec()),
-                    fullscreen_cache: group.fullscreen_cache().map(|c| c.to_vec()),
-                }
-            })
-            .collect();
+        // Panels without a saved form (plugin panels, operations, an empty
+        // editor…) are left out, so every per-panel index and vector is
+        // remapped to the panels that are written, and a group left with
+        // none is not written at all.
+        let mut groups_kept = Vec::with_capacity(self.panel_groups.len());
+        let mut panel_groups: Vec<PanelGroupState> = Vec::new();
+        for group in self.panel_groups.iter_mut() {
+            let states: Vec<Option<PanelState>> = group
+                .panels_mut()
+                .iter_mut()
+                .map(|panel| panel.to_state(project_dir))
+                .collect();
+            let kept: Vec<bool> = states.iter().map(Option::is_some).collect();
+            let Some(expanded_index) = remap_index(&kept, group.expanded_index()) else {
+                groups_kept.push(false);
+                continue;
+            };
+            groups_kept.push(true);
+            panel_groups.push(PanelGroupState {
+                panels: states.into_iter().flatten().collect(),
+                expanded_index,
+                width: group.width,
+                // `mode` is legacy — never written by current code.
+                mode: GroupLayoutMode::default(),
+                split_heights: retain_per_panel(group.split_heights().map(<[u16]>::to_vec), &kept),
+                fullscreen_cache: retain_per_panel(
+                    group.fullscreen_cache().map(<[u16]>::to_vec),
+                    &kept,
+                ),
+            });
+        }
 
         ProjectLayout {
             panel_groups,
-            focused_group: self.focus,
+            focused_group: remap_index(&groups_kept, self.focus).unwrap_or(0),
         }
     }
 
@@ -111,8 +154,11 @@ impl LayoutPersistence for LayoutManager {
         agent_settings: AiSettings,
     ) -> Result<LayoutManager> {
         let mut manager = LayoutManager::new();
+        // Which saved groups came back, to move the focus with them.
+        let mut groups_kept = Vec::with_capacity(layout.panel_groups.len());
 
         for saved_group in layout.panel_groups {
+            groups_kept.push(false);
             if saved_group.panels.is_empty() {
                 continue;
             }
@@ -149,7 +195,9 @@ impl LayoutPersistence for LayoutManager {
                 .collect();
 
             let mut panels: Vec<Box<dyn Panel>> = Vec::with_capacity(handles.len());
+            let mut kept = Vec::with_capacity(handles.len());
             for handle in handles {
+                let built_before = panels.len();
                 match handle.join() {
                     Ok(Some(panel)) => panels.push(panel),
                     Ok(None) => {} // construct_panel logged the failure
@@ -157,14 +205,18 @@ impl LayoutPersistence for LayoutManager {
                         log::warn!("panel construction worker panicked during layout restore")
                     }
                 }
+                kept.push(panels.len() > built_before);
             }
 
-            if panels.is_empty() {
+            // Panels that failed to rebuild shift the rest, so the focus
+            // and the per-panel heights follow the ones that came back.
+            let Some(expanded_idx) = remap_index(&kept, saved_group.expanded_index) else {
                 continue;
-            }
-
+            };
+            let legacy_without_heights = saved_group.split_heights.is_none();
+            let saved_split_heights = retain_per_panel(saved_group.split_heights, &kept);
+            let saved_fullscreen_cache = retain_per_panel(saved_group.fullscreen_cache, &kept);
             let n_panels = panels.len();
-            let expanded_idx = saved_group.expanded_index.min(n_panels - 1);
 
             // Decide what fullscreen-cache to seed the group with so
             // toggle-off in this run restores the user's pre-fullscreen
@@ -177,10 +229,10 @@ impl LayoutPersistence for LayoutManager {
             //    fresh equal-distribution cache so toggling off lands
             //    the user in a sane free-resize layout.
             let area_height = term_height.saturating_sub(2);
-            let fullscreen_cache = if let Some(cache) = saved_group.fullscreen_cache {
+            let fullscreen_cache = if let Some(cache) = saved_fullscreen_cache {
                 Some(cache)
             } else if matches!(saved_group.mode, GroupLayoutMode::Accordion)
-                && saved_group.split_heights.is_none()
+                && legacy_without_heights
                 && n_panels >= 2
             {
                 let per = area_height / n_panels as u16;
@@ -200,7 +252,7 @@ impl LayoutPersistence for LayoutManager {
             let split_heights = if in_fullscreen {
                 Some(fullscreen_preset(n_panels, expanded_idx, area_height))
             } else {
-                saved_group.split_heights
+                saved_split_heights
             };
 
             let mut group = PanelGroup::from_parts(
@@ -217,11 +269,10 @@ impl LayoutPersistence for LayoutManager {
             }
 
             manager.panel_groups.push(group);
+            *groups_kept.last_mut().expect("pushed above") = true;
         }
 
-        manager.focus = layout
-            .focused_group
-            .min(manager.panel_groups.len().saturating_sub(1));
+        manager.focus = remap_index(&groups_kept, layout.focused_group).unwrap_or(0);
 
         Ok(manager)
     }
@@ -413,6 +464,119 @@ fn construct_panel(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::{buffer::Buffer, layout::Rect};
+    use termide_core::{PanelEvent, RenderContext};
+
+    /// A panel with no saved form, like a plugin panel.
+    struct UnsavedPanel;
+
+    impl Panel for UnsavedPanel {
+        fn name(&self) -> &'static str {
+            "unsaved"
+        }
+        fn title(&self) -> String {
+            "unsaved".to_string()
+        }
+        fn render(&mut self, _area: Rect, _buf: &mut Buffer, _ctx: &RenderContext) {}
+        fn handle_key(&mut self, _chord: termide_core::KeyChord) -> Vec<PanelEvent> {
+            vec![]
+        }
+    }
+
+    fn group_state(
+        panels: Vec<PanelState>,
+        expanded_index: usize,
+        split_heights: Option<Vec<u16>>,
+    ) -> PanelGroupState {
+        PanelGroupState {
+            panels,
+            expanded_index,
+            width: None,
+            mode: GroupLayoutMode::default(),
+            split_heights,
+            fullscreen_cache: None,
+        }
+    }
+
+    #[test]
+    fn remap_index_follows_the_kept_items() {
+        assert_eq!(remap_index(&[true, false, true], 2), Some(1));
+        assert_eq!(remap_index(&[true, false, true], 1), Some(0));
+        assert_eq!(remap_index(&[false, true], 0), Some(0));
+        assert_eq!(remap_index(&[true, true], 9), Some(1));
+        assert_eq!(remap_index(&[false, false], 0), None);
+    }
+
+    /// A panel without a saved form drops out of the layout; the focus and
+    /// the heights of the others stay with them, and a group left empty
+    /// takes the group focus along.
+    #[test]
+    fn saving_leaves_unsaved_panels_out_in_step_with_focus_and_heights() {
+        let mut manager = LayoutManager::new();
+        let mut first = PanelGroup::new(Box::new(JournalPanel::default()));
+        first.add_panel(Box::new(UnsavedPanel));
+        first.add_panel(Box::new(JournalPanel::default()));
+        first.set_split_heights(vec![5, 10, 15]);
+        first.set_expanded(2);
+        manager.panel_groups.push(first);
+        manager
+            .panel_groups
+            .push(PanelGroup::new(Box::new(UnsavedPanel)));
+        manager
+            .panel_groups
+            .push(PanelGroup::new(Box::new(JournalPanel::default())));
+        manager.focus = 2;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let layout = manager.to_state(tmp.path());
+
+        assert_eq!(layout.panel_groups.len(), 2);
+        assert_eq!(layout.focused_group, 1);
+        let saved = &layout.panel_groups[0];
+        assert_eq!(saved.panels, vec![PanelState::Journal, PanelState::Journal]);
+        assert_eq!(saved.expanded_index, 1);
+        assert_eq!(saved.split_heights, Some(vec![5, 15]));
+    }
+
+    /// A saved panel that cannot be rebuilt drops out on restore with the
+    /// same remapping, and so does a group none of whose panels come back.
+    #[test]
+    fn restoring_remaps_focus_and_heights_past_panels_that_fail() {
+        let gone = || PanelState::Editor {
+            path: None,
+            unsaved_buffer_file: None,
+        };
+        let layout = ProjectLayout {
+            panel_groups: vec![
+                group_state(
+                    vec![gone(), PanelState::Journal, PanelState::Journal],
+                    2,
+                    Some(vec![3, 7, 20]),
+                ),
+                group_state(vec![gone()], 0, None),
+                group_state(vec![PanelState::Journal], 0, None),
+            ],
+            focused_group: 2,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let manager = LayoutManager::from_layout(
+            layout,
+            tmp.path(),
+            tmp.path(),
+            32,
+            80,
+            EditorConfig::default(),
+            AiSettings::default(),
+        )
+        .unwrap();
+
+        assert_eq!(manager.panel_groups.len(), 2);
+        assert_eq!(manager.focus, 1);
+        let group = &manager.panel_groups[0];
+        assert_eq!(group.panels().len(), 2);
+        assert_eq!(group.expanded_index(), 1);
+        assert_eq!(group.split_heights(), Some(&[7, 20][..]));
+    }
 
     /// A terminal's saved directory can vanish between runs; restoring must
     /// climb to a surviving ancestor rather than fail to spawn the shell.

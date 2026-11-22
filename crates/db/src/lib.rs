@@ -10,8 +10,9 @@ mod engine;
 mod error;
 mod value;
 
-use std::sync::mpsc;
-use std::thread::{self, JoinHandle};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
+use std::thread;
 
 pub use error::DbError;
 pub use value::DbValue;
@@ -162,12 +163,14 @@ enum Request {
 /// [`mpsc::Receiver`] the caller polls with `try_recv()` from the TUI loop.
 ///
 /// Queries are serialised (one connection, one in flight) — fine for a viewer
-/// and keeps the bridge trivial. Dropping the handle closes the channel, which
-/// ends the worker loop and the pool.
+/// and keeps the bridge trivial. Dropping the handle returns at once: the
+/// worker finishes the query in flight, if any, skips the queued ones and
+/// closes the pool on its own.
 pub struct DbConnection {
     backend: DbBackend,
     tx: Option<mpsc::Sender<Request>>,
-    worker: Option<JoinHandle<()>>,
+    /// Set when the handle is dropped: the worker serves nothing more.
+    closed: Arc<AtomicBool>,
 }
 
 impl DbConnection {
@@ -179,17 +182,19 @@ impl DbConnection {
         let url = url.to_string();
         let (init_tx, init_rx) = mpsc::channel::<Result<(), DbError>>();
         let (tx, rx) = mpsc::channel::<Request>();
+        let closed = Arc::new(AtomicBool::new(false));
+        let worker_closed = Arc::clone(&closed);
 
         let worker = thread::Builder::new()
             .name("termide-db".into())
-            .spawn(move || run_worker(url, init_tx, rx))
+            .spawn(move || run_worker(url, init_tx, rx, worker_closed))
             .map_err(|e| DbError::Runtime(e.to_string()))?;
 
         match init_rx.recv() {
             Ok(Ok(())) => Ok(Self {
                 backend,
                 tx: Some(tx),
-                worker: Some(worker),
+                closed,
             }),
             Ok(Err(e)) => {
                 let _ = worker.join();
@@ -299,12 +304,12 @@ impl DbConnection {
 
 impl Drop for DbConnection {
     fn drop(&mut self) {
-        // Closing the request channel ends the worker's recv loop, after which
-        // it closes the pool and exits.
+        // Runs on the UI thread, when a panel closes or termide quits: never
+        // wait for the server. The flag makes the worker drop what is queued
+        // (nobody reads the answers any more), and closing the channel ends
+        // its loop; the detached thread then closes the pool by itself.
+        self.closed.store(true, Ordering::Release);
         self.tx.take();
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
-        }
     }
 }
 
@@ -314,6 +319,7 @@ fn run_worker(
     url: String,
     init_tx: mpsc::Sender<Result<(), DbError>>,
     rx: mpsc::Receiver<Request>,
+    closed: Arc<AtomicBool>,
 ) {
     let rt = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -342,6 +348,9 @@ fn run_worker(
     let mut writable = !matches!(pool, engine::Pool::Sqlite(_));
 
     while let Ok(req) = rx.recv() {
+        if closed.load(Ordering::Acquire) {
+            break;
+        }
         match req {
             Request::ListDatabases(reply) => {
                 let _ = reply.send(rt.block_on(engine::list_databases(&pool)));
@@ -489,6 +498,55 @@ mod tests {
         // it rather than guessing which row to write.
         let none = conn.primary_key("empty_t").recv().unwrap().unwrap();
         assert!(none.is_empty(), "{none:?}");
+    }
+
+    /// Closing a panel drops its handle on the UI thread while a query may
+    /// still wait on the server: the drop returns at once, and what was
+    /// queued behind that query is skipped rather than run for nobody.
+    #[test]
+    fn dropping_the_handle_waits_for_no_query() {
+        let (dir, url) = make_sqlite_db();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        // Another connection holds the write lock, so the edit below waits on
+        // SQLite's busy timeout.
+        let write_url = format!("sqlite://{}", dir.path().join("test.db").display());
+        let mut holder = rt.block_on(async {
+            use sqlx::Connection;
+            let mut c = sqlx::SqliteConnection::connect(&write_url).await.unwrap();
+            sqlx::query("BEGIN IMMEDIATE")
+                .execute(&mut c)
+                .await
+                .unwrap();
+            c
+        });
+
+        let conn = DbConnection::connect(&url).unwrap();
+        let edit = conn.update_cell(
+            "users",
+            vec![("id".to_string(), DbValue::Int(1))],
+            "name",
+            DbValue::Text("x".to_string()),
+        );
+        let queued: Vec<_> = (0..5).map(|_| conn.count("users", vec![])).collect();
+        // Let the worker take the edit up before the handle goes.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+
+        let started = std::time::Instant::now();
+        drop(conn);
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(1),
+            "drop waited {:?}",
+            started.elapsed()
+        );
+
+        rt.block_on(async {
+            sqlx::query("ROLLBACK").execute(&mut holder).await.unwrap();
+        });
+        // The edit in flight still answers; the queued counts never run.
+        assert!(edit.recv().is_ok());
+        for rx in queued {
+            assert!(rx.recv().is_err(), "a queued request ran after the drop");
+        }
     }
 
     /// The viewer browses SQLite through a read-only handle; the first edit has

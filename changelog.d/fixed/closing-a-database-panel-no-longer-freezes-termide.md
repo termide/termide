@@ -1,0 +1,1 @@
+- **Closing a database panel no longer freezes termide.** Closing the panel, or quitting, waited for the database to answer the query in progress and then ran every query still queued behind it, so a slow server or a locked SQLite file held the whole screen. The panel now closes at once; the query in progress finishes in the background and the queued ones are dropped.
