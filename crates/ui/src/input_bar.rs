@@ -1077,24 +1077,27 @@ fn render_multiline(
         buf.set_string(area.x, y, prefix, prompt_style);
         if let Some(&(row, start, end)) = visual.get(scroll + r) {
             let seg: String = lines[row].chars().skip(start).take(end - start).collect();
-            buf.set_stringn(text_x, y, &seg, tw, text_style);
             // Invert the selected characters of this visual row. One
             // logical row holds at most one selected range, and it can show
-            // on several wrapped rows of that line.
+            // on several wrapped rows of that line. A cluster at a time: a
+            // letter and its accents share a cell.
             let selection = selected.iter().find(|(srow, _, _)| *srow == row);
-            let mut col = 0usize;
-            for (i, c) in lines[row].chars().enumerate().skip(start).take(end - start) {
-                let cw = char_width(c);
-                if col + cw > tw {
-                    break;
-                }
-                if selection.is_some_and(|(_, from, to)| i >= *from && i < *to) {
-                    for x in 0..cw {
-                        buf[(text_x + (col + x) as u16, y)].set_style(selected_style);
+            crate::grapheme_utils::render_field_text(
+                buf,
+                text_x,
+                y,
+                text_width,
+                &seg,
+                0,
+                |at, _| {
+                    let i = start + at;
+                    if selection.is_some_and(|(_, from, to)| i >= *from && i < *to) {
+                        selected_style
+                    } else {
+                        text_style
                     }
-                }
-                col += cw;
-            }
+                },
+            );
         }
     }
 
@@ -1108,11 +1111,9 @@ fn render_multiline(
     if focused {
         if let Some(vr) = cursor_vi.checked_sub(scroll).filter(|vr| *vr < height) {
             let (row, start, _) = visual[cursor_vi];
-            let col: usize = lines[row]
-                .chars()
-                .skip(start)
-                .take(cursor.col - start)
-                .map(char_width)
+            let col: usize = crate::text_utils::field_clusters(&lines[row])
+                .filter(|&(at, _, _)| at >= start && at < cursor.col)
+                .map(|(_, _, w)| w)
                 .sum();
             if (col as u16) < text_width {
                 let x = text_x + col as u16;
@@ -1124,15 +1125,15 @@ fn render_multiline(
 }
 
 /// Split `line` into visual segments no wider than `width` display columns,
-/// each a `[start, end)` char-index range. An empty line yields one empty
-/// segment so it still occupies a row.
+/// each a `[start, end)` char-index range that never splits a grapheme
+/// cluster (a letter and its accents wrap together). An empty line yields one
+/// empty segment so it still occupies a row.
 fn wrap_line(line: &str, width: usize) -> Vec<(usize, usize)> {
     let width = width.max(1);
     let mut out = Vec::new();
     let mut start = 0usize;
     let mut w = 0usize;
-    for (i, c) in line.chars().enumerate() {
-        let cw = char_width(c);
+    for (i, _, cw) in crate::text_utils::field_clusters(line) {
         if w + cw > width && i > start {
             out.push((start, i));
             start = i;
@@ -1149,10 +1150,6 @@ pub fn wrapped_row_count(text: &str, width: usize) -> usize {
     text.split('\n')
         .map(|line| wrap_line(line, width).len())
         .sum()
-}
-
-fn char_width(c: char) -> usize {
-    str_display_width(&c.to_string()).max(1)
 }
 
 fn hit(area: Rect, col: u16, row: u16) -> bool {
@@ -1420,6 +1417,35 @@ mod tests {
         let cursor = b.multiline(0).unwrap().cursor();
         assert_eq!(cursor.row, 1);
         assert_eq!(cursor.col, 2);
+    }
+
+    /// "café" as macOS spells it, `e` then COMBINING ACUTE, in the prompt
+    /// box: one cell when drawn, wrapped and clicked.
+    #[test]
+    fn a_multiline_field_draws_wraps_and_clicks_an_accented_letter_as_one_cell() {
+        // The accent never wraps away from its letter, and counts no cell.
+        assert_eq!(wrap_line("cafe\u{301}xy", 4), vec![(0, 5), (5, 7)]);
+        assert_eq!(wrap_line("abce\u{301}", 3), vec![(0, 3), (3, 5)]);
+
+        let mut b = InputBar::new(vec![]).with_multiline_field("");
+        b.multiline_mut(0).unwrap().insert_str("cafe\u{301}x");
+        let area = Rect::new(0, 0, 40, b.height());
+        let mut buf = Buffer::filled(area, ratatui::buffer::Cell::default());
+        b.render(area, &mut buf, &ThemeColors::default(), true);
+        // After the "› " prompt: c a f é x, then the cursor in cell 7.
+        assert_eq!(buf[(5, 0)].symbol(), "e\u{301}");
+        assert_eq!(buf[(6, 0)].symbol(), "x");
+        let colors = ThemeColors::default();
+        assert_eq!(buf[(7, 0)].bg, colors.fg, "the cursor right after the x");
+        // A click on the x lands before it, past both characters of é.
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 6,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        b.handle_mouse(click);
+        assert_eq!(b.multiline(0).unwrap().cursor().col, 5);
     }
 
     #[test]

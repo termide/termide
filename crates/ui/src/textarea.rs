@@ -8,6 +8,12 @@
 //! - Undo/Redo history
 //! - The soft-wrap geometry of the last render, so a host that draws the text
 //!   wrapped can map a click on a wrapped row back to the character under it
+//!
+//! Columns are character indices, kept at the start of a grapheme cluster
+//! (see [`crate::text_utils::field_clusters`]): a letter with its combining
+//! accents is one step for the cursor, Backspace and Delete.
+
+use crate::text_utils;
 
 /// Position in the text area (row, column in characters)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -417,10 +423,12 @@ impl TextArea {
 
         if self.cursor.col > 0 {
             self.save_undo_state();
-            self.cursor.col -= 1;
+            // The whole cluster: a letter with its accents, not the accent.
             let line = &mut self.lines[self.cursor.row];
-            let byte_idx = char_to_byte_index(line, self.cursor.col);
-            line.remove(byte_idx);
+            let end = char_to_byte_index(line, self.cursor.col);
+            self.cursor.col = text_utils::cluster_start_before(line, self.cursor.col);
+            let start = char_to_byte_index(line, self.cursor.col);
+            line.replace_range(start..end, "");
             true
         } else if self.cursor.row > 0 {
             // Join with previous line
@@ -445,8 +453,10 @@ impl TextArea {
         if self.cursor.col < line_len {
             self.save_undo_state();
             let line = &mut self.lines[self.cursor.row];
-            let byte_idx = char_to_byte_index(line, self.cursor.col);
-            line.remove(byte_idx);
+            let start = char_to_byte_index(line, self.cursor.col);
+            let end =
+                char_to_byte_index(line, text_utils::cluster_end_after(line, self.cursor.col));
+            line.replace_range(start..end, "");
             true
         } else if self.cursor.row + 1 < self.lines.len() {
             // Join with next line
@@ -461,11 +471,24 @@ impl TextArea {
 
     // === Navigation ===
 
-    /// Move cursor left.
+    /// Move cursor left, over a whole grapheme cluster.
     pub fn move_left(&mut self) -> bool {
         self.clear_selection();
+        self.step_left()
+    }
+
+    /// Move cursor right, over a whole grapheme cluster.
+    pub fn move_right(&mut self) -> bool {
+        self.clear_selection();
+        self.step_right()
+    }
+
+    /// One cluster left, or to the end of the line above at a line's start;
+    /// leaves the selection to the caller.
+    fn step_left(&mut self) -> bool {
         if self.cursor.col > 0 {
-            self.cursor.col -= 1;
+            self.cursor.col =
+                text_utils::cluster_start_before(self.current_line(), self.cursor.col);
             true
         } else if self.cursor.row > 0 {
             self.cursor.row -= 1;
@@ -476,12 +499,12 @@ impl TextArea {
         }
     }
 
-    /// Move cursor right.
-    pub fn move_right(&mut self) -> bool {
-        self.clear_selection();
+    /// One cluster right, or to the start of the line below at a line's end;
+    /// leaves the selection to the caller.
+    fn step_right(&mut self) -> bool {
         let line_len = self.current_line_len();
         if self.cursor.col < line_len {
-            self.cursor.col += 1;
+            self.cursor.col = text_utils::cluster_end_after(self.current_line(), self.cursor.col);
             true
         } else if self.cursor.row + 1 < self.lines.len() {
             self.cursor.row += 1;
@@ -524,8 +547,11 @@ impl TextArea {
         if target >= self.lines.len() {
             return false;
         }
-        self.cursor.row = target;
-        self.cursor.col = self.cursor.col.min(self.current_line_len());
+        // Keep the display column, not the character count: an accented
+        // letter or a wide character is not one column per character.
+        let column = cells_between(self.current_line(), 0, self.cursor.col);
+        let line = &self.lines[target];
+        self.cursor = CursorPos::new(target, col_at_column(line, 0, line.chars().count(), column));
         true
     }
 
@@ -584,33 +610,17 @@ impl TextArea {
             return false;
         };
         let (_, cur_start, _) = rows[current];
-        let line = &self.lines[self.cursor.row];
-        let column = crate::grapheme_utils::str_display_width(
-            &line
-                .chars()
-                .skip(cur_start)
-                .take(self.cursor.col - cur_start)
-                .collect::<String>(),
-        );
+        let column = cells_between(&self.lines[self.cursor.row], cur_start, self.cursor.col);
+        let line = &self.lines[row];
         // Every row but a line's last ends where the next begins, so its
-        // `end` itself is drawn on the row below: stop one short of it.
+        // `end` itself is drawn on the row below: stop one cluster short.
         let last_of_line = rows.get(target + 1).is_none_or(|next| next.0 != row);
         let limit = if last_of_line || end == start {
             end
         } else {
-            end - 1
+            text_utils::cluster_start_before(line, end).max(start)
         };
-        let mut col = start;
-        let mut width = 0usize;
-        for c in self.lines[row].chars().skip(start).take(limit - start) {
-            let cw = crate::grapheme_utils::str_display_width(&c.to_string()).max(1);
-            if width + cw > column {
-                break;
-            }
-            width += cw;
-            col += 1;
-        }
-        self.cursor = CursorPos::new(row, col);
+        self.cursor = CursorPos::new(row, col_at_column(line, start, limit, column));
         true
     }
 
@@ -655,7 +665,7 @@ impl TextArea {
         while pos > 0 && chars[pos - 1].is_alphanumeric() {
             pos -= 1;
         }
-        pos
+        text_utils::cluster_floor(self.current_line(), pos)
     }
 
     /// Char index of the word boundary after `col` on the cursor's line.
@@ -672,7 +682,8 @@ impl TextArea {
         while pos < len && chars[pos].is_whitespace() {
             pos += 1;
         }
-        pos
+        // Past a letter's accents, which are not alphanumeric themselves.
+        text_utils::cluster_ceil(self.current_line(), pos)
     }
 
     /// Move one word left (Ctrl+Left); at the start of a line, to the end of
@@ -706,32 +717,13 @@ impl TextArea {
     /// Move left with selection.
     pub fn move_left_with_selection(&mut self) -> bool {
         self.start_selection();
-        if self.cursor.col > 0 {
-            self.cursor.col -= 1;
-            true
-        } else if self.cursor.row > 0 {
-            self.cursor.row -= 1;
-            self.cursor.col = self.current_line_len();
-            true
-        } else {
-            false
-        }
+        self.step_left()
     }
 
     /// Move right with selection.
     pub fn move_right_with_selection(&mut self) -> bool {
         self.start_selection();
-        let line_len = self.current_line_len();
-        if self.cursor.col < line_len {
-            self.cursor.col += 1;
-            true
-        } else if self.cursor.row + 1 < self.lines.len() {
-            self.cursor.row += 1;
-            self.cursor.col = 0;
-            true
-        } else {
-            false
-        }
+        self.step_right()
     }
 
     /// Move up with selection.
@@ -800,7 +792,8 @@ impl TextArea {
     pub fn set_cursor(&mut self, row: usize, col: usize) {
         self.clear_selection();
         self.cursor.row = row.min(self.lines.len().saturating_sub(1));
-        self.cursor.col = col.min(self.current_line_len());
+        // Never inside a cluster: a position on an accent is its letter's.
+        self.cursor.col = text_utils::cluster_floor(self.current_line(), col);
     }
 
     /// Place the cursor for a mouse press, dropping any selection: the anchor
@@ -846,9 +839,11 @@ impl TextArea {
         self.place_cursor(row, col);
         let row = self.cursor.row;
         let chars: Vec<char> = self.lines[row].chars().collect();
-        if let Some((start, end)) = crate::text_utils::word_range_at(&chars, self.cursor.col) {
-            self.selection_anchor = Some(CursorPos::new(row, start));
-            self.cursor.col = end;
+        if let Some((start, end)) = text_utils::word_range_at(&chars, self.cursor.col) {
+            let line = &self.lines[row];
+            self.selection_anchor =
+                Some(CursorPos::new(row, text_utils::cluster_floor(line, start)));
+            self.cursor.col = text_utils::cluster_ceil(line, end);
         }
     }
 
@@ -859,8 +854,7 @@ impl TextArea {
             self.selection_anchor = Some(self.cursor);
         }
         self.cursor.row = row.min(self.lines.len().saturating_sub(1));
-        let line_len = self.lines[self.cursor.row].chars().count();
-        self.cursor.col = col.min(line_len);
+        self.cursor.col = text_utils::cluster_floor(&self.lines[self.cursor.row], col);
     }
 
     // === Soft-wrap geometry ===
@@ -896,18 +890,39 @@ impl TextArea {
             None => return self.cursor,
         };
         let line = self.lines.get(row).map(|s| s.as_str()).unwrap_or_default();
-        let mut col = start;
-        let mut width = 0usize;
-        for c in line.chars().skip(start) {
-            let cw = crate::grapheme_utils::str_display_width(&c.to_string()).max(1);
-            if width + cw > column {
-                break;
-            }
-            width += cw;
-            col += 1;
-        }
-        CursorPos::new(row, col)
+        CursorPos::new(
+            row,
+            col_at_column(line, start, line.chars().count(), column),
+        )
     }
+}
+
+/// The cells the clusters of `line` from character `start` up to `end` take,
+/// as a field draws them (see [`text_utils::field_clusters`]).
+fn cells_between(line: &str, start: usize, end: usize) -> usize {
+    text_utils::field_clusters(line)
+        .filter(|&(at, _, _)| at >= start && at < end)
+        .map(|(_, _, w)| w)
+        .sum()
+}
+
+/// The cluster start of `line` at display `column`, counted from character
+/// `start` (a cluster start) and going no further than `limit`: the cursor
+/// position under that column, before a cluster the column falls inside.
+fn col_at_column(line: &str, start: usize, limit: usize, column: usize) -> usize {
+    let mut col = start;
+    let mut width = 0usize;
+    for (at, g, w) in text_utils::field_clusters(line) {
+        if at < start {
+            continue;
+        }
+        if at >= limit || width + w > column {
+            break;
+        }
+        width += w;
+        col = (at + g.chars().count()).min(limit);
+    }
+    col
 }
 
 /// Convert character position to byte index in a string.
@@ -921,6 +936,90 @@ fn char_to_byte_index(s: &str, char_pos: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// "café" as macOS spells it: `e` then COMBINING ACUTE.
+    const NFD: &str = "cafe\u{301} ok";
+
+    #[test]
+    fn an_accented_letter_is_one_step_for_the_cursor_and_deletion() {
+        let mut ta = TextArea::with_text(NFD);
+        ta.set_cursor(0, 3);
+        assert!(ta.move_right());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 5), "over é with its accent");
+        assert!(ta.move_left());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 3));
+        ta.move_right_with_selection();
+        assert_eq!(ta.selected_text().as_deref(), Some("e\u{301}"));
+        ta.move_left_with_selection();
+        assert!(!ta.has_selection());
+        // Backspace after é removes the letter, not just its accent.
+        ta.set_cursor(0, 5);
+        assert!(ta.backspace());
+        assert_eq!(ta.text(), "caf ok");
+        assert_eq!(ta.cursor(), CursorPos::new(0, 3));
+        // Delete before it removes the whole letter too.
+        let mut ta = TextArea::with_text(NFD);
+        ta.set_cursor(0, 3);
+        assert!(ta.delete());
+        assert_eq!(ta.text(), "caf ok");
+        // A position on the accent is its letter's.
+        let mut ta = TextArea::with_text(NFD);
+        ta.set_cursor(0, 4);
+        assert_eq!(ta.cursor(), CursorPos::new(0, 3));
+        ta.extend_selection_to(0, 4);
+        assert_eq!(ta.cursor(), CursorPos::new(0, 3));
+    }
+
+    #[test]
+    fn word_moves_and_a_double_click_take_the_accent_along() {
+        let mut ta = TextArea::with_text(NFD);
+        ta.set_cursor(0, 0);
+        assert!(ta.move_word_right());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 6));
+        ta.move_end();
+        assert!(ta.move_word_left());
+        assert!(ta.move_word_left());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 0));
+        ta.select_word_at(0, 1);
+        assert_eq!(ta.selected_text().as_deref(), Some("cafe\u{301}"));
+    }
+
+    #[test]
+    fn up_and_down_keep_the_display_column_across_accents() {
+        // Cell 4 is "x" on the first line and the fifth character on the
+        // second, where é is two characters in one cell.
+        let mut ta = TextArea::with_text("abcdx\ncafe\u{301}x");
+        ta.set_cursor(0, 4);
+        assert!(ta.move_down());
+        assert_eq!(ta.cursor(), CursorPos::new(1, 5));
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 4));
+        // Wide characters take two cells: column 4 is after two of them.
+        let mut ta = TextArea::with_text("abcdx\n世界y");
+        ta.set_cursor(0, 4);
+        assert!(ta.move_down());
+        assert_eq!(ta.cursor(), CursorPos::new(1, 2));
+    }
+
+    #[test]
+    fn wrapped_rows_and_clicks_count_an_accented_letter_as_one_cell() {
+        // "cafe\u{301}xyz" drawn 3 cells wide: "caf" / "e\u{301}xy" / "z".
+        let mut ta = TextArea::with_text("cafe\u{301}xyz");
+        ta.set_wrap(vec![(0, 0, 3), (0, 3, 7), (0, 7, 8)], 0);
+        assert_eq!(ta.position_at_drawn_row(1, 1), CursorPos::new(0, 5));
+        assert_eq!(ta.position_at_drawn_row(1, 0), CursorPos::new(0, 3));
+        ta.set_cursor(0, 1);
+        assert!(ta.move_down());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 5), "under the a is the x");
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 1));
+        // Past the end of the row above a wrap: stop before its last cluster.
+        ta.set_wrap(vec![(0, 0, 5), (0, 5, 8)], 0);
+        // "cafe\u{301}" / "xyz": from z's end (col 8, cell 3) up stops at é.
+        ta.set_cursor(0, 8);
+        assert!(ta.move_up());
+        assert_eq!(ta.cursor(), CursorPos::new(0, 3));
+    }
 
     #[test]
     fn test_new_textarea() {
