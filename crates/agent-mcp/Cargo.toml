@@ -23,5 +23,8 @@ url.workspace = true
 termide-agent-core = { path = "../agent-core" }
 termide-http = { path = "../http" }
 
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile.workspace = true

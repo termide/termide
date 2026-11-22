@@ -67,6 +67,17 @@ fn scheme_ok(scheme: &str) -> bool {
 /// Fetch `raw_url` under the safety policy. Returns a human-readable error
 /// string on any failure (network, policy violation, oversized body, …).
 pub fn fetch(raw_url: &str) -> Result<Fetched, String> {
+    fetch_checked(raw_url, |_| Ok(()))
+}
+
+/// [`fetch`], with `allow_hop` judging each redirect target before it is
+/// requested: an `Err` refuses the redirect with that message. The caller's
+/// own policy for the first URL is its business; this holds the hops it did
+/// not see to it.
+pub fn fetch_checked(
+    raw_url: &str,
+    mut allow_hop: impl FnMut(&url::Url) -> Result<(), String>,
+) -> Result<Fetched, String> {
     let mut current = url::Url::parse(raw_url).map_err(|e| format!("invalid URL: {e}"))?;
     if !scheme_ok(current.scheme()) {
         return Err(format!("unsupported scheme: {}", current.scheme()));
@@ -80,9 +91,14 @@ pub fn fetch(raw_url: &str) -> Result<Fetched, String> {
         .build();
 
     for _ in 0..=MAX_REDIRECTS {
+        // With `redirects(0)` ureq hands a 3xx back as `Ok`; only 4xx and
+        // 5xx come as `Error::Status`.
         match agent.get(current.as_str()).call() {
-            Ok(resp) => return read_response(&current, resp),
-            Err(ureq::Error::Status(code, resp)) if (300..400).contains(&code) => {
+            Ok(resp) if !(300..400).contains(&resp.status()) => {
+                return read_response(&current, resp)
+            }
+            Ok(resp) => {
+                let code = resp.status();
                 let location = resp
                     .header("location")
                     .ok_or_else(|| format!("redirect {code} without Location"))?;
@@ -96,6 +112,7 @@ pub fn fetch(raw_url: &str) -> Result<Fetched, String> {
                         next.scheme()
                     ));
                 }
+                allow_hop(&next)?;
                 current = next;
             }
             Err(ureq::Error::Status(code, _)) => {
@@ -179,6 +196,50 @@ mod tests {
             "https->http must be refused"
         );
         assert!(!redirect_allowed("https", "ftp"));
+    }
+
+    /// A server answering every request on its port with `response`, once
+    /// per connection, counting the requests it got.
+    fn serve(response: String) -> (String, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::Write;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        let hits = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = hits.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        (addr, hits)
+    }
+
+    #[test]
+    fn a_refused_hop_is_never_requested() {
+        let (target, target_hits) = serve(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: 2\r\nConnection: close\r\n\r\nhi"
+                .to_string(),
+        );
+        let (origin, _) = serve(format!(
+            "HTTP/1.1 302 Found\r\nLocation: {target}/secret\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        ));
+        let mut seen = Vec::new();
+        let error = fetch_checked(&origin, |next| {
+            seen.push(next.to_string());
+            Err("refused".into())
+        })
+        .unwrap_err();
+        assert_eq!(error, "refused");
+        assert_eq!(seen, [format!("{target}/secret")]);
+        assert_eq!(target_hits.load(std::sync::atomic::Ordering::SeqCst), 0);
+
+        let fetched = fetch_checked(&origin, |_| Ok(())).unwrap();
+        assert_eq!(fetched.body, b"hi");
+        assert_eq!(fetched.final_url, format!("{target}/secret"));
     }
 
     #[test]

@@ -1,0 +1,1 @@
+- **termide's MCP server bounds connections before the token check.** Any local process could open connections to the server termide gives an external agent and hold each one, with a thread, for as long as it liked before sending a request. Now a request must arrive whole within 10 seconds, and past 64 open connections a new one is closed unread.

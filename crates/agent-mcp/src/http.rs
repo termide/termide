@@ -33,13 +33,13 @@
 
 use std::io::{BufRead, BufReader, Read};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{mpsc, Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 use termide_agent_core::{expand_env, CancelToken, McpServerConfig};
 
-use crate::client::{answer_server_request, McpTransport, OnMessage};
+use crate::client::{answer_server_request, cancelled, wait, McpTransport, OnMessage, WaitError};
 use crate::oauth::{self, Grant, TokenStore};
 
 /// The largest answer accepted. A tool's result is text a model reads, so
@@ -278,8 +278,14 @@ impl Inner {
     /// One POST of one message, and the JSON-RPC message it answers with;
     /// once more after a refusal a renewed sign-in may cure.
     fn post(&self, message: &Value) -> Result<Value, String> {
+        self.post_until(message, &|| false)
+    }
+
+    /// [`Self::post`], dropping a streamed answer between events once
+    /// `stop` says nobody waits for it any more.
+    fn post_until(&self, message: &Value, stop: &dyn Fn() -> bool) -> Result<Value, String> {
         let sent = self.bearer();
-        let refused = match self.post_once(message, sent.as_deref()) {
+        let refused = match self.post_once(message, sent.as_deref(), stop) {
             Ok(reply) => return Ok(reply),
             Err(PostError::Other(error)) => return Err(error),
             Err(PostError::Unauthorized(error)) => error,
@@ -288,7 +294,7 @@ impl Inner {
             return Err(refused);
         }
         if self.renew(sent.as_deref()) {
-            match self.post_once(message, self.bearer().as_deref()) {
+            match self.post_once(message, self.bearer().as_deref(), stop) {
                 Ok(reply) => return Ok(reply),
                 Err(PostError::Other(error)) => return Err(error),
                 Err(PostError::Unauthorized(_)) => {}
@@ -301,7 +307,12 @@ impl Inner {
         ))
     }
 
-    fn post_once(&self, message: &Value, bearer: Option<&str>) -> Result<Value, PostError> {
+    fn post_once(
+        &self,
+        message: &Value,
+        bearer: Option<&str>,
+        stop: &dyn Fn() -> bool,
+    ) -> Result<Value, PostError> {
         let call = self
             .agent
             .post(&self.url)
@@ -336,8 +347,10 @@ impl Inner {
         let content_type = response.content_type().to_ascii_lowercase();
         let id = message.get("id").and_then(Value::as_u64);
         if content_type.contains("text/event-stream") {
-            return reply_from_stream(response.into_reader(), id, |other| self.dispatch(&other))
-                .map_err(PostError::Other);
+            return reply_from_stream(response.into_reader(), id, stop, |other| {
+                self.dispatch(&other);
+            })
+            .map_err(PostError::Other);
         }
         let text = read_capped(response.into_reader()).map_err(PostError::Other)?;
         if text.trim().is_empty() {
@@ -348,6 +361,26 @@ impl Inner {
                 "the server answered with that is not JSON: {error}"
             ))
         })
+    }
+
+    /// Tell the server we stopped waiting for request `id`, so it can stop
+    /// working on it. Best effort, on a thread of its own: the caller has
+    /// already given up on this server once.
+    fn cancel_on_server(self: &Arc<Self>, id: u64, why: &WaitError) {
+        let inner = Arc::clone(self);
+        let message = json!({
+            "jsonrpc": "2.0", "method": "notifications/cancelled", "params": cancelled(id, why)
+        });
+        let spawned = std::thread::Builder::new()
+            .name(format!("termide-mcp-{}-cancel", self.name))
+            .spawn(move || {
+                if let Err(error) = inner.post(&message) {
+                    log::debug!("mcp {}: cannot cancel request {id}: {error}", inner.name);
+                }
+            });
+        if let Err(error) = spawned {
+            log::debug!("mcp: cannot cancel request {id}: {error}");
+        }
     }
 
     /// A message the server sent unasked: a request is answered, a
@@ -450,6 +483,10 @@ impl Inner {
 impl McpTransport for HttpClient {
     /// One POST, and the `result` out of the answer it comes back with. The
     /// session and the protocol version are learned inside `post`.
+    ///
+    /// The POST runs on a thread of its own, so the wait for it notices a
+    /// cancelled run and ends at the timeout even while a streamed answer
+    /// keeps trickling in; the thread drops the stream at its next event.
     fn request(
         &self,
         method: &str,
@@ -462,7 +499,43 @@ impl McpTransport for HttpClient {
         let inner = &self.inner;
         let id = inner.next_id.fetch_add(1, Ordering::Relaxed);
         let message = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        let reply = inner.post(&message)?;
+        let (tx, rx) = mpsc::channel();
+        let worker = Arc::clone(inner);
+        let token = cancel.cloned();
+        let deadline = Instant::now() + inner.timeout;
+        let spawned = std::thread::Builder::new()
+            .name(format!("termide-mcp-{}-request", inner.name))
+            .spawn(move || {
+                let stop = || {
+                    token.as_ref().is_some_and(CancelToken::is_cancelled)
+                        || Instant::now() >= deadline
+                };
+                let _ = tx.send(worker.post_until(&message, &stop));
+            });
+        if let Err(error) = spawned {
+            return Err(format!("{method}: cannot start the request: {error}"));
+        }
+        let outcome = match wait(&rx, inner.timeout, cancel) {
+            // The thread can see the cancel, or the deadline, before the wait
+            // does and end with an error of its own.
+            Err(WaitError::Failed(_)) if cancel.is_some_and(CancelToken::is_cancelled) => {
+                Err(WaitError::Aborted)
+            }
+            Err(WaitError::Failed(_)) if Instant::now() >= deadline => {
+                Err(WaitError::TimedOut(inner.timeout))
+            }
+            other => other,
+        };
+        let reply = match outcome {
+            Ok(reply) => reply,
+            Err(WaitError::Failed(error)) => return Err(error),
+            Err(error) => {
+                if error.gave_up() {
+                    inner.cancel_on_server(id, &error);
+                }
+                return Err(format!("{method}: {error}"));
+            }
+        };
         match &reply {
             Value::Null => Err(format!("{method}: the server answered with no result")),
             reply if reply.get("error").is_some() => Err(jsonrpc_error(reply)),
@@ -600,13 +673,19 @@ impl<R: Read> Events<R> {
 /// Read an event stream until the event answering `id`, handing every other
 /// message to `other`: a server may send its notifications, and requests of
 /// its own, ahead of the answer. A stream that ends first has no answer.
+/// `stop` is asked after each event: a stream may run on well past the point
+/// where nobody waits for its answer.
 fn reply_from_stream(
     stream: impl Read,
     id: Option<u64>,
+    stop: &dyn Fn() -> bool,
     mut other: impl FnMut(Value),
 ) -> Result<Value, String> {
     let mut events = Events::new(stream);
     while let Some(data) = events.next()? {
+        if stop() {
+            return Err("nobody waits for the answer any more".to_string());
+        }
         let Ok(message) = serde_json::from_str::<Value>(&data) else {
             continue;
         };
@@ -759,17 +838,17 @@ mod tests {
     fn a_stream_is_read_until_the_answer_in_it() {
         let stream = b"event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\r\n\r\n\
                       event: message\r\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"ok\":true}}\r\n\r\n";
-        let reply = reply_from_stream(stream as &[u8], Some(7), |_| {}).unwrap();
+        let reply = reply_from_stream(stream as &[u8], Some(7), &|| false, |_| {}).unwrap();
         assert_eq!(reply["result"]["ok"], true);
         // An id that never comes is an ended stream, not a hang.
         let only_other = b"data: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\r\n\r\n";
-        assert!(reply_from_stream(only_other as &[u8], Some(9), |_| {}).is_err());
+        assert!(reply_from_stream(only_other as &[u8], Some(9), &|| false, |_| {}).is_err());
     }
 
     #[test]
     fn a_multiline_event_is_joined_before_it_is_parsed() {
         let stream = b"data: {\"jsonrpc\":\"2.0\",\ndata: \"id\":4,\"result\":{\"a\":1}}\r\n\r\n";
-        let reply = reply_from_stream(stream as &[u8], Some(4), |_| {}).unwrap();
+        let reply = reply_from_stream(stream as &[u8], Some(4), &|| false, |_| {}).unwrap();
         assert_eq!(reply["result"]["a"], 1);
     }
 
@@ -830,5 +909,86 @@ mod tests {
         // The session is still ended, off the dropping thread.
         let request = rx.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(request.starts_with("DELETE "), "{request}");
+    }
+
+    #[test]
+    fn a_stream_is_dropped_between_events_once_nobody_waits() {
+        let stream = b"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n\
+                      data: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n";
+        let error = reply_from_stream(stream as &[u8], Some(7), &|| true, |_| {}).unwrap_err();
+        assert!(error.contains("nobody waits"), "{error}");
+    }
+
+    /// A tool call whose answer streams on without end stops at a cancel,
+    /// and the server is told the request is cancelled.
+    #[test]
+    fn a_cancel_ends_a_streaming_answer_and_reaches_the_server() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/mcp", listener.local_addr().unwrap());
+        let (tx, rx) = mpsc::channel::<String>();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { return };
+                let tx = tx.clone();
+                std::thread::spawn(move || {
+                    let mut seen = Vec::new();
+                    let mut buf = [0u8; 4096];
+                    // Headers and the small body arrive together, or nearly.
+                    stream
+                        .set_read_timeout(Some(Duration::from_millis(300)))
+                        .unwrap();
+                    while let Ok(n) = stream.read(&mut buf) {
+                        if n == 0 {
+                            break;
+                        }
+                        seen.extend_from_slice(&buf[..n]);
+                        if seen.ends_with(b"}") {
+                            break;
+                        }
+                    }
+                    let request = String::from_utf8_lossy(&seen).into_owned();
+                    if request.contains("notifications/cancelled") {
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        let _ = tx.send(request);
+                        return;
+                    }
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n",
+                    );
+                    for _ in 0..100 {
+                        let progress = b"data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n";
+                        if stream.write_all(progress).is_err() {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(100));
+                    }
+                });
+            }
+        });
+        let config = McpServerConfig {
+            url: Some(url),
+            timeout_secs: 30,
+            ..Default::default()
+        };
+        let client = HttpClient::new("streaming", &config).unwrap();
+        let cancel = CancelToken::new();
+        let canceller = cancel.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(300));
+            canceller.cancel();
+        });
+        let started = Instant::now();
+        let error = client
+            .request("tools/call", json!({ "name": "slow" }), Some(&cancel))
+            .unwrap_err();
+        assert!(error.contains("aborted"), "{error}");
+        assert!(started.elapsed() < Duration::from_secs(3));
+        let notice = rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(notice.contains("\"requestId\":1"), "{notice}");
     }
 }

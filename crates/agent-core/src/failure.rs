@@ -182,7 +182,7 @@ impl Failure {
             retry_after
                 .and_then(|value| value.trim().parse::<f64>().ok())
                 .filter(|secs| secs.is_finite() && *secs >= 0.0)
-                .map(|secs| unix(now) + secs.ceil() as u64)
+                .map(|secs| after(now, Duration::from_secs(secs.min(1e12).ceil() as u64)))
                 .or_else(|| parse_reset(body, now))
         } else {
             None
@@ -359,6 +359,15 @@ fn unix(time: DateTime<Local>) -> u64 {
     u64::try_from(time.timestamp()).unwrap_or(0)
 }
 
+/// The longest wait for a reset taken from a server: past a weekly limit, a
+/// figure is a server's mistake, and an absurd one overflowed the clock.
+const MAX_RESET_WAIT: Duration = Duration::from_secs(8 * 86_400);
+
+/// `span` after `now`, in Unix seconds, the span held to [`MAX_RESET_WAIT`].
+fn after(now: DateTime<Local>, span: Duration) -> u64 {
+    unix(now).saturating_add(span.min(MAX_RESET_WAIT).as_secs())
+}
+
 /// When a limit resets, as the error text states it: after a span ("try
 /// again in 4 days 3 hours", "retry in 41.5s") or at a time of day, with or
 /// without a date ("resets 9:50pm", "try again at Oct 9th, 2026 5:00 PM").
@@ -385,10 +394,10 @@ pub fn parse_reset(text: &str, now: DateTime<Local>) -> Option<u64> {
         };
         let rest = &lower[start + marker.len()..];
         let found = if marker.ends_with("in ") {
-            parse_span(rest).map(|span| unix(now) + span.as_secs())
+            parse_span(rest).map(|span| after(now, span))
         } else {
             parse_span(rest)
-                .map(|span| unix(now) + span.as_secs())
+                .map(|span| after(now, span))
                 .or_else(|| parse_moment(rest, now))
         };
         if found.is_some() {
@@ -433,6 +442,7 @@ fn parse_span(text: &str) -> Option<Duration> {
             .trim_start_matches("and ")
             .trim_start();
     }
+    // The cast saturates, and `after` holds the span to its cap.
     (seen && total.is_finite()).then(|| Duration::from_secs(total.ceil() as u64))
 }
 
@@ -604,6 +614,22 @@ mod tests {
         );
         let failure = Failure::from_text_at("Quota exceeded. Please retry in 41.5s.", now);
         assert_eq!(failure.resets_at, Some(unix(now) + 42));
+    }
+
+    /// A huge Retry-After or span neither overflows nor waits for ages.
+    #[test]
+    fn an_absurd_wait_is_held_to_the_cap() {
+        let now = evening();
+        let capped = Some(unix(now) + MAX_RESET_WAIT.as_secs());
+        for header in ["1e300", "18446744073709551615", "99999999999999999999"] {
+            let failure = Failure::from_http_at(429, "slow down", Some(header), now);
+            assert_eq!(failure.resets_at, capped, "{header}");
+        }
+        let failure = Failure::from_text_at(
+            "Rate limit reached; try again in 99999999999999999999999 days.",
+            now,
+        );
+        assert_eq!(failure.resets_at, capped);
     }
 
     #[test]

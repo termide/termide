@@ -20,9 +20,9 @@
 //! call is then cancelled, taking down a question asked on its behalf.
 
 use std::collections::{HashMap, VecDeque};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Condvar, Mutex, PoisonError, RwLock};
 use std::thread::JoinHandle;
@@ -42,6 +42,13 @@ pub const SERVER_NAME: &str = "termide";
 
 /// The largest request body read; a tool call's arguments are far smaller.
 const MAX_BODY: usize = 16 * 1024 * 1024;
+
+/// How long a connection has to deliver its whole request, body included.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The most connections served at once: tool calls and server streams of a
+/// few agents fit many times over.
+const MAX_CONNECTIONS: usize = 64;
 
 /// How often a streamed tool call shows the client it is alive. Clients
 /// drop a request that has been silent for minutes (five in Bun's `fetch`).
@@ -157,14 +164,22 @@ impl McpServer {
         let thread = std::thread::Builder::new()
             .name("termide-mcp-server".into())
             .spawn(move || {
+                let open = Arc::new(AtomicUsize::new(0));
                 for stream in listener.incoming() {
                     if serving.stop.load(Ordering::Acquire) {
                         break;
                     }
                     let Ok(stream) = stream else { continue };
+                    // Any local process can connect before the token is
+                    // checked: past the cap a connection is closed unread.
+                    let Some(slot) = ConnectionSlot::take(&open) else {
+                        log::debug!("mcp server: {MAX_CONNECTIONS} connections open, refusing one");
+                        continue;
+                    };
                     let shared = Arc::clone(&serving);
                     // A tool call can take minutes; others must not wait on it.
                     std::thread::spawn(move || {
+                        let _slot = slot;
                         if let Err(error) = serve(&shared, stream) {
                             log::debug!("mcp server: {error}");
                         }
@@ -411,15 +426,69 @@ fn respond(stream: &mut TcpStream, status: &str, body: &str) -> std::io::Result<
     stream.flush()
 }
 
+/// One of the [`MAX_CONNECTIONS`] connections served at once, given back
+/// when dropped.
+struct ConnectionSlot(Arc<AtomicUsize>);
+
+impl ConnectionSlot {
+    fn take(open: &Arc<AtomicUsize>) -> Option<Self> {
+        open.fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+            (n < MAX_CONNECTIONS).then_some(n + 1)
+        })
+        .ok()
+        .map(|_| Self(Arc::clone(open)))
+    }
+}
+
+impl Drop for ConnectionSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
+/// The connection read with every read held to one deadline, so a client
+/// that sends its request a byte at a time still runs out of time.
+struct DeadlineReader {
+    stream: TcpStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let late = || {
+            std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the request did not arrive in time",
+            )
+        };
+        let left = self.deadline.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return Err(late());
+        }
+        self.stream.set_read_timeout(Some(left))?;
+        // A read that times out says `WouldBlock` on some systems.
+        self.stream.read(buf).map_err(|error| match error.kind() {
+            std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut => late(),
+            _ => error,
+        })
+    }
+}
+
 /// Answer one connection: one request, then close.
 fn serve(shared: &Shared, mut stream: TcpStream) -> std::io::Result<()> {
     if shared.stop.load(Ordering::Acquire) {
         return Ok(());
     }
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut reader = BufReader::new(DeadlineReader {
+        stream: stream.try_clone()?,
+        deadline: Instant::now() + REQUEST_TIMEOUT,
+    });
     let Some(request) = read_request(&mut reader)? else {
         return Ok(());
     };
+    // What follows — a tool call's stream, the server stream — reads only
+    // to see whether the client is gone.
+    stream.set_read_timeout(None)?;
     if request.path.split('?').next() != Some("/mcp") {
         return respond(&mut stream, "404 Not Found", "");
     }
@@ -906,6 +975,66 @@ mod tests {
         let mut tools = ToolRegistry::new();
         tools.insert(Arc::new(Echo));
         McpServer::start(tools, Box::new(Guard), ToolContext::new("/tmp")).unwrap()
+    }
+
+    /// A client that sends its request a byte at a time runs out of time
+    /// all the same.
+    #[test]
+    fn a_request_has_one_deadline_for_all_its_reads() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        std::thread::spawn(move || {
+            for _ in 0..50 {
+                if client.write_all(b"G").is_err() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(50));
+            }
+        });
+        let started = Instant::now();
+        let mut reader = BufReader::new(DeadlineReader {
+            stream,
+            deadline: Instant::now() + Duration::from_millis(300),
+        });
+        let error = read_request(&mut reader).err().expect("a timeout");
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    /// Past the cap a connection is closed unread, and a slot comes back
+    /// when its connection ends.
+    #[test]
+    fn connections_past_the_cap_are_refused() {
+        let server = server();
+        let addr = server
+            .url()
+            .trim_start_matches("http://")
+            .trim_end_matches("/mcp")
+            .to_string();
+        let idle: Vec<TcpStream> = (0..MAX_CONNECTIONS)
+            .map(|_| TcpStream::connect(&addr).unwrap())
+            .collect();
+        let mut refused = TcpStream::connect(&addr).unwrap();
+        refused
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        // Closed at once: an end of stream, or a reset, not a wait.
+        match refused.read(&mut [0u8; 16]) {
+            Ok(0) => {}
+            Err(e)
+                if !matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) => {}
+            other => panic!("the connection past the cap was served: {other:?}"),
+        }
+        // Their threads see the end of their requests and give the slots back.
+        drop(idle);
+        std::thread::sleep(Duration::from_millis(300));
+        let ping = json!({ "jsonrpc": "2.0", "id": 1, "method": "ping" });
+        let token = server.token().to_string();
+        assert_eq!(post(&server, &token, &ping).0, "HTTP/1.1 200 OK");
     }
 
     #[test]

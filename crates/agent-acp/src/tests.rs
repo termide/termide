@@ -74,6 +74,59 @@ fn an_agent_cannot_open_termides_terminal() {
     assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "NO_TTY");
 }
 
+/// Closing the runtime ends the agent's whole group without waiting for
+/// it: what the agent started goes too.
+#[cfg(unix)]
+#[test]
+fn closing_an_agent_ends_what_it_started() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker = dir.path().join("survived");
+    let config = AcpConfig {
+        command: "sh".into(),
+        args: vec![
+            "-c".into(),
+            format!(
+                "(sleep 3; touch '{}') </dev/null >/dev/null 2>&1 & trap '' TERM; sleep 30",
+                marker.display()
+            ),
+        ],
+        env: Default::default(),
+        timeout_secs: 5,
+        flavor: AcpFlavor::default(),
+        context_limit: None,
+    };
+    let cancel = CancelToken::new();
+    let (prompter, _permissions) = permission_channel(cancel.clone());
+    let setup = BackendSetup {
+        cwd: dir.path().to_path_buf(),
+        prompter,
+        cancel,
+        rules: PermissionRules::default(),
+        persist: None,
+        mode: ModeHandle::new(Mode::default()),
+        system_prompt: String::new(),
+        plan: PlanPrompt::default(),
+        plan_seen: false,
+        goal: GoalPrompt::default(),
+        handoff: HandoffPrompt::default(),
+        reviewer: ReviewerSetup::default(),
+        host_tools: None,
+        resume: None,
+        fork: None,
+        history: Vec::new(),
+    };
+    let runtime = AcpRuntime::start("bg", &config, setup).unwrap();
+    std::thread::sleep(Duration::from_millis(200));
+    let started = std::time::Instant::now();
+    drop(runtime);
+    assert!(
+        started.elapsed() < Duration::from_millis(500),
+        "drop waited"
+    );
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(!marker.exists(), "the agent's background job outlived it");
+}
+
 /// An agent on the other end of two pipes, scripted for one prompt: it
 /// thinks, speaks, edits a file through our fs methods after asking for
 /// permission, speaks again and ends the turn; a second prompt is
