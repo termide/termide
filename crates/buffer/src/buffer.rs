@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::{Action, Cursor, History};
+use crate::columns;
 use crate::edit_log::{EditLog, EditRevision, SyntaxEdit};
 use crate::folds::{Fold, Folds};
 use crate::line_marks::{shift_marks, LineEdit};
@@ -249,7 +250,7 @@ impl TextBuffer {
     pub fn line_len_graphemes(&self, line_idx: usize) -> usize {
         if let Some(line) = self.line(line_idx) {
             // Remove newline character before counting
-            line.trim_end_matches('\n').graphemes(true).count()
+            columns::trim_line_ending(&line).graphemes(true).count()
         } else {
             0
         }
@@ -271,7 +272,7 @@ impl TextBuffer {
         let Some(text) = self.line(line) else {
             return 0;
         };
-        text.trim_end_matches('\n')
+        columns::trim_line_ending(&text)
             .graphemes(true)
             .take(column)
             .map(|g| g.encode_utf16().count())
@@ -289,7 +290,7 @@ impl TextBuffer {
             return 0;
         };
         let mut consumed = 0;
-        for (column, grapheme) in text.trim_end_matches('\n').graphemes(true).enumerate() {
+        for (column, grapheme) in columns::trim_line_ending(&text).graphemes(true).enumerate() {
             if consumed >= utf16_column {
                 return column;
             }
@@ -302,7 +303,7 @@ impl TextBuffer {
             }
             consumed = next;
         }
-        text.trim_end_matches('\n').graphemes(true).count()
+        columns::trim_line_ending(&text).graphemes(true).count()
     }
 
     /// LSP position for a char index in the rope as it stands right now.
@@ -350,7 +351,7 @@ impl TextBuffer {
             start_at_line_start,
             end_line,
             end_at_line_start,
-            // Count breaks the way the rope does (CR, LS, PS... too).
+            // Count breaks the way the rope does (a lone CR too).
             inserted_breaks: ropey::str_utils::byte_to_line_idx(text, text.len()),
         };
         if !self.line_marks.is_empty() && shift_marks(&mut self.line_marks, edit) {
@@ -597,12 +598,16 @@ impl TextBuffer {
             return Ok(false);
         }
 
-        // Get deleted character for history
-        let deleted_char = self.rope.char(char_idx).to_string();
+        // Delete the whole grapheme under the cursor — a flag, an accented
+        // letter written with a combining mark, a CRLF — not just its first
+        // char, which would leave half a cluster behind.
+        let line = self.rope.line(cursor.line).to_string();
+        let len = columns::grapheme_at(&line, cursor.column).map_or(1, |g| g.chars().count());
+        let end = (char_idx + len).min(self.rope.len_chars());
+        let deleted_char = self.rope.slice(char_idx..end).to_string();
 
-        // Delete one character
-        self.record_change(char_idx..char_idx + 1, "");
-        self.rope.remove(char_idx..char_idx + 1);
+        self.record_change(char_idx..end, "");
+        self.rope.remove(char_idx..end);
         self.modified = true;
         self.edit_version += 1;
 
@@ -627,21 +632,29 @@ impl TextBuffer {
             return Ok(None);
         }
 
-        // Get deleted character for history
-        let deleted_char = self.rope.char(char_idx - 1).to_string();
-
-        // Calculate new cursor position
-        let new_cursor = if cursor.column > 0 {
-            Cursor::at(cursor.line, cursor.column - 1)
+        // Calculate new cursor position, and how many chars the grapheme
+        // before the cursor spans: the whole cluster goes, so what undo
+        // puts back at the new cursor is what was there.
+        let (new_cursor, len) = if cursor.column > 0 {
+            let line = self.rope.line(cursor.line).to_string();
+            let len =
+                columns::grapheme_before(&line, cursor.column).map_or(1, |g| g.chars().count());
+            (Cursor::at(cursor.line, cursor.column - 1), len)
         } else {
-            // Move to previous line
+            // Join with the previous line, removing its whole line ending.
+            let prev = self.rope.line(cursor.line - 1).to_string();
+            let len = prev
+                .graphemes(true)
+                .next_back()
+                .map_or(1, |g| g.chars().count());
             let prev_line_len = self.line_len_graphemes(cursor.line - 1);
-            Cursor::at(cursor.line - 1, prev_line_len)
+            (Cursor::at(cursor.line - 1, prev_line_len), len)
         };
+        let start = char_idx.saturating_sub(len);
+        let deleted_char = self.rope.slice(start..char_idx).to_string();
 
-        // Delete character before cursor
-        self.record_change(char_idx - 1..char_idx, "");
-        self.rope.remove(char_idx - 1..char_idx);
+        self.record_change(start..char_idx, "");
+        self.rope.remove(start..char_idx);
         self.modified = true;
         self.edit_version += 1;
 
@@ -709,22 +722,33 @@ impl TextBuffer {
 
     /// Advance cursor after text insertion
     fn advance_cursor(&self, cursor: &Cursor, text: &str) -> Cursor {
-        let lines: Vec<&str> = text.lines().collect();
+        // Count breaks the way the rope does, so text ending in a line break
+        // leaves the cursor at the start of the line after it.
+        let breaks = ropey::str_utils::byte_to_line_idx(text, text.len());
+        match text.rfind(['\n', '\r']) {
+            Some(last_break) if breaks > 0 => {
+                let last_line = &text[last_break + 1..];
+                Cursor::at(cursor.line + breaks, last_line.graphemes(true).count())
+            }
+            _ => Cursor::at(cursor.line, cursor.column + text.graphemes(true).count()),
+        }
+    }
 
-        if lines.is_empty() || (lines.len() == 1 && text.ends_with('\n')) {
-            // Only newline
-            Cursor::at(cursor.line + 1, 0)
-        } else if lines.len() == 1 {
-            // Single line without newline
-            let graphemes = text.graphemes(true).count();
-            Cursor::at(cursor.line, cursor.column + graphemes)
-        } else {
-            // Multiple lines - last() is safe because we checked lines.len() > 1 above
-            let last_line = lines
-                .last()
-                .expect("lines has at least 2 elements in else branch");
-            let last_line_len = last_line.graphemes(true).count();
-            Cursor::at(cursor.line + lines.len() - 1, last_line_len)
+    /// The text between two cursor positions, `start` before `end`.
+    ///
+    /// Columns are graphemes, as everywhere; a column past a line's end
+    /// stands for the end of its text, before the line ending.
+    pub fn text_range(&self, start: &Cursor, end: &Cursor) -> String {
+        let clamp = |c: &Cursor| -> Option<usize> {
+            if c.line >= self.line_count() {
+                return Some(self.rope.len_chars());
+            }
+            let column = c.column.min(self.line_len_graphemes(c.line));
+            self.cursor_to_char_idx(&Cursor::at(c.line, column)).ok()
+        };
+        match (clamp(start), clamp(end)) {
+            (Some(s), Some(e)) if s < e => self.rope.slice(s..e).to_string(),
+            _ => String::new(),
         }
     }
 
@@ -860,6 +884,78 @@ impl Default for TextBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backspace_and_delete_remove_whole_graphemes_and_undo_restores_them() {
+        let text = "a🇩🇪e\u{301}b";
+        let mut buffer = TextBuffer::from_text(text);
+        // Backspace after the accented e removes it with its mark.
+        assert_eq!(
+            buffer.backspace(&Cursor::at(0, 3)).unwrap(),
+            Some(Cursor::at(0, 2))
+        );
+        assert_eq!(buffer.text(), "a🇩🇪b");
+        // Delete on the flag removes both regional indicators.
+        assert!(buffer.delete_char(&Cursor::at(0, 1)).unwrap());
+        assert_eq!(buffer.text(), "ab");
+        buffer.undo().unwrap();
+        assert_eq!(buffer.text(), "a🇩🇪b");
+        buffer.undo().unwrap();
+        assert_eq!(buffer.text(), text);
+    }
+
+    #[test]
+    fn backspace_at_line_start_removes_a_whole_crlf() {
+        let mut buffer = TextBuffer::from_text("ab\r\ncd");
+        assert_eq!(buffer.line_len_graphemes(0), 2);
+        assert_eq!(
+            buffer.backspace(&Cursor::at(1, 0)).unwrap(),
+            Some(Cursor::at(0, 2))
+        );
+        assert_eq!(buffer.text(), "abcd");
+    }
+
+    #[test]
+    fn inserting_text_that_ends_in_a_newline_puts_the_cursor_on_the_next_line() {
+        let mut buffer = TextBuffer::from_text("xy");
+        let cursor = buffer.insert(&Cursor::at(0, 1), "one\ntwo\n").unwrap();
+        assert_eq!(cursor, Cursor::at(2, 0));
+        assert_eq!(buffer.text(), "xone\ntwo\ny");
+        let cursor = buffer.insert(&Cursor::at(0, 0), "\n").unwrap();
+        assert_eq!(cursor, Cursor::at(1, 0));
+        let cursor = buffer.insert(&Cursor::at(0, 0), "a\nbc").unwrap();
+        assert_eq!(cursor, Cursor::at(1, 2));
+        let cursor = buffer.insert(&Cursor::at(0, 0), "é").unwrap();
+        assert_eq!(cursor, Cursor::at(0, 1));
+    }
+
+    /// Lines break where LSP and git break them: LF, CRLF and a lone CR, not
+    /// form feed, vertical tab, NEL or the Unicode line/paragraph separators.
+    #[test]
+    fn only_lf_cr_and_crlf_break_lines() {
+        let buffer = TextBuffer::from_text("a\u{c}b\u{b}c\u{85}d\u{2028}e\u{2029}f");
+        assert_eq!(buffer.line_count(), 1);
+        let buffer = TextBuffer::from_text("a\nb\r\nc\rd");
+        assert_eq!(buffer.line_count(), 4);
+    }
+
+    #[test]
+    fn text_range_slices_by_grapheme_columns() {
+        let buffer = TextBuffer::from_text("🇩🇪abc\nde");
+        assert_eq!(
+            buffer.text_range(&Cursor::at(0, 1), &Cursor::at(0, 3)),
+            "ab"
+        );
+        assert_eq!(
+            buffer.text_range(&Cursor::at(0, 3), &Cursor::at(1, 1)),
+            "c\nd"
+        );
+        assert_eq!(
+            buffer.text_range(&Cursor::at(0, 2), &Cursor::at(0, 99)),
+            "bc"
+        );
+        assert_eq!(buffer.text_range(&Cursor::at(0, 2), &Cursor::at(0, 1)), "");
+    }
 
     #[test]
     fn a_group_of_edits_is_one_undo_step() {

@@ -2,7 +2,7 @@
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use termide_buffer::Cursor;
+use termide_buffer::{columns, Cursor};
 
 use crate::completion_popup;
 
@@ -30,27 +30,8 @@ impl Editor {
     ///
     /// Used to determine the prefix when triggering completion.
     fn find_word_start_column(&self) -> usize {
-        let line_text = self.buffer.line(self.cursor.line).unwrap_or_default();
-
-        let cursor_col = self.cursor.column;
-        if cursor_col == 0 || line_text.is_empty() {
-            return 0;
-        }
-
-        // Walk backwards from cursor to find word start
-        let chars: Vec<char> = line_text.chars().collect();
-        let mut start = cursor_col.min(chars.len());
-
-        while start > 0 {
-            let ch = chars[start - 1];
-            // Stop at non-identifier characters
-            if !ch.is_alphanumeric() && ch != '_' {
-                break;
-            }
-            start -= 1;
-        }
-
-        start
+        let line_text = self.buffer.line_cow(self.cursor.line).unwrap_or_default();
+        word_start_column(&line_text, self.cursor.column)
     }
 
     /// Check if completion was requested and clear the flag.
@@ -99,17 +80,13 @@ impl Editor {
 
     /// Get the prefix text for completion (from trigger column to cursor).
     fn get_completion_prefix(&self) -> String {
-        let line_text = self.buffer.line(self.cursor.line).unwrap_or_default();
-
         let trigger_col = self.lsp.completion_trigger_column;
         let cursor_col = self.cursor.column;
-
-        if cursor_col > trigger_col && cursor_col <= line_text.chars().count() {
-            line_text
-                .chars()
-                .skip(trigger_col)
-                .take(cursor_col - trigger_col)
-                .collect()
+        if cursor_col > trigger_col
+            && cursor_col <= self.buffer.line_len_graphemes(self.cursor.line)
+        {
+            self.buffer
+                .text_range(&Cursor::at(self.cursor.line, trigger_col), &self.cursor)
         } else {
             String::new()
         }
@@ -170,7 +147,10 @@ impl Editor {
             return;
         };
 
-        if let Some(cursor) = apply_text_edits(&mut self.buffer, edits) {
+        self.buffer.begin_undo_group();
+        let cursor = apply_text_edits(&mut self.buffer, edits);
+        self.buffer.end_undo_group();
+        if let Some(cursor) = cursor {
             self.cursor = cursor;
         }
         self.clamp_cursor();
@@ -202,7 +182,10 @@ impl Editor {
             })
             .sum();
 
+        // One undo step, however many edits and files the server sent.
+        self.buffer.begin_undo_group();
         apply_text_edits(&mut self.buffer, edits);
+        self.buffer.end_undo_group();
 
         if line_delta != 0 {
             self.cursor.line = (self.cursor.line as i64 + line_delta).max(0) as usize;
@@ -353,18 +336,9 @@ impl Editor {
 
     /// Get the column where current word starts (for completion prefix).
     fn get_word_start_column(&self) -> usize {
-        if let Some(line_text) = self.buffer.line(self.cursor.line) {
-            let prefix: String = line_text.chars().take(self.cursor.column).collect();
-            // Find start of current word (alphanumeric + underscore)
-            let word_start = prefix
-                .char_indices()
-                .rev()
-                .find(|(_, c)| !c.is_alphanumeric() && *c != '_')
-                .map(|(i, _)| i + 1)
-                .unwrap_or(0);
-            word_start
-        } else {
-            self.cursor.column
+        match self.buffer.line_cow(self.cursor.line) {
+            Some(line_text) => word_start_column(&line_text, self.cursor.column),
+            None => self.cursor.column,
         }
     }
 
@@ -374,6 +348,24 @@ impl Editor {
     pub fn take_last_inserted_char(&mut self) -> Option<char> {
         self.lsp.last_inserted_char.take()
     }
+}
+
+/// Grapheme column where the identifier ending at grapheme column `column`
+/// of `line` starts: identifiers are letters, digits and `_`, a cluster
+/// counting as its base char.
+fn word_start_column(line: &str, column: usize) -> usize {
+    let line = columns::trim_line_ending(line);
+    let before = columns::grapheme_slice(line, 0, column);
+    let word_len = before
+        .graphemes(true)
+        .rev()
+        .take_while(|g| {
+            g.chars()
+                .next()
+                .is_some_and(|c| c.is_alphanumeric() || c == '_')
+        })
+        .count();
+    before.graphemes(true).count() - word_len
 }
 
 /// Apply LSP `TextEdit`s to `buffer`, returning where the caret should land.
@@ -590,6 +582,20 @@ mod text_edit_tests {
         assert_eq!(buffer.to_string(), "<?php\nuse App\\Order;\n\nOrder");
         // Completion was on line 2; the import added one line above it -> line 3.
         assert_eq!((cursor.line, cursor.column), (3, 5));
+    }
+}
+
+#[cfg(test)]
+mod word_start_tests {
+    use super::word_start_column;
+
+    #[test]
+    fn the_word_start_counts_graphemes_not_chars() {
+        assert_eq!(word_start_column("foo.bar", 7), 4);
+        assert_eq!(word_start_column("🇩🇪 caf", 5), 2);
+        assert_eq!(word_start_column("x = cafe\u{301}", 8), 4);
+        assert_eq!(word_start_column("abc\n", 99), 0);
+        assert_eq!(word_start_column("", 3), 0);
     }
 }
 

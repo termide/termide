@@ -477,6 +477,15 @@ impl Editor {
         self.scroll_follows_cursor = true;
     }
 
+    /// Go to a position a language server named: `character` counts UTF-16
+    /// code units, which differ from grapheme columns after an emoji or a
+    /// combining mark.
+    pub fn goto_lsp_position(&mut self, line: usize, character: usize) {
+        let max_line = self.buffer.line_count().saturating_sub(1);
+        let column = self.buffer.grapheme_column(line.min(max_line), character);
+        self.goto_position(line, column);
+    }
+
     /// Handle backspace/delete key with selection awareness.
     ///
     /// If selection exists and is not empty, deletes the selection.
@@ -533,6 +542,9 @@ impl Editor {
         self.close_search();
 
         if let Some(new_cursor) = operation(&mut self.buffer)? {
+            // The text under a selection is gone or moved: keeping it would
+            // let the next keystroke delete whatever now sits there.
+            self.selection = None;
             self.cursor = new_cursor;
             self.clamp_cursor();
             // Invalidate entire highlighting cache after undo/redo

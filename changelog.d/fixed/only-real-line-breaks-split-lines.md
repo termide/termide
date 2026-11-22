@@ -1,0 +1,1 @@
+- **Only real line breaks split lines in the editor.** A form feed, vertical tab, NEL or Unicode line/paragraph separator started a new line in the editor but not for git or language servers, so line numbers and diagnostics after one were off by a line. Lines now break only at LF, CRLF and a lone CR, and Duplicate line copies the line the cursor is on in such files.

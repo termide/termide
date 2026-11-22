@@ -122,6 +122,9 @@ pub struct History {
     pending_action: Option<Action>,
     /// Actions recorded since [`History::begin_group`], to be one step.
     group: Option<Vec<Action>>,
+    /// How many [`History::begin_group`] calls are still open: groups nest,
+    /// and only the outermost one closes the step.
+    group_depth: usize,
 }
 
 impl History {
@@ -138,18 +141,28 @@ impl History {
             max_size,
             pending_action: None,
             group: None,
+            group_depth: 0,
         }
     }
 
     /// Record what follows, until [`History::end_group`], as one step.
+    ///
+    /// Groups nest: a group opened inside another joins the outer step.
     pub fn begin_group(&mut self) {
-        self.commit_pending();
-        self.group = Some(Vec::new());
+        if self.group_depth == 0 {
+            self.commit_pending();
+            self.group = Some(Vec::new());
+        }
+        self.group_depth += 1;
     }
 
     /// Close the step [`History::begin_group`] opened; an empty one leaves
     /// nothing.
     pub fn end_group(&mut self) {
+        self.group_depth = self.group_depth.saturating_sub(1);
+        if self.group_depth > 0 {
+            return;
+        }
         if let Some(actions) = self.group.take() {
             if !actions.is_empty() {
                 self.undo_stack.push_back(Action::Group(actions));
@@ -240,6 +253,27 @@ impl Default for History {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_nested_group_joins_the_outer_step() {
+        let mut history = History::new();
+        let insert = |text: &str, column| Action::Insert {
+            position: Cursor::at(0, column),
+            text: text.to_string(),
+        };
+        history.begin_group();
+        history.push(insert("a", 0));
+        history.begin_group();
+        history.push(insert("b", 5));
+        history.end_group();
+        history.push(insert("c", 9));
+        history.end_group();
+        match history.undo() {
+            Some(Action::Group(actions)) => assert_eq!(actions.len(), 3),
+            other => panic!("expected one group of three, got {other:?}"),
+        }
+        assert!(history.undo().is_none());
+    }
 
     #[test]
     fn test_simple_undo_redo() {

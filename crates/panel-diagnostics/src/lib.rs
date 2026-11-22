@@ -598,10 +598,11 @@ impl Panel for DiagnosticsPanel {
             }
             KeyCode::Enter => {
                 if let Some(entry) = self.selected_entry() {
-                    return vec![PanelEvent::OpenFileAt {
+                    // Diagnostic columns are a language server's: UTF-16 units.
+                    return vec![PanelEvent::OpenFileAtLsp {
                         path: entry.file_path.clone(),
                         line: entry.line as usize,
-                        column: entry.column as usize,
+                        character: entry.column as usize,
                     }];
                 }
             }

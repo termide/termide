@@ -89,10 +89,11 @@ impl ReferencesPanel {
 
     fn open_selected(&self) -> Vec<PanelEvent> {
         if let Some(item) = self.items.get(self.selected) {
-            vec![PanelEvent::OpenFileAt {
+            // Reference columns are a language server's: UTF-16 units.
+            vec![PanelEvent::OpenFileAtLsp {
                 path: item.path.clone(),
                 line: item.line,
-                column: item.column,
+                character: item.column,
             }]
         } else {
             vec![]

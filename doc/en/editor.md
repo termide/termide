@@ -170,8 +170,11 @@ Press `Ctrl+H` to open the find bar with a Replace field added.
   - **◄ Prev** / **Next ►** — navigate matches
   - **Replace** — replace the current match and move to the next
   - **Replace all** — replace every match (the status bar reports the count)
+  as one undo step
 - `[.*] Regex` and `[Aa] Case` toggles. With regex on, the Replace field
   supports `$1` / `${name}` capture groups; off (the default) it is literal.
+  Each line is matched without its line break, so `$` matches at the end of
+  every line and `\s+$` trims trailing whitespace without joining lines.
 - Both find and replace text are preserved when the bar is closed.
 
 The configurable `replace_current` (`Ctrl+R`) and `replace_all`

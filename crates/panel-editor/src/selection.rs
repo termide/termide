@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 
-use termide_buffer::{is_word_boundary, Cursor, Selection, TextBuffer};
+use termide_buffer::{columns, is_word_boundary, Cursor, Selection, TextBuffer};
+use unicode_segmentation::UnicodeSegmentation;
 
 /// Select all text in the buffer.
 ///
@@ -39,58 +40,14 @@ pub fn update_selection_active(selection: &mut Option<Selection>, new_cursor: Cu
     }
 }
 
-/// Get selected text from buffer.
-///
-/// Optimized to only read the lines within the selection range,
-/// avoiding copying the entire buffer for large files.
+/// Get selected text from buffer: exactly the text [`delete_selection`]
+/// removes, sliced by the same grapheme columns.
 pub fn get_selected_text(buffer: &TextBuffer, selection: Option<&Selection>) -> Option<String> {
     let selection = selection?;
     if selection.is_empty() {
         return None;
     }
-
-    let start = selection.start();
-    let end = selection.end();
-
-    if start.line == end.line {
-        // Single line selection - only read one line
-        let line = buffer.line(start.line)?;
-        let line_trimmed = line.trim_end_matches('\n');
-        let selected: String = line_trimmed
-            .chars()
-            .skip(start.column)
-            .take(end.column.saturating_sub(start.column))
-            .collect();
-        Some(selected)
-    } else {
-        // Multi-line selection - read only the lines in range
-        let mut result = String::new();
-
-        for i in start.line..=end.line {
-            let Some(line) = buffer.line(i) else {
-                continue;
-            };
-            let line_trimmed = line.trim_end_matches('\n');
-
-            if i == start.line {
-                // First line: from start.column to end
-                for ch in line_trimmed.chars().skip(start.column) {
-                    result.push(ch);
-                }
-                result.push('\n');
-            } else if i == end.line {
-                // Last line: from beginning to end.column
-                for ch in line_trimmed.chars().take(end.column) {
-                    result.push(ch);
-                }
-            } else {
-                // Middle lines: entire line
-                result.push_str(line_trimmed);
-                result.push('\n');
-            }
-        }
-        Some(result)
-    }
+    Some(buffer.text_range(&selection.start(), &selection.end()))
 }
 
 /// Delete selected text from buffer.
@@ -123,26 +80,34 @@ pub fn select_word(buffer: &TextBuffer, cursor: &Cursor) -> Option<(Selection, C
         return None;
     }
 
-    let chars: Vec<char> = line_text.chars().collect();
-    let char_count = chars.len();
+    // Columns are graphemes; a cluster is a boundary when its base char is.
+    let line_text = columns::trim_line_ending(&line_text);
+    let bounds: Vec<bool> = line_text
+        .graphemes(true)
+        .map(|g| g.chars().next().is_none_or(is_word_boundary))
+        .collect();
+    let count = bounds.len();
+    if count == 0 {
+        return None;
+    }
 
     // Clamp column to valid range
-    let col = cursor.column.min(char_count.saturating_sub(1));
+    let col = cursor.column.min(count - 1);
 
     // If cursor is at a word boundary character, don't select anything
-    if col < char_count && is_word_boundary(chars[col]) {
+    if bounds[col] {
         return None;
     }
 
     // Find word start (go backwards until word boundary)
     let mut start_col = col;
-    while start_col > 0 && !is_word_boundary(chars[start_col - 1]) {
+    while start_col > 0 && !bounds[start_col - 1] {
         start_col -= 1;
     }
 
     // Find word end (go forwards until word boundary or end of line)
     let mut end_col = col;
-    while end_col < char_count && !is_word_boundary(chars[end_col]) {
+    while end_col < count && !bounds[end_col] {
         end_col += 1;
     }
 
@@ -156,9 +121,11 @@ pub fn select_word(buffer: &TextBuffer, cursor: &Cursor) -> Option<(Selection, C
 /// Select the whole line at the cursor (triple-click). Covers the line
 /// content from column 0 to end of line; the cursor lands at line end.
 pub fn select_line(buffer: &TextBuffer, cursor: &Cursor) -> Option<(Selection, Cursor)> {
-    let line_text = buffer.line(cursor.line)?;
-    // `line()` includes the trailing newline; exclude it from the selection.
-    let end_col = line_text.trim_end_matches(['\n', '\r']).chars().count();
+    if cursor.line >= buffer.line_count() {
+        return None;
+    }
+    // The line's text in graphemes, without its line ending.
+    let end_col = buffer.line_len_graphemes(cursor.line);
     let start = Cursor::at(cursor.line, 0);
     let end = Cursor::at(cursor.line, end_col);
     Some((Selection::new(start, end), end))
@@ -171,13 +138,42 @@ mod tests {
     fn word_at(text: &str, column: usize) -> Option<String> {
         let buffer = TextBuffer::from_text(text);
         let (selection, _) = select_word(&buffer, &Cursor::at(0, column))?;
-        let line = buffer.line(0)?;
-        let chars: Vec<char> = line.chars().collect();
-        Some(
-            chars[selection.start().column..selection.end().column]
-                .iter()
-                .collect(),
-        )
+        Some(get_selected_text(&buffer, Some(&selection)).unwrap_or_default())
+    }
+
+    #[test]
+    fn a_word_after_a_cluster_is_selected_by_grapheme_columns() {
+        assert_eq!(word_at("🇩🇪 foo bar", 2).as_deref(), Some("foo"));
+        assert_eq!(word_at("cafe\u{301} x", 1).as_deref(), Some("cafe\u{301}"));
+    }
+
+    /// What Copy puts on the clipboard is what Cut deletes, also after
+    /// clusters that are one column but several chars.
+    #[test]
+    fn the_copied_text_is_the_text_a_cut_deletes() {
+        let text = "🇩🇪ab e\u{301}cd\nxy🇩🇪z\n";
+        for (a, b) in [((0, 1), (0, 3)), ((0, 4), (0, 6)), ((0, 2), (1, 3))] {
+            let mut buffer = TextBuffer::from_text(text);
+            let selection = Selection::new(Cursor::at(a.0, a.1), Cursor::at(b.0, b.1));
+            let copied = get_selected_text(&buffer, Some(&selection)).unwrap();
+            delete_selection(&mut buffer, Some(&selection)).unwrap();
+            buffer.insert(&selection.start(), &copied).unwrap();
+            assert_eq!(buffer.text(), text, "{a:?}..{b:?} copied {copied:?}");
+        }
+        let buffer = TextBuffer::from_text(text);
+        let selection = Selection::new(Cursor::at(0, 1), Cursor::at(0, 3));
+        assert_eq!(get_selected_text(&buffer, Some(&selection)).unwrap(), "ab");
+    }
+
+    #[test]
+    fn a_triple_click_selects_the_line_without_its_newline() {
+        let buffer = TextBuffer::from_text("🇩🇪ab\nc");
+        let (selection, _) = select_line(&buffer, &Cursor::at(0, 0)).unwrap();
+        assert_eq!(selection.end(), Cursor::at(0, 3));
+        assert_eq!(
+            get_selected_text(&buffer, Some(&selection)).unwrap(),
+            "🇩🇪ab"
+        );
     }
 
     /// Double-clicking a `snake_case` identifier must take all of it. The

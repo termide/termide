@@ -5,7 +5,8 @@
 
 use anyhow::Result;
 
-use termide_buffer::{Cursor, Selection, TextBuffer};
+use termide_buffer::{columns, Cursor, Selection, TextBuffer};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::auto_pairs;
 
@@ -64,16 +65,18 @@ pub fn insert_newline_with_indent(
     smart_indent: bool,
 ) -> Result<EditResult> {
     let old_line = cursor.line;
-    let line_content = buffer.line(cursor.line).unwrap_or_default();
+    let line_cow = buffer.line_cow(cursor.line).unwrap_or_default();
+    let line_content = columns::trim_line_ending(&line_cow);
 
     // Collect indentation from the current line
     let indent: String = line_content
         .chars()
-        .take_while(|c| c.is_whitespace() && *c != '\n')
+        .take_while(|c| c.is_whitespace())
         .collect();
 
-    // Smart indent: check if text before cursor ends with an opener
-    let before_cursor: String = line_content.chars().take(cursor.column).collect();
+    // Smart indent: check if text before cursor ends with an opener. The
+    // cursor column counts graphemes, so slice by graphemes too.
+    let before_cursor = columns::grapheme_slice(line_content, 0, cursor.column);
     let trimmed = before_cursor.trim_end();
     let extra_indent = if smart_indent
         && (trimmed.ends_with('{')
@@ -88,7 +91,8 @@ pub fn insert_newline_with_indent(
 
     // Split brackets: if cursor is between matching pair like {|}, insert
     // an extra line for the closing bracket with base indentation.
-    let char_after_cursor = line_content.chars().nth(cursor.column);
+    let char_after_cursor =
+        columns::grapheme_at(line_content, cursor.column).and_then(|g| g.chars().next());
     let last_before = trimmed.chars().last();
     let split_brackets = match (last_before, char_after_cursor) {
         (Some(open), Some(close)) => auto_pairs::is_matching_pair(open, close),
@@ -108,7 +112,7 @@ pub fn insert_newline_with_indent(
     let final_cursor = if split_brackets {
         Cursor {
             line: old_line + 1,
-            column: indent.len() + extra_indent.len(),
+            column: indent.graphemes(true).count() + extra_indent.len(),
         }
     } else {
         new_cursor
@@ -174,26 +178,18 @@ pub fn duplicate_line(
         (cursor.line, cursor.line)
     };
 
-    // Get all text and extract the lines to duplicate
-    let full_text = buffer.text();
-    let lines: Vec<&str> = full_text.lines().collect();
-
-    // Build text to duplicate
-    let mut text_to_duplicate = String::new();
-    for line_idx in start_line..=end_line {
-        if let Some(line) = lines.get(line_idx) {
-            text_to_duplicate.push_str(line);
-            if line_idx < end_line {
-                text_to_duplicate.push('\n');
-            }
-        }
-    }
+    // The lines to duplicate, read off the rope by its own line numbers
+    // (`str::lines` breaks lines differently and copied the whole buffer).
+    let last_line_len = buffer.line_len_graphemes(end_line);
+    let mut text_to_duplicate = buffer.text_range(
+        &Cursor::at(start_line, 0),
+        &Cursor::at(end_line, last_line_len),
+    );
 
     // Insert newline and duplicated text after the last line
     text_to_duplicate.insert(0, '\n');
 
     // Move cursor to end of last line to duplicate
-    let last_line_len = buffer.line_len_graphemes(end_line);
     let insert_cursor = Cursor {
         line: end_line,
         column: last_line_len,
@@ -292,6 +288,25 @@ mod tests {
 
     fn buf(content: &str) -> TextBuffer {
         TextBuffer::from_text(content)
+    }
+
+    /// Duplicating reads the line by the rope's line numbers: a form feed
+    /// on an earlier line used to shift `str::lines` against them.
+    #[test]
+    fn duplicate_line_takes_the_line_the_cursor_is_on() {
+        let mut b = buf("a\u{c}b\nsecond\nthird");
+        duplicate_line(&mut b, &Cursor::at(1, 0), None).unwrap();
+        assert_eq!(b.text(), "a\u{c}b\nsecond\nsecond\nthird");
+    }
+
+    #[test]
+    fn smart_indent_reads_the_brackets_around_a_grapheme_column() {
+        // The cursor sits between the brackets after a flag: column 3, but
+        // char 4.
+        let mut b = buf("🇩🇪 {}");
+        let r = insert_newline_with_indent(&mut b, &Cursor::at(0, 3), 4, true).unwrap();
+        assert_eq!(b.text(), "🇩🇪 {\n    \n}");
+        assert_eq!(r.new_cursor, Cursor::at(1, 4));
     }
 
     #[test]

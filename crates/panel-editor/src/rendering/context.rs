@@ -60,7 +60,8 @@ impl RenderContext {
             search
                 .matches
                 .iter()
-                .map(|c| (c.line, c.column, search.query.chars().count()))
+                .enumerate()
+                .map(|(idx, c)| (c.line, c.column, search.match_len_at(idx)))
                 .collect()
         } else {
             Vec::new()
@@ -204,6 +205,17 @@ mod tests {
         assert_eq!(map.get(&(1, 12)), Some(&1));
         assert_eq!(map.get(&(1, 13)), Some(&1));
         assert_eq!(map.get(&(1, 14)), None);
+    }
+
+    /// A regex match is highlighted over its own length, not the pattern's.
+    #[test]
+    fn regex_matches_are_highlighted_over_their_own_length() {
+        let mut search = SearchState::new("a+".to_string(), true).with_regex(true);
+        search.matches = vec![termide_buffer::Cursor::at(0, 0)];
+        search.match_lengths = vec![5];
+        let ctx = RenderContext::prepare(&Some(search), &None, &[], 0..10, 4);
+        assert_eq!(ctx.search_match_map.get(&(0, 4)), Some(&0));
+        assert_eq!(ctx.search_match_map.get(&(0, 5)), None);
     }
 
     #[test]

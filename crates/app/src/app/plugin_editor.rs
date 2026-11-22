@@ -266,11 +266,11 @@ impl App {
         let path = path_param(params)?;
         let line = params["line"].as_u64().unwrap_or(0) as usize;
         let column = params["col"].as_u64().unwrap_or(0) as usize;
-        // As a go-to-definition opens a file: 1-based there.
-        self.process_single_event(termide_core::PanelEvent::OpenFileAt {
+        // Positions count as LSP counts them (see `doc/en/plugins.md`).
+        self.process_single_event(termide_core::PanelEvent::OpenFileAtLsp {
             path,
-            line: line + 1,
-            column: column + 1,
+            line,
+            character: column,
         })
         .map_err(|e| RpcError::new(INVALID_PARAMS, e.to_string()))?;
         Ok(Value::Null)

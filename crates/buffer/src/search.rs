@@ -1,3 +1,5 @@
+use unicode_segmentation::UnicodeSegmentation;
+
 use crate::Cursor;
 
 /// Search state in editor
@@ -61,7 +63,7 @@ impl SearchState {
         self.match_lengths
             .get(idx)
             .copied()
-            .unwrap_or_else(|| self.query.chars().count())
+            .unwrap_or_else(|| self.query.graphemes(true).count())
     }
 
     /// Check if search is active

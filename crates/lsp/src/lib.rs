@@ -41,6 +41,22 @@ pub fn path_to_uri(path: &Path) -> Option<Uri> {
     url.as_str().parse().ok()
 }
 
+/// The local path a `file://` URI names, percent-decoded (`%20` is a space,
+/// `%D1%84` a `ф`); `None` for any other scheme or a malformed URI. The
+/// inverse of [`path_to_uri`].
+pub fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
+    uri_str_to_path(uri.as_str())
+}
+
+/// [`uri_to_path`] for a URI held as a string.
+pub fn uri_str_to_path(uri: &str) -> Option<PathBuf> {
+    let url = Url::parse(uri).ok()?;
+    if url.scheme() != "file" {
+        return None;
+    }
+    url.to_file_path().ok()
+}
+
 /// Configuration for LSP servers
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LspConfig {
@@ -1035,6 +1051,23 @@ impl Drop for LspManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A server percent-encodes spaces and non-ASCII names in its URIs; the
+    /// path they name is the decoded one, and back again.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_uri_is_percent_decoded_into_its_path() {
+        let path = Path::new("/tmp/my project/файл.rs");
+        let uri = path_to_uri(path).unwrap();
+        assert!(uri.as_str().contains("my%20project"), "{}", uri.as_str());
+        assert_eq!(uri_to_path(&uri).as_deref(), Some(path));
+        assert_eq!(
+            uri_str_to_path("file:///tmp/a%23b.rs").as_deref(),
+            Some(Path::new("/tmp/a#b.rs"))
+        );
+        assert_eq!(uri_str_to_path("untitled:Untitled-1"), None);
+        assert_eq!(uri_str_to_path("https://example.com/a.rs"), None);
+    }
 
     #[test]
     fn test_detect_language() {

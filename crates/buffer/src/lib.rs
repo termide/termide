@@ -4,6 +4,7 @@
 //! along with cursor management, history (undo/redo), viewport, and search.
 
 mod buffer;
+pub mod columns;
 mod cursor;
 mod edit_log;
 mod folds;

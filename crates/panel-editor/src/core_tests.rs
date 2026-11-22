@@ -1193,3 +1193,30 @@ fn the_replace_key_replaces_while_the_bar_has_focus() {
     assert_eq!(editor.buffer.text().matches('x').count(), 1);
     assert_eq!(editor.buffer.text().matches('l').count(), 1);
 }
+
+/// A replacement that adds lines moves the matches below it; the next
+/// Replace must still hit a real match, not a stale position.
+#[test]
+fn replace_current_after_a_line_adding_replacement_targets_the_next_real_match() {
+    let mut editor = Editor::from_text("a,b\nx a,c\n", "t.txt".to_string());
+    editor.start_replace(",".to_string(), "\n".to_string(), true, false);
+    editor.replace_current().unwrap();
+    assert_eq!(editor.buffer.text(), "a\nb\nx a,c\n");
+    editor.replace_current().unwrap();
+    assert_eq!(editor.buffer.text(), "a\nb\nx a\nc\n");
+    assert!(editor.search.state.as_ref().unwrap().matches.is_empty());
+}
+
+/// Undo drops the selection: it named text that undo just moved.
+#[test]
+fn undo_clears_the_selection() {
+    let mut editor = Editor::from_text("hello world", "t.txt".to_string());
+    editor.goto_position(0, 11);
+    editor.insert_char('x').unwrap();
+    editor.select_all();
+    editor.handle_undo_redo(|b| b.undo()).unwrap();
+    assert_eq!(editor.buffer.text(), "hello world");
+    assert!(editor.selection.is_none());
+    editor.insert_char('!').unwrap();
+    assert_eq!(editor.buffer.text(), "hello world!");
+}
