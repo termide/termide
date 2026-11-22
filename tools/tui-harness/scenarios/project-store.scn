@@ -13,7 +13,7 @@ start
 wait-re "Projects  project "
 
 # The old tree is gone, each project has its own flat directory.
-run "test ! -e \"$TERMIDE_DATA/projects/private\" && test ! -e \"$TERMIDE_DATA/projects/tmp\""
+run "F=$(pwd -P | cut -d/ -f2) && test -n \"$F\" && test ! -e \"$TERMIDE_DATA/projects/$F\""
 run "test -f \"$TERMIDE_DATA\"/projects/other-*/project.toml && test -f \"$TERMIDE_DATA\"/projects/gone-*/project.toml"
 
 key 'Alt+\'
