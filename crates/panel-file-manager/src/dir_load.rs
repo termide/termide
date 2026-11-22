@@ -18,6 +18,13 @@ pub(crate) struct AsyncDirReloadResult {
     entries: Vec<FileEntry>,
 }
 
+#[cfg(test)]
+impl AsyncDirReloadResult {
+    pub(crate) fn new(path: PathBuf, entries: Vec<FileEntry>) -> Self {
+        Self { path, entries }
+    }
+}
+
 /// Cursor / selection restoration state to apply once an async directory
 /// load completes. Stored on `FileManager` between the moment the load
 /// is kicked off and the moment `tick()` sees the worker's result.
@@ -25,11 +32,30 @@ pub(crate) struct AsyncDirReloadResult {
 pub(crate) struct PendingDirLoad {
     /// Name to put the cursor on when the load resolves.
     previous_name: Option<String>,
+    /// Full path of the entry the cursor should return to; preferred over
+    /// the name, which cannot tell a nested entry from a top-level one.
+    previous_path: Option<PathBuf>,
     previous_index: usize,
     previous_scroll_offset: usize,
-    /// Names of files that were selected before the load. Empty when
-    /// the caller did not request selection preservation.
-    selected_names: HashSet<String>,
+    /// Full paths of the entries that were marked before the load. Empty
+    /// when the caller did not request selection preservation.
+    selected_paths: HashSet<PathBuf>,
+}
+
+/// Cursor and marks waiting for their rows: a reload rebuilds the top level
+/// at once but lists expanded folders afterwards, so an entry inside one is
+/// found only once its folder's listing lands. Applied by
+/// `poll_pending_expansions`; dropped when no listing is left in flight.
+#[derive(Default)]
+pub(crate) struct PathRestore {
+    /// Where the cursor belongs, not shown yet.
+    cursor: Option<PathBuf>,
+    /// The entry the cursor was left on meanwhile. When the cursor is on
+    /// another entry by the time `cursor` shows up, the user moved it and it
+    /// stays where it is.
+    parked_on: Option<PathBuf>,
+    /// Marked entries not shown yet.
+    marks: HashSet<PathBuf>,
 }
 
 /// Standalone directory reader that can run in a background thread.
@@ -133,6 +159,12 @@ impl FileManager {
     /// main tick loop. Call `check_async_reload()` on each tick to apply results.
     pub(crate) fn start_async_reload(&mut self) {
         const RELOAD_DEBOUNCE_MS: u128 = 300;
+        // The worker reads the local disk: a remote panel's path names a
+        // directory on the server, and the local one of that name is not it.
+        if self.vfs.is_remote() {
+            self.reload_dirty = false;
+            return;
+        }
         if !self.navigation.should_reload(RELOAD_DEBOUNCE_MS) {
             // Too soon after the last reload — remember to retry so a burst's
             // final change isn't lost.
@@ -187,9 +219,11 @@ impl FileManager {
             }
         };
 
-        if result.path != self.current_path {
+        // Stale result: the user navigated away, or onto a server or into an
+        // archive, where a path equal to the local one names other files.
+        if result.path != self.current_path || self.vfs.is_remote() {
             self.pending_dir_load = None;
-            return false; // Stale result — user navigated away
+            return false;
         }
 
         // Build entries with ".." prefix. A drive root keeps it too: from
@@ -212,25 +246,40 @@ impl FileManager {
 
         // If `pending_dir_load` is set, this was a navigation-initiated
         // load — restore the saved cursor/selection. Otherwise we're
-        // resolving a passive watcher refresh, so just hold the current
-        // cursor by name.
+        // resolving a passive watcher refresh, so hold the current cursor
+        // and marks on their entries: rows shift when entries come and go.
         let pending = self.pending_dir_load.take();
-        let (current_name, previous_index, previous_scroll_offset, selected_names) =
+        let carried = self.path_restore.take();
+        let (current_name, current_path, previous_index, previous_scroll_offset, mut marks) =
             if let Some(p) = pending {
                 (
                     p.previous_name,
+                    p.previous_path,
                     p.previous_index,
                     p.previous_scroll_offset,
-                    p.selected_names,
+                    p.selected_paths,
                 )
             } else {
+                let mut marks = self.save_selection_paths();
+                let mut cursor = self.path_at(self.selected).cloned();
+                // An earlier reload's targets whose folders were still being
+                // listed carry over.
+                if let Some(carried) = carried {
+                    marks.extend(carried.marks);
+                    if carried.parked_on == cursor && carried.cursor.is_some() {
+                        cursor = carried.cursor;
+                    }
+                }
                 (
                     self.entry_at(self.selected).map(|e| e.name.clone()),
+                    cursor,
                     self.selected,
                     self.scroll_offset,
-                    HashSet::new(),
+                    marks,
                 )
             };
+        self.selection.clear();
+        self.selection.end_drag();
 
         self.tree_entries = self.build_top_level_tree(entries);
         self.load_expanded_subtrees();
@@ -244,17 +293,82 @@ impl FileManager {
             self.apply_git_statuses();
         }
 
-        if !selected_names.is_empty() {
+        if !marks.is_empty() {
             for (vis_idx, &tree_idx) in self.visible_indices.iter().enumerate() {
-                if selected_names.contains(&self.tree_entries[tree_idx].file_entry.name) {
+                if marks.remove(&self.tree_entries[tree_idx].full_path) {
                     self.selection.select(vis_idx);
                 }
             }
         }
 
-        self.restore_cursor(current_name, previous_index, previous_scroll_offset);
+        let cursor_target = self.restore_cursor(
+            current_name,
+            current_path,
+            previous_index,
+            previous_scroll_offset,
+        );
+
+        // Entries inside expanded folders show up once their listings land.
+        marks.retain(|p| self.is_nested_path(p));
+        if !self.pending_expansions.is_empty() && (cursor_target.is_some() || !marks.is_empty()) {
+            self.path_restore = Some(PathRestore {
+                cursor: cursor_target,
+                parked_on: self.path_at(self.selected).cloned(),
+                marks,
+            });
+        }
 
         true
+    }
+
+    /// Whether `path` lies inside a folder of the current directory rather
+    /// than directly in it: only such an entry can appear later, when an
+    /// expanded folder's listing lands.
+    fn is_nested_path(&self, path: &std::path::Path) -> bool {
+        path.starts_with(&self.current_path) && path.parent() != Some(self.current_path.as_path())
+    }
+
+    /// Visible row of the entry at `path`.
+    pub(crate) fn visible_index_of_path(&self, path: &std::path::Path) -> Option<usize> {
+        self.visible_indices
+            .iter()
+            .position(|&ti| self.tree_entries[ti].full_path == path)
+    }
+
+    /// Put back the cursor and marks a reload could not place yet, those
+    /// whose rows have appeared since. Called after expansions land, with
+    /// the entry the cursor was on before they did.
+    pub(crate) fn apply_path_restore(&mut self, cursor_before: Option<&PathBuf>) {
+        let Some(mut restore) = self.path_restore.take() else {
+            return;
+        };
+        let found: Vec<(PathBuf, usize)> = restore
+            .marks
+            .iter()
+            .filter_map(|p| Some((p.clone(), self.visible_index_of_path(p)?)))
+            .collect();
+        for (path, idx) in found {
+            restore.marks.remove(&path);
+            self.selection.select(idx);
+        }
+        if let Some(target) = restore.cursor.take() {
+            if cursor_before != restore.parked_on.as_ref() {
+                // The user moved the cursor meanwhile: leave it be.
+            } else if let Some(idx) = self.visible_index_of_path(&target) {
+                self.selected = idx;
+                if self.visible_height > 0 {
+                    self.adjust_scroll_offset(self.visible_height);
+                }
+            } else {
+                restore.cursor = Some(target);
+                restore.parked_on = self.path_at(self.selected).cloned();
+            }
+        }
+        if !self.pending_expansions.is_empty()
+            && (restore.cursor.is_some() || !restore.marks.is_empty())
+        {
+            self.path_restore = Some(restore);
+        }
     }
 
     /// Build top-level `tree_entries` from a sorted list of `FileEntry`.
@@ -288,13 +402,18 @@ impl FileManager {
     }
 
     /// Restore cursor position after entries reload.
-    /// Priority: newly created item → navigating down → restore by name → fallback to index.
+    /// Priority: newly created item → navigating down → restore by path,
+    /// then name → fallback to index.
+    ///
+    /// Returns the entry the cursor belongs on when it lies inside an
+    /// expanded folder not listed yet, for `apply_path_restore` to finish.
     fn restore_cursor(
         &mut self,
         current_name: Option<String>,
+        current_path: Option<PathBuf>,
         previous_index: usize,
         previous_scroll_offset: usize,
-    ) {
+    ) -> Option<PathBuf> {
         let count = self.visible_count();
         // Newly-created cursor restore: prefer matching by full path so
         // an entry nested inside an expanded subdir is found correctly.
@@ -322,17 +441,39 @@ impl FileManager {
                 if self.visible_height > 0 {
                     self.adjust_scroll_offset(self.visible_height);
                 }
-            } else if count > 0 {
-                self.selected = previous_index.min(count - 1);
+            } else {
+                if count > 0 {
+                    self.selected = previous_index.min(count - 1);
+                }
+                return created_path.filter(|p| self.is_nested_path(p));
             }
         } else if self.navigation.check_and_reset_navigating_down() {
             self.selected = 0;
             self.scroll_offset = 0;
-        } else if let Some(name) = current_name {
-            if let Some(pos) = self.find_entry_index(&name) {
+        } else if current_name.is_some() || current_path.is_some() {
+            // A nested entry is found by its path only: its name may also be
+            // a top-level entry's.
+            let nested = current_path.as_ref().filter(|p| self.is_nested_path(p));
+            let found = current_path
+                .as_deref()
+                .and_then(|p| self.visible_index_of_path(p))
+                .or_else(|| {
+                    if nested.is_some() {
+                        None
+                    } else {
+                        current_name
+                            .as_deref()
+                            .and_then(|n| self.find_entry_index(n))
+                    }
+                });
+            let mut unresolved = None;
+            if let Some(pos) = found {
                 self.selected = pos;
-            } else if count > 0 {
-                self.selected = previous_index.min(count - 1);
+            } else {
+                if count > 0 {
+                    self.selected = previous_index.min(count - 1);
+                }
+                unresolved = nested.cloned();
             }
             if self.visible_height > 0 {
                 if count <= self.visible_height {
@@ -343,7 +484,9 @@ impl FileManager {
                 }
                 self.adjust_scroll_offset(self.visible_height);
             }
+            return unresolved;
         }
+        None
     }
 
     /// Update entries from VFS directory listing (for remote directories).
@@ -397,7 +540,8 @@ impl FileManager {
         self.git_status_cache = None;
         self.git_root = None;
 
-        self.restore_cursor(current_name, previous_index, previous_scroll_offset);
+        self.path_restore = None;
+        self.restore_cursor(current_name, None, previous_index, previous_scroll_offset);
     }
 
     /// Internal method to load directory with optional selection preservation.
@@ -424,22 +568,25 @@ impl FileManager {
 
         // Save current file name and index to restore position once the
         // async read completes (see `check_async_reload`).
-        let previous_name = self
-            .navigation
-            .take_previous_dir_name()
-            .or_else(|| self.entry_at(self.selected).map(|e| e.name.clone()));
+        let (previous_name, previous_path) = match self.navigation.take_previous_dir_name() {
+            Some(name) => {
+                let path = self.current_path.join(&name);
+                (Some(name), Some(path))
+            }
+            None => (
+                self.entry_at(self.selected).map(|e| e.name.clone()),
+                self.path_at(self.selected).cloned(),
+            ),
+        };
         let previous_index = self.selected;
         let previous_scroll_offset = self.scroll_offset;
 
-        let selected_names: HashSet<String> = if preserve_selection {
-            self.selection
-                .items
-                .iter()
-                .filter_map(|&vis_idx| self.entry_at(vis_idx).map(|e| e.name.clone()))
-                .collect()
+        let selected_paths: HashSet<PathBuf> = if preserve_selection {
+            self.save_selection_paths()
         } else {
             HashSet::new()
         };
+        self.path_restore = None;
 
         self.tree_entries.clear();
         // Drop the stale `visible_indices` / `tree_prefixes` along with
@@ -457,9 +604,10 @@ impl FileManager {
 
         self.pending_dir_load = Some(PendingDirLoad {
             previous_name,
+            previous_path,
             previous_index,
             previous_scroll_offset,
-            selected_names,
+            selected_paths,
         });
 
         // Spawn the read_dir on a worker. `read_dir_entries_standalone`

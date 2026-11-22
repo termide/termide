@@ -81,10 +81,14 @@ pub fn parse_vfs_url(url: &str) -> VfsResult<VfsPath> {
     let port = parsed.port();
 
     // Extract username (if specified)
+    // Percent-encoded like the path (an `@` in the name is `%40`).
     let username = if parsed.username().is_empty() {
         None
     } else {
-        Some(parsed.username().to_string())
+        let decoded = percent_encoding::percent_decode_str(parsed.username())
+            .decode_utf8()
+            .map_err(|e| VfsError::InvalidUrl(format!("username is not valid UTF-8: {e}")))?;
+        Some(decoded.into_owned())
     };
 
     // Extract path. `url::Url::path()` returns percent-encoded bytes
@@ -133,6 +137,51 @@ fn parse_archive_url(rest: &str) -> VfsResult<VfsPath> {
         )));
     }
     Ok(VfsPath::archive(container, inner))
+}
+
+/// Percent-encode a remote path for [`VfsPath::to_url_string`] so that
+/// [`parse_vfs_url`], which decodes it, gets the same path back: `%` starts
+/// an escape, `#` and `?` would start a fragment or a query, control
+/// characters are dropped by the URL parser and so is trailing whitespace
+/// (the whole URL is trimmed). Other characters, spaces and non-ASCII
+/// letters included, stay as they are so the URL stays readable where it is
+/// shown.
+pub fn encode_url_path(path: &str) -> String {
+    let keep_len = path.trim_end().len();
+    let mut out = String::with_capacity(path.len());
+    for (i, c) in path.char_indices() {
+        if matches!(c, '%' | '#' | '?') || c.is_control() || i >= keep_len {
+            push_escaped(&mut out, c);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Percent-encode a username for the userinfo part of a URL: `@`, `:` and
+/// `/` would end it early, the rest of the set as in [`encode_url_path`].
+/// [`parse_vfs_url`] decodes it.
+pub(crate) fn encode_userinfo(user: &str) -> String {
+    let mut out = String::with_capacity(user.len());
+    for c in user.chars() {
+        if matches!(c, '%' | '@' | ':' | '/' | '#' | '?' | '[' | ']' | '\\')
+            || c.is_control()
+            || c.is_whitespace()
+        {
+            push_escaped(&mut out, c);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+fn push_escaped(out: &mut String, c: char) {
+    let mut buf = [0u8; 4];
+    for byte in c.encode_utf8(&mut buf).bytes() {
+        out.push_str(&format!("%{byte:02X}"));
+    }
 }
 
 /// Percent-encode the two characters that would make an archive URL's
@@ -316,6 +365,44 @@ mod tests {
             .with_port(2222);
 
         assert_eq!(path.to_url_string(), "sftp://user@host:2222/path/to/file");
+    }
+
+    #[test]
+    fn remote_urls_round_trip_awkward_paths_and_usernames() {
+        for path in [
+            "/a#b/c?d",
+            "/100%41/50%",
+            "/My Docs/file name.txt",
+            "/тест/文件",
+            "/trailing ",
+            "/tab\there",
+        ] {
+            let vfs = VfsPath::remote(VfsProtocol::Sftp, "host", path)
+                .with_username("me@corp.example")
+                .with_port(2222);
+            let url = vfs.to_url_string();
+            assert_eq!(parse_vfs_url(&url).unwrap(), vfs, "{path} via {url}");
+        }
+
+        let vfs = VfsPath::remote(VfsProtocol::Ftp, "host", "/x").with_username("a:b%c/d");
+        assert_eq!(parse_vfs_url(&vfs.to_url_string()).unwrap(), vfs);
+    }
+
+    #[test]
+    fn remote_urls_stay_readable() {
+        let vfs =
+            VfsPath::remote(VfsProtocol::Sftp, "host", "/My Docs/тест#1").with_username("me@corp");
+        assert_eq!(
+            vfs.to_url_string(),
+            "sftp://me%40corp@host/My Docs/тест%231"
+        );
+    }
+
+    #[test]
+    fn archive_url_on_a_remote_path_with_a_percent_round_trips() {
+        let container = VfsPath::remote(VfsProtocol::Sftp, "host", "/srv/50%41 #1.zip");
+        let path = VfsPath::archive(container, "/docs");
+        assert_eq!(parse_vfs_url(&path.to_url_string()).unwrap(), path);
     }
 
     #[test]

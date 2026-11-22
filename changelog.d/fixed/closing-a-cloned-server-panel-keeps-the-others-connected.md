@@ -1,0 +1,1 @@
+- **Closing a cloned server panel keeps the others connected.** A file manager opened from a server panel shares its connection, and closing either one, or leaving an archive open in both, closed that connection under the other. A connection is now closed only when no panel shows it.

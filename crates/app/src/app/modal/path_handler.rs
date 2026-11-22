@@ -65,23 +65,8 @@ impl App {
         operation_id: termide_file_ops::OperationId,
         value: termide_modal::ModalOutput,
     ) -> Result<()> {
-        use termide_file_ops::ConflictResolution as FileOpsResolution;
-        use termide_modal::ConflictResolution as ModalResolution;
-
-        if let Some(modal_resolution) = value.get::<ModalResolution>() {
-            // Convert modal resolution to file-ops resolution
-            let file_ops_resolution = match modal_resolution {
-                ModalResolution::Overwrite => FileOpsResolution::Overwrite,
-                ModalResolution::Skip => FileOpsResolution::Skip,
-                ModalResolution::OverwriteAll => FileOpsResolution::OverwriteAll,
-                ModalResolution::SkipAll => FileOpsResolution::SkipAll,
-                ModalResolution::Rename | ModalResolution::RenameAll => {
-                    // Rename is not supported by OperationManager yet, treat as Skip
-                    log::warn!("Rename resolution not yet supported, skipping file");
-                    FileOpsResolution::Skip
-                }
-                ModalResolution::Cancel => FileOpsResolution::Cancel,
-            };
+        if let Some(modal_resolution) = value.get::<termide_modal::ConflictResolution>() {
+            let file_ops_resolution = worker_resolution(modal_resolution);
 
             // Send resolution to the operation
             if !self
@@ -178,5 +163,44 @@ impl App {
             }
         }
         Ok(())
+    }
+}
+
+/// The answer to a conflict a copy worker raised, as the worker takes it.
+fn worker_resolution(
+    resolution: &termide_modal::ConflictResolution,
+) -> termide_file_ops::ConflictResolution {
+    use termide_file_ops::ConflictResolution as Worker;
+    use termide_modal::ConflictResolution as Modal;
+    match resolution {
+        Modal::Overwrite => Worker::Overwrite,
+        Modal::Skip => Worker::Skip,
+        Modal::OverwriteAll => Worker::OverwriteAll,
+        Modal::SkipAll => Worker::SkipAll,
+        // The worker names this and every later conflict "name (N)".
+        Modal::RenameAll => Worker::RenameAll,
+        Modal::Rename => {
+            // A name of the user's choosing has no prompt on this path yet.
+            log::warn!("Rename resolution not yet supported, skipping file");
+            Worker::Skip
+        }
+        Modal::Cancel => Worker::Cancel,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::worker_resolution;
+    use termide_file_ops::ConflictResolution as Worker;
+    use termide_modal::ConflictResolution as Modal;
+
+    /// Rename All reaches the worker as Rename All, not as Skip.
+    #[test]
+    fn rename_all_reaches_the_worker() {
+        assert!(matches!(
+            worker_resolution(&Modal::RenameAll),
+            Worker::RenameAll
+        ));
+        assert!(matches!(worker_resolution(&Modal::Cancel), Worker::Cancel));
     }
 }

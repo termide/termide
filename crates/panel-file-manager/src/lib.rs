@@ -183,6 +183,9 @@ pub struct FileManager {
     /// synchronous; cleared by `check_async_reload`. `None` means a
     /// watcher-triggered passive refresh — keep cursor where it is.
     pending_dir_load: Option<PendingDirLoad>,
+    /// Cursor and marks a reload could not place yet because their rows
+    /// sit in expanded folders still being listed.
+    path_restore: Option<dir_load::PathRestore>,
     /// In-flight directory listings for tree-expand. Keyed by the
     /// absolute path of the directory being expanded; while an entry is
     /// present the tree shows a synthetic loading placeholder underneath
@@ -340,6 +343,7 @@ impl FileManager {
             async_reload_receiver: None,
             reload_dirty: false,
             pending_dir_load: None,
+            path_restore: None,
             pending_expansions: HashMap::new(),
         }
     }
@@ -530,16 +534,13 @@ impl FileManager {
         if let Some(parent) = path.parent() {
             self.current_path =
                 dunce::canonicalize(parent).unwrap_or_else(|_| parent.to_path_buf());
-            let _ = self.load_directory();
-
-            // Find and select the file in the list
+            // The listing is read on a worker; the cursor finds the file
+            // when it lands (`restore_cursor`), as for a new file.
             if let Some(file_name) = path.file_name() {
-                let name_str = file_name.to_string_lossy();
-                if let Some(idx) = self.find_entry_index(&name_str) {
-                    self.selected = idx;
-                    self.adjust_scroll_offset(self.visible_height);
-                }
+                self.navigation
+                    .set_newly_created_path(self.current_path.join(file_name));
             }
+            let _ = self.load_directory();
         }
     }
 
@@ -767,6 +768,11 @@ impl Panel for FileManager {
                 CommandResult::None
             }
             PanelCommand::OnFsUpdate { changed_path } => {
+                // The watcher reports the local disk; a remote panel's path
+                // names a directory on the server.
+                if self.vfs.is_remote() {
+                    return CommandResult::NeedsRedraw(false);
+                }
                 let current = self.current_path();
 
                 // For git repos: reload on any change within current directory tree
@@ -942,19 +948,7 @@ impl Panel for FileManager {
             // Try to reconstruct the URL manually
             let vfs_path = self.vfs.current_path();
             let reconstructed = if vfs_path.protocol.is_remote() {
-                let mut url = format!("{}://", vfs_path.protocol.scheme());
-                if let Some(ref user) = vfs_path.username {
-                    url.push_str(user);
-                    url.push('@');
-                }
-                if let Some(ref host) = vfs_path.host {
-                    url.push_str(host);
-                }
-                if let Some(port) = vfs_path.port {
-                    url.push(':');
-                    url.push_str(&port.to_string());
-                }
-                url.push_str(&vfs_path.path.display().to_string());
+                let url = vfs_path.to_url_string();
                 log::info!("Reconstructed URL: {}", url);
                 url
             } else {
@@ -2204,6 +2198,186 @@ mod tests {
             full_path,
             shortened,
         );
+    }
+
+    /// Lists every expanded folder still in flight, as `tick()` would.
+    fn wait_for_expansions(fm: &mut FileManager) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !fm.pending_expansions.is_empty() {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "expansion never landed"
+            );
+            fm.poll_pending_expansions();
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// A watcher-driven reload, past the debounce window.
+    fn watcher_reload(fm: &mut FileManager) {
+        fm.navigation.last_reload_time = None;
+        fm.start_async_reload();
+        wait_for_local_listing(fm);
+        wait_for_expansions(fm);
+    }
+
+    fn cursor_path(fm: &FileManager) -> PathBuf {
+        fm.path_at(fm.selected).cloned().unwrap()
+    }
+
+    /// A file appearing above the marked ones must not shift the marks onto
+    /// other files: F8 would delete those.
+    #[test]
+    fn marks_stay_on_their_files_when_a_watcher_reload_adds_one_above() {
+        let (mut fm, temp_dir) = create_file_manager_in_temp();
+        let root = canonical_temp_path(&temp_dir);
+        for name in ["b.txt", "c.txt", "d.txt"] {
+            std::fs::write(root.join(name), "x").unwrap();
+        }
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        let c = fm.find_entry_index("c.txt").unwrap();
+        fm.selection.select(c);
+        fm.selected = fm.find_entry_index("d.txt").unwrap();
+
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        watcher_reload(&mut fm);
+
+        assert_eq!(names(&fm)[1], "a.txt", "the new file is listed first");
+        assert_eq!(fm.get_selected_paths(), vec![root.join("c.txt")]);
+        assert_eq!(cursor_path(&fm), root.join("d.txt"));
+    }
+
+    /// Inside an expanded folder, cursor and marks wait for the folder's
+    /// listing after a reload and land on their own entries, not on a
+    /// top-level entry of the same name nor on whatever row took their place.
+    #[test]
+    fn nested_cursor_and_marks_survive_reloads_of_an_expanded_tree() {
+        let (mut fm, temp_dir) = create_file_manager_in_temp();
+        let root = canonical_temp_path(&temp_dir);
+        std::fs::create_dir(root.join("sub")).unwrap();
+        for name in ["sub/inner.txt", "sub/z.txt", "inner.txt", "zz.txt"] {
+            std::fs::write(root.join(name), "x").unwrap();
+        }
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.expand_dir(fm.find_entry_index("sub").unwrap());
+        wait_for_expansions(&mut fm);
+
+        let inner = fm
+            .visible_index_of_path(&root.join("sub/inner.txt"))
+            .unwrap();
+        fm.selection.select(inner);
+        fm.selected = fm.visible_index_of_path(&root.join("sub/z.txt")).unwrap();
+
+        // A folder sorting above `sub` shifts every row below it.
+        std::fs::create_dir(root.join("a_dir")).unwrap();
+        watcher_reload(&mut fm);
+        assert_eq!(cursor_path(&fm), root.join("sub/z.txt"));
+        assert_eq!(fm.get_selected_paths(), vec![root.join("sub/inner.txt")]);
+
+        // Ctrl+R keeps them by path too.
+        fm.navigation.last_reload_time = None;
+        fm.reload_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        wait_for_expansions(&mut fm);
+        assert_eq!(cursor_path(&fm), root.join("sub/z.txt"));
+        assert_eq!(fm.get_selected_paths(), vec![root.join("sub/inner.txt")]);
+    }
+
+    /// Rows a folder's listing inserts above the cursor push it down with
+    /// its entry.
+    #[test]
+    fn an_expansion_landing_above_the_cursor_keeps_it_on_its_entry() {
+        let (mut fm, temp_dir) = create_file_manager_in_temp();
+        let root = canonical_temp_path(&temp_dir);
+        std::fs::create_dir(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/a.txt"), "x").unwrap();
+        std::fs::write(root.join("sub/b.txt"), "x").unwrap();
+        std::fs::write(root.join("top.txt"), "x").unwrap();
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.expand_dir(fm.find_entry_index("sub").unwrap());
+        fm.selected = fm.find_entry_index("top.txt").unwrap();
+        wait_for_expansions(&mut fm);
+        assert_eq!(cursor_path(&fm), root.join("top.txt"));
+    }
+
+    /// A local change at the path a remote panel (here an archive, rooted at
+    /// `/`) shows must not replace its listing with the local directory.
+    #[test]
+    fn a_remote_panel_ignores_local_changes_at_its_path() {
+        use std::io::Write;
+        let temp_dir = TempDir::new().unwrap();
+        let archive = temp_dir.path().join("pack.zip");
+        let mut zip = zip::ZipWriter::new(std::fs::File::create(&archive).unwrap());
+        zip.start_file("inner.txt", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"x").unwrap();
+        zip.add_directory("folder/", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.finish().unwrap();
+
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("pack.zip").unwrap();
+        assert!(fm.enter().is_none());
+        wait_for_vfs(&mut fm);
+        assert!(fm.vfs.at_archive_root());
+        let listed = names(&fm);
+
+        let changed_path = fm.current_path.join("some-local-file");
+        let result = fm.handle_command(PanelCommand::OnFsUpdate {
+            changed_path: &changed_path,
+        });
+        assert!(!result.needs_redraw());
+        fm.navigation.last_reload_time = None;
+        fm.start_async_reload();
+        assert!(fm.async_reload_receiver.is_none(), "no local read started");
+
+        // A local result landing for the same path is dropped too.
+        let (tx, rx) = mpsc::channel();
+        tx.send(dir_load::AsyncDirReloadResult::new(
+            fm.current_path.clone(),
+            vec![FileEntry {
+                name: "local.txt".to_string(),
+                os_name: None,
+                is_dir: false,
+                is_symlink: false,
+                is_executable: false,
+                is_readonly: false,
+                git_status: GitStatus::Unmodified,
+                size: Some(1),
+                modified: None,
+            }],
+        ))
+        .unwrap();
+        fm.async_reload_receiver = Some(rx);
+        assert!(!fm.check_async_reload());
+        assert_eq!(names(&fm), listed);
+
+        // Nor are folder sizes walked on the local disk under its paths.
+        fm.cached_config.dir_size_in_wide_view = true;
+        fm.cached_config.dir_size_budget_ms = 100;
+        fm.on_tick();
+        assert!(fm.dir_size_pending.is_none());
+        assert!(fm.dir_size_queue.is_empty());
+    }
+
+    /// Going to a file (Go to path, a search result) lands the cursor on it
+    /// once the listing, read on a worker, arrives.
+    #[test]
+    fn navigate_to_file_puts_the_cursor_on_the_file() {
+        let (mut fm, temp_dir) = create_file_manager_in_temp();
+        let root = canonical_temp_path(&temp_dir);
+        std::fs::create_dir(root.join("dir")).unwrap();
+        for name in ["dir/a.txt", "dir/b.txt", "dir/target.txt"] {
+            std::fs::write(root.join(name), "x").unwrap();
+        }
+        fm.navigate_to_file(&root.join("dir/target.txt"));
+        wait_for_local_listing(&mut fm);
+        assert_eq!(cursor_path(&fm), root.join("dir/target.txt"));
     }
 
     #[test]

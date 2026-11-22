@@ -1,0 +1,1 @@
+- **The operations panel keeps its selection.** When an operation above the selected one finished or a new one appeared, the selection jumped to another operation, so cancelling could hit the wrong one. It now stays on its operation.

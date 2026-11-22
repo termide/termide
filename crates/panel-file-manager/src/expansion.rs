@@ -256,17 +256,28 @@ impl FileManager {
                 }
             }
         }
-        let changed = !results.is_empty();
+        if results.is_empty() {
+            return false;
+        }
+        // Read marks and cursor while `visible_indices` still matches the
+        // tree: rows inserted above must not move them to other entries.
+        let saved = self.save_selection_paths();
+        let cursor = self.path_at(self.selected).cloned();
         for (dir_path, result) in results {
             self.pending_expansions.remove(&dir_path);
             self.finish_expand(&dir_path, result);
         }
-        if changed {
-            let saved = self.save_selection_paths();
-            self.recompute_visible();
-            self.restore_selection_by_paths(&saved);
+        self.recompute_visible();
+        self.restore_selection_by_paths(&saved);
+        if let Some(idx) = cursor.as_ref().and_then(|p| self.visible_index_of_path(p)) {
+            self.selected = idx;
         }
-        changed
+        self.selected = self.selected.min(self.visible_count().saturating_sub(1));
+        self.apply_path_restore(cursor.as_ref());
+        if self.visible_height > 0 {
+            self.adjust_scroll_offset(self.visible_height);
+        }
+        true
     }
 
     /// Substitute the loading placeholder under `dir_path` with the real
@@ -427,7 +438,7 @@ impl FileManager {
     }
 
     /// Save selection as set of paths (survives tree rebuilds).
-    fn save_selection_paths(&self) -> HashSet<PathBuf> {
+    pub(crate) fn save_selection_paths(&self) -> HashSet<PathBuf> {
         self.selection
             .items
             .iter()

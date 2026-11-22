@@ -1,0 +1,1 @@
+- **Sizes just under the next unit show in it.** A file of 1,048,575 bytes read "1024 KB" instead of "1 MB" (or "1.0 MB" where sizes show a decimal); a value that rounds to 1024 of a unit now takes the next one.

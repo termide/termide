@@ -210,8 +210,13 @@ impl FileManager {
 
         // Directory size scheduler. Each panel runs at most one worker,
         // but all panels share the process-wide cache, so overlapping
-        // directories are computed once.
-        if self.cached_config.dir_size_in_wide_view && self.cached_config.dir_size_budget_ms > 0 {
+        // directories are computed once. The walk reads the local disk, so a
+        // remote panel (or archive) has nothing for it: its paths name files
+        // elsewhere, and the listing shows no folder sizes for it anyway.
+        if self.cached_config.dir_size_in_wide_view
+            && self.cached_config.dir_size_budget_ms > 0
+            && !self.vfs.is_remote()
+        {
             let cache = utils::shared_dir_size_cache();
 
             // 1. Drain the completion signal for our own worker, if any.

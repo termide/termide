@@ -54,7 +54,11 @@ impl App {
             // All operations finished — close the panel entirely
             self.state.operations_panel_dirty = false;
             self.state.last_operations_elapsed_redraw = None;
-            self.close_operations_panel();
+            // Nothing else may redraw: a copy cancelled at its first
+            // conflict changes no file.
+            if self.close_operations_panel().is_some() {
+                self.state.needs_redraw = true;
+            }
             return;
         }
         self.state.operations_panel_dirty = true;

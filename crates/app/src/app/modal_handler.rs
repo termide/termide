@@ -84,6 +84,7 @@ impl App {
                     self.finish_help();
                     return Ok(());
                 }
+                let result = conflict_dismissal_as_cancel(modal, result);
                 // Check modal type before taking state references
                 let is_rename_pattern = matches!(modal, ActiveModal::RenamePattern(_));
 
@@ -294,6 +295,7 @@ impl App {
                     self.finish_help();
                     return Ok(());
                 }
+                let result = conflict_dismissal_as_cancel(modal, result);
                 // Check if this is a git push/pull action that should keep modal open
                 if self.handle_git_push_pull_from_modal(&result)? {
                     return Ok(());
@@ -672,8 +674,9 @@ impl App {
                 PendingAction::RenameWithPattern {
                     operation,
                     original_name,
+                    all,
                 } => {
-                    self.handle_rename_with_pattern(operation, original_name, value)?;
+                    self.handle_rename_with_pattern(operation, original_name, all, value)?;
                 }
                 PendingAction::ChangeEditorTabSize => {
                     if let Some(text) = value.get::<String>() {
@@ -1289,6 +1292,22 @@ fn paste_into_modal(modal: Option<&mut termide_modal::ActiveModal>, text: &str) 
     }
 }
 
+/// A conflict question closed without an answer (Esc, the close button)
+/// stands for Cancel. Left pending, a batch came straight back to the same
+/// question, and a copy worker waiting on the answer waited forever.
+fn conflict_dismissal_as_cancel(
+    modal: &ActiveModal,
+    result: ModalResult<termide_modal::ModalOutput>,
+) -> ModalResult<termide_modal::ModalOutput> {
+    use termide_modal::{ConflictResolution, ModalPayload};
+    match result {
+        ModalResult::Cancelled if matches!(modal, ActiveModal::Conflict(_)) => {
+            ModalResult::Confirmed(ConflictResolution::Cancel.wrap())
+        }
+        other => other,
+    }
+}
+
 /// The host-key answer a dialog result stands for: the button pressed, and
 /// Cancel for anything else.
 fn host_key_answer(
@@ -1363,6 +1382,33 @@ mod tests {
         assert_eq!(pressed(HostKeyAnswer::REMEMBER), HostKeyAnswer::Remember);
         assert_eq!(pressed(HostKeyAnswer::ONCE), HostKeyAnswer::Once);
         assert_eq!(pressed(HostKeyAnswer::CANCEL), HostKeyAnswer::Cancel);
+    }
+
+    /// Esc on a conflict question answers Cancel; other modals' dismissals
+    /// stay dismissals.
+    #[test]
+    fn a_dismissed_conflict_question_answers_cancel() {
+        use super::conflict_dismissal_as_cancel;
+        use termide_modal::{ConflictModal, ConflictResolution, ModalResult};
+        let conflict = ActiveModal::Conflict(Box::new(ConflictModal::new(
+            std::path::Path::new("/src/a.txt"),
+            std::path::Path::new("/dst/a.txt"),
+            2,
+        )));
+        match conflict_dismissal_as_cancel(&conflict, ModalResult::Cancelled) {
+            ModalResult::Confirmed(value) => {
+                assert_eq!(
+                    value.get::<ConflictResolution>(),
+                    Some(&ConflictResolution::Cancel)
+                );
+            }
+            ModalResult::Cancelled => panic!("Esc must answer the conflict"),
+        }
+        let confirm = ActiveModal::Confirm(Box::new(ConfirmModal::new("Delete", "Sure?")));
+        assert!(matches!(
+            conflict_dismissal_as_cancel(&confirm, ModalResult::Cancelled),
+            ModalResult::Cancelled
+        ));
     }
 
     #[test]

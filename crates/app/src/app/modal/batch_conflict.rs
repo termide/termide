@@ -31,12 +31,20 @@ impl App {
                     if let Some(source) = operation.current_source().cloned() {
                         let dest_str_ow = operation.destination.to_string_lossy().into_owned();
                         let is_move = operation.operation_type == BatchOperationType::Move;
+                        // Under Rename All the taken name is the pattern's.
+                        let renamed = renamed_item_name(&operation, &source);
 
                         if termide_vfs::is_vfs_url(&dest_str_ow) {
-                            let name = path_utils::get_file_name_string(&source);
+                            let name = renamed
+                                .clone()
+                                .unwrap_or_else(|| path_utils::get_file_name_string(&source));
                             if let Some(target) = self.remote_batch_target(&operation, &source) {
-                                let (dest, _) =
-                                    self.remote_item_destination(&target, &operation, &name, false);
+                                let (dest, _) = self.remote_item_destination(
+                                    &target,
+                                    &operation,
+                                    &name,
+                                    renamed.is_some(),
+                                );
                                 let request = target.request(dest, is_move);
                                 self.start_batch_sub_operation(request, target.manager, operation);
                                 return Ok(());
@@ -57,12 +65,8 @@ impl App {
                             if let Some((vfs_manager, _, vfs_source)) =
                                 self.remote_batch_source(&operation, &source)
                             {
-                                let final_dest = path_utils::resolve_batch_destination_path(
-                                    &source,
-                                    &operation.destination,
-                                    operation.sources.len() == 1,
-                                    operation.destination_is_directory(),
-                                );
+                                let final_dest =
+                                    item_destination(&operation, &source, renamed.as_deref());
                                 operation.note_item_destination(&final_dest);
                                 let request =
                                     OperationRequest::download(vfs_source.clone(), final_dest);
@@ -81,12 +85,8 @@ impl App {
                         if is_copyable_local_source(&source) {
                             use termide_file_ops::ConflictMode as FileOpsConflictMode;
 
-                            let final_dest = path_utils::resolve_batch_destination_path(
-                                &source,
-                                &operation.destination,
-                                operation.sources.len() == 1,
-                                operation.destination_is_directory(),
-                            );
+                            let final_dest =
+                                item_destination(&operation, &source, renamed.as_deref());
                             let is_move = operation.operation_type == BatchOperationType::Move;
                             operation.note_item_destination(&final_dest);
                             let worker_dest = if source.is_dir() && final_dest.is_dir() {
@@ -172,6 +172,7 @@ impl App {
                         self.state.pending_action = Some(PendingAction::RenameWithPattern {
                             operation,
                             original_name,
+                            all: false,
                         });
                         self.state.active_modal = Some(ActiveModal::RenamePattern(Box::new(modal)));
                     }
@@ -200,22 +201,37 @@ impl App {
                             modified,
                         );
 
-                        // Set flag that this is RenameAll
-                        operation.set_conflict_mode(ConflictMode::Ask); // Reset to Ask to apply pattern
+                        // A name the pattern gives that is taken too is asked about.
+                        operation.set_conflict_mode(ConflictMode::Ask);
 
                         self.state.pending_action = Some(PendingAction::RenameWithPattern {
                             operation,
                             original_name,
+                            all: true,
                         });
                         self.state.active_modal = Some(ActiveModal::RenamePattern(Box::new(modal)));
                     }
                 }
-                ConflictResolution::Cancel => {
-                    // Cancel the entire batch operation
-                }
+                ConflictResolution::Cancel => self.cancel_batch_at_conflict(&operation),
             }
         }
         Ok(())
+    }
+
+    /// Cancel a batch stopped at a conflict: nothing is in flight, so its
+    /// card leaves the Operations panel, and panels show what the items
+    /// before it already did.
+    pub(in crate::app) fn cancel_batch_at_conflict(&mut self, operation: &BatchOperation) {
+        self.state.finish_batch_tracking();
+        if operation.success_count > 0 {
+            for panel in self.layout_manager.iter_all_panels_mut() {
+                if let Some(fm) = panel.as_file_manager_mut() {
+                    fm.clear_selection();
+                    let _ = fm.force_reload_directory();
+                }
+            }
+        }
+        self.state.needs_redraw = true;
     }
 
     /// Handle rename pattern input result
@@ -223,6 +239,7 @@ impl App {
         &mut self,
         mut operation: BatchOperation,
         original_name: String,
+        all: bool,
         value: termide_modal::ModalOutput,
     ) -> Result<()> {
         if let Some(pattern_str) = value.get::<String>() {
@@ -230,9 +247,9 @@ impl App {
 
             let pattern = RenamePattern::new(pattern_str.clone());
 
-            // Check that for single file (Rename)
-            // need to get counter and apply pattern once
-            if operation.rename_pattern.is_none() {
+            // Rename (this item only): take the counter and apply the
+            // pattern once.
+            if !all {
                 // This is Rename (single rename)
                 if let Some(source) = operation.current_source().cloned() {
                     let counter = operation.get_and_increment_rename_counter();
@@ -305,13 +322,85 @@ impl App {
                     }
                 }
             } else {
-                // This is RenameAll - pattern already set in operation,
-                // just continue processing
+                // Rename All: the batch names this item and the ones after
+                // it with the pattern (`process_batch_operation`).
                 operation.set_rename_pattern(pattern);
-                // Continue processing the batch operation
                 self.process_batch_operation(operation);
             }
         }
         Ok(())
+    }
+}
+
+/// The name a Rename All pattern gave the current item, which
+/// `process_batch_operation` computed with the counter it then advanced;
+/// `None` without a pattern.
+fn renamed_item_name(operation: &BatchOperation, source: &std::path::Path) -> Option<String> {
+    let pattern = operation.rename_pattern.as_ref()?;
+    let name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let metadata = source.metadata().ok();
+    let created = metadata.as_ref().and_then(|m| m.created().ok());
+    let modified = metadata.as_ref().and_then(|m| m.modified().ok());
+    let counter = operation.rename_counter.saturating_sub(1);
+    Some(pattern.apply(&name, counter, created, modified))
+}
+
+/// Where the current item lands locally: under its pattern name when it has
+/// one, under its own name otherwise.
+fn item_destination(
+    operation: &BatchOperation,
+    source: &std::path::Path,
+    renamed: Option<&str>,
+) -> std::path::PathBuf {
+    match renamed {
+        Some(name) => path_utils::resolve_rename_destination_path(
+            &operation.destination,
+            name,
+            operation.destination_is_directory(),
+        ),
+        None => path_utils::resolve_batch_destination_path(
+            source,
+            &operation.destination,
+            operation.sources.len() == 1,
+            operation.destination_is_directory(),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::{Path, PathBuf};
+    use termide_state::RenamePattern;
+
+    /// Overwriting under Rename All replaces the pattern's name — the one
+    /// the conflict was about — not the item's own name.
+    #[test]
+    fn an_overwrite_under_rename_all_targets_the_pattern_name() {
+        let mut operation = BatchOperation::new(
+            BatchOperationType::Copy,
+            vec![PathBuf::from("/nonexistent/src/a.txt")],
+            PathBuf::from("/nonexistent/dst"),
+        )
+        .with_destination_directory(true);
+        let source = Path::new("/nonexistent/src/a.txt");
+        assert_eq!(renamed_item_name(&operation, source), None);
+        assert_eq!(
+            item_destination(&operation, source, None),
+            PathBuf::from("/nonexistent/dst/a.txt")
+        );
+
+        operation.set_rename_pattern(RenamePattern::new("$1_$I.$-1".to_string()));
+        // `process_batch_operation` took counter 1 for this item.
+        assert_eq!(operation.get_and_increment_rename_counter(), 1);
+        let renamed = renamed_item_name(&operation, source);
+        assert_eq!(renamed.as_deref(), Some("a_1.txt"));
+        assert_eq!(
+            item_destination(&operation, source, renamed.as_deref()),
+            PathBuf::from("/nonexistent/dst/a_1.txt")
+        );
     }
 }

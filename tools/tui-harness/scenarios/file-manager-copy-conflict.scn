@@ -1,0 +1,45 @@
+# A copy onto files that exist asks per conflict: Esc ends the copy (it is
+# not asked again, nothing is written), and Rename All renames every
+# remaining conflict by its pattern, not only the first.
+project empty
+config file-manager-taken-names.toml
+setup "mkdir dst && echo new > a.txt && echo new > b.txt && echo old > dst/a.txt && echo old > dst/b.txt"
+start
+wait "b.txt"
+
+# Mark a.txt and b.txt, copy them into dst.
+key Home Down Down
+wait "a.txt"
+key Insert Insert
+key F5
+wait "Copy"
+key Ctrl+A
+type "dst"
+key Enter
+wait "File Conflict"
+snapshot conflict
+key Esc
+wait-gone "File Conflict"
+# The copy that asked ends instead of waiting for an answer.
+wait-gone "Files: 0/2"
+sleep 1
+expect-not "File Conflict"
+run "grep -qx old dst/a.txt && grep -qx old dst/b.txt && test ! -e 'dst/a (1).txt'"
+
+# Again, answered Rename All with a pattern: both land under it.
+key F5
+wait "Copy"
+key Ctrl+A
+type "dst"
+key Enter
+wait "File Conflict"
+key End Enter
+wait "Pattern"
+key Ctrl+A
+type "$1_new.$-1"
+key Enter
+file-contains dst/a_new.txt "new"
+file-contains dst/b_new.txt "new"
+expect-not "File Conflict"
+run "grep -qx old dst/a.txt && grep -qx old dst/b.txt"
+quit --force

@@ -154,6 +154,8 @@ pub enum PendingAction {
     RenameWithPattern {
         operation: BatchOperation,
         original_name: String,
+        /// Rename All: the pattern names this item and every one after it.
+        all: bool,
     },
     /// Override tab_size for the active editor panel (runtime only, not persisted).
     ChangeEditorTabSize,

@@ -177,6 +177,8 @@ pub struct VfsState {
     /// An archive that needs a password: its root, and whether a password
     /// was given and rejected. Taken by the FileManager on the next tick.
     password_request: Option<(VfsPath, bool)>,
+    /// This panel's id among the views sharing `manager`.
+    view: u64,
 }
 
 impl Default for VfsState {
@@ -191,26 +193,15 @@ impl VfsState {
         let current_path = std::env::current_dir()
             .map(VfsPath::local)
             .unwrap_or_else(|_| VfsPath::local("/"));
-
-        Self {
-            manager: Arc::new(VfsManager::new()),
-            current_path,
-            previous_path: None,
-            pending_operation: None,
-            connection_status: None,
-            login: RemoteLogin::default(),
-            host_key: HostKeyQuestion::default(),
-            connection_started: None,
-            resolved_file_open: None,
-            completed_create: None,
-            password_request: None,
-        }
+        Self::with_path(current_path, None)
     }
 
     /// Create VFS state for a specific path.
     pub fn with_path(path: VfsPath, manager: Option<Arc<VfsManager>>) -> Self {
-        Self {
-            manager: manager.unwrap_or_else(|| Arc::new(VfsManager::new())),
+        let manager = manager.unwrap_or_else(|| Arc::new(VfsManager::new()));
+        let view = manager.register_view();
+        let state = Self {
+            manager,
             current_path: path,
             previous_path: None,
             pending_operation: None,
@@ -221,7 +212,20 @@ impl VfsState {
             resolved_file_open: None,
             completed_create: None,
             password_request: None,
-        }
+            view,
+        };
+        state.note_view_connection();
+        state
+    }
+
+    /// Tell the manager which connection this panel shows, so that another
+    /// panel sharing it does not close it under this one.
+    fn note_view_connection(&self) {
+        let key = self
+            .current_path
+            .is_remote()
+            .then(|| self.current_path.connection_key());
+        self.manager.set_view_connection(self.view, key);
     }
 
     /// Get reference to the VFS manager.
@@ -440,8 +444,10 @@ impl VfsState {
         }
         let archive = self.current_path.container()?.clone();
         let directory = archive.parent()?;
-        // An extraction still running keeps its own handle on the archive.
-        self.manager.disconnect(&self.current_path.connection_key());
+        // An extraction still running keeps its own handle on the archive,
+        // and a panel cloned from this one may still show it.
+        self.manager
+            .release_view_connection(self.view, &self.current_path.connection_key());
         self.previous_path = None;
         self.current_path = directory;
         archive
@@ -546,6 +552,7 @@ impl VfsState {
     /// For remote paths, this will automatically start a connection first if not connected.
     /// The connection completion will trigger directory listing in tick().
     pub fn start_list_dir(&mut self) {
+        self.note_view_connection();
         // For remote paths, check if connected and start connection if needed
         if self.current_path.is_remote() && !self.manager.is_connected(&self.current_path) {
             self.connection_status = Some(connecting_status(&self.current_path));
@@ -952,11 +959,12 @@ impl Drop for VfsState {
         // Cancel any pending operation (ignore returned message)
         let _ = self.cancel_pending();
 
-        // Disconnect from any remote connections
+        // Close the connection unless a panel sharing the manager shows it.
         if self.current_path.is_remote() {
             let key = self.current_path.connection_key();
-            self.manager.disconnect(&key);
+            self.manager.release_view_connection(self.view, &key);
         }
+        self.manager.set_view_connection(self.view, None);
     }
 }
 
@@ -1116,6 +1124,30 @@ mod tests {
             !state.manager().is_connected(&root),
             "the archive is closed"
         );
+    }
+
+    #[test]
+    fn a_clone_sharing_the_manager_keeps_the_connection_until_the_last_leaves() {
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("pack.zip");
+        write_zip(&archive);
+        let mut first = VfsState::with_path(VfsPath::local(dir.path()), None);
+        first.enter_archive(VfsPath::local(&archive));
+        tick_until_done(&mut first).unwrap().unwrap();
+        let root = first.current_path().clone();
+
+        // A cloned panel: same URL, same manager.
+        let clone = VfsState::with_path(root.clone(), Some(first.manager_arc()));
+        drop(clone);
+        assert!(first.manager().is_connected(&root), "closing the clone");
+
+        let clone = VfsState::with_path(root.clone(), Some(first.manager_arc()));
+        assert_eq!(first.leave_archive(), Some("pack.zip".to_string()));
+        assert!(clone.manager().is_connected(&root), "leaving in the first");
+
+        let manager = clone.manager_arc();
+        drop(clone);
+        assert!(!manager.is_connected(&root), "the last one closes it");
     }
 
     #[test]
