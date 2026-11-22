@@ -34,16 +34,70 @@ pub struct Fetched {
     pub final_url: String,
     /// The response `Content-Type` (media type, lowercased, without parameters).
     pub content_type: String,
+    /// The `charset` parameter of the response `Content-Type`, if any.
+    pub charset: Option<String>,
     /// The raw response body (capped at [`MAX_BODY`]).
     pub body: Vec<u8>,
 }
 
 impl Fetched {
-    /// Body decoded as UTF-8, lossily (good enough for text/* rendering).
+    /// Body decoded as text, lossily: in the encoding a byte order mark
+    /// names, else the `Content-Type` charset, else (for HTML) a
+    /// `<meta charset>` or `<meta http-equiv>` near the top, else UTF-8.
     #[must_use]
     pub fn text(&self) -> String {
-        String::from_utf8_lossy(&self.body).into_owned()
+        let declared = self
+            .charset
+            .as_deref()
+            .and_then(|label| encoding_rs::Encoding::for_label(label.as_bytes()))
+            .or_else(|| {
+                (self.content_type.contains("html") || self.content_type.is_empty())
+                    .then(|| meta_charset(&self.body))
+                    .flatten()
+            })
+            .unwrap_or(encoding_rs::UTF_8);
+        // `decode` lets a byte order mark override the declared encoding.
+        let (text, _, _) = declared.decode(&self.body);
+        text.into_owned()
     }
+}
+
+/// The encoding a `<meta charset>` or `<meta http-equiv="Content-Type"
+/// content="…; charset=…">` in the first 1024 bytes of an HTML page names,
+/// as a browser's prescan finds it. A UTF-16 label there means UTF-8 (a page
+/// that can be read this far as ASCII is not UTF-16).
+fn meta_charset(body: &[u8]) -> Option<&'static encoding_rs::Encoding> {
+    let head = body[..body.len().min(1024)].to_ascii_lowercase();
+    let mut rest = head.as_slice();
+    while let Some(at) = find(rest, b"<meta") {
+        let tag = &rest[at + 5..];
+        let tag = &tag[..find(tag, b">").unwrap_or(tag.len())];
+        if let Some(at) = find(tag, b"charset") {
+            let value = tag[at + 7..]
+                .iter()
+                .skip_while(|byte| byte.is_ascii_whitespace())
+                .skip_while(|byte| **byte == b'=')
+                .skip_while(|byte| byte.is_ascii_whitespace() || **byte == b'"' || **byte == b'\'')
+                .take_while(|byte| {
+                    !matches!(byte, b'"' | b'\'' | b';' | b'/' | b'>')
+                        && !byte.is_ascii_whitespace()
+                })
+                .copied()
+                .collect::<Vec<u8>>();
+            if let Some(encoding) = encoding_rs::Encoding::for_label(&value) {
+                // UTF-16 (and the replacement encoding) become UTF-8.
+                return Some(encoding.output_encoding());
+            }
+        }
+        rest = &rest[at + 5..];
+    }
+    None
+}
+
+fn find(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack
+        .windows(needle.len())
+        .position(|window| window == needle)
 }
 
 /// Whether a redirect from `from` scheme to `to` scheme is permitted. Upgrades
@@ -128,7 +182,7 @@ pub fn fetch_checked(
 
 /// Read a 2xx response into a [`Fetched`], enforcing the body-size cap.
 fn read_response(url: &url::Url, resp: ureq::Response) -> Result<Fetched, String> {
-    // media type only, lowercased, parameters (charset, …) dropped.
+    // Media type only, lowercased (ureq's, which defaults to `text/plain`).
     let content_type = resp
         .content_type()
         .split(';')
@@ -136,6 +190,7 @@ fn read_response(url: &url::Url, resp: ureq::Response) -> Result<Fetched, String
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
+    let charset = resp.header("content-type").and_then(charset_of);
 
     // Read one byte past the cap to detect overflow without trusting
     // Content-Length.
@@ -163,7 +218,19 @@ fn read_response(url: &url::Url, resp: ureq::Response) -> Result<Fetched, String
     Ok(Fetched {
         final_url: url.to_string(),
         content_type,
+        charset,
         body,
+    })
+}
+
+/// The `charset` parameter of a `Content-Type` header, unquoted.
+fn charset_of(header: &str) -> Option<String> {
+    header.split(';').skip(1).find_map(|param| {
+        let (key, value) = param.split_once('=')?;
+        key.trim()
+            .eq_ignore_ascii_case("charset")
+            .then(|| value.trim().trim_matches('"').to_string())
+            .filter(|value| !value.is_empty())
     })
 }
 
@@ -240,6 +307,69 @@ mod tests {
         let fetched = fetch_checked(&origin, |_| Ok(())).unwrap();
         assert_eq!(fetched.body, b"hi");
         assert_eq!(fetched.final_url, format!("{target}/secret"));
+    }
+
+    #[test]
+    fn the_content_type_charset_decodes_the_body() {
+        use std::io::Write;
+        // "Привет" in windows-1251.
+        let body: &[u8] = &[0xcf, 0xf0, 0xe8, 0xe2, 0xe5, 0xf2];
+        let mut response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=\"Windows-1251\"\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        response.write_all(body).unwrap();
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = format!("http://{}", listener.local_addr().unwrap());
+        std::thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(&response);
+            }
+        });
+        let fetched = fetch(&addr).unwrap();
+        assert_eq!(fetched.content_type, "text/plain");
+        assert_eq!(fetched.charset.as_deref(), Some("Windows-1251"));
+        assert_eq!(fetched.text(), "Привет");
+    }
+
+    fn fetched(content_type: &str, charset: Option<&str>, body: &[u8]) -> Fetched {
+        Fetched {
+            final_url: "https://example.com/".into(),
+            content_type: content_type.into(),
+            charset: charset.map(str::to_string),
+            body: body.to_vec(),
+        }
+    }
+
+    #[test]
+    fn an_html_meta_charset_decodes_the_body_when_the_header_names_none() {
+        let mut page = b"<html><head><meta charset='koi8-r'></head><body>".to_vec();
+        page.extend_from_slice(&[0xf0, 0xd2, 0xc9, 0xd7, 0xc5, 0xd4]); // "Привет"
+        assert!(fetched("text/html", None, &page).text().ends_with("Привет"));
+
+        let mut page =
+            br#"<meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1">"#.to_vec();
+        page.push(0xe9); // "é"
+        assert!(fetched("text/html", None, &page).text().ends_with('é'));
+
+        // The header wins over the page; a byte order mark over both.
+        let page = b"<meta charset=koi8-r>\xc3\xa9";
+        assert!(fetched("text/html", Some("utf-8"), page)
+            .text()
+            .ends_with('é'));
+        let page = b"\xef\xbb\xbf<meta charset=koi8-r>\xc3\xa9";
+        assert_eq!(
+            fetched("text/html", Some("windows-1251"), page).text(),
+            "<meta charset=koi8-r>é"
+        );
+        // No declaration at all: UTF-8, and no meta lookup for plain text.
+        assert_eq!(
+            fetched("text/plain", None, b"<meta charset=koi8-r>\xc3\xa9").text(),
+            "<meta charset=koi8-r>é"
+        );
     }
 
     #[test]

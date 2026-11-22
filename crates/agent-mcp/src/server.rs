@@ -34,7 +34,10 @@ use termide_agent_core::{
     ToolRegistry,
 };
 
-use crate::client::PROTOCOL_VERSION;
+/// The protocol revisions this server speaks, newest first. Its transport is
+/// Streamable HTTP, which 2025-03-26 introduced; 2024-11-05, whose messages
+/// are the same, is still answered for a client that asks for it.
+const SERVER_VERSIONS: &[&str] = &["2025-06-18", "2025-03-26", "2024-11-05"];
 
 /// The name the agent knows the server by; its tools reach the model as
 /// `mcp__termide__<tool>`.
@@ -526,6 +529,16 @@ fn rpc_error(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
+/// The protocol revision to answer `initialize` with: the client's when this
+/// server speaks it, else the newest it does, which the client may then take
+/// or disconnect over, as the specification has it.
+fn agreed_version(requested: Option<&str>) -> &'static str {
+    requested
+        .and_then(|requested| SERVER_VERSIONS.iter().find(|&&known| known == requested))
+        .copied()
+        .unwrap_or(SERVER_VERSIONS[0])
+}
+
 /// The answer to one JSON-RPC message; `None` for a notification.
 fn handle(shared: &Shared, message: &Value) -> Option<Value> {
     let method = message["method"].as_str().unwrap_or("");
@@ -546,7 +559,7 @@ fn handle(shared: &Shared, message: &Value) -> Option<Value> {
     let params = &message["params"];
     let result = match method {
         "initialize" => json!({
-            "protocolVersion": params["protocolVersion"].as_str().unwrap_or(PROTOCOL_VERSION),
+            "protocolVersion": agreed_version(params["protocolVersion"].as_str()),
             "capabilities": { "tools": { "listChanged": true } },
             "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
         }),
@@ -1476,6 +1489,15 @@ mod tests {
             result["content"][0]["text"],
             "/work asker=true suggester=true withdrawn=true"
         );
+    }
+
+    #[test]
+    fn initialize_agrees_only_to_a_version_the_server_speaks() {
+        assert_eq!(agreed_version(Some("2025-06-18")), "2025-06-18");
+        assert_eq!(agreed_version(Some("2024-11-05")), "2024-11-05");
+        assert_eq!(agreed_version(Some("1999-01-01")), SERVER_VERSIONS[0]);
+        assert_eq!(agreed_version(Some("anything")), SERVER_VERSIONS[0]);
+        assert_eq!(agreed_version(None), SERVER_VERSIONS[0]);
     }
 
     #[test]

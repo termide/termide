@@ -10,6 +10,7 @@ description = "Minimal, security-bounded HTTP(S) GET for termide's viewer panels
 publish = false
 
 [dependencies]
+encoding_rs.workspace = true
 termide-http = { path = "../http" }
 ureq.workspace = true
 url.workspace = true

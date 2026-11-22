@@ -67,6 +67,9 @@ struct Entry {
     /// Bumped at every new listing; only the newest one is applied, so two
     /// changes in a row cannot land in the wrong order.
     listing: u64,
+    /// The server said its tools changed before its connection was stored
+    /// here: they are listed again once it is.
+    relist_owed: bool,
     /// Set to give up a sign-in waiting in the browser.
     login_cancel: Option<Arc<AtomicBool>>,
 }
@@ -89,8 +92,15 @@ impl Entry {
             generation: 0,
             client: None,
             listing: 0,
+            relist_owed: false,
             login_cancel: None,
         }
+    }
+
+    /// A connection that was made and whose server has since gone.
+    fn stopped(&self) -> bool {
+        matches!(self.state, State::Ready(_))
+            && self.client.as_ref().is_some_and(|client| client.stopped())
     }
 
     fn cancel_login(&mut self) {
@@ -251,6 +261,7 @@ impl Connections {
     fn spawn_connect(&self, name: &str, entry: &mut Entry) {
         entry.generation += 1;
         entry.client = None;
+        entry.relist_owed = false;
         if entry.config.withheld {
             entry.state = State::Withheld;
             self.broadcast(&LateTools::NeedsApproval {
@@ -284,6 +295,7 @@ impl Connections {
             self.tokens.clone(),
             self.on_message(name, generation),
         );
+        let mut relist = false;
         let event = {
             let mut entries = self.lock();
             let Some(entry) = entries.get_mut(name).filter(|e| e.generation == generation) else {
@@ -294,6 +306,7 @@ impl Connections {
                 Ok((client, tools)) => {
                     entry.client = Some(client);
                     entry.state = State::Ready(tools.clone());
+                    relist = std::mem::take(&mut entry.relist_owed);
                     LateTools::Ready { source, tools }
                 }
                 Err(Refusal::NeedsLogin) => {
@@ -307,6 +320,9 @@ impl Connections {
             }
         };
         self.broadcast(&event);
+        if relist {
+            self.relist(name, generation);
+        }
     }
 
     /// What a connection calls with a server's notifications: a change of
@@ -339,6 +355,8 @@ impl Connections {
                 return;
             };
             let Some(client) = entry.client.clone() else {
+                // Still being connected: the change is not lost but owed.
+                entry.relist_owed = true;
                 return;
             };
             entry.listing += 1;
@@ -376,6 +394,7 @@ impl Connections {
             .iter()
             .map(|(name, entry)| {
                 let status = match &entry.state {
+                    _ if entry.stopped() => McpStatus::Failed(client::STOPPED.to_string()),
                     State::Pending => McpStatus::Connecting,
                     State::Ready(tools) => McpStatus::Ready { tools: tools.len() },
                     State::Failed(error) => McpStatus::Failed(error.clone()),
@@ -484,7 +503,10 @@ impl Connections {
                     .entry(name.clone())
                     .or_insert_with(|| Entry::new(config.clone()));
                 let unchanged = entry.config == config;
-                if unchanged && matches!(entry.state, State::Ready(_) | State::SigningIn) {
+                if unchanged
+                    && matches!(entry.state, State::Ready(_) | State::SigningIn)
+                    && !entry.stopped()
+                {
                     report.kept.push(name);
                     continue;
                 }
@@ -783,6 +805,98 @@ mod tests {
             names,
             ["docs__search", "github__get_issue", "github__create_issue"]
         );
+    }
+}
+
+#[cfg(all(test, unix))]
+mod lifecycle_tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn stdio(script: &str) -> McpServerConfig {
+        McpServerConfig {
+            command: Some("sh".into()),
+            args: vec!["-c".into(), script.into()],
+            timeout_secs: 5,
+            ..Default::default()
+        }
+    }
+
+    fn tool_count(event: LateTools) -> usize {
+        match event {
+            LateTools::Ready { tools, .. } => tools.len(),
+            _ => panic!("expected tools"),
+        }
+    }
+
+    /// A server that says its tools changed while its first listing is
+    /// still under way (its connection not yet kept) is listed again once
+    /// it is, rather than the change being dropped.
+    #[test]
+    fn a_change_announced_while_connecting_is_listed_once_connected() {
+        let script = r#"n=0
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"sh","version":"0"}}}\n' "$id";;
+    *'"tools/list"'*)
+      n=$((n+1))
+      if [ "$n" = 1 ]; then
+        printf '{"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n'
+        sleep 0.3
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"a"}]}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"a"},{"name":"b"}]}}\n' "$id"
+      fi;;
+  esac
+done"#;
+        let connections = Connections::new(BTreeMap::from([("s".to_string(), stdio(script))]));
+        let events = connections.subscribe();
+        assert_eq!(
+            tool_count(events.recv_timeout(Duration::from_secs(5)).unwrap()),
+            1
+        );
+        assert_eq!(
+            tool_count(events.recv_timeout(Duration::from_secs(5)).unwrap()),
+            2
+        );
+    }
+
+    /// A server that exits is shown as stopped, and a reload starts it
+    /// again even though its configuration did not change.
+    #[test]
+    fn a_server_that_exits_shows_as_stopped_and_a_reload_restarts_it() {
+        let script = r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"sh","version":"0"}}}\n' "$id";;
+    *'"tools/list"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"a"}]}}\n' "$id"; exit 0;;
+  esac
+done"#;
+        let config = stdio(script);
+        let connections = Connections::new(BTreeMap::from([("s".to_string(), config.clone())]));
+        let events = connections.subscribe();
+        assert_eq!(
+            tool_count(events.recv_timeout(Duration::from_secs(5)).unwrap()),
+            1
+        );
+        let started = std::time::Instant::now();
+        loop {
+            match &connections.status()[0].status {
+                McpStatus::Failed(error) => {
+                    assert_eq!(error, client::STOPPED);
+                    break;
+                }
+                McpStatus::Ready { .. } => {
+                    assert!(started.elapsed() < Duration::from_secs(5), "never stopped");
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+        let report = connections.reload(BTreeMap::from([("s".to_string(), config)]));
+        assert_eq!(report.started, ["s"]);
+        assert!(report.kept.is_empty());
     }
 }
 

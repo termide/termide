@@ -1,0 +1,1 @@
+- **A page of one long line is cut, not dropped.** When `fetch` got a page whose first line was longer than its whole output budget, such as a minified HTML or a JSON document, it returned nothing but the header. It now shows the start of that line and says how long the line is and how much of it is shown.

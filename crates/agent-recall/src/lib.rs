@@ -472,17 +472,7 @@ impl RecallTool {
         let (from_sessions, from_git, from_files): (Found, Found, Found) =
             std::thread::scope(|scope| {
                 let sessions = scope.spawn(|| {
-                    let dirs: Vec<&PathBuf> = self
-                        .setup
-                        .sessions_dir
-                        .iter()
-                        .chain(
-                            self.setup
-                                .panel_dir
-                                .iter()
-                                .filter_map(|p| p.sessions_dir.as_ref()),
-                        )
-                        .collect();
+                    let dirs = self.session_dirs();
                     if !request.sources.sessions || dirs.is_empty() {
                         return None;
                     }
@@ -604,6 +594,21 @@ impl RecallTool {
         }
     }
 
+    /// The session logs searched and opened: the project's, then the panel
+    /// directory's when it lies elsewhere.
+    fn session_dirs(&self) -> Vec<&PathBuf> {
+        self.setup
+            .sessions_dir
+            .iter()
+            .chain(
+                self.setup
+                    .panel_dir
+                    .iter()
+                    .filter_map(|p| p.sessions_dir.as_ref()),
+            )
+            .collect()
+    }
+
     /// The project's repositories, and those of the panel's directory when
     /// it lies elsewhere, each once.
     fn repos(&self) -> Vec<RepoRoot> {
@@ -654,10 +659,13 @@ impl RecallTool {
             let (id, entry) = rest
                 .split_once('#')
                 .ok_or("a session reference is session:<id>#<entry>")?;
-            let dir = self
-                .setup
-                .sessions_dir
-                .as_ref()
+            // Where `search` found it: the project's logs, or the panel
+            // directory's when that lies elsewhere.
+            let dirs = self.session_dirs();
+            let dir = dirs
+                .iter()
+                .find(|dir| sessions::find_log(dir, id).is_some())
+                .or_else(|| dirs.first())
                 .ok_or("this project has no session logs")?;
             return sessions::open(
                 dir,
@@ -1060,10 +1068,17 @@ mod tests {
         let outcome = tool.search(request, None, &CancelToken::new());
         let refs: Vec<&str> = outcome.hits.iter().map(|h| h.reference.as_str()).collect();
         assert!(refs.contains(&"file:notes.md:1"), "{refs:?}");
-        assert!(
-            outcome.hits.iter().any(|h| h.source == Source::Session),
-            "{refs:?}"
-        );
+        let session_ref = outcome
+            .hits
+            .iter()
+            .find(|h| h.source == Source::Session)
+            .map(|h| h.reference.clone())
+            .unwrap_or_else(|| panic!("{refs:?}"));
+        // What search found there, open reads from there too.
+        assert!(tool
+            .open(&session_ref, &CancelToken::new())
+            .unwrap()
+            .contains("walrus again"));
         let commit = refs
             .iter()
             .find(|r| r.starts_with("commit:"))

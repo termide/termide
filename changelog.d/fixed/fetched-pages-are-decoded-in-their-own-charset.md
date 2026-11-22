@@ -1,0 +1,1 @@
+- **Fetched pages are decoded in their own charset.** `fetch` read every page as UTF-8, so a page in windows-1251, Shift_JIS or latin-1 came out as replacement characters. The charset of the `Content-Type` header is now honoured, then an HTML page's `<meta charset>`, then a byte-order mark.

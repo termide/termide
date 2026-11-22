@@ -377,6 +377,7 @@ mod tests {
         termide_fetch::Fetched {
             final_url: url.to_string(),
             content_type: content_type.to_string(),
+            charset: None,
             body: body.as_bytes().to_vec(),
         }
     }

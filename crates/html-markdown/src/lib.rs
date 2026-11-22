@@ -9,6 +9,7 @@
 use std::cell::RefCell;
 
 use html5ever::tendril::StrTendril;
+use html5ever::tokenizer::states::RawKind;
 use html5ever::tokenizer::{
     BufferQueue, Tag, TagKind, Token, TokenSink, TokenSinkResult, Tokenizer, TokenizerOpts,
 };
@@ -138,14 +139,24 @@ impl TokenSink for Sink {
             }) => {
                 let name = name.to_string();
                 match kind {
-                    TagKind::StartTag => out.push(Tok::Open(OpenTag {
-                        name,
-                        attrs: attrs
-                            .into_iter()
-                            .map(|attr| (attr.name.local.to_string(), attr.value.to_string()))
-                            .collect(),
-                        self_closing,
-                    })),
+                    TagKind::StartTag => {
+                        // With no tree builder to say so, the sink tells the
+                        // tokenizer where markup stops being markup, as a
+                        // browser's parser would: a script's `<p>` or
+                        // `document.write('<script>')` is text.
+                        let state = raw_state(&name);
+                        out.push(Tok::Open(OpenTag {
+                            name,
+                            attrs: attrs
+                                .into_iter()
+                                .map(|attr| (attr.name.local.to_string(), attr.value.to_string()))
+                                .collect(),
+                            self_closing,
+                        }));
+                        if let Some(state) = state {
+                            return state;
+                        }
+                    }
                     TagKind::EndTag => out.push(Tok::Close(name)),
                 }
             }
@@ -156,6 +167,20 @@ impl TokenSink for Sink {
             _ => {}
         }
         TokenSinkResult::Continue
+    }
+}
+
+/// The tokenizer state the content of a start tag named `name` is read in,
+/// when it is not markup (HTML's "generic raw text" and "RCDATA" elements).
+fn raw_state(name: &str) -> Option<TokenSinkResult<()>> {
+    match name {
+        "script" => Some(TokenSinkResult::RawData(RawKind::ScriptData)),
+        "style" | "xmp" | "iframe" | "noembed" | "noframes" | "noscript" => {
+            Some(TokenSinkResult::RawData(RawKind::Rawtext))
+        }
+        "title" | "textarea" => Some(TokenSinkResult::RawData(RawKind::Rcdata)),
+        "plaintext" => Some(TokenSinkResult::Plaintext),
+        _ => None,
     }
 }
 
@@ -172,6 +197,12 @@ fn tokenize(html: &str) -> Vec<Tok> {
 const SKIPPED: &[&str] = &[
     "script", "style", "noscript", "template", "svg", "canvas", "iframe", "object", "head", "nav",
     "aside", "footer", "form", "button", "select", "textarea", "dialog",
+];
+
+/// Elements a `<head>` holds; any other start tag ends it.
+const HEAD_CONTENT: &[&str] = &[
+    "head", "title", "base", "basefont", "bgsound", "link", "meta", "style", "script", "noscript",
+    "noframes", "template",
 ];
 
 /// Elements that are never closed.
@@ -226,11 +257,47 @@ struct Table {
     rows: Vec<Vec<String>>,
     header_rows: usize,
     cell: Option<String>,
+    /// Links open in the current cell: target and where their text starts.
+    links: Vec<(Option<String>, usize)>,
+    /// Tables open inside this one; their text is flattened into the cell.
+    nested: usize,
     /// Inside `<thead>`.
     in_thead: bool,
     /// The current row is a header row (inside `<thead>`, or a first row
     /// made of `<th>`).
     head_row: bool,
+}
+
+impl Table {
+    /// Save the open cell, if any, into the current row. `</td>` may be
+    /// left out: the next cell, the row's end or the table's end closes it.
+    fn end_cell(&mut self) {
+        self.links.clear();
+        if let Some(cell) = self.cell.take() {
+            let cell = cell.trim().replace('|', "\\|");
+            if let Some(row) = self.rows.last_mut() {
+                row.push(cell);
+            }
+        }
+    }
+
+    /// End the current row, whether `</tr>` closed it or the next row did.
+    fn end_row(&mut self) {
+        self.end_cell();
+        if self.head_row {
+            self.header_rows = self.rows.len();
+            self.head_row = false;
+        }
+    }
+
+    /// Mark where an inner table's cell or row breaks the flattened text.
+    fn separate(&mut self) {
+        if let Some(cell) = &mut self.cell {
+            if !cell.is_empty() && !cell.ends_with(' ') {
+                cell.push(' ');
+            }
+        }
+    }
 }
 
 impl Writer {
@@ -253,6 +320,16 @@ impl Writer {
     fn token(&mut self, token: &Tok) {
         if self.skip_depth > 0 {
             match token {
+                // `</head>` may be left out: the head ends where the body
+                // starts, at `<body>` or at the first tag a head cannot hold.
+                Tok::Open(tag)
+                    if self.skip_name.as_deref() == Some("head")
+                        && !HEAD_CONTENT.contains(&tag.name.as_str()) =>
+                {
+                    self.skip_depth = 0;
+                    self.skip_name = None;
+                    self.open(tag);
+                }
                 Tok::Open(tag)
                     if Some(&tag.name) == self.skip_name.as_ref() && !tag.self_closing =>
                 {
@@ -291,7 +368,9 @@ impl Writer {
 
     fn open(&mut self, tag: &OpenTag) {
         let name = tag.name.as_str();
-        if SKIPPED.contains(&name) && !tag.self_closing {
+        // `<script/>` still opens a script: the slash is ignored on a
+        // non-void element, and the tokenizer reads what follows as its text.
+        if SKIPPED.contains(&name) && (!tag.self_closing || raw_state(name).is_some()) {
             self.skip_depth = 1;
             self.skip_name = Some(tag.name.clone());
             return;
@@ -304,7 +383,7 @@ impl Writer {
             return;
         }
         if self.table.is_some() {
-            self.table_open(name);
+            self.table_open(tag);
             return;
         }
         // Inside preformatted text only line structure matters: highlighters
@@ -431,37 +510,60 @@ impl Writer {
                 self.quote_depth = self.quote_depth.saturating_sub(1);
             }
             "a" => {
-                let Some((href, start)) = self.links.pop() else {
-                    return;
-                };
-                let start = start.min(self.line.len());
-                let text = self.line[start..].trim().to_string();
-                let Some(href) = href else { return };
-                if text.is_empty() {
-                    return;
+                if let Some((href, start)) = self.links.pop() {
+                    wrap_link(&mut self.line, href, start);
                 }
-                let leading = if self.line[start..].starts_with(' ') {
-                    " "
-                } else {
-                    ""
-                };
-                self.line.truncate(start);
-                self.line.push_str(&format!("{leading}[{text}]({href})"));
             }
             _ if BLOCKS.contains(&name) => self.flush_line(),
             _ => {}
         }
     }
 
-    fn table_open(&mut self, name: &str) {
+    fn table_open(&mut self, tag: &OpenTag) {
+        let name = tag.name.as_str();
+        let href = (name == "a")
+            .then(|| tag.attr("href").and_then(|href| self.absolute(href)))
+            .flatten();
         let Some(table) = &mut self.table else { return };
         match name {
-            "thead" => table.in_thead = true,
+            "a" => {
+                if let Some(cell) = &table.cell {
+                    table.links.push((href, cell.len()));
+                }
+            }
+            "img" => {
+                if let (Some(alt), Some(cell), Some(_)) =
+                    (tag.attr("alt"), &mut table.cell, table.links.last())
+                {
+                    push_collapsed(cell, alt);
+                }
+            }
+            "br" => table.separate(),
+            // A table inside a cell has no place in a pipe table: its text
+            // joins the cell's.
+            "table" => {
+                table.nested += 1;
+                table.separate();
+            }
+            "tr" | "td" | "th" if table.nested > 0 => table.separate(),
+            "thead" => {
+                table.end_row();
+                table.in_thead = true;
+            }
+            "tbody" | "tfoot" => {
+                table.end_row();
+                if table.in_thead {
+                    table.in_thead = false;
+                    table.header_rows = table.rows.len();
+                }
+            }
             "tr" => {
+                table.end_row();
                 table.rows.push(Vec::new());
                 table.head_row = table.in_thead;
             }
             "td" | "th" => {
+                table.end_cell();
                 if table.rows.is_empty() {
                     table.rows.push(Vec::new());
                 }
@@ -470,11 +572,6 @@ impl Writer {
                 }
                 table.cell = Some(String::new());
             }
-            "br" => {
-                if let Some(cell) = &mut table.cell {
-                    cell.push(' ');
-                }
-            }
             _ => {}
         }
     }
@@ -482,23 +579,25 @@ impl Writer {
     fn table_close(&mut self, name: &str) {
         let Some(table) = &mut self.table else { return };
         match name {
-            "td" | "th" => {
-                if let Some(cell) = table.cell.take() {
-                    let cell = cell.trim().replace('|', "\\|");
-                    if let Some(row) = table.rows.last_mut() {
-                        row.push(cell);
-                    }
+            "a" => {
+                if let (Some((href, start)), Some(cell)) = (table.links.pop(), &mut table.cell) {
+                    wrap_link(cell, href, start);
                 }
             }
-            "tr" if table.head_row => {
-                table.header_rows = table.rows.len();
-                table.head_row = false;
+            "table" if table.nested > 0 => {
+                table.nested -= 1;
+                table.separate();
             }
+            _ if table.nested > 0 => {}
+            "td" | "th" => table.end_cell(),
+            "tr" => table.end_row(),
             "thead" => {
+                table.end_row();
                 table.in_thead = false;
                 table.header_rows = table.rows.len();
             }
             "table" => {
+                table.end_row();
                 let table = self.table.take().unwrap_or_default();
                 self.out.push_str(&render_table(&table));
             }
@@ -596,6 +695,24 @@ fn render_table(table: &Table) -> String {
     }
     out.push('\n');
     out
+}
+
+/// Turn the text `buf` gained since `start` into a link to `href`; a link
+/// with no target or no text stays plain text.
+fn wrap_link(buf: &mut String, href: Option<String>, start: usize) {
+    let start = start.min(buf.len());
+    let text = buf[start..].trim().to_string();
+    let Some(href) = href else { return };
+    if text.is_empty() {
+        return;
+    }
+    let leading = if buf[start..].starts_with(' ') {
+        " "
+    } else {
+        ""
+    };
+    buf.truncate(start);
+    buf.push_str(&format!("{leading}[{text}]({href})"));
 }
 
 /// `language-rust` / `lang-rust` in a class list names a code block.
@@ -718,6 +835,54 @@ mod tests {
         assert_eq!(
             out,
             "| Name | Size |\n| --- | --- |\n| a\\|b | 1 |\n| c |  |"
+        );
+    }
+
+    #[test]
+    fn a_head_without_its_end_tag_ends_where_the_body_starts() {
+        let converted = html_to_markdown(
+            "<html><head><title>T</title><meta charset=utf-8><body><p>Body text</p></body>",
+            "https://example.com/",
+        );
+        assert_eq!(converted.title, "T");
+        assert_eq!(converted.markdown, "Body text");
+        // No `<body>` either: the first tag a head cannot hold ends it.
+        assert_eq!(
+            md("<head><link rel=stylesheet href=a.css><h1>Title</h1><p>x</p>"),
+            "# Title\n\nx"
+        );
+    }
+
+    #[test]
+    fn script_and_style_content_is_text_not_markup() {
+        let out = md(concat!(
+            r#"<p>before</p><script>document.write('<script src="x.js"><\/script>');"#,
+            r#"if (a <!-- b) {}</script><p>after</p><style>a::before{content:"<style>"}</style>"#,
+            "<p>end</p><script/>var x = 1;</script><p>last</p>",
+        ));
+        assert_eq!(out, "before\n\nafter\n\nend\n\nlast");
+    }
+
+    #[test]
+    fn table_cells_close_without_their_end_tags() {
+        let out = md("<table><tr><th>Name<th>Size<tr><td>a<td>1<tr><td>b<td>2</table><p>after</p>");
+        assert_eq!(
+            out,
+            "| Name | Size |\n| --- | --- |\n| a | 1 |\n| b | 2 |\n\nafter"
+        );
+    }
+
+    #[test]
+    fn table_cells_keep_links_and_flatten_inner_tables() {
+        let out = md(concat!(
+            r#"<table><tr><th>Crate</th><th>Notes</th></tr>"#,
+            r#"<tr><td><a href="/serde">serde</a></td>"#,
+            r#"<td><table><tr><td>inner a</td><td>inner b</td></tr></table></td></tr>"#,
+            r#"<tr><td>last</td><td>row</td></tr></table>"#,
+        ));
+        assert_eq!(
+            out,
+            "| Crate | Notes |\n| --- | --- |\n| [serde](https://example.com/serde) | inner a inner b |\n| last | row |"
         );
     }
 

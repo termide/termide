@@ -1,0 +1,1 @@
+- **`recall` opens a session it found in the panel's directory.** When the agent panel's directory is outside the project, `recall` searched that directory's sessions too but could not open one of them: opening the reference looked only in the project's. It now opens the session where it was found.
