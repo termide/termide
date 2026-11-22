@@ -69,6 +69,9 @@ pub struct CommandParamsModal {
     last_text_areas: Vec<Option<Rect>>,
     /// The field a press landed in while the button is still down.
     dragging: Option<usize>,
+    /// The number field `Run` was refused for, its label drawn as an error
+    /// until it is edited.
+    invalid: Option<usize>,
 }
 
 impl CommandParamsModal {
@@ -123,6 +126,7 @@ impl CommandParamsModal {
             last_field_areas: Vec::new(),
             last_text_areas: Vec::new(),
             dragging: None,
+            invalid: None,
         }
     }
 
@@ -208,12 +212,23 @@ impl CommandParamsModal {
         }
     }
 
-    fn try_confirm(&self) -> Option<ModalResult<CommandParamsResult>> {
+    /// The values to run with, or `None` with the focus on a number field
+    /// that holds something other than a number: the agent's runs refuse one
+    /// too. An empty one is let through, as an empty default is.
+    fn try_confirm(&mut self) -> Option<ModalResult<CommandParamsResult>> {
         let mut values = HashMap::new();
-        for (param, value) in self.params.iter().zip(self.values.iter()) {
+        for (i, (param, value)) in self.params.iter().zip(self.values.iter()).enumerate() {
             let str_value = match value {
                 ParamValue::Text { input } => input.text().to_string(),
-                ParamValue::Number { input } => input.text().to_string(),
+                ParamValue::Number { input } => {
+                    let text = input.text();
+                    if !text.trim().is_empty() && param.accepts(text).is_err() {
+                        self.invalid = Some(i);
+                        self.focus = FocusArea::Field(i);
+                        return None;
+                    }
+                    text.to_string()
+                }
                 ParamValue::Bool { checked } => checked.to_string(),
                 ParamValue::Select { selected } => {
                     param.options.get(*selected).cloned().unwrap_or_default()
@@ -259,7 +274,9 @@ impl Modal for CommandParamsModal {
 
             // Label row
             let label = format!("{}:", param.label);
-            let label_style = if is_focused {
+            let label_style = if self.invalid == Some(i) {
+                Style::default().fg(theme.error)
+            } else if is_focused {
                 Style::default().fg(theme.accented_fg)
             } else {
                 Style::default().fg(theme.fg)
@@ -370,9 +387,13 @@ impl Modal for CommandParamsModal {
                 match &mut self.values[idx] {
                     ParamValue::Text { input } | ParamValue::Number { input } => {
                         match handle_input_key(input, key) {
-                            InputKeyResult::Handled | InputKeyResult::TextModified => {
+                            InputKeyResult::TextModified => {
+                                if self.invalid == Some(idx) {
+                                    self.invalid = None;
+                                }
                                 return Ok(None);
                             }
+                            InputKeyResult::Handled => return Ok(None),
                             InputKeyResult::NotHandled => {}
                         }
                         match key.code {
@@ -517,6 +538,9 @@ impl Modal for CommandParamsModal {
             FocusArea::Field(idx) => match &mut self.values[idx] {
                 ParamValue::Text { input } | ParamValue::Number { input } => {
                     input.paste(text);
+                    if self.invalid == Some(idx) {
+                        self.invalid = None;
+                    }
                     true
                 }
                 ParamValue::Bool { .. } | ParamValue::Select { .. } => false,
@@ -554,6 +578,33 @@ mod tests {
         match &modal.values[i] {
             ParamValue::Text { input } | ParamValue::Number { input } => input,
             _ => unreachable!(),
+        }
+    }
+
+    #[test]
+    fn run_is_refused_while_a_number_field_holds_no_number() {
+        let number = CommandParam {
+            param_type: CommandParamType::Number,
+            ..text_param("Port", "80x")
+        };
+        let mut modal =
+            CommandParamsModal::new("serve".into(), vec![text_param("Host", "a"), number]);
+        modal.focus = FocusArea::Buttons;
+        assert!(modal.try_confirm().is_none());
+        assert_eq!(modal.focus, FocusArea::Field(1));
+        assert_eq!(modal.invalid, Some(1));
+
+        let chord = |code| {
+            termide_core::KeyChord::identity(crossterm::event::KeyEvent::new(
+                code,
+                KeyModifiers::NONE,
+            ))
+        };
+        modal.handle_key(chord(KeyCode::Backspace)).unwrap();
+        assert_eq!(modal.invalid, None, "editing the field clears the mark");
+        match modal.try_confirm() {
+            Some(ModalResult::Confirmed(result)) => assert_eq!(result.values["Port"], "80"),
+            other => panic!("{other:?}"),
         }
     }
 

@@ -176,8 +176,8 @@ pub struct Editor {
 
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
 
     /// Per-editor tab_size override set at runtime (e.g. from the status bar
     /// Tab indicator modal). When `Some`, it wins over `config.editor.tab_size`

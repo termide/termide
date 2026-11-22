@@ -66,7 +66,7 @@ impl Editor {
             folding: Default::default(),
             is_stale: false,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             tab_size_override: None,
             syntax_picker: None,
         }
@@ -156,7 +156,7 @@ impl Editor {
             folding: Default::default(),
             is_stale: false,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             tab_size_override: None,
             syntax_picker: None,
         };
@@ -207,7 +207,7 @@ impl Editor {
             folding: Default::default(),
             is_stale: false,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             tab_size_override: None,
             syntax_picker: None,
         }

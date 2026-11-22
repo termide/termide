@@ -1237,6 +1237,8 @@ impl Translation for RuntimeTranslation {
         help_desc_redo,
         help_desc_search,
         help_desc_search_content,
+        help_desc_search_replace,
+        help_desc_toggle_hex,
         help_desc_select_all,
         help_desc_refresh,
         help_desc_go_parent,

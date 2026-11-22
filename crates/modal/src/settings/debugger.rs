@@ -117,6 +117,19 @@ impl SettingsModal {
         self
     }
 
+    /// The commands' hotkeys as `(key, command name)`, for the keybinding
+    /// picker to name a command whose key a binding would share.
+    pub fn with_command_hotkeys(mut self, keys: Vec<(String, String)>) -> Self {
+        self.command_hotkeys = keys
+            .into_iter()
+            .filter_map(|(key, name)| {
+                let parsed = termide_config::parse_keybinding(&key).ok()?;
+                Some((parsed, key, format!("commands.{name}")))
+            })
+            .collect();
+        self
+    }
+
     /// The name of the debugger the page has open.
     pub(super) fn open_debugger_name(&self) -> Option<&str> {
         self.debugger_edit.as_ref().map(|e| e.name.as_str())

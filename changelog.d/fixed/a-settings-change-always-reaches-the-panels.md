@@ -1,0 +1,1 @@
+- **A settings change always reaches the panels.** A panel rebuilt its keys and settings only when the new config sat at another memory address than the old one; one that landed at the old address left the panel on the previous keys until the next change.

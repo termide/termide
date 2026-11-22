@@ -179,9 +179,7 @@ impl Panel for Editor {
             .set_light_theme(theme.is_light_theme());
         self.render_cache.highlight.set_default_fg(theme.fg);
 
-        let config_ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_editor_hotkey_table(config);
             self.sync_custom_highlight(config);
         }

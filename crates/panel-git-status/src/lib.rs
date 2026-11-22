@@ -147,8 +147,8 @@ pub struct GitStatusPanel {
     stash_count: usize,
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// In-flight async refresh — when set, the panel is rendering its
     /// `is_loading` placeholder while a background thread runs the
     /// `git status` / `git branch` / `git rev-list` commands. `tick()`
@@ -252,7 +252,7 @@ impl GitStatusPanel {
             pending_init_fetch: true,
             stash_count: 0,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             refresh_rx: None,
             refresh_pending: false,
         };
@@ -407,9 +407,7 @@ impl Panel for GitStatusPanel {
     fn prepare_render(&mut self, theme: &Theme, config: &std::sync::Arc<Config>) {
         self.cached_theme = ThemeColors::from(theme);
         self.vim_mode = config.general.vim_mode;
-        let config_ptr = std::sync::Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_git_status_hotkey_table(config);
         }
     }

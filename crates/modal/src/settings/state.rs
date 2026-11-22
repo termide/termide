@@ -46,6 +46,7 @@ impl SettingsModal {
             lsp_server_edit: None,
             debugger_edit: None,
             debugger_defaults: Default::default(),
+            command_hotkeys: Vec::new(),
             plugin_names: Vec::new(),
             builtin_plugins: Default::default(),
             connection_edit: None,

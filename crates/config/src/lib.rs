@@ -20,8 +20,8 @@ mod xdg;
 pub use bookmarks::{Bookmark, BookmarkType, BookmarksConfig};
 pub use conflicts::{
     actions_reachable_only_by_function_key, binding_requires_kitty,
-    binding_requires_macos_all_keys, enumerate_bindings, find_conflicts, BindingLocation,
-    ConflictKind, HotkeyConflict,
+    binding_requires_macos_all_keys, dispatch_table, enumerate_bindings, find_conflicts,
+    BindingLocation, ConflictKind, HotkeyConflict,
 };
 pub use diff::{diff_toml, merge_partial};
 pub use keybindings::{

@@ -433,7 +433,7 @@ impl App {
     }
 
     /// Get the working directory from the focused panel
-    fn get_focused_panel_cwd(&self) -> PathBuf {
+    pub(in crate::app) fn get_focused_panel_cwd(&self) -> PathBuf {
         // Use the Panel::get_working_directory() method
         if let Some(panel) = self.layout_manager.active_panel() {
             if let Some(cwd) = panel.get_working_directory() {

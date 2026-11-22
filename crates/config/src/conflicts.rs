@@ -3,7 +3,8 @@
 //! Used by:
 //! - the Settings keybinding picker (inline warning when assigning a
 //!   binding already taken in the same section);
-//! - app startup (status-bar log of `SameSection` conflicts and
+//! - app startup (status-bar log of `SameSection` and
+//!   `CrossSectionShadowed` conflicts and
 //!   `binding_requires_kitty` warnings on terminals without Kitty
 //!   keyboard protocol).
 
@@ -352,7 +353,7 @@ pub fn enumerate_bindings(config: &Config) -> Vec<(BindingLocation, ParsedKeyBin
 /// The key table a binding is matched in. The viewer's hex and view toggles
 /// are matched in the editor's table too, ahead of the editor's own actions,
 /// so a clash with one of those is as much a same-section clash.
-fn dispatch_table(loc: &BindingLocation) -> &str {
+pub fn dispatch_table(loc: &BindingLocation) -> &str {
     match (loc.section.as_str(), loc.action.as_str()) {
         ("viewer", "toggle_hex" | "toggle_view") => "editor",
         (section, _) => section,
@@ -367,27 +368,46 @@ pub fn find_conflicts(config: &Config) -> Vec<HotkeyConflict> {
         grouped.entry(parsed).or_default().push((loc, display));
     }
     let mut conflicts = Vec::new();
-    for (_, locs) in grouped {
+    for (_, mut locs) in grouped {
+        // One action listing the same chord twice clashes with nothing.
+        locs.sort_by(|a, b| (&a.0.section, &a.0.action).cmp(&(&b.0.section, &b.0.action)));
+        locs.dedup_by(|a, b| a.0 == b.0);
         if locs.len() < 2 {
             continue;
         }
         let display = locs[0].1.clone();
-        let sections: Vec<_> = locs.iter().map(|(l, _)| dispatch_table(l)).collect();
-        let kind = if sections.windows(2).all(|w| w[0] == w[1]) {
-            // All in the same section.
-            ConflictKind::SameSection
-        } else if sections.contains(&"general") {
-            ConflictKind::CrossSectionShadowed
-        } else {
-            ConflictKind::CrossSectionAmbient
-        };
-        let mut locations: Vec<_> = locs.into_iter().map(|(l, _)| l).collect();
-        locations.sort_by(|a, b| a.section.cmp(&b.section).then(a.action.cmp(&b.action)));
-        conflicts.push(HotkeyConflict {
-            binding: display,
-            kind,
-            locations,
-        });
+        let locations: Vec<_> = locs.into_iter().map(|(l, _)| l).collect();
+        // A clash inside one key table is reported on its own, even when the
+        // chord is bound in other tables as well.
+        let mut tables: Vec<&str> = locations.iter().map(dispatch_table).collect();
+        tables.sort_unstable();
+        tables.dedup();
+        for table in &tables {
+            let within: Vec<_> = locations
+                .iter()
+                .filter(|l| dispatch_table(l) == *table)
+                .cloned()
+                .collect();
+            if within.len() > 1 {
+                conflicts.push(HotkeyConflict {
+                    binding: display.clone(),
+                    kind: ConflictKind::SameSection,
+                    locations: within,
+                });
+            }
+        }
+        if tables.len() > 1 {
+            let kind = if tables.contains(&"general") {
+                ConflictKind::CrossSectionShadowed
+            } else {
+                ConflictKind::CrossSectionAmbient
+            };
+            conflicts.push(HotkeyConflict {
+                binding: display,
+                kind,
+                locations,
+            });
+        }
     }
     conflicts.sort_by(|a, b| a.binding.cmp(&b.binding));
     conflicts
@@ -742,6 +762,48 @@ mod tests {
                 .any(|l| l.section == "general" && l.action == "quit")),
             "expected same-section conflict on Alt+Q"
         );
+    }
+
+    /// Two editor actions on one chord were reported only as a shadow when a
+    /// global action had the chord too, so the startup warning missed them.
+    #[test]
+    fn a_clash_within_a_section_is_reported_beside_a_shadow() {
+        let mut cfg = Config::default();
+        cfg.normalize();
+        cfg.editor.keybindings.save = Some(KeyBinding::Single("Alt+F12".to_string()));
+        cfg.editor.keybindings.undo = Some(KeyBinding::Single("Alt+F12".to_string()));
+        cfg.general.keybindings.quit = Some(KeyBinding::Single("Alt+F12".to_string()));
+        let on_key: Vec<_> = find_conflicts(&cfg)
+            .into_iter()
+            .filter(|c| c.binding == "Alt+F12")
+            .collect();
+        let same = on_key
+            .iter()
+            .find(|c| c.kind == ConflictKind::SameSection)
+            .expect("the editor clash is reported");
+        assert_eq!(
+            same.locations,
+            vec![
+                BindingLocation::new("editor", "save"),
+                BindingLocation::new("editor", "undo"),
+            ]
+        );
+        assert!(on_key
+            .iter()
+            .any(|c| c.kind == ConflictKind::CrossSectionShadowed && c.locations.len() == 3));
+    }
+
+    #[test]
+    fn an_action_listing_a_chord_twice_clashes_with_nothing() {
+        let mut cfg = Config::default();
+        cfg.normalize();
+        cfg.editor.keybindings.save = Some(KeyBinding::Multiple(vec![
+            "Alt+F12".to_string(),
+            "alt+f12".to_string(),
+        ]));
+        assert!(find_conflicts(&cfg)
+            .iter()
+            .all(|c| !c.locations.iter().any(|l| l.action == "save")));
     }
 
     #[test]

@@ -58,6 +58,10 @@ pub struct CommandConfigResult {
 #[derive(Debug, Clone)]
 pub struct ReservedHotkey {
     pub binding: String,
+    /// The panel action that has the key, as `section.action`: a command's
+    /// key is matched before any panel's, so it takes the key there. The form
+    /// warns about it but saves; `None` is a key the command could never get.
+    pub panel_action: Option<String>,
 }
 
 /// Focus area in the modal.
@@ -98,6 +102,10 @@ pub struct CommandConfigModal {
     hotkey_error: bool,
     hotkey_conflict: Option<String>,
     reserved_hotkeys: Vec<ParsedKeyBinding>,
+    /// Panel keys a command's key would take, with the action that has each.
+    panel_hotkeys: Vec<(ParsedKeyBinding, String)>,
+    /// The panel action the hotkey takes the key from, said below the field.
+    hotkey_takes: Option<String>,
     // Cached areas for mouse handling
     last_buttons_area: Option<Rect>,
     last_group_field_area: Option<Rect>,

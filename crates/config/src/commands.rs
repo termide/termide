@@ -173,7 +173,7 @@ impl CommandParam {
     }
 
     /// Whether `value` is one this parameter can take from its form.
-    fn accepts(&self, value: &str) -> Result<(), String> {
+    pub fn accepts(&self, value: &str) -> Result<(), String> {
         let fits = match self.param_type {
             CommandParamType::Text => true,
             CommandParamType::Number => value.trim().parse::<f64>().is_ok(),
@@ -282,6 +282,25 @@ pub struct CommandsMetadata {
     pub entries: HashMap<String, CommandMetadata>,
 }
 
+/// The keys a command's section of `commands.toml` takes.
+const COMMAND_KEYS: &[&str] = &[
+    "command",
+    "name",
+    "mode",
+    "cwd",
+    "key",
+    "params",
+    "group",
+    "debugger",
+    "debugger_args",
+    "build",
+    "console",
+    "env",
+];
+
+/// The keys one of a command's `params` takes.
+const PARAM_KEYS: &[&str] = &["name", "label", "type", "options", "default"];
+
 impl CommandsMetadata {
     /// Load metadata from `commands.toml` in the given directory.
     ///
@@ -336,17 +355,26 @@ impl CommandsMetadata {
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
+            Self::warn_unknown_keys(section, COMMAND_KEYS, section_name, "");
             let mode = section
                 .get("mode")
                 .and_then(|v| v.as_str())
-                .and_then(CommandMode::from_str);
+                .and_then(|raw| {
+                    CommandMode::from_str(raw).or_else(|| {
+                        log::warn!(
+                            "commands.toml: unknown `mode` {raw:?} of `{section_name}`; \
+                         the default is used"
+                        );
+                        None
+                    })
+                });
 
             let key = section
                 .get("key")
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
 
-            let params = Self::parse_params(section);
+            let params = Self::parse_params(section, section_name);
 
             let group = section
                 .get("group")
@@ -469,7 +497,23 @@ impl CommandsMetadata {
             .collect()
     }
 
-    fn parse_params(section: &toml::map::Map<String, toml::Value>) -> Vec<CommandParam> {
+    /// Report each key of `table` not in `known`: a typo such as `comand`
+    /// would otherwise leave a command that silently lacks what it names.
+    fn warn_unknown_keys(
+        table: &toml::map::Map<String, toml::Value>,
+        known: &[&str],
+        command: &str,
+        within: &str,
+    ) {
+        for key in table.keys().filter(|key| !known.contains(&key.as_str())) {
+            log::warn!("commands.toml: unknown key `{within}{key}` in `{command}`; ignored");
+        }
+    }
+
+    fn parse_params(
+        section: &toml::map::Map<String, toml::Value>,
+        command: &str,
+    ) -> Vec<CommandParam> {
         let params_array = match section.get("params").and_then(|v| v.as_array()) {
             Some(a) => a,
             None => return Vec::new(),
@@ -493,10 +537,19 @@ impl CommandsMetadata {
                 .unwrap_or(&name)
                 .to_string();
 
+            Self::warn_unknown_keys(table, PARAM_KEYS, command, "params.");
             let param_type = table
                 .get("type")
                 .and_then(|v| v.as_str())
-                .and_then(CommandParamType::from_str)
+                .and_then(|raw| {
+                    CommandParamType::from_str(raw).or_else(|| {
+                        log::warn!(
+                            "commands.toml: unknown `type` {raw:?} of parameter `{name}` \
+                             in `{command}`; taken as text"
+                        );
+                        None
+                    })
+                })
                 .unwrap_or(CommandParamType::Text);
 
             let options = table

@@ -124,8 +124,8 @@ pub struct Terminal {
     color_preview: Option<ColorPreview>,
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// Cached foreground command name (avoids /proc reads on every render frame).
     /// Mutex for interior mutability from `&self` in `title()`.
     cached_fg_command: std::sync::Mutex<(String, std::time::Instant)>,
@@ -398,7 +398,7 @@ impl Terminal {
             panel_bounds: None,
             color_preview: None,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             cached_fg_command: std::sync::Mutex::new((
                 "shell".to_string(),
                 std::time::Instant::now(),
@@ -1220,9 +1220,7 @@ impl Panel for Terminal {
         if self.keybindings != config.terminal.keybindings {
             self.keybindings = config.terminal.keybindings.clone();
         }
-        let config_ptr = std::sync::Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_terminal_hotkey_table(config);
         }
     }

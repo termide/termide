@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use termide_config::{Config, KeyBinding};
+use termide_config::Config;
 use termide_core::{HotkeyTable, PanelEvent};
 use termide_git::GitStatus;
 use termide_modal::{ActiveModal, ConfirmModal, InputModal};
@@ -47,22 +47,8 @@ pub(crate) fn build_fm_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("invert_selection", &kb.invert_selection);
     t.insert("toggle_hidden", &kb.toggle_hidden);
 
-    // open_external: config binding, always ensure O present
-    if let Some(ref binding) = kb.open_external {
-        let mut keys: Vec<String> = match binding {
-            KeyBinding::Single(s) => vec![s.clone()],
-            KeyBinding::Multiple(v) => v.clone(),
-        };
-        if !keys.iter().any(|k| k == "O") {
-            keys.push("O".into());
-        }
-        t.insert("open_external", &Some(KeyBinding::Multiple(keys)));
-    } else {
-        t.insert(
-            "open_external",
-            &Some(KeyBinding::Multiple(vec!["O".into(), "Alt+Enter".into()])),
-        );
-    }
+    // As configured: rebound or cleared, `O` goes with the rest.
+    t.insert("open_external", &kb.open_external);
     t.insert("switch_directory", &kb.switch_directory);
     t.insert("go_to_path", &kb.go_to_path);
     t

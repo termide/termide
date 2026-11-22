@@ -29,6 +29,7 @@ pub mod links;
 pub mod operation_id;
 pub mod panel;
 pub mod scrollbar;
+pub mod seen_arc;
 pub mod terminal_caps;
 pub mod terminal_modes;
 pub mod terminal_probe;
@@ -53,6 +54,7 @@ pub use panel::{
     Searchable, SegmentKind, StatusSegment, ThemeColors, TitleCut, WidthPreference,
 };
 pub use scrollbar::{ScrollAxis, ScrollBarGeometry, ScrollBars};
+pub use seen_arc::SeenArc;
 pub use terminal_caps::{
     attention_mark, get_terminal_caps, init_terminal_caps, refresh_terminal_caps, set_icon_mode,
     use_emoji_icons, ColorDepth, TerminalCaps,

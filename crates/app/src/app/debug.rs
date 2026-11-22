@@ -240,8 +240,22 @@ impl App {
             command.metadata.as_ref().and_then(|m| m.build.clone()),
             command.debugger_args(),
         );
-        let cwd = self.project_root.clone();
+        let cwd = self.debug_command_cwd(command);
         self.launch_debugger(&launch, cwd, env)
+    }
+
+    /// Where a debug command runs: the project root unless its `cwd` says
+    /// `panel` — for a project command, where its linked `commands.toml`
+    /// really lives, as a shell command with `cwd = "project"` runs.
+    pub(in crate::app) fn debug_command_cwd(&self, command: &CommandItem) -> PathBuf {
+        use termide_config::commands::CommandCwd;
+        match command.metadata.as_ref().and_then(|m| m.cwd) {
+            Some(CommandCwd::Panel) => self.get_focused_panel_cwd(),
+            _ if command.is_project => {
+                termide_config::commands::project_commands_root(&self.project_root)
+            }
+            _ => self.project_root.clone(),
+        }
     }
 
     /// Open a terminal in `cwd` running `launch` with the project's
@@ -416,7 +430,16 @@ impl App {
             .metadata
             .as_ref()
             .and_then(|m| m.console.as_deref())
-            .and_then(Console::parse)
+            .and_then(|name| {
+                Console::parse(name).or_else(|| {
+                    log::warn!(
+                        "commands.toml: `console` {name:?} of `{}` is neither terminal \
+                         nor panel; using [debug] console",
+                        command.name
+                    );
+                    None
+                })
+            })
             .unwrap_or_else(|| self.default_console());
         Ok(LaunchSpec {
             adapter,
@@ -424,7 +447,7 @@ impl App {
             adapter_args: command.debugger_args().to_vec(),
             program,
             args,
-            cwd: self.project_root.clone(),
+            cwd: self.debug_command_cwd(command),
             build: command.metadata.as_ref().and_then(|m| m.build.clone()),
             env: env.to_vec(),
             label,

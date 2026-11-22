@@ -337,6 +337,8 @@ pub trait Translation: Send + Sync {
     fn help_desc_redo(&self) -> &str;
     fn help_desc_search(&self) -> &str;
     fn help_desc_search_content(&self) -> &str;
+    fn help_desc_search_replace(&self) -> &str;
+    fn help_desc_toggle_hex(&self) -> &str;
     fn help_desc_select_all(&self) -> &str;
     fn help_desc_refresh(&self) -> &str;
     fn help_desc_go_parent(&self) -> &str;

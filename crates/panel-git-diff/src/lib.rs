@@ -73,8 +73,8 @@ pub struct GitDiffPanel {
     tab_size: usize,
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// Whether this panel shows a stash diff (uses `git stash show -p`)
     is_stash: bool,
     /// Stash message (for title display instead of hash)
@@ -193,7 +193,7 @@ impl GitDiffPanel {
             vim_mode: false,
             tab_size: termide_config::defaults::TAB_SIZE,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             is_stash,
             stash_message,
             refresh_rx: None,
@@ -453,9 +453,7 @@ impl Panel for GitDiffPanel {
         self.cached_theme = ThemeColors::from(theme);
         self.vim_mode = config.general.vim_mode;
         self.tab_size = config.editor.tab_size;
-        let config_ptr = std::sync::Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_git_diff_hotkey_table(config);
         }
     }

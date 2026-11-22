@@ -556,6 +556,23 @@ impl App {
                 where_str,
             );
         }
+        // A global action takes the chord before any panel sees it.
+        for c in conflicts
+            .iter()
+            .filter(|c| c.kind == termide_config::ConflictKind::CrossSectionShadowed)
+        {
+            let where_str = c
+                .locations
+                .iter()
+                .map(|l| l.display())
+                .collect::<Vec<_>>()
+                .join(", ");
+            log::warn!(
+                "Keybinding {} is taken by a global action before the panel's: {}",
+                c.binding,
+                where_str,
+            );
+        }
 
         // macOS: Option composes text unless REPORT_ALL_KEYS_AS_ESCAPE_CODES is
         // active, so every `Alt+<char>` chord arrives as a composed glyph
