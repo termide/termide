@@ -352,12 +352,13 @@ normalizer rewrites back to the slash / backslash chord.
 Multiple alternatives are supported for any action: list them in an
 array. The help window shows them all; a menu shows the first.
 
-Two actions are configured in one section and used in another. The git
+Three actions are configured in one section and used in another. The git
 log opens a file outside termide with `open_external` from
 `[file_manager.keybindings]` (`O` and `Alt+Enter` by default), so a key
 rebound or cleared there changes both panels. The editor swaps itself for
 the hex view of its file with `toggle_hex` from `[viewer.keybindings]`
-(`Ctrl+L`).
+(`Ctrl+L`), and switches between viewing and editing with `toggle_view`
+from the same section (`Ctrl+E`).
 
 The same shape is editable without touching the file: in Settings →
 Keybindings each row lists every key its action accepts, `Left`/`Right`

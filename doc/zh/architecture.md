@@ -176,7 +176,7 @@ pub trait Panel {
 - ANSI 颜色支持
 - 调整大小处理
 
-**日志查看器** (`crates/panel-misc/src/journal.rs`)
+**日志查看器** (`crates/panel-misc/src/journal/`)
 - 应用日志查看器
 - 面板信息
 - 系统资源监控
@@ -312,7 +312,7 @@ while !state.should_quit {
 
 #### 4.1 主渲染
 
-**位置：** `crates/ui-render/src/layout.rs`
+**位置：** `src/ui.rs` (`render_layout_with_accordion`)
 
 渲染流程：
 
@@ -358,7 +358,7 @@ fn render_main_area(frame, layout_manager, state) {
 
 #### 4.2 面板渲染
 
-**位置：** `crates/ui-render/src/panel.rs`
+**位置：** `crates/ui-render/src/panel_rendering.rs`
 
 **完整面板（height ≥ 2 行）：**
 - 带 `[≡]` 操作按钮、emoji 与标题的边框（例如 `[≡] 📁 文件`）
@@ -410,20 +410,29 @@ pub struct AppState {
 
 #### 5.2 配置
 
-**位置：** `crates/config/src/lib.rs`
+**位置：** `crates/config/src/settings.rs`
 
 从 TOML 加载的用户配置：
 
 ```rust
 pub struct Config {
-    pub general: GeneralSettings,         // 主题、语言、icon_mode、vim_mode、快捷键
-    pub editor: EditorSettings,           // 制表符大小、自动换行、git diff、自动缩进
-    pub file_manager: FileManagerSettings, // 扩展视图宽度、快捷键
-    pub git_status: GitStatusSettings,    // 快捷键
-    pub terminal: TerminalSettings,       // 快捷键
-    pub lsp: LspSettings,                // LSP 服务器、补全、悬停
-    pub logging: LoggingSettings,         // 日志级别、资源监控间隔
-    pub vfs: VfsSettings,                // VFS 连接超时
+    pub general: GeneralSettings,                  // 通用：主题、语言、icon_mode、vim_mode、资源监控间隔、快捷键
+    pub editor: EditorSettings,                    // 制表符大小、自动换行、git diff、自动缩进、blame
+    pub file_manager: FileManagerSettings,         // 扩展视图宽度、目录大小、快捷键
+    pub git_status: GitStatusSettings,             // 快捷键
+    pub git_diff: GitDiffSettings,                 // 快捷键
+    pub git_log: GitLogSettings,                   // 快捷键、Unicode 图形
+    pub database: DatabaseSettings,                // 快捷键
+    pub viewer: ViewerSettings,                    // 快捷键
+    pub terminal: TerminalSettings,                // Shell、回滚、Shell 集成、快捷键
+    pub lsp: LspSettings,                          // LSP 服务器、补全、悬停
+    pub debug: DebugSettings,                      // 调试器启动设置
+    pub logging: LoggingSettings,                  // 日志文件、最低级别
+    pub vfs: VfsSettings,                          // VFS 连接超时
+    pub vault: VaultSettings,                      // 密码库自动锁定
+    pub highlight: HighlightSettings,              // 自定义关键字语言
+    pub ai: AiSettings,                            // 模型连接与编码代理
+    pub plugins: BTreeMap<String, PluginSettings>, // 各插件的开关与设置
 }
 ```
 
@@ -436,7 +445,7 @@ pub struct Config {
 
 **位置：** `crates/theme/src/lib.rs`
 
-**内置主题：** 38 款主题（Dracula、Nord、Monokai、Matrix、Pip-Boy 等）
+**内置主题：** 44 款主题（Dracula、Nord、Monokai、Matrix、Pip-Boy 等）
 
 **自定义主题：** 从 `~/.config/termide/themes/*.toml` 加载
 
@@ -571,7 +580,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
   `VfsOperation<T>`，调用方轮询其 receiver——没有阻塞变体。
 - **`VfsManager`**（`crates/vfs/src/lib.rs`）——按 `(scheme, host, port, user)`
   为键的 provider 缓存；淘汰其 actor 已死的条目。
-- **SFTP actor**（`crates/vfs/src/sftp.rs`）——单个 tokio 任务拥有
+- **SFTP actor**（`crates/vfs/src/sftp/`）——单个 tokio 任务拥有
   `russh-sftp` 会话，处理小的原子命令（`OpenRead` / `ReadChunk` / `WriteChunk` /
   `CloseHandle` / `Stat` / `ListDir` / `MkdirRecursive` / …）。分块循环位于同步
   工作线程一侧，在分发之间轮询暂停/取消。
@@ -715,7 +724,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 | 目录大小遍历（宽视图）           | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | 对共享缓存逐帧 `try_recv`；每次遍历有预算限制                              |
 
 SFTP/FTP 后端使用不同的模式——一个专用的 tokio 运行时拥有连接和一个“分块即命令”
-actor（见 `crates/vfs/src/sftp.rs`）。同步工作线程驱动分块循环，并在分发之间
+actor（见 `crates/vfs/src/sftp/`）。同步工作线程驱动分块循环，并在分发之间
 轮询暂停/取消标志，因此暂停的传输会让 actor 空闲以服务其他面板的元数据请求。
 
 ## 未来架构考虑

@@ -11,7 +11,7 @@ Welcome to the Termide documentation! This guide covers installation, usage, and
 - [File Manager](file-manager.md) - File navigation and operations
 - [Operations Panel](operations.md) - Background transfers: pause, resume, cancel, partial-upload cleanup
 - [Remote Filesystems (VFS)](vfs.md) - Browsing and transferring files over SFTP / FTP / FTPS / SMB / NFS
-- [Database Viewer](database.md) - Read-only browsing of SQLite / PostgreSQL / MySQL tables
+- [Database Viewer](database.md) - Browsing and editing SQLite / PostgreSQL / MySQL tables
 - [Password Vault](passwords.md) - Encrypted storage of connection passwords under a master password
 - [Terminal](terminal.md) - Using the integrated terminal
 - [Detached Instances](detached-instances.md) - Keeping termide alive across SSH disconnects
@@ -24,6 +24,7 @@ Welcome to the Termide documentation! This guide covers installation, usage, and
 - [Themes](themes.md) - Customizing appearance with themes
 - [Custom Commands](actions.md) - Shell commands from `commands.toml` in the Commands menu
 - [Plugins](plugins.md) - Background programs that add commands, status items and agent tools
+- [Keybindings](keybindings.md) - Every keyboard shortcut and how to rebind it
 
 ### Security
 
