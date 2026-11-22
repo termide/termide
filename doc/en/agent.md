@@ -1666,14 +1666,19 @@ the rest what the form opens with. The session ends when the panel is closed,
 
 `start` and `evaluate`, which can call the program's own functions, are
 decided as any tool call is, by the rules and the mode; their subject for a
-rule names what runs (`start debug-server`, `start app/main.py`,
-`evaluate len(items)`), so "Allow always" trusts that command. Everything
+rule names what runs, a command's parameters included
+(`start debug-server port=9000`, `start app/main.py`, `evaluate len(items)`),
+so "Allow always" trusts that command with those values. Everything
 else — stepping, pausing, stopping, breakpoints, frames, `state` — only moves
 on or looks at a program whose launch was already decided, and asks no one,
 outside plan mode; a `deny` rule still refuses it. A `start` refused for a
 reason known beforehand — no such command, a command-line debugger, a value
 from the focused panel, a parameter the command does not declare or a value
 its field could not hold — fails at once, before any prompt or reviewer.
+A command the project's `commands.toml` brings is not launched until you have
+approved it, seeing what it runs, as your own launch of it asks: the agent's
+`start` of one not yet approved opens that question and tells the agent to
+start it again once you have answered.
 
 ## Permissions
 
@@ -1995,14 +2000,16 @@ answer for the session allows runs, and any other asks, with "Allow always"
 on offer. A tool switched off for the session in the tools menu stays off,
 and a `deny` rule refuses it even when its server calls it read-only.
 `task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
-says, so it only reads. `suggest_command` puts its card up with only **Copy**
+says, so it only reads; plan mode switched on while a task runs holds it from
+its next call on. `suggest_command` puts its card up with only **Copy**
 and **Don't run**; `suggest_goal` and `suggest_loop` keep **Start**, since
 what they start runs in plan mode too. `send_message` is refused: the panel it reaches is not in
 plan mode, and could make the change this one may not; so is `fork`, whose
 copy is not in plan mode either. `debug` only reads the
 session (`state`); starting, stepping or stopping the program is refused.
-`agents`, `jobs` and `terminals` (but its `send`) run; a line `send` types at
-a shell prompt passes when it is look-only, and any other `send` is refused.
+`agents`, `checklist`, `jobs` and `terminals` (but its `send`) run — what
+the agent set going it may still stop or close; a line `send` types at a
+shell prompt passes when it is look-only, and any other `send` is refused.
 
 The default instructions have the agent work the task through with you
 before it writes the plan. It explores first and finds out the facts itself,
@@ -3269,9 +3276,11 @@ what the rules and the mode already allow: anything that would ask is refused
 with a reason the model reads. In the default `auto` mode the reviewer decides
 what the rules leave open, and a call it cannot decide is refused; in
 `configured`, add `allow` rules for the exact commands and paths the task
-needs, or set `mode = "all"` for unattended work. Plan mode has no meaning
-without the panel and is treated as `auto`. There are no terminal sessions either: `shell` runs each command on its
-own, without `session` and `background`, and `terminals` is not offered.
+needs, or set `mode = "all"` for unattended work. In plan mode the agent only
+looks and everything else is refused; its plan is the answer, with no one to
+accept it and have it carried out. There are no terminal sessions either:
+`shell` runs each command on its own, without `session` and `background`, and
+`terminals` is not offered; nor is `checklist`, which has no panel to show it.
 
 On a CLI-agent connection (`claude_code`, `codex`, `gemini_cli`), or with an
 agent whose `AGENT.md` names a `command`, the task runs in that agent's own

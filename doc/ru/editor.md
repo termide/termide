@@ -308,7 +308,7 @@ Tree-sitter-грамматика (если она есть) всегда име�
 - **Номера строк**: Отображаются для логических строк, а не визуальных рядов; поле номеров ровно такой ширины, какой требует номер последней строки, так что короткий файл отдаёт освободившееся место тексту
 - **Операции редактирования**: Все команды редактирования (вырезать, копировать, вставить, отменить/повторить) работают без проблем с перенесённым содержимым
 
-Включить/выключить перенос строк в конфигурационном файле (`~/.config/termide/config.toml`):
+Включить/выключить перенос строк в конфигурационном файле (`~/.config/termide/config.toml` в Linux, `~/Library/Application Support/termide/config.toml` в macOS, `%APPDATA%\termide\config.toml` в Windows):
 ```toml
 [editor]
 word_wrap = true  # или false
@@ -434,7 +434,7 @@ auto_close_brackets = true  # или false (по умолчанию: true)
 
 ### Конфигурация
 
-Включить или отключить визуализацию git diff в конфигурационном файле (`~/.config/termide/config.toml`):
+Включить или отключить визуализацию git diff в конфигурационном файле (`~/.config/termide/config.toml` в Linux, `~/Library/Application Support/termide/config.toml` в macOS, `%APPDATA%\termide\config.toml` в Windows):
 
 ```toml
 [editor]
@@ -505,7 +505,7 @@ Termide включает встроенную поддержку LSP для ин
 
 ### Конфигурация
 
-Настройка LSP в файле конфигурации (`~/.config/termide/config.toml`):
+Настройка LSP в файле конфигурации (`~/.config/termide/config.toml` в Linux, `~/Library/Application Support/termide/config.toml` в macOS, `%APPDATA%\termide\config.toml` в Windows):
 
 ```toml
 [lsp]
@@ -573,7 +573,7 @@ build-скриптов и процедурных макросов идут в `t
 
 | Клавиша            | Действие                                   |
 |-------------------|--------------------------------------------|
-| `Shift+F12`       | Найти все ссылки на символ под курсором    |
+| `Shift+F12`, `F24` | Найти все ссылки на символ под курсором    |
 
 Открывает панель ссылок со списком всех мест использования символа. Клик по ссылке переходит к этому месту.
 
@@ -651,7 +651,7 @@ Termide включает опциональный режим редактиро�
 
 ### Включение режима Vim
 
-Включите режим Vim в файле конфигурации (`~/.config/termide/config.toml`):
+Включите режим Vim в файле конфигурации (`~/.config/termide/config.toml` в Linux, `~/Library/Application Support/termide/config.toml` в macOS, `%APPDATA%\termide\config.toml` в Windows):
 
 ```toml
 [general]

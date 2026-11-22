@@ -160,7 +160,12 @@ impl App {
                     Err(e) => {
                         let kind = if is_directory { "directory" } else { "file" };
                         log::error!("{} creation error '{}': {}", kind, name, e);
-                        let error_msg = format!("Failed to create {} '{}': {}", kind, name, e);
+                        let error = e.to_string();
+                        let error_msg = if is_directory {
+                            t.create_dir_failed_fmt(name, &error)
+                        } else {
+                            t.create_file_failed_fmt(name, &error)
+                        };
                         self.show_error_modal(error_msg);
                     }
                 }

@@ -1,0 +1,1 @@
+- **A git fetch, pull or push asks for its password under any system language.** termide recognises a remote that wants credentials by git's English messages, so with a translated git (a German or Russian locale, say) the vault never offered the password and the operation just failed. Network git commands now run with `LC_ALL=C`, so the messages are the ones termide looks for.

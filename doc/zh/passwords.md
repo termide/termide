@@ -4,7 +4,7 @@ Termide 将远程连接的密码保存在一个由主密码保护的加密密码
 
 密码库用于：
 
-- **远程文件系统** — SFTP、FTP、FTPS、SMB（参见 [VFS](vfs.md)）。
+- **远程文件系统** — SFTP、FTP、FTPS、SMB（参见 [VFS](vfs.md)），以及 SFTP 登录所用 SSH 密钥的密码短语。
 - **数据库** — PostgreSQL 和 MySQL（参见[数据库查看器](database.md)）。
 - **通过 HTTPS 的 Git** — push、pull 和 fetch 所用的用户名和密码或令牌。
 - **通过 SSH 的 Git** — SSH 密钥的密码短语。
@@ -22,7 +22,7 @@ Termide 将远程连接的密码保存在一个由主密码保护的加密密码
 
 取消主密码提示并不会取消连接，Termide 会改为直接询问登录密码。
 
-密码按服务器归档：scheme、主机和端口（省略默认端口）加上用户名。数据库密码属于服务器登录，而不属于某一个数据库，因此在面板中切换数据库时仍能找到它。git 使用的 SSH 密钥的密码短语保存为一个条目。
+密码按服务器归档：scheme、主机和端口（省略默认端口）加上用户名。数据库密码属于服务器登录，而不属于某一个数据库，因此在面板中切换数据库时仍能找到它。git 使用的 SSH 密钥的密码短语保存为一个条目；SFTP 密钥的密码短语按密钥路径归档。
 
 ## URL 中带密码的书签
 
@@ -59,7 +59,7 @@ lock_after_mins = 15   # 0 表示在 termide 退出前保持解锁
 
 ## 密码库文件
 
-密码库是 `~/.config/termide/vault.toml`（仅所有者可访问）。每个用户只有一个密码库，不会按项目区分。
+密码库是 Linux 上为 `~/.config/termide/vault.toml`，macOS 上为 `~/Library/Application Support/termide/vault.toml`，Windows 上为 `%APPDATA%\termide\vault.toml`（仅所有者可访问）。每个用户只有一个密码库，不会按项目区分。
 
 - **机密是加密的。** 它们使用临时 X25519、HKDF-SHA256 和 XChaCha20-Poly1305 密封到一个 X25519 密钥对。私钥使用由主密码经 Argon2id（64 MiB，3 轮）派生的密钥加密。
 - **保存无需解锁。** 保存只用到公钥，因此 Termide 只在确实需要已保存的密码时才询问主密码。

@@ -62,7 +62,7 @@ Two ways to get a remote panel open:
 2. **Bookmarks** — store frequently-used remotes once and reach them
    through the `Bookmarks` menu. Bookmark entries accept the same URL
    syntax as above; they're stored in
-   `~/.config/termide/bookmarks.toml` (or the project-local
+   `~/.config/termide/bookmarks.toml` on Linux, `~/Library/Application Support/termide/bookmarks.toml` on macOS, `%APPDATA%\termide\bookmarks.toml` on Windows (or the project-local
    `.termide/bookmarks.toml` if you keep team-shared shortcuts in the
    repo).
 
@@ -72,17 +72,28 @@ properties on Space) is exactly the same as for local panels.
 
 ## Authentication (SFTP)
 
-SFTP supports four authentication modes:
+SFTP logs in the way `ssh` does, and the
+[SSH configuration](#ssh-configuration-sftp) of the host chooses how:
 
-- **`Auto`** *(default)* — tries SSH agent first, then the host's
-  `IdentityFile` keys from the SSH configuration, then default keys
-  (`id_ed25519`, `id_rsa`, `id_ecdsa`, `id_dsa`), then password.
-  `IdentitiesOnly yes` skips the agent and the default keys.
-- **SSH agent** — uses an SSH agent if `SSH_AUTH_SOCK` points at one.
-- **SSH key** — explicit private-key file, optionally with a
-  passphrase.
-- **Password** — when the methods above are refused, Termide takes the
-  password from the [password vault](passwords.md) or asks for it.
+1. **SSH agent** — the one `IdentityAgent` names (a socket path, or
+   `$VAR` for the socket in that variable), else the one
+   `SSH_AUTH_SOCK` points at. `IdentityAgent none` turns it off.
+2. **Keys** — the host's `IdentityFile` keys, then the default keys
+   (`id_ed25519`, `id_rsa`, `id_ecdsa`, `id_dsa`).
+   `IdentitiesOnly yes` skips the agent and the default keys.
+3. **Password** — when the methods above are refused, Termide takes the
+   password from the [password vault](passwords.md) or asks for it.
+
+`PreferredAuthentications` picks among them: without `publickey` the
+agent and keys are not tried; without `password` (or
+`keyboard-interactive`) no password is asked for, and a refused login
+is reported as an error.
+
+An encrypted key that the agent does not hold asks for its passphrase
+once nothing else got in, before the password unless
+`PreferredAuthentications` puts `password` first. The passphrase is
+taken from the vault or asked for, and kept in the vault under the key's
+path, so one entry serves every server that key opens.
 
 FTP and FTPS log in with the user from the URL; a refused login asks for
 the password the same way. Without a user in the URL the login is
@@ -105,7 +116,9 @@ options are used:
 | `HostName` | The server actually connected to; `%h` stands for the host in the URL. |
 | `Port` | Used when the URL has no port. |
 | `User` | Used when the URL has no user; without either, your local user name. |
-| `IdentityFile`, `IdentitiesOnly` | The keys `Auto` tries. |
+| `IdentityFile`, `IdentitiesOnly` | The keys tried, and whether the agent and default keys are. |
+| `IdentityAgent` | The SSH agent used; `none` for none. |
+| `PreferredAuthentications` | Which of keys (`publickey`) and the password are tried, and which first. |
 | `UserKnownHostsFile`, `GlobalKnownHostsFile` | Where server keys are looked up. |
 | `HostKeyAlias` | The name the server key is looked up and recorded under. |
 | `HashKnownHosts` | `yes` writes remembered keys with the host name hashed. |
@@ -153,10 +166,11 @@ and runs the next SSH session inside that connection, as `ssh -J` does.
 - Each jump host's key is checked like any server key (see below)
   before anything is sent to it. The question or refusal names the jump
   host, and the answer is recorded in that host's `known_hosts`.
-- Jump hosts log in with the SSH agent and keys only (`Auto` without the
-  password). A refused login to a jump host is reported as an error
+- Jump hosts log in with the SSH agent and keys only, without the
+  password. A refused login to a jump host is reported as an error
   naming it; the password Termide asks for, or takes from the vault, is
-  sent only to the server in the URL.
+  sent only to the server in the URL. An encrypted key is not asked
+  about for a jump host: load it into the SSH agent.
 
 ## Server keys (SFTP)
 

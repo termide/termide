@@ -59,7 +59,7 @@ nfs://nas.local/srv/backup
    VFS URL。
 2. **Bookmarks** — 把常用的远程位置保存一次，然后通过 `Bookmarks`
    菜单访问。书签条目接受同样的 URL 语法，保存在
-   `~/.config/termide/bookmarks.toml`（或项目本地的
+   Linux 上为 `~/.config/termide/bookmarks.toml`，macOS 上为 `~/Library/Application Support/termide/bookmarks.toml`，Windows 上为 `%APPDATA%\termide\bookmarks.toml`（或项目本地的
    `.termide/bookmarks.toml`，用于团队共享）。
 
 两种方式都会打开一个根目录指向远程目录的普通文件管理器视图；其他
@@ -68,16 +68,25 @@ nfs://nas.local/srv/backup
 
 ## 认证（SFTP）
 
-SFTP 支持四种认证方式：
+SFTP 像 `ssh` 一样登录，由该主机的 [SSH 配置](#ssh-配置sftp)决定方式：
 
-- **`Auto`**（默认）— 先尝试 SSH agent，然后是 SSH 配置中该主机的
-  `IdentityFile` 密钥，再尝试默认密钥（`id_ed25519`、`id_rsa`、
-  `id_ecdsa`、`id_dsa`），最后是密码。`IdentitiesOnly yes` 会跳过
-  agent 和默认密钥。
-- **SSH agent** — 当 `SSH_AUTH_SOCK` 指向正在运行的 agent 时使用。
-- **SSH key** — 明确指定私钥文件，可选带密码短语。
-- **Password** — 上述方式都被拒绝时，Termide 从[密码库](passwords.md)
-  中取得密码或询问它。
+1. **SSH agent** — `IdentityAgent` 指定的 agent（套接字路径，或
+   `$VAR` 表示该变量中的套接字），否则为 `SSH_AUTH_SOCK` 指向的
+   agent。`IdentityAgent none` 关闭 agent。
+2. **密钥** — 该主机的 `IdentityFile` 密钥，然后是默认密钥
+   （`id_ed25519`、`id_rsa`、`id_ecdsa`、`id_dsa`）。
+   `IdentitiesOnly yes` 会跳过 agent 和默认密钥。
+3. **密码** — 上述方式都被拒绝时，Termide 从[密码库](passwords.md)
+   中取得密码或询问它。
+
+`PreferredAuthentications` 在其中选择：不含 `publickey` 时不尝试
+agent 和密钥；不含 `password`（或 `keyboard-interactive`）时不询问
+密码，登录被拒绝时报告错误。
+
+agent 中没有的加密密钥会在其他方式都失败后询问其密码短语；除非
+`PreferredAuthentications` 把 `password` 放在前面，否则先于密码询问。
+密码短语从密码库取得或询问，并按密钥路径保存在密码库中，因此一个条目
+可用于该密钥能登录的所有服务器。
 
 FTP 和 FTPS 使用 URL 中的用户登录；登录被拒绝时以同样的方式询问
 密码。URL 中没有用户时为匿名登录。
@@ -98,7 +107,9 @@ Termide 按 `ssh` 的方式先读取 `~/.ssh/config`，再读取
 | `HostName` | 实际连接的服务器；`%h` 代表 URL 中的主机。 |
 | `Port` | URL 中没有端口时使用。 |
 | `User` | URL 中没有用户时使用；两者都没有时使用本地用户名。 |
-| `IdentityFile`、`IdentitiesOnly` | `Auto` 尝试的密钥。 |
+| `IdentityFile`、`IdentitiesOnly` | 尝试哪些密钥，以及是否尝试 agent 和默认密钥。 |
+| `IdentityAgent` | 使用的 SSH agent；`none` 表示不使用。 |
+| `PreferredAuthentications` | 是否尝试密钥（`publickey`）和密码，以及先后顺序。 |
 | `UserKnownHostsFile`、`GlobalKnownHostsFile` | 查找服务器密钥的文件。 |
 | `HostKeyAlias` | 查找和记录服务器密钥时使用的名称。 |
 | `HashKnownHosts` | 为 `yes` 时，记住的密钥以哈希后的主机名写入。 |
@@ -142,9 +153,10 @@ URL 中写明的端口或用户优先于 `Port` 和 `User`，与 `ssh` 命令行
 - 每个跳板主机的密钥在向它发送任何内容之前，都会像其他服务器密钥一样
   检查（见下文）。询问或拒绝会写明该跳板主机，答复记录在该主机的
   `known_hosts` 中。
-- 跳板主机只用 SSH agent 和密钥登录（不含密码的 `Auto`）。跳板主机拒绝
+- 跳板主机只用 SSH agent 和密钥登录，不用密码。跳板主机拒绝
   登录时会报告一个写明其名称的错误；Termide 询问的或从密码库取出的密码
-  只发送给 URL 中的服务器。
+  只发送给 URL 中的服务器。跳板主机的加密密钥不会询问密码短语：请把它
+  加载到 SSH agent 中。
 
 ## 服务器密钥（SFTP）
 

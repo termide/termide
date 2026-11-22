@@ -169,7 +169,28 @@ impl Tool for TerminalsTool {
         }
         let done = match action {
             "read" => return self.read(call, owner, name),
-            "send" => return self.send(call, owner, name, cancel),
+            "send" => {
+                // The call was judged by where the shell stood then: a line
+                // typed at its prompt as a command, anything else as input
+                // to a program. Typed where the shell stands no longer, it
+                // would be something its check never saw.
+                let at_prompt = typed_command_line(call, ctx, self.terminals.as_ref()).is_some();
+                if at_prompt != ctx.tool.typed_at_prompt {
+                    let now = if at_prompt {
+                        "is back at its prompt"
+                    } else {
+                        "is no longer at its prompt"
+                    };
+                    return ToolResultMessage::error(
+                        call,
+                        format!(
+                            "nothing typed: the shell of terminal session `{name}` {now} since \
+                             this call was checked; look at it and send again"
+                        ),
+                    );
+                }
+                return self.send(call, owner, name, cancel);
+            }
             "screen" => {
                 return match self.terminals.screen(owner, name) {
                     Ok(screen) => ToolResultMessage::text(call, screen_body(name, &screen)),
@@ -601,6 +622,40 @@ mod tests {
         let elsewhere =
             json!({ "action": "send", "session": "nope", "input": "ls", "keys": ["Enter"] });
         assert_eq!(typed(true, elsewhere), None);
+    }
+
+    /// A send runs only where it was judged: a line checked as a command at
+    /// the prompt is not typed into a program that has the terminal since,
+    /// nor input checked for a program into the shell once it ended.
+    #[test]
+    fn a_send_is_refused_when_the_shell_moved_since_its_check() {
+        let send = json!({ "action": "send", "session": "dev", "input": "ls", "keys": ["Enter"] });
+        for (judged, now) in [(true, false), (false, true)] {
+            let fake = Arc::new(Fake {
+                at_prompt: now,
+                ..Fake::default()
+            });
+            let tool = TerminalsTool::new(fake.clone());
+            let mut ctx = ctx_of(Some("s1"));
+            ctx.tool.typed_at_prompt = judged;
+            let sent = tool.execute(
+                &tool_call(send.clone()),
+                &ctx,
+                &mut |_| {},
+                &CancelToken::new(),
+            );
+            assert!(sent.is_error, "{}", sent.plain_text());
+            assert!(fake.calls.lock().unwrap().is_empty());
+        }
+        let fake = Arc::new(Fake {
+            at_prompt: true,
+            ..Fake::default()
+        });
+        let tool = TerminalsTool::new(fake.clone());
+        let mut ctx = ctx_of(Some("s1"));
+        ctx.tool = tool.call_traits(&tool_call(send.clone()), &ctx);
+        let sent = tool.execute(&tool_call(send), &ctx, &mut |_| {}, &CancelToken::new());
+        assert!(!sent.is_error, "{}", sent.plain_text());
     }
 
     /// A command line typed into a session is judged where its shell

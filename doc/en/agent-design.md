@@ -81,8 +81,8 @@ prompt, so its prompter is `AutoDenyPrompter` — anything the rules and mode do
 not already allow is refused with a reason, rather than blocking a user who is
 not watching the nested run; this is the deliberate limit that keeps a
 subagent from doing more than the parent could without asking. No nesting: the
-subagent build path adds no `task` tool, and external (ACP) agents are refused
-as delegates, since driving one headlessly has no permission surface. A
+subagent build path adds no `task` tool. A delegate on an external (ACP)
+agent runs in that agent's own loop, its calls judged as any delegate's. A
 runaway is cut after fifty model calls (the emit closure trips a budget
 token), and the parent's cancel aborts the sub-run. Not done yet: parallel
 delegation (the loop runs one tool at a time) and streaming the sub-run as a
@@ -1596,9 +1596,11 @@ without the panel, the way the subagent runner is. Streaming: text deltas to
 stdout so the answer pipes cleanly, tool activity and errors to stderr, one
 tool line per call. Permissions: no one to prompt, so `AutoDenyPrompter` as in
 a subagent — the run does only what the rules and mode already allow, and
-`mode = "all"` or `allow` rules opt into more; plan mode becomes `auto`,
-and an ACP agent is refused (no headless permission surface, as for
-subagents). `-` reads the prompt from stdin. Exit code: 0, 1 on a failed
+`mode = "all"` or `allow` rules opt into more. Plan mode stays plan: the
+run only looks, its answer is the plan, and `checklist` is left out, as
+nothing outlives the run to read it. An agent whose `AGENT.md` names an ACP
+`command` runs headless in its own loop, served termide's prompt and tools,
+its permission requests refused unless the rules and mode allow them. `-` reads the prompt from stdin. Exit code: 0, 1 on a failed
 message, 130 on abort. `--output json` prints one object instead of streaming
 — answer, stop reason, model, provider, usage and the tool calls — for a
 consumer that parses rather than reads, and `--output stream-json` prints one

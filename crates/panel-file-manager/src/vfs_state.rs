@@ -50,9 +50,24 @@ struct RemoteLogin {
     /// it comes. Its URL is the key the app answers with.
     waiting: Option<VfsPath>,
     /// Raised on refusal; taken by the FileManager on the next tick.
-    request: Option<(String, CredentialAttempt)>,
+    request: Option<CredentialRequest>,
+    /// The encrypted SSH key whose passphrase is waited for or in flight;
+    /// `None` when the login wants the account's password.
+    key: Option<PathBuf>,
     /// Raised when a password-authenticated connection succeeded.
     accepted: Option<String>,
+}
+
+/// A refused remote login waiting for a secret.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CredentialRequest {
+    /// The login URL the answer names.
+    pub url: String,
+    /// Which secret the refused attempt used.
+    pub attempt: CredentialAttempt,
+    /// The encrypted SSH key whose passphrase is wanted; `None` for the
+    /// account's password.
+    pub key: Option<PathBuf>,
 }
 
 /// A connection stopped on an SSH server key no `known_hosts` file records.
@@ -283,9 +298,8 @@ impl VfsState {
         self.login.waiting.is_some()
     }
 
-    /// Take the request for a remote password: the login URL and which
-    /// password was just refused.
-    pub fn take_credential_request(&mut self) -> Option<(String, CredentialAttempt)> {
+    /// Take the request for a remote password or key passphrase.
+    pub fn take_credential_request(&mut self) -> Option<CredentialRequest> {
         self.login.request.take()
     }
 
@@ -496,6 +510,9 @@ impl VfsState {
 
     /// Start a connection to a remote path.
     fn start_connect(&mut self, path: VfsPath) -> VfsResult<()> {
+        // Callers connect remote paths only; a local one is a bug, reported
+        // as an error in release builds.
+        debug_assert!(path.is_remote(), "start_connect on a local path");
         // Start async connection based on protocol
         let operation = match path.protocol {
             VfsProtocol::Sftp => {
@@ -586,6 +603,7 @@ impl VfsState {
                 match op.try_recv() {
                     Some(Ok(())) => {
                         // Connection succeeded, start listing
+                        self.login.key = None;
                         if matches!(
                             self.login.attempt.take(),
                             Some(CredentialAttempt::Stored | CredentialAttempt::Typed)
@@ -614,18 +632,28 @@ impl VfsState {
                         // Ask for a password instead of reporting an error;
                         // the panel shows where it was meanwhile.
                         log::info!("VfsState: authentication refused: {msg}");
-                        let attempt = self
-                            .login
-                            .attempt
-                            .take()
-                            .unwrap_or(CredentialAttempt::Initial);
-                        self.login.request = Some((login_url(&self.current_path), attempt));
-                        self.login.waiting = Some(self.current_path.clone());
-                        self.connection_status = None;
-                        self.clear_connection_tracking();
-                        if let Some(prev) = self.previous_path.take() {
-                            self.current_path = prev;
-                        }
+                        // A passphrase that opened its key says nothing
+                        // about the account's password.
+                        let attempt = self.login.attempt.take();
+                        let attempt = if self.login.key.take().is_some() {
+                            None
+                        } else {
+                            attempt
+                        };
+                        self.ask_for_credential(attempt, None);
+                        None
+                    }
+                    Some(Err(VfsError::KeyPassphraseRequired(key)))
+                        if self.current_path.protocol == VfsProtocol::Sftp =>
+                    {
+                        log::info!("VfsState: SSH key {} needs its passphrase", key.display());
+                        let attempt = self.login.attempt.take();
+                        let attempt = if self.login.key.as_ref() == Some(&key) {
+                            attempt
+                        } else {
+                            None
+                        };
+                        self.ask_for_credential(attempt, Some(key));
                         None
                     }
                     Some(Err(VfsError::UnknownHostKey(key))) => {
@@ -642,6 +670,7 @@ impl VfsState {
                         self.host_key.request = Some((url, (*key).clone()));
                         self.host_key.waiting = Some((self.current_path.clone(), *key));
                         self.login.attempt = None;
+                        self.login.key = None;
                         self.connection_status = None;
                         self.clear_connection_tracking();
                         if let Some(prev) = self.previous_path.take() {
@@ -665,6 +694,8 @@ impl VfsState {
                     }
                     Some(Err(e)) => {
                         log::error!("VfsState: Connection failed: {}", e);
+                        self.login.attempt = None;
+                        self.login.key = None;
                         // Connection failed - clear status (error shown via modal)
                         self.connection_status = None;
                         self.clear_connection_tracking();
@@ -735,8 +766,27 @@ impl VfsState {
         }
     }
 
-    /// Retry the refused login for `url` with `password`. Returns false when
-    /// this panel is not waiting for `url`.
+    /// Park the refused login on the current path until a secret comes:
+    /// the account's password, or the passphrase of `key`. `attempt` is
+    /// the secret just refused, `None` for none of the kind asked for.
+    fn ask_for_credential(&mut self, attempt: Option<CredentialAttempt>, key: Option<PathBuf>) {
+        self.login.request = Some(CredentialRequest {
+            url: login_url(&self.current_path),
+            attempt: attempt.unwrap_or(CredentialAttempt::Initial),
+            key: key.clone(),
+        });
+        self.login.key = key;
+        self.login.waiting = Some(self.current_path.clone());
+        self.connection_status = None;
+        self.clear_connection_tracking();
+        if let Some(prev) = self.previous_path.take() {
+            self.current_path = prev;
+        }
+    }
+
+    /// Retry the refused login for `url` with `password`: the passphrase of
+    /// the key it asked for, else the account's password. Returns false
+    /// when this panel is not waiting for `url`.
     pub fn provide_password(
         &mut self,
         url: &str,
@@ -746,7 +796,12 @@ impl VfsState {
         let Some(path) = self.login.waiting.take_if(|p| login_url(p) == url) else {
             return false;
         };
-        let options = ConnectOptions::with_password(password.expose());
+        let options = match &self.login.key {
+            Some(key) => {
+                ConnectOptions::with_ssh_key(key.clone(), Some(password.expose().to_string()))
+            }
+            None => ConnectOptions::with_password(password.expose()),
+        };
         let operation = match path.protocol {
             VfsProtocol::Sftp => self.manager.connect_sftp(&path, options),
             VfsProtocol::Ftp | VfsProtocol::Ftps => self.manager.connect_ftp(&path, options),
@@ -764,10 +819,15 @@ impl VfsState {
 
     /// The user declined to give a password for `url`.
     pub fn cancel_password(&mut self, url: &str) -> bool {
-        self.login
+        let cancelled = self
+            .login
             .waiting
             .take_if(|p| login_url(p) == url)
-            .is_some()
+            .is_some();
+        if cancelled {
+            self.login.key = None;
+        }
+        cancelled
     }
 
     /// Drop the (possibly dead) provider for the current remote path and start
@@ -1156,6 +1216,48 @@ mod tests {
         assert!(state.is_connecting());
         assert_eq!(state.current_path(), &path);
         assert_eq!(state.login.attempt, Some(CredentialAttempt::Stored));
+    }
+
+    /// An encrypted key asks for its passphrase; the passphrase given goes
+    /// to that key, a wrong one asks again as refused, and a password
+    /// refusal after it asks for the password afresh.
+    #[test]
+    fn an_encrypted_key_asks_for_its_passphrase() {
+        let mut state = VfsState::with_path(VfsPath::local("/tmp"), None);
+        let path = VfsPath::remote(VfsProtocol::Sftp, "127.0.0.1", "/srv").with_port(1);
+        let key = PathBuf::from("/keys/id_ed25519");
+        let refuse = |state: &mut VfsState, error: VfsError| {
+            state.previous_path = Some(state.current_path.clone());
+            state.current_path = path.clone();
+            state.pending_operation =
+                Some(PendingVfsOperation::Connect(VfsOperation::error(error)));
+            assert!(state.tick().is_none(), "no error reaches the panel");
+            state.take_credential_request().expect("a request")
+        };
+
+        let request = refuse(&mut state, VfsError::KeyPassphraseRequired(key.clone()));
+        assert_eq!(
+            request,
+            CredentialRequest {
+                url: login_url(&path),
+                attempt: CredentialAttempt::Initial,
+                key: Some(key.clone()),
+            }
+        );
+        assert_eq!(state.current_path(), &VfsPath::local("/tmp"));
+        let pp = SecretText::new("pp");
+        assert!(state.provide_password(&request.url, &pp, CredentialAttempt::Typed));
+        assert_eq!(state.login.key.as_ref(), Some(&key), "in flight");
+
+        let again = refuse(&mut state, VfsError::KeyPassphraseRequired(key.clone()));
+        assert_eq!(again.attempt, CredentialAttempt::Typed, "wrong passphrase");
+        assert!(state.provide_password(&again.url, &pp, CredentialAttempt::Typed));
+
+        let password = refuse(&mut state, VfsError::AuthenticationFailed("no".into()));
+        assert_eq!(password.attempt, CredentialAttempt::Initial);
+        assert_eq!(password.key, None);
+        assert_eq!(state.login.key, None);
+        assert!(state.cancel_password(&password.url));
     }
 
     fn host_key(host: &str, port: u16) -> HostKey {

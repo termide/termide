@@ -1,0 +1,12 @@
+# `termide --prompt` in plan mode stays in plan mode: the mock task reads
+# the report, then its edit — which an allow rule would let through in any
+# other mode — is refused, with no one to ask.
+config headless-plan.toml
+mock-llm
+start
+wait "README.md"
+run "\"$TERMIDE_BIN\" --prompt 'flag critical low-stock items in the reorder report' --output json > headless.json 2> headless.err"
+file-contains headless.json "{\"error\":false,\"name\":\"read\",\"subject\":\"inventory/report.py\"}" 20
+file-contains headless.json "{\"error\":true,\"name\":\"edit\",\"subject\":\"inventory/report.py\"}" 20
+file-contains headless.json "{\"error\":true,\"name\":\"shell\",\"subject\":\"python3 -m unittest -q\"}" 20
+quit --force

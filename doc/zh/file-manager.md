@@ -249,8 +249,8 @@ termide 内还是其他应用中——都会让下一次粘贴退回复制；在
 
 | 文件类型 | 操作 |
 |-----------|--------|
-| 光栅图片（PNG、JPG、JPEG、GIF、WebP、BMP、TIFF） | ImagePanel（原生图形）或 xdg-open 回退 |
-| 矢量图片（SVG、ICO） | xdg-open（系统查看器） |
+| 光栅图片（PNG、JPG、JPEG、GIF、WebP、BMP、ICO、TIFF） | ImagePanel（原生图形）或 xdg-open 回退 |
+| 矢量图片（SVG） | xdg-open（系统查看器） |
 | 视频（MP4、MKV、AVI、MOV、WebM、FLV、WMV、M4V） | xdg-open（系统播放器） |
 | 二进制文件 | xdg-open（系统默认） |
 | 文本文件 | 编辑器面板 |

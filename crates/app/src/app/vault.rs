@@ -45,10 +45,13 @@ pub(crate) enum GitAuth {
 #[derive(Debug, Clone)]
 pub(crate) enum Request {
     /// A panel's refused login, answered by `PanelCommand::ProvideCredentials`.
+    /// With `key` it wants that SSH key's passphrase, and `origin` is the
+    /// key's (`origin::ssh_key`), so a passphrase serves every host.
     Panel {
         url: String,
         origin: String,
         user: Option<String>,
+        key: bool,
     },
     /// A git network operation, answered by running it again.
     Git {
@@ -79,7 +82,8 @@ pub(crate) enum GitTarget {
 impl Request {
     fn kind(&self) -> SecretKind {
         match self {
-            Request::Panel { .. } => SecretKind::Password,
+            Request::Panel { key: false, .. } => SecretKind::Password,
+            Request::Panel { key: true, .. } => SecretKind::SshPassphrase,
             Request::Git {
                 target: GitTarget::Https { .. },
                 ..
@@ -135,6 +139,9 @@ impl Request {
                 target: GitTarget::SshKey,
                 ..
             } => termide_i18n::t().vault_target_ssh_key().to_string(),
+            Request::Panel {
+                key: true, origin, ..
+            } => format!("{} {origin}", termide_i18n::t().vault_target_ssh_key()),
             _ => match self.user() {
                 Some(user) => format!("{user}@{}", self.origin()),
                 None => self.origin().to_string(),
@@ -365,16 +372,33 @@ impl App {
 
     // === Entry points ===
 
-    /// A panel's login to `url` was refused.
-    pub(super) fn event_credentials_required(&mut self, url: String, attempt: CredentialAttempt) {
-        let Some(parts) = origin::parse_url(&url) else {
-            log::warn!("credentials requested for an unparsable URL");
-            return;
-        };
-        let request = Request::Panel {
-            url,
-            origin: parts.origin,
-            user: parts.user,
+    /// A panel's login to `url` was refused; `key` is the encrypted SSH key
+    /// whose passphrase it wants, if that is what it wants.
+    pub(super) fn event_credentials_required(
+        &mut self,
+        url: String,
+        attempt: CredentialAttempt,
+        key: Option<PathBuf>,
+    ) {
+        let request = match key {
+            Some(path) => Request::Panel {
+                url,
+                origin: origin::ssh_key(&path),
+                user: None,
+                key: true,
+            },
+            None => {
+                let Some(parts) = origin::parse_url(&url) else {
+                    log::warn!("credentials requested for an unparsable URL");
+                    return;
+                };
+                Request::Panel {
+                    url,
+                    origin: parts.origin,
+                    user: parts.user,
+                    key: false,
+                }
+            }
         };
         self.answer(request, attempt);
     }
@@ -712,6 +736,7 @@ impl App {
                 url: stripped,
                 origin: parts.origin,
                 user: parts.user,
+                key: false,
             },
             secret: SecretText::new(password.as_str()),
             then: Some(AfterSave::StripBookmark { url, is_project }),
@@ -1180,6 +1205,52 @@ mod tests {
             connection: "or".into()
         }));
         assert_eq!(use_key.target_label(), "openrouter");
+    }
+
+    #[test]
+    fn a_key_passphrase_request_addresses_the_keys_entry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.toml");
+        let mut state = VaultState::new(Some(path.clone()));
+        let fast = KdfParams {
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        let key = dir.path().join("id_ed25519");
+        let mut vault = Vault::create(&path, "m", fast).unwrap();
+        vault
+            .put(
+                SecretKind::SshPassphrase,
+                &origin::ssh_key(&key),
+                None,
+                "pp",
+                None,
+            )
+            .unwrap();
+        let request = |url: &str| Request::Panel {
+            url: url.into(),
+            origin: origin::ssh_key(&key),
+            user: None,
+            key: true,
+        };
+        // One entry per key, whichever host asks for it.
+        for url in ["sftp://u@a/", "sftp://v@b/"] {
+            let r = request(url);
+            assert_eq!(r.kind(), SecretKind::SshPassphrase);
+            assert!(state.has_entry(&r));
+        }
+        assert!(request("sftp://u@a/")
+            .target_label()
+            .ends_with(&key.display().to_string()));
+        let password = Request::Panel {
+            url: "sftp://u@a/".into(),
+            origin: "sftp://a".into(),
+            user: Some("u".into()),
+            key: false,
+        };
+        assert_eq!(password.kind(), SecretKind::Password);
+        assert!(!state.has_entry(&password));
     }
 
     #[test]

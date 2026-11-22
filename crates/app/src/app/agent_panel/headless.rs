@@ -10,9 +10,9 @@ use termide_agent_acp::AcpRuntime;
 use termide_agent_core::{
     build_system_prompt, discover_context_files, ensure_global_layout, permission_channel,
     subject_of, Agent, AgentDirs, AgentEvent, AutoDenyPrompter, Backend, BackendSetup, CancelToken,
-    HostTools, IntentLog, Message, Mode, ModeHandle, ModelSpec, PermissionAnswer,
-    PermissionEnvelope, PermissionHooks, PromptOptions, SessionView, StopReason, StreamEvent,
-    ToolContext, Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
+    HostTools, IntentLog, Message, Mode, ModelSpec, PermissionAnswer, PermissionEnvelope,
+    PermissionHooks, PlanGuard, PromptOptions, SessionView, StopReason, StreamEvent, ToolContext,
+    Usage, UserMessage, DEFAULT_AGENT, GLOBAL_AGENT_DIR,
 };
 use termide_agent_tools::SkillTool;
 use termide_config::AiSettings;
@@ -174,6 +174,9 @@ pub fn run_agent_headless(
     let web = shared_web(&settings.web, &dirs);
     let recall = recall_tool(settings, &dirs, project_root, cwd);
     let mut tools = base_tools(&dirs, Some(&web), Some(&recall), false);
+    // The checklist is shown above a panel's input and reminded of at each
+    // turn there; a run with neither keeps no list.
+    tools.remove("checklist");
     restrict_tools(&mut tools, &definition.spec.tools, name);
     let skills = dirs.model_skills();
     if !skills.is_empty() {
@@ -190,28 +193,28 @@ pub fn run_agent_headless(
     if let Some(mode) = definition.spec.mode {
         rules.mode = mode;
     }
-    // Plan mode is a UI affordance (it waits for a card); headless has no
-    // one to accept a plan, so the default mode decides instead.
-    if rules.mode == Mode::Plan {
-        eprintln!("termide: plan mode has no meaning without the panel; using auto");
-        rules.mode = Mode::Auto;
-    }
 
     let cancel = CancelToken::new();
     let refusals = dirs.refusals();
     let reviewer = reviewer_setup(settings, &dirs, name);
+    // Plan mode stays plan mode: the agent only looks, and what it would
+    // be asked about is refused, as everything asked is here. Its plan is
+    // the answer; no one is there to accept it and have it carried out.
     let permissions = PermissionHooks::new(
         rules.clone(),
         Box::new(AutoDenyPrompter::new(refusals.unattended_headless.clone())),
     )
     .with_classifier(Box::new(reviewer.classifier(cancel.clone())))
     .with_refusals(refusals.clone());
+    let mode = permissions.mode_handle();
     // The approved command hooks run around the calls as in a panel; a
     // project's hook never approved there does not run here either.
     let approvals = termide_agent_core::approvals::Approvals::new(
         termide_project::approvals_path(project_root).ok(),
     );
-    let mut chain: Vec<Box<dyn termide_agent_core::Hooks>> = Vec::new();
+    let mut chain: Vec<Box<dyn termide_agent_core::Hooks>> = vec![Box::new(
+        PlanGuard::new(mode.clone()).with_refusals(&refusals),
+    )];
     if let Some(factory) = super::command_hooks(&dirs, &approvals, cwd) {
         chain.push(factory());
     }
@@ -230,7 +233,7 @@ pub fn run_agent_headless(
                 prompter
             },
             cancel: cancel.clone(),
-            mode: ModeHandle::new(rules.mode),
+            mode,
             rules,
             persist: None,
             system_prompt,
@@ -278,6 +281,11 @@ pub fn run_agent_headless(
         max_tokens: settings.output_limit(),
         thinking: settings.reasoning,
         reasoning_budget: connection.reasoning_budget(),
+    };
+    let system_prompt = if rules.mode == Mode::Plan {
+        dirs.plan_prompt().apply(&system_prompt)
+    } else {
+        system_prompt
     };
     let mut agent = Agent::new(Arc::clone(&provider), tools, model, cwd.to_path_buf())
         .with_system_prompt(system_prompt)

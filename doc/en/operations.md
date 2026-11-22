@@ -22,7 +22,7 @@ never claims more than half of the column — beyond that the cards
 scroll. Resizing it by hand (`Alt+Shift+=` / `Alt+Shift+-`, or dragging
 its border) switches it to an ordinary fixed height until it is closed.
 
-Closing follows the standard panel rules (`Alt+X`, `F10`, or `Esc`
+Closing follows the standard panel rules (`Alt+W`, `Alt+X`, `F10`, or `Esc`
 when nothing is selected). With an operation highlighted, `Esc`
 cancels that operation instead of closing the panel — see the
 keybindings below.
@@ -41,6 +41,8 @@ silences it; it is on by default.
 | `Space`                        | Pause or resume the selected operation            |
 | `Esc` / `Delete` / `Backspace` | Cancel the selected operation (asks to confirm)   |
 | Mouse wheel                    | Scroll the cards when they do not all fit         |
+
+`k` / `j` and `g` / `G` work with `vim_mode` on only.
 
 Cancelling an operation always asks for confirmation first,
 regardless of which key (or the popup menu) triggers it. `Esc` only

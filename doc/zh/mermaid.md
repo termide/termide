@@ -52,5 +52,6 @@ Rust、Python、TypeScript/TSX/JSX、Go、Java、Kotlin、C、C++、Ruby 和 PHP
 - `PageUp`/`PageDown`（或 `Space`）— 垂直翻页；`Home`/`End` — 顶部/底部；鼠标滚轮和右边缘滚动条同样可滚动。
 - **`y`** 或 **`Ctrl+C`**，或面板 `[≡]` 菜单中的 **`Copy diagram`** 项 — 将渲染后的图表（伪图形）复制到剪贴板。
 - **`Ctrl+S`**，或菜单项 **`图表另存为…`** — 将图表源码（`.mmd`）保存到所选路径。
+- **`Ctrl+R`** — 从磁盘重新读取源码以获取外部修改，并保持滚动位置。
 
 该面板随项目布局保存，并在同一文件上重新打开。

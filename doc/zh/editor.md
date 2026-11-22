@@ -235,7 +235,7 @@ tree-sitter 语法（若存在）始终优先于自定义条目。这是逐行�
 - **行号**：显示逻辑行号，而非视觉行号；行号栏只占最后一个行号所需的宽度，因此短文件会把宽度让给正文
 - **编辑操作**：所有编辑命令（剪切、复制、粘贴、撤销/重做）与换行内容无缝工作
 
-在配置文件（`~/.config/termide/config.toml`）中启用/禁用自动换行：
+在配置文件（Linux 上为 `~/.config/termide/config.toml`，macOS 上为 `~/Library/Application Support/termide/config.toml`，Windows 上为 `%APPDATA%\termide\config.toml`）中启用/禁用自动换行：
 ```toml
 [editor]
 word_wrap = true  # 或 false
@@ -346,7 +346,7 @@ auto_close_brackets = true  # 或 false（默认：true）
 
 ### 配置
 
-在配置文件（`~/.config/termide/config.toml`）中启用或禁用 Git 差异可视化：
+在配置文件（Linux 上为 `~/.config/termide/config.toml`，macOS 上为 `~/Library/Application Support/termide/config.toml`，Windows 上为 `%APPDATA%\termide\config.toml`）中启用或禁用 Git 差异可视化：
 
 ```toml
 [editor]
@@ -417,7 +417,7 @@ Termide 内置 LSP 支持，提供智能代码辅助。当配置了可用的语�
 
 ### 配置
 
-在配置文件（`~/.config/termide/config.toml`）中配置 LSP：
+在配置文件（Linux 上为 `~/.config/termide/config.toml`，macOS 上为 `~/Library/Application Support/termide/config.toml`，Windows 上为 `%APPDATA%\termide\config.toml`）中配置 LSP：
 
 ```toml
 [lsp]
@@ -477,7 +477,7 @@ rust-analyzer 以 `cargo.targetDir = true` 启动：它的 `cargo check` 以及�
 
 | 快捷键              | 操作                                       |
 |-------------------|--------------------------------------------|
-| `Shift+F12`       | 查找光标下符号的所有引用                    |
+| `Shift+F12`、`F24` | 查找光标下符号的所有引用                    |
 
 打开引用面板，列出符号被使用的所有位置。点击任何引用即可导航到该位置。
 
@@ -555,7 +555,7 @@ Termide 包含可选的 Vim 风格编辑模式，完整支持西里尔文键盘�
 
 ### 启用 Vim 模式
 
-在配置文件（`~/.config/termide/config.toml`）中启用 Vim 模式：
+在配置文件（Linux 上为 `~/.config/termide/config.toml`，macOS 上为 `~/Library/Application Support/termide/config.toml`，Windows 上为 `%APPDATA%\termide\config.toml`）中启用 Vim 模式：
 
 ```toml
 [general]

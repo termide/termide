@@ -5256,6 +5256,7 @@ dependencies = [
 name = "termide-agent-acp"
 version = "0.50.0"
 dependencies = [
+ "dunce",
  "libc",
  "log",
  "serde_json",

@@ -274,7 +274,7 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 
 在 ARM64 Windows 11 上安装 x64 版本，通过模拟运行。ARM64 Windows 10 不支持（无 x64 模拟）。
 
-如果发布中包含 `.sha256` 文件，安装程序会验证下载的压缩包。
+安装程序会按发布中与压缩包一同发布的 `.sha256` 文件验证下载内容；该文件缺失或不匹配时不安装任何内容。
 
 **手动安装：**
 
@@ -287,6 +287,31 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 - 配置文件: `%APPDATA%\termide\config.toml`
 - 项目数据: `%APPDATA%\termide\projects\`
 - 日志文件: `%APPDATA%\termide\projects\<名称>-<哈希>\logs\*.log`
+
+**卸载：**
+
+要删除 Termide 并将其从 PATH 中移除，请在 PowerShell 中运行以下命令；如果安装时设置过
+`TERMIDE_INSTALL_DIR`，请将其设为与安装时相同的值：
+
+```powershell
+# 安装位置
+$dir = if ($env:TERMIDE_INSTALL_DIR) { $env:TERMIDE_INSTALL_DIR } else { "$env:LOCALAPPDATA\Programs\termide" }
+
+# 删除二进制文件；目录中没有其他内容时一并删除目录
+Remove-Item -Force "$dir\termide.exe"
+if (-not (Get-ChildItem $dir)) { Remove-Item $dir }
+
+# 从用户 PATH 中移除
+$p = [Environment]::GetEnvironmentVariable('Path', 'User') -split ';' |
+     Where-Object { $_ -and $_.TrimEnd('\') -ne $dir.TrimEnd('\') }
+[Environment]::SetEnvironmentVariable('Path', ($p -join ';'), 'User')
+```
+
+配置和项目数据位于 `%APPDATA%\termide\` 下。如需彻底卸载，也请删除该目录：
+
+```powershell
+Remove-Item -Recurse -Force "$env:APPDATA\termide"
+```
 
 ### Windows (WSL)
 

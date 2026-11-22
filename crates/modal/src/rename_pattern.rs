@@ -147,7 +147,7 @@ impl Modal for RenamePatternModal {
         let input_block = Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(theme.accented_fg))
-            .title(" Pattern ");
+            .title(format!(" {} ", i18n::t().rename_pattern_title()));
 
         let input_area = input_block.inner(chunks[1]);
         input_block.render(chunks[1], buf);

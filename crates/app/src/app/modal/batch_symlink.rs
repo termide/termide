@@ -142,19 +142,11 @@ impl App {
             }
         }
 
+        let t = termide_i18n::t();
         if error_count == 0 {
-            let t = termide_i18n::t();
-            self.state.set_info(format!(
-                "{} {} symlink{}",
-                t.batch_result_copied(),
-                success_count,
-                if success_count == 1 { "" } else { "s" }
-            ));
+            self.state.set_info(t.symlinks_created_fmt(success_count));
         } else {
-            self.show_error_modal(format!(
-                "Symlinks: {} created, {} errors",
-                success_count, error_count
-            ));
+            self.show_error_modal(t.symlinks_failed_fmt(success_count, error_count));
         }
 
         self.state.needs_redraw = true;

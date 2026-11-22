@@ -2159,6 +2159,7 @@ pub trait Translation: Send + Sync {
     fn find_bar_next(&self) -> &str;
     fn find_bar_select_all(&self) -> &str;
     fn rename_pattern_new_name(&self) -> &str;
+    fn rename_pattern_title(&self) -> &str;
     fn editor_goto_line_title(&self) -> &str;
     fn op_cancelled_title(&self) -> &str;
     fn op_delete_copied(&self) -> &str;
@@ -2199,6 +2200,10 @@ pub trait Translation: Send + Sync {
     fn bookmarks_save_failed_fmt(&self, error: &str) -> String;
     fn bookmarks_save_project_failed_fmt(&self, error: &str) -> String;
     fn bookmarks_create_dir_failed_fmt(&self, error: &str) -> String;
+    fn create_file_failed_fmt(&self, name: &str, error: &str) -> String;
+    fn create_dir_failed_fmt(&self, name: &str, error: &str) -> String;
+    fn symlinks_created_fmt(&self, count: usize) -> String;
+    fn symlinks_failed_fmt(&self, created: usize, errors: usize) -> String;
     fn lsp_rename_prompt_fmt(&self, name: &str) -> String;
     fn lsp_code_action_applied_fmt(&self, count: usize) -> String;
     fn lsp_code_action_failed_fmt(&self, error: &str) -> String;

@@ -27,6 +27,10 @@ const KEEP_BYTES: usize = 2 * 1024 * 1024;
 const MAX_LOG_BYTES: u64 = 256 * 1024 * 1024;
 /// How long the output is waited for between checks of cancel and timeout.
 const POLL: Duration = Duration::from_millis(50);
+/// How long the prompt's output must stop before input is sent after it.
+const SETTLE_QUIET: Duration = Duration::from_millis(50);
+/// The longest wait for a prompt before input is sent.
+const SETTLE_MAX: Duration = Duration::from_secs(1);
 /// How long the shell has to exit after `SIGHUP` before it is killed.
 const HANGUP_GRACE: Duration = Duration::from_secs(2);
 
@@ -58,7 +62,8 @@ impl SessionShell {
 /// left alone; pagers and editors that would wait for keys nobody presses
 /// are turned off. The `DEBUG` trap marks the start of the first command
 /// after a prompt (bash 3.2, the one macOS ships, has no `PS0`), and the
-/// first entry of `PROMPT_COMMAND` its end, with its exit code.
+/// first entry of `PROMPT_COMMAND` its end, with its exit code, then the
+/// prompt (`A`) — not a continuation prompt, which runs no `PROMPT_COMMAND`.
 const BASH_INIT: &str = r#"# termide: the agent's shell session.
 if [ -f ~/.bashrc ]; then . ~/.bashrc; fi
 set +m +H
@@ -78,6 +83,7 @@ __termide_precmd() {
   __termide_ready=
   set +m
   if [ -n "$__termide_ran" ]; then printf '\033]133;D;%s\007' "$code"; fi
+  printf '\033]133;A\007'
   __termide_ran=
 }
 trap '__termide_preexec' DEBUG
@@ -106,7 +112,8 @@ unset __termide_dotdir
 /// prompt too; `!` taken as typed; no history file; no pagers; no mark of a
 /// last line left open, which zsh prints ahead of the end mark. `preexec`
 /// marks a command's start, the first `precmd` its end — zsh gives each of
-/// them the command's exit code. Pasting, which is how a command is typed
+/// them the command's exit code — and then the prompt, which a continuation
+/// prompt is not. Pasting, which is how a command is typed
 /// here, is bound to zsh's own widget, under a name no plugin wraps: a
 /// plugin that quotes URLs or pairs brackets must not change the command.
 const ZSH_RC: &str = r#"# termide: the agent's shell session.
@@ -124,6 +131,7 @@ __termide_precmd() {
   local code=$?
   unsetopt monitor
   if [[ -n $__termide_ran ]]; then printf '\033]133;D;%s\007' $code; fi
+  printf '\033]133;A\007'
   __termide_ran=
 }
 preexec_functions+=(__termide_preexec)
@@ -323,6 +331,11 @@ pub struct AgentShell {
     /// before, so the agent's writes reach the terminal in order.
     turn: Arc<Mutex<()>>,
     in_flight: Arc<Mutex<Option<InFlight>>>,
+    /// The output offset when input was last sent: until the shell marks a
+    /// prompt after it, it is not known to be at one — the input may have
+    /// left a line open (a quote, a `\`), started a program, or not reached
+    /// the shell yet.
+    sent: Arc<Mutex<Option<u64>>>,
     /// The terminal's screen, for a snapshot and the keys' encoding.
     screen: Arc<std::sync::RwLock<crate::terminal::TerminalScreen>>,
 }
@@ -534,6 +547,7 @@ impl Terminal {
             pid: term.shell_pid,
             turn: Arc::new(Mutex::new(())),
             in_flight: Arc::new(Mutex::new(None)),
+            sent: Arc::new(Mutex::new(None)),
             screen: Arc::clone(&term.screen),
         };
         Ok((term, shell))
@@ -597,9 +611,13 @@ impl AgentShell {
     /// it was given runs, and none typed into it either — the shell marks
     /// the start of every command it runs, typed or given, and its end.
     /// What is typed now goes to the shell, not to a program it started.
+    /// After input is sent, only a prompt the shell marks since says so.
     pub fn at_prompt(&self) -> bool {
         self.status() == ShellStatus::Idle
             && !matches!(self.tap.last_mark(), Some(mark) if mark.kind == MarkKind::Start)
+            && lock(&self.sent).is_none_or(|from| {
+                (self.tap.marks_since(from).iter()).any(|mark| mark.kind == MarkKind::Prompt)
+            })
     }
 
     /// Run `command` and pass its output to `on_output` as it comes, until
@@ -708,6 +726,32 @@ impl AgentShell {
         }
     }
 
+    /// Let the prompt that follows a command finish drawing before input is
+    /// sent, so that its marks — fish draws two — come before the input and
+    /// do not pass for a prompt the input led to. Nothing to wait for while
+    /// a program runs; a second at most otherwise.
+    fn settle_prompt(&self) {
+        let deadline = Instant::now() + SETTLE_MAX;
+        loop {
+            let last = self.tap.last_mark().map(|mark| mark.kind);
+            if last == Some(MarkKind::Start) || self.tap.is_closed() {
+                return;
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return;
+            }
+            let seen = self.tap.end();
+            if last == Some(MarkKind::Prompt) {
+                if !self.tap.wait_past(seen, SETTLE_QUIET.min(left)) {
+                    return;
+                }
+            } else {
+                self.tap.wait_past(seen, POLL.min(left));
+            }
+        }
+    }
+
     /// Type `input` — a line break as `Enter` — then press `keys` (see
     /// [`key_bytes`]), and wait as `wait` says: for the output to show what
     /// it waits for, for the shell to finish the command the input started,
@@ -733,8 +777,12 @@ impl AgentShell {
         if self.tap.is_closed() {
             return Err(SendError::Exited);
         }
+        if !bytes.is_empty() {
+            self.settle_prompt();
+        }
         let from = self.tap.end();
         if !bytes.is_empty() {
+            *lock(&self.sent) = Some(from);
             self.input
                 .send(bytes)
                 .map_err(|e| SendError::Input(e.to_string()))?;
@@ -1157,6 +1205,42 @@ mod shell_tests {
             let deadline = Instant::now() + Duration::from_secs(10);
             while !shell.at_prompt() {
                 assert!(Instant::now() < deadline, "{program}: cat still runs");
+                std::thread::sleep(POLL);
+            }
+        }
+    }
+
+    /// A line typed with a quote left open leaves the shell reading the
+    /// rest of it at a continuation prompt: what is typed next is part of
+    /// that line, not a command of its own, until the line ends.
+    #[test]
+    fn a_line_left_open_is_not_the_prompt() {
+        for program in ["bash", "zsh", "fish"] {
+            let home = tempfile::tempdir().unwrap();
+            let Some((_term, shell)) = session_in(program, home.path()) else {
+                continue;
+            };
+            let wait = SendWait {
+                until: None,
+                quiet: Some(Duration::from_millis(300)),
+                timeout: Duration::from_secs(20),
+            };
+            let (_, outcome) = run(&shell, "true", Duration::from_secs(20));
+            assert_eq!(outcome.end, RunEnd::Finished(Some(0)), "{program}");
+            shell
+                .send("echo 'a", &["Enter".to_string()], &wait, &|| false)
+                .unwrap();
+            assert_eq!(shell.status(), ShellStatus::Idle, "{program}");
+            assert!(!shell.at_prompt(), "{program}");
+            shell
+                .send("b'", &["Enter".to_string()], &wait, &|| false)
+                .unwrap();
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !shell.at_prompt() {
+                assert!(
+                    Instant::now() < deadline,
+                    "{program}: the line is still open"
+                );
                 std::thread::sleep(POLL);
             }
         }

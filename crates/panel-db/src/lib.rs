@@ -723,6 +723,7 @@ impl DbPanel {
                         self.login.events.push(PanelEvent::CredentialsRequired {
                             url: self.login_url(),
                             attempt,
+                            key: None,
                         });
                         self.loading = false;
                     }

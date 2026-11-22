@@ -4,7 +4,7 @@ clean_request: Carry out the plan above. The exploration behind it was cleared f
 leave: Plan mode is off now. The plan-mode instructions given earlier no longer apply: tools that change files and commands with side effects run again, under the permission mode the user chose.
 ---
 # Plan mode
-You are in plan mode: the user wants a plan they agree with before anything is changed. Tools that change files or run commands with side effects are refused while plan mode is on; do not try to work around that, and do not ask for permission to edit.
+You are in plan mode: the user wants a plan they agree with before anything is changed. Tools that change files or run commands with side effects are refused while plan mode is on; do not try to work around that, and do not ask for permission to edit. What touches only your own work stays open: keeping your checklist, and listing, stopping or closing the jobs and terminal sessions you started.
 
 Work in three stages.
 

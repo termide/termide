@@ -56,6 +56,48 @@ pub struct SshHostConfig {
     /// `StrictHostKeyChecking`: `true` for `yes`, `false` for `no`, `ask`,
     /// `accept-new` and `off`.
     pub strict_host_key_checking: Option<bool>,
+    /// `PreferredAuthentications`, lower-cased, in order.
+    pub preferred_authentications: Option<Vec<String>>,
+    /// `IdentityAgent`: `none`, `SSH_AUTH_SOCK`, `$VAR` or a socket path
+    /// (`~` expanded; tokens as in `identity_files`).
+    pub identity_agent: Option<String>,
+}
+
+/// Where the agent is reached, as `IdentityAgent` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentSocket {
+    /// `none`: no agent.
+    Disabled,
+    /// Unset, or `SSH_AUTH_SOCK`: the socket of `SSH_AUTH_SOCK`.
+    Environment,
+    /// A socket path, from the option or the variable it names.
+    Path(PathBuf),
+}
+
+impl SshHostConfig {
+    /// Whether `PreferredAuthentications` allows `method` (any method when
+    /// unset).
+    pub fn allows_auth(&self, method: &str) -> bool {
+        self.preferred_authentications
+            .as_ref()
+            .is_none_or(|methods| methods.iter().any(|m| m == method))
+    }
+
+    /// The agent socket `IdentityAgent` names. A `$VAR` that is unset
+    /// gives [`AgentSocket::Disabled`], as in OpenSSH.
+    pub fn agent_socket(&self) -> AgentSocket {
+        match self.identity_agent.as_deref() {
+            None | Some("SSH_AUTH_SOCK") => AgentSocket::Environment,
+            Some(value) if value.eq_ignore_ascii_case("none") => AgentSocket::Disabled,
+            Some(value) => match value.strip_prefix('$') {
+                Some(var) => match std::env::var_os(var) {
+                    Some(path) if !path.is_empty() => AgentSocket::Path(PathBuf::from(path)),
+                    _ => AgentSocket::Disabled,
+                },
+                None => AgentSocket::Path(PathBuf::from(value)),
+            },
+        }
+    }
 }
 
 /// A configuration file and the directory its relative `Include` paths
@@ -124,6 +166,11 @@ impl SshHostConfig {
         if let Some(files) = &mut self.user_known_hosts_files {
             for path in files {
                 *path = expand_path(path, "UserKnownHostsFile");
+            }
+        }
+        if let Some(agent) = &mut self.identity_agent {
+            if !agent.starts_with('$') && agent.contains('%') {
+                *agent = expand(agent, "IdentityAgent", &table);
             }
         }
     }
@@ -243,6 +290,24 @@ impl Reader {
             "stricthostkeychecking" => {
                 out.strict_host_key_checking
                     .get_or_insert_with(|| is_yes(first));
+            }
+            "preferredauthentications" => {
+                out.preferred_authentications.get_or_insert_with(|| {
+                    first
+                        .split(',')
+                        .map(|m| m.trim().to_ascii_lowercase())
+                        .filter(|m| !m.is_empty())
+                        .collect()
+                });
+            }
+            "identityagent" => {
+                out.identity_agent.get_or_insert_with(|| {
+                    if first.starts_with('~') {
+                        expand_tilde(first).to_string_lossy().into_owned()
+                    } else {
+                        first.clone()
+                    }
+                });
             }
             _ => {}
         }
@@ -680,6 +745,52 @@ Host *
             let cfg = resolve("h", &format!("StrictHostKeyChecking {value}\n"));
             assert_eq!(cfg.strict_host_key_checking, Some(false), "{value}");
         }
+    }
+
+    #[test]
+    fn preferred_authentications_and_identity_agent() {
+        let text = "\
+Host build
+  PreferredAuthentications PublicKey,keyboard-interactive
+  IdentityAgent none
+Host *
+  PreferredAuthentications password
+  IdentityAgent /run/late.sock
+";
+        let cfg = resolve("build", text);
+        assert_eq!(
+            cfg.preferred_authentications,
+            Some(vec![
+                "publickey".to_string(),
+                "keyboard-interactive".to_string()
+            ])
+        );
+        assert!(cfg.allows_auth("publickey"));
+        assert!(!cfg.allows_auth("password"));
+        assert_eq!(cfg.agent_socket(), AgentSocket::Disabled);
+        let other = resolve("other", text);
+        assert!(!other.allows_auth("publickey"));
+        assert_eq!(
+            other.agent_socket(),
+            AgentSocket::Path(PathBuf::from("/run/late.sock"))
+        );
+        let unset = SshHostConfig::default();
+        assert!(unset.allows_auth("password"));
+        assert_eq!(unset.agent_socket(), AgentSocket::Environment);
+        let env = resolve("h", "IdentityAgent SSH_AUTH_SOCK\n");
+        assert_eq!(env.agent_socket(), AgentSocket::Environment);
+        let missing = resolve("h", "IdentityAgent $TERMIDE_TEST_UNSET_AGENT_VAR\n");
+        assert_eq!(missing.agent_socket(), AgentSocket::Disabled);
+    }
+
+    #[test]
+    fn identity_agent_expands_tokens() {
+        let mut cfg = resolve("build", "IdentityAgent %d/.agent-%r.sock\n");
+        cfg.expand_tokens(&tokens());
+        assert_eq!(
+            cfg.agent_socket(),
+            AgentSocket::Path(PathBuf::from("/home/me/.agent-deploy.sock"))
+        );
     }
 
     #[test]

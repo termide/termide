@@ -352,6 +352,9 @@ impl Hooks for PlanGuard {
 #[derive(Debug, Clone)]
 pub struct ModeHandle {
     mode: Arc<AtomicU8>,
+    /// The handle of the run that delegated this one, whose plan mode
+    /// overrides this one's own while it lasts.
+    parent: Option<Arc<ModeHandle>>,
 }
 
 impl ModeHandle {
@@ -359,13 +362,38 @@ impl ModeHandle {
     pub fn new(mode: Mode) -> Self {
         let handle = Self {
             mode: Arc::new(AtomicU8::new(0)),
+            parent: None,
         };
         handle.set(mode);
         handle
     }
 
+    /// The mode of a run delegated from the one `parent` steers: `own`, the
+    /// mode its definition names, else the parent's as it switches. Plan
+    /// mode lets a delegation through only because the delegate cannot
+    /// change anything either, so the parent's plan mode, switched on at
+    /// any time, overrides `own`.
+    #[must_use]
+    pub fn following(parent: &ModeHandle, own: Option<Mode>) -> Self {
+        match own {
+            None => parent.clone(),
+            Some(own) => {
+                let mut handle = Self::new(own);
+                handle.parent = Some(Arc::new(parent.clone()));
+                handle
+            }
+        }
+    }
+
     #[must_use]
     pub fn get(&self) -> Mode {
+        if self
+            .parent
+            .as_ref()
+            .is_some_and(|parent| parent.get() == Mode::Plan)
+        {
+            return Mode::Plan;
+        }
         let index = self.mode.load(Ordering::Acquire) as usize;
         Mode::ALL.get(index).copied().unwrap_or_default()
     }
@@ -1646,7 +1674,31 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
             let arg = |key: &str| call.arguments[key].as_str().unwrap_or("").trim();
             let action = arg("action");
             let what = match action {
-                "start" if !arg("command").is_empty() => arg("command").to_string(),
+                // The parameters change what the command runs, so they are
+                // part of what is judged: `start debug-server port=9000`.
+                "start" if !arg("command").is_empty() => {
+                    let mut what = arg("command").to_string();
+                    if let Some(params) = call.arguments["params"].as_object() {
+                        let mut params: Vec<_> = params.iter().collect();
+                        params.sort_by(|a, b| a.0.cmp(b.0));
+                        for (name, value) in params {
+                            let value = match value {
+                                Value::String(text) => text.clone(),
+                                other => other.to_string(),
+                            };
+                            let plain = !value.is_empty()
+                                && !value
+                                    .chars()
+                                    .any(|c| c.is_whitespace() || matches!(c, '"' | '\'' | '\\'));
+                            if plain {
+                                what.push_str(&format!(" {name}={value}"));
+                            } else {
+                                what.push_str(&format!(" {name}={value:?}"));
+                            }
+                        }
+                    }
+                    what
+                }
                 "start" if !arg("file").is_empty() => relative_to_project(arg("file"), &ctx.cwd),
                 "evaluate" => arg("expression").replace('\n', " "),
                 _ => String::new(),
@@ -2062,6 +2114,12 @@ struct ParsedShell {
     has_case: bool,
     /// The `case` commands open where the reading has got to.
     open_cases: usize,
+    /// Whether the line stops short of a whole command: a quote, a
+    /// substitution, a here-document, a compound command or a subshell left
+    /// open, a trailing `\`, `|`, `&&` or `||`. A shell reads on for the
+    /// rest, from wherever it comes next, so what this line runs cannot be
+    /// told from it.
+    incomplete: bool,
 }
 
 /// Whether a `)` after `current`, the segment read so far, ends a `case`
@@ -2152,17 +2210,19 @@ struct Segment {
 
 /// `command` as the POSIX reading takes it — the text itself, or the POSIX a
 /// fish command means — and what that reading made of it; `None` for a fish
-/// command that cannot be read that way.
+/// command that cannot be read that way, and for a line that stops short of
+/// a whole command.
 fn parse_in(command: &str, shell: ShellSyntax) -> Option<(Cow<'_, str>, ParsedShell)> {
-    match shell {
-        ShellSyntax::Posix => Some((Cow::Borrowed(command), split_posix(command, false))),
-        ShellSyntax::Zsh => Some((Cow::Borrowed(command), split_posix(command, true))),
+    let (text, parsed) = match shell {
+        ShellSyntax::Posix => (Cow::Borrowed(command), split_posix(command, false)),
+        ShellSyntax::Zsh => (Cow::Borrowed(command), split_posix(command, true)),
         ShellSyntax::Fish => {
             let posix = crate::fish::as_posix(command)?;
             let parsed = split_posix(&posix, false);
-            Some((Cow::Owned(posix), parsed))
+            (Cow::Owned(posix), parsed)
         }
-    }
+    };
+    (!parsed.incomplete).then_some((text, parsed))
 }
 
 /// [`split_posix`] for bash and the POSIX shells.
@@ -2219,7 +2279,12 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
             continue;
         }
         match c {
-            '\\' if i + 1 < chars.len() => {
+            '\\' if i + 1 == chars.len() || (i + 2 == chars.len() && chars[i + 1] == '\n') => {
+                // The line goes on in whatever the shell reads next.
+                parsed.incomplete = true;
+                break;
+            }
+            '\\' => {
                 // An escaped character stands for itself; an escaped newline
                 // continues the line.
                 if chars[i + 1] != '\n' {
@@ -2314,7 +2379,10 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
             '\n' if !heredocs.is_empty() => {
                 // The bodies feed the command just ended, so they are read
                 // while its segment is still open and mark it when they expand.
-                i = skip_heredocs(&chars, i + 1, &mut heredocs, flags, &mut expands);
+                let (end, closed) =
+                    skip_heredocs(&chars, i + 1, &mut heredocs, flags, &mut expands);
+                parsed.incomplete |= !closed;
+                i = end;
                 expands = !push_part(&mut parsed, &mut current, expands, Join::Sequence) && expands;
                 continue;
             }
@@ -2325,7 +2393,11 @@ fn split_posix(command: &str, zsh: bool) -> ParsedShell {
         }
         i += 1;
     }
+    let dangling =
+        matches!(parsed.last_join, Join::And | Join::Or | Join::Pipe) && current.trim().is_empty();
     push_part(&mut parsed, &mut current, expands, Join::Sequence);
+    parsed.incomplete |=
+        quote.is_some() || !open.is_empty() || !heredocs.is_empty() || parsed.depth > 0 || dangling;
     if parsed.parts.is_empty() {
         parsed.parts.push(command.trim().to_string());
         parsed.substituted.push(false);
@@ -2391,17 +2463,20 @@ fn heredoc_at(chars: &[char], start: usize) -> (Option<(String, bool, bool)>, us
 
 /// Skip the bodies of the here-documents opened on the line just ended,
 /// from `start`, each up to its delimiter line; returns where the commands
-/// go on. An unquoted delimiter's body that substitutes marks `expands`, the
-/// command being fed by them.
+/// go on, and whether every body found its delimiter. An unquoted
+/// delimiter's body that substitutes marks `expands`, the command being fed
+/// by them.
 fn skip_heredocs(
     chars: &[char],
     start: usize,
     heredocs: &mut Vec<(String, bool, bool)>,
     flags: &str,
     expands: &mut bool,
-) -> usize {
+) -> (usize, bool) {
     let mut i = start;
+    let mut closed = true;
     for (delimiter, strip, body_expands) in heredocs.drain(..) {
+        let mut found = false;
         while i < chars.len() {
             let end = chars[i..]
                 .iter()
@@ -2415,6 +2490,7 @@ fn skip_heredocs(
                 line.as_str()
             };
             if line == delimiter {
+                found = true;
                 break;
             }
             let line_chars: Vec<char> = line.chars().collect();
@@ -2427,8 +2503,9 @@ fn skip_heredocs(
                 *expands = true;
             }
         }
+        closed &= found;
     }
-    i
+    (i, closed)
 }
 
 /// One part of a command line as the rules see it.
@@ -3923,6 +4000,32 @@ fn without_harmless_redirections(part: &str) -> String {
     kept.join(" ")
 }
 
+/// Whether `part` has a `>` or a `<(` outside quotes and escapes: an output
+/// redirection or a process substitution. Quoted, they are text for the
+/// program, as in `grep '->'`.
+fn redirects_or_substitutes_process(part: &str) -> bool {
+    let chars: Vec<char> = part.chars().collect();
+    let mut quote: Option<char> = None;
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        match quote {
+            Some('"') if c == '\\' => i += 1,
+            Some(q) if c == q => quote = None,
+            Some(_) => {}
+            None => match c {
+                '\\' => i += 1,
+                '\'' | '"' => quote = Some(c),
+                '>' => return true,
+                '<' if chars.get(i + 1) == Some(&'(') => return true,
+                _ => {}
+            },
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Commands that only read state; a redirection into a file disqualifies a
 /// command, while pointing one stream at another (`2>&1`) or at `/dev/null`
 /// does not. A command that can write a file or run another program through
@@ -3930,7 +4033,7 @@ fn without_harmless_redirections(part: &str) -> String {
 #[must_use]
 pub fn is_read_only_command(part: &str) -> bool {
     let part = without_harmless_redirections(part);
-    if part.contains('>') || part.contains("<(") {
+    if redirects_or_substitutes_process(&part) {
         return false;
     }
     // An array subscript is arithmetic in bash, and arithmetic runs the

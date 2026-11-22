@@ -15,7 +15,7 @@ ratatui.workspace = true
 
 # Graphics support
 ratatui-image = { version = "10", default-features = false, features = ["crossterm"] }
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "ico", "tiff"] }
 
 # Workspace crates
 termide-core = { path = "../core" }

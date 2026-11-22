@@ -1004,6 +1004,11 @@ impl App {
                         self.start_command(command)?;
                     }
                 }
+                PendingAction::ApproveProjectCommand { command } => {
+                    if value.get::<bool>().copied().unwrap_or(false) {
+                        self.approve_shown_command(&command);
+                    }
+                }
                 PendingAction::RunCommandWithParams { command } => {
                     use termide_modal::CommandParamsResult;
                     if let Some(result) = value.get::<CommandParamsResult>() {

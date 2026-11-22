@@ -1,0 +1,1 @@
+- **BMP and ICO pictures open in the image viewer.** The viewer was offered them but could not decode either and showed an error; the file manager also sent `.ico` files to the system viewer as if they were vector images. Both formats now decode in the viewer, and the file manager opens `.ico` there like any other raster picture.

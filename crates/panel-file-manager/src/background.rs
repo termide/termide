@@ -152,11 +152,15 @@ impl FileManager {
             return events;
         }
 
-        // A remote login was refused: the app supplies a password, from
-        // the vault or the user.
-        if let Some((url, attempt)) = self.vfs.take_credential_request() {
+        // A remote login was refused: the app supplies a password or key
+        // passphrase, from the vault or the user.
+        if let Some(request) = self.vfs.take_credential_request() {
             events.push(PanelEvent::ClearStatus);
-            events.push(PanelEvent::CredentialsRequired { url, attempt });
+            events.push(PanelEvent::CredentialsRequired {
+                url: request.url,
+                attempt: request.attempt,
+                key: request.key,
+            });
             events.push(PanelEvent::NeedsRedraw);
             return events;
         }

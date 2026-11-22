@@ -1,0 +1,22 @@
+# An agent's `debug start` of a command the project's commands.toml brings
+# (doc/en/agent.md, Debugging): until the user approves the command, seeing
+# what it runs, it is not launched — the agent is told so, and the user is
+# shown the command to approve, as their own launch shows it.
+mock-llm
+setup "mkdir -p .termide && printf '[debug-stock]\ncommand = \"./stock-server\"\ndebugger = \"lldb-dap\"\n' > .termide/commands.toml"
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "debug the stock server"
+key Enter
+wait "Allow once" 20
+type "1"
+wait "Run the project's command?" 20
+expect "./stock-server"
+wait "not approved" 20
+expect-not "Call stack"
+snapshot approval
+key Esc
+quit --force

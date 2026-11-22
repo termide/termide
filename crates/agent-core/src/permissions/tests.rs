@@ -211,12 +211,24 @@ fn debug_steps_go_through_and_launches_stay_with_the_mode() {
         ..Default::default()
     };
     rules.add("debug", "step_over", Decision::Deny);
-    rules.add("debug", "start debug-server", Decision::Allow);
+    rules.add("debug", "start debug-server port=1", Decision::Allow);
     let (hooks, _) = hooks(rules, vec![]);
     assert_eq!(hooks.decide(&step, &ctx()), Decision::Deny);
     assert_eq!(hooks.decide(&start, &ctx()), Decision::Allow);
 
-    assert_eq!(subject_of(&start, &ctx()), "start debug-server");
+    assert_eq!(subject_of(&start, &ctx()), "start debug-server port=1");
+    // Its parameters change what runs, so they are judged with it: the
+    // rule for one set of them does not let another through.
+    let with_params = call(
+        "debug",
+        json!({ "action": "start", "command": "debug-server",
+                "params": { "port": 9000, "data": "my dir" } }),
+    );
+    assert_eq!(
+        subject_of(&with_params, &ctx()),
+        "start debug-server data=\"my dir\" port=9000"
+    );
+    assert_ne!(hooks.decide(&with_params, &ctx()), Decision::Allow);
     assert_eq!(
         subject_of(
             &call(
@@ -2552,6 +2564,20 @@ fn subjects_are_project_relative() {
     );
 }
 #[test]
+fn a_following_handle_takes_its_parents_plan_mode() {
+    let parent = ModeHandle::new(Mode::Edit);
+    let shared = ModeHandle::following(&parent, None);
+    let own = ModeHandle::following(&parent, Some(Mode::All));
+    assert_eq!((shared.get(), own.get()), (Mode::Edit, Mode::All));
+    parent.set(Mode::Auto);
+    assert_eq!((shared.get(), own.get()), (Mode::Auto, Mode::All));
+    parent.set(Mode::Plan);
+    assert_eq!((shared.get(), own.get()), (Mode::Plan, Mode::Plan));
+    parent.set(Mode::Edit);
+    assert_eq!((shared.get(), own.get()), (Mode::Edit, Mode::All));
+}
+
+#[test]
 fn mode_handle_switches_the_live_mode() {
     let asked = Arc::new(Mutex::new(Vec::new()));
     let mut hooks = PermissionHooks::new(
@@ -3729,6 +3755,74 @@ fn what_a_toolchain_is_and_where_a_program_lives_is_look_only() {
         "rustc --version",
         "node --version script.js",
         "go version -m ./bin",
+    ] {
+        assert!(!is_read_only_command(c), "{c} is not look-only");
+    }
+}
+
+#[test]
+fn a_line_that_stops_short_of_a_command_cannot_be_read() {
+    // The shell reads on for the rest from whatever it gets next: a later
+    // line typed into the same terminal would run inside this one.
+    for c in [
+        "ls 'a",
+        "ls \"a",
+        "ls \\",
+        "ls \\\n",
+        "echo $(ls",
+        "echo `ls",
+        "cat <<EOF",
+        "cat <<EOF\nbody",
+        "if true; then ls",
+        "for x in a b; do echo $x",
+        "(ls",
+        "{ ls",
+        "ls &&",
+        "ls ||",
+        "ls |",
+        "ls |\n",
+    ] {
+        let parts = shell_parts(c, Path::new("/p"));
+        assert_eq!(parts.len(), 1, "{c:?}");
+        assert!(parts[0].substituted && !parts[0].savable, "{c:?}");
+        assert!(
+            command_not_read_only(c, ShellSyntax::Posix).is_some(),
+            "{c:?} is not look-only"
+        );
+    }
+    for c in [
+        "ls 'a'",
+        "ls \\\nfoo",
+        "cat <<EOF\nbody\nEOF",
+        "cat <<EOF\nbody\nEOF\nls",
+        "if true; then ls; fi",
+        "for x in a b; do echo $x; done",
+        "(ls)",
+        "{ ls; }",
+        "ls &",
+        "ls | wc -l",
+        "ls |\nwc -l",
+    ] {
+        let parts = shell_parts(c, Path::new("/p"));
+        assert!(parts.iter().all(|p| !p.substituted), "{c:?} reads whole");
+    }
+}
+
+#[test]
+fn a_quoted_angle_bracket_is_no_redirection() {
+    for c in [
+        "grep '->' src/a.rs",
+        "grep \"a>b\" x",
+        "rg '<(' x",
+        "grep a\\>b x",
+    ] {
+        assert!(is_read_only_command(c), "{c} only looks");
+    }
+    for c in [
+        "grep a x > out",
+        "grep 'a' x >out",
+        "diff <(ls) x",
+        "ls \">\">x",
     ] {
         assert!(!is_read_only_command(c), "{c} is not look-only");
     }

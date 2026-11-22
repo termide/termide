@@ -1397,6 +1397,7 @@ impl Translation for RuntimeTranslation {
         find_bar_next,
         find_bar_select_all,
         rename_pattern_new_name,
+        rename_pattern_title,
         editor_goto_line_title,
         op_cancelled_title,
         op_delete_copied,
@@ -3213,6 +3214,31 @@ impl Translation for RuntimeTranslation {
 
     fn bookmarks_create_dir_failed_fmt(&self, error: &str) -> String {
         self.format("bookmarks_create_dir_failed_fmt", &[("error", error)])
+    }
+
+    fn create_file_failed_fmt(&self, name: &str, error: &str) -> String {
+        self.format(
+            "create_file_failed_fmt",
+            &[("name", name), ("error", error)],
+        )
+    }
+
+    fn create_dir_failed_fmt(&self, name: &str, error: &str) -> String {
+        self.format("create_dir_failed_fmt", &[("name", name), ("error", error)])
+    }
+
+    fn symlinks_created_fmt(&self, count: usize) -> String {
+        self.format("symlinks_created_fmt", &[("count", &count.to_string())])
+    }
+
+    fn symlinks_failed_fmt(&self, created: usize, errors: usize) -> String {
+        self.format(
+            "symlinks_failed_fmt",
+            &[
+                ("created", &created.to_string()),
+                ("errors", &errors.to_string()),
+            ],
+        )
     }
 
     fn lsp_rename_prompt_fmt(&self, name: &str) -> String {

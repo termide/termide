@@ -186,8 +186,8 @@ termide-ui-render = { path = "crates/ui-render" }
 
 [build-dependencies]
 cc = "1.0"
-
-[target.'cfg(windows)'.build-dependencies]
+# Used only when the target is Windows, which a build script, compiled for
+# the host, can tell only at run time.
 winresource = "0.1"
 
 [dev-dependencies]

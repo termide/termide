@@ -122,7 +122,11 @@ fn parse_mark(body: &[u8]) -> Option<MarkKind> {
     let rest = body.strip_prefix(b"\x1b]133;")?;
     match rest {
         b"A" => Some(MarkKind::Prompt),
-        [b'A', b';', ..] => Some(MarkKind::Prompt),
+        // `k=s` marks a continuation prompt: the shell still reads the
+        // command line, which is not over.
+        [b'A', b';', params @ ..] if !params.split(|b| *b == b';').any(|p| p == b"k=s") => {
+            Some(MarkKind::Prompt)
+        }
         b"C" => Some(MarkKind::Start),
         [b'D', code @ ..] => {
             let code = code

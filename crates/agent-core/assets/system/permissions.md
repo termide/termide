@@ -1,6 +1,6 @@
 ---
 rule_denied: denied by the permission rules, which the user set; do not try to reach the same thing another way
-plan_mode: plan mode: only reading is allowed; read files and line ranges with `read`, search with `rg`, and describe any change in the plan instead of making it
+plan_mode: plan mode: only reading, and your own checklist, jobs and terminals, is allowed; read files and line ranges with `read`, search with `rg`, and describe any change in the plan instead of making it
 reviewer_blocked: blocked by the auto-mode reviewer: {{reason}} Do not reach the same outcome another way; continue with a safer alternative, or tell the user what you need them to run or allow.
 user_denied: denied by the user
 user_denied_session: denied by the user for this session

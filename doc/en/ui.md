@@ -45,7 +45,7 @@ Opened with `Alt+P` or menu **Options → Settings**. The previous horizontal-ta
 **Saving.** Every change applies and saves at once: a switch or a dropdown when it is set, a text or number field on `Enter`. There is no Apply button and nothing to cancel. A number field left empty or holding something else than a number keeps its value. A few agent settings reach only the agent panels opened after the change (see [Configuring a model](agent.md#configuring-a-model)).
 
 **Where settings are stored.** The first button switches storage:
-- **Global** — `~/.config/termide/config.toml`, shared by every project.
+- **Global** — `~/.config/termide/config.toml` on Linux, `~/Library/Application Support/termide/config.toml` on macOS, `%APPDATA%\termide\config.toml` on Windows, shared by every project.
 - **Project** — `<project>/.termide/config.toml`, holding only what differs from the global settings. Switching to it creates the file; the settings themselves do not change.
 - Switching back to global deletes the project file and asks what to do with its settings: **Discard** them (the global ones apply) or **Move to Global** (they become the global settings for every project).
 
@@ -498,5 +498,7 @@ The practical effect:
 - Bindings like `Alt+T` keep working with Caps Lock pressed (without this, the event would arrive as `{Char('T'), Alt|Shift}` and miss the `{Char('t'), Alt}` binding).
 - Intentional `Shift+letter` bindings (e.g. `Ctrl+Shift+F` for content search) stay distinct from their unshifted counterparts — Shift is only ignored when Caps Lock is actually reported.
 - Terminals without Kitty protocol support (Caps Lock bit not delivered) fall back to strict modifier comparison, so behaviour there is unchanged — use those terminals without Caps Lock for best results.
+
+On macOS termide also requests `REPORT_ALL_KEYS_AS_ESCAPE_CODES`, so that `Option+<letter>` arrives as `Alt+<letter>`; it costs dead-key and IME composition and is turned off with `general.report_all_keys = false` — see [keybindings.md](keybindings.md#macos-option-is-not-alt).
 
 Modified arrow keys and Home/End are encoded for the embedded terminal emulator — see [terminal.md](terminal.md#interaction).

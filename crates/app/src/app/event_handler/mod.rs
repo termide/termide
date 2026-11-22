@@ -283,8 +283,8 @@ impl App {
                 self.event_git_operation(operation, repo_path, None)?;
             }
 
-            PanelEvent::CredentialsRequired { url, attempt } => {
-                self.event_credentials_required(url, attempt);
+            PanelEvent::CredentialsRequired { url, attempt, key } => {
+                self.event_credentials_required(url, attempt, key);
             }
 
             PanelEvent::CredentialsAccepted { url } => {
@@ -343,10 +343,6 @@ impl App {
             // === Operations panel ===
             PanelEvent::ToggleOperationPause(op_id) => {
                 self.event_toggle_operation_pause(op_id);
-            }
-
-            PanelEvent::CancelOperation(op_id) => {
-                self.event_cancel_operation(op_id);
             }
 
             PanelEvent::OpenOperationActionMenu {

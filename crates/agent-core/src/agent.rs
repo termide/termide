@@ -197,12 +197,15 @@ pub fn execute_tool(
     }
 }
 
-/// A call the hooks let run: with the arguments they settled on, and who
-/// decided.
+/// A call the hooks let run: with the arguments they settled on, who
+/// decided, and the traits it was judged with — the tool sees them as it
+/// runs, to refuse a call whose world changed since (a terminal no longer
+/// at its prompt).
 #[derive(Debug)]
 pub struct JudgedCall {
     pub call: ToolCall,
     pub permission: Option<Box<PermissionNote>>,
+    pub traits: crate::tool::ToolTraits,
 }
 
 /// What the hooks made of a call: run it, or its result is already known.
@@ -281,6 +284,7 @@ pub fn judge_tool_call(
     Judgment::Run(JudgedCall {
         call: effective,
         permission,
+        traits: ctx.tool,
     })
 }
 
@@ -294,6 +298,10 @@ pub fn run_judged_call(
 ) -> ToolResultMessage {
     let Some(tool) = tools.get(&judged.call.name) else {
         return ToolResultMessage::error(&judged.call, "The tool is gone.");
+    };
+    let ctx = &ToolContext {
+        tool: judged.traits,
+        ..ctx.clone()
     };
     // A tool that panics fails its own call, not the run or the host: the
     // model hears of it as of any failed call.

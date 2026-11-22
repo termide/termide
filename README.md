@@ -49,7 +49,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 - **Self-contained** - One static binary with no runtime dependencies: SSH, TLS and crypto are pure Rust, so the same file runs on Alpine, in a distroless container or in Termux. Tools you already have — git, language servers, a browser for the agent's web search — are picked up when present.
 - **At home on a desktop and on a server** - Native graphics and the system clipboard on a workstation; over SSH, `termide --detached` keeps editors, shells and jobs alive across disconnects ([Detached Instances](doc/en/detached-instances.md)), and the file manager reaches other hosts over SFTP / FTP.
 - **Your data stays yours** - No telemetry, no update checks: termide connects only to the servers, databases and model endpoints you point it at. The agent stays off until you configure a model, and with a local one your code never leaves the machine.
-- **Secrets are guarded** - Connection passwords live in an encrypted vault under a master password (Argon2 + ChaCha20-Poly1305), never in bookmarks, layouts or logs ([Password Vault](doc/en/passwords.md)); API keys are read from environment variables.
+- **Secrets are guarded** - Connection passwords live in an encrypted vault under a master password (Argon2, X25519 and XChaCha20-Poly1305), never in bookmarks, layouts or logs ([Password Vault](doc/en/passwords.md)); an agent connection's API key comes from an environment variable or the same vault.
 - **Nothing hidden from you** - Every prompt the agent's model sees — the system prompt, service prompts, tool descriptions — is a plain file you can read and override, and `/prompt` shows the assembled result ([The system prompt](doc/en/agent.md#the-system-prompt)). Settings, keybindings, themes and commands are TOML.
 
 ## Features
@@ -88,7 +88,7 @@ Editor, LSP, terminal, git and project layouts are a given among terminal editor
 - **Background operations** - Copy, move, upload and download with progress, pause, resume and cancel
 - **Database viewer** - SQLite, PostgreSQL and MySQL from a bookmark URL: server-side sort, per-column filters, cell editing, rows as TSV, JSON or INSERT
 - **CSV and TSV tables** - Delimited files as a sortable table with the delimiter and header guessed; read from disk in windows, so a file of any size opens at once
-- **Password vault** - Passwords of remote hosts, databases and git in an encrypted vault under a master password
+- **Password vault** - Passwords of remote hosts, databases and git, SSH key passphrases and agent API keys in an encrypted vault under a master password
 - **Bookmarks and directory switcher** - Saved locations and quick switching with `Ctrl+\`
 
 ### Servers and ops
@@ -626,6 +626,7 @@ Built with:
 - [suppaftp](https://github.com/veeso/suppaftp) - FTP / FTPS
 - [rustls](https://github.com/rustls/rustls) - TLS without OpenSSL
 - [SQLx](https://github.com/launchbadge/sqlx) - SQLite, PostgreSQL and MySQL access
-- [RustCrypto](https://github.com/RustCrypto) - Argon2 and ChaCha20-Poly1305 for the password vault
+- [RustCrypto](https://github.com/RustCrypto) - Argon2 and XChaCha20-Poly1305 for the password vault
+- [x25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek) - X25519 key exchange for the password vault
 - [nucleo](https://github.com/helix-editor/nucleo) - Fuzzy matching
 - [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) and [html5ever](https://github.com/servo/html5ever) - Markdown and HTML parsing
