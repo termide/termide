@@ -1140,10 +1140,11 @@ impl App {
             // Check and close panels that should auto-close
             self.check_auto_close_panels()?;
 
-            // A report that arrived behind an open question gets the screen
-            // once the question has been answered. Checked every turn, so it
-            // shows as soon as the modal closes, whichever key closed it.
-            if self.state.deliver_queued_message_modal() {
+            // A question or report that arrived behind an open question gets
+            // the screen once that question has been answered — waiting
+            // questions first. Checked every turn, so it shows as soon as the
+            // modal closes, whichever key closed it.
+            if self.state.deliver_queued_modal() {
                 self.state.needs_redraw = true;
             }
 
@@ -1320,7 +1321,7 @@ impl App {
                 .iter_all_panels_mut()
                 .find_map(|panel| panel.take_modal_request());
             if let Some((action, modal)) = modal_request {
-                if let Err(e) = self.handle_modal_request(action, modal) {
+                if let Err(e) = self.handle_background_modal_request(action, modal) {
                     log::error!("Error handling modal request: {}", e);
                 }
                 self.state.needs_redraw = true;

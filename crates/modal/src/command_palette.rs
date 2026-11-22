@@ -133,7 +133,7 @@ impl CommandPaletteModal {
             .max()
             .unwrap_or(50) as u16;
 
-        let filter_prefix = "  Filter: ".width() as u16;
+        let filter_prefix = crate::base::filter_label().width() as u16;
 
         calculate_modal_width(
             [title_width, max_entry_width + 2, filter_prefix].into_iter(),
@@ -164,7 +164,7 @@ impl Modal for CommandPaletteModal {
         );
 
         // --- Filter input ---
-        let filter_label = "  Filter: ";
+        let filter_label = crate::base::filter_label();
         let label_width = (filter_label.width() as u16).min(inner.width);
         let label_area = Rect {
             x: inner.x,
@@ -172,7 +172,7 @@ impl Modal for CommandPaletteModal {
             width: label_width,
             height: 1,
         };
-        ratatui::widgets::Paragraph::new(filter_label)
+        ratatui::widgets::Paragraph::new(filter_label.as_str())
             .style(Style::default().fg(theme.fg))
             .render(label_area, buf);
         let field_area = Rect {
@@ -288,9 +288,8 @@ impl Modal for CommandPaletteModal {
         }
 
         if list_items.is_empty() {
-            // Show "No commands found" hint
             let hint = Line::from(Span::styled(
-                "  No commands found",
+                format!("  {}", termide_i18n::t().command_palette_no_commands()),
                 Style::default()
                     .fg(theme.accented_bg)
                     .add_modifier(Modifier::DIM),

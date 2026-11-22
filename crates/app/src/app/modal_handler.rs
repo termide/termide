@@ -238,7 +238,7 @@ impl App {
         if pressed.is_empty() {
             return;
         }
-        if let Some(panel) = self.layout_manager.active_panel_mut() {
+        if let Some(panel) = self.asking_panel_mut() {
             for id in pressed {
                 panel.handle_command(termide_core::PanelCommand::ChecklistButton {
                     action: action.clone(),
@@ -247,6 +247,17 @@ impl App {
             }
         }
         self.state.needs_redraw = true;
+    }
+
+    /// The panel a panel prompt (input, selection, checklist, confirmation)
+    /// came from: a view shown over the layout when one is up — it has the
+    /// keys — else the focused panel.
+    fn asking_panel_mut(&mut self) -> Option<&mut Box<dyn termide_core::Panel>> {
+        if self.layout_manager.overlay.is_some() {
+            self.layout_manager.overlay.as_mut()
+        } else {
+            self.layout_manager.active_panel_mut()
+        }
     }
 
     /// Hand a bracketed paste to the open modal; `false` when none is open
@@ -392,7 +403,7 @@ impl App {
                     // Like a selection, to the focused panel that raised it;
                     // cancelling changes nothing.
                     if let Some(outcome) = value.get::<termide_core::ChecklistOutcome>() {
-                        if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(panel) = self.asking_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::ChecklistDone {
                                 action,
                                 checked: outcome.checked.clone(),
@@ -411,7 +422,7 @@ impl App {
                         .get::<Vec<usize>>()
                         .and_then(|picked| picked.first().copied())
                     {
-                        if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(panel) = self.asking_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::SelectionMade {
                                 action,
                                 index,
@@ -426,7 +437,7 @@ impl App {
                     // recognises the action — otherwise, with several agent
                     // panels open, the wrong session would be renamed.
                     if let Some(text) = value.get::<String>() {
-                        if let Some(panel) = self.layout_manager.active_panel_mut() {
+                        if let Some(panel) = self.asking_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::InputSubmitted {
                                 action,
                                 text: text.clone(),
@@ -440,12 +451,7 @@ impl App {
                     // it stays as it was. As with the input and selection
                     // prompts, deliver to the focused panel that raised it.
                     if value.get::<bool>().copied().unwrap_or(false) {
-                        // A view shown over the layout raised it if one is up.
-                        let panel = match self.layout_manager.overlay.as_mut() {
-                            Some(overlay) => Some(overlay),
-                            None => self.layout_manager.active_panel_mut(),
-                        };
-                        if let Some(panel) = panel {
+                        if let Some(panel) = self.asking_panel_mut() {
                             panel.handle_command(termide_core::PanelCommand::Confirmed { action });
                         }
                         self.state.needs_redraw = true;
@@ -616,7 +622,22 @@ impl App {
                 }
                 PendingAction::ArchivePassword { archive } => {
                     if let Some(password) = value.get::<String>() {
-                        if let Some(fm) = self.active_file_manager_mut() {
+                        // To the panel that asked: a question that waited
+                        // behind another may show after the focus moved.
+                        let asker = self
+                            .layout_manager
+                            .iter_all_panels_mut()
+                            .filter_map(|panel| panel.as_file_manager_mut())
+                            .position(|fm| fm.awaits_archive_password(&archive));
+                        let fm = match asker {
+                            Some(at) => self
+                                .layout_manager
+                                .iter_all_panels_mut()
+                                .filter_map(|panel| panel.as_file_manager_mut())
+                                .nth(at),
+                            None => self.active_file_manager_mut(),
+                        };
+                        if let Some(fm) = fm {
                             fm.open_archive_with_password(archive, password.clone());
                         }
                     }

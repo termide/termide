@@ -95,7 +95,7 @@ pub(crate) fn path_to_title(path: &Path) -> String {
     path.file_name()
         .and_then(|n| n.to_str())
         .map(|s| s.to_string())
-        .unwrap_or_else(|| "Untitled".to_string())
+        .unwrap_or_else(|| termide_i18n::t().editor_untitled().to_string())
 }
 
 #[cfg(test)]

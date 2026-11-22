@@ -191,8 +191,8 @@ impl ProjectsModal {
             .max()
             .unwrap_or(40);
 
-        // Filter row needs space for "  Filter: " prefix + input text
-        let filter_prefix_width = 12u16; // "  Filter: ".width()
+        // Filter row needs space for its label and a little input text
+        let filter_prefix_width = str_display_width(&crate::base::filter_label()) as u16 + 2;
 
         calculate_modal_width(
             [title_width, max_row_width, filter_prefix_width].into_iter(),
@@ -311,8 +311,8 @@ impl Modal for ProjectsModal {
         let inner = render_modal_block(modal_area, buf, &self.title, theme);
 
         // --- Filter input row (row 0 is blank padding) ---
-        let filter_label = "  Filter: ";
-        let label_width = (str_display_width(filter_label) as u16).min(inner.width);
+        let filter_label = crate::base::filter_label();
+        let label_width = (str_display_width(&filter_label) as u16).min(inner.width);
         Paragraph::new(filter_label)
             .style(Style::default().fg(theme.fg))
             .render(

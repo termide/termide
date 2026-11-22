@@ -288,6 +288,7 @@ impl Translation for RuntimeTranslation {
         editor_cancel,
         editor_close_external,
         editor_close_external_question,
+        editor_title_changed_on_disk,
         editor_remote_changed_question,
         editor_overwrite_disk,
         editor_keep_disk_close,
@@ -1072,8 +1073,6 @@ impl Translation for RuntimeTranslation {
         status_selected,
         status_tab_modal_title,
         status_plain_text,
-        status_terminal,
-        status_layout,
         ui_yes,
         ui_no,
         ui_ok,
@@ -1125,6 +1124,11 @@ impl Translation for RuntimeTranslation {
         op_type_command,
         op_type_scanning,
         modal_confirm_title,
+        modal_input_title,
+        ui_filter_label,
+        command_palette_no_commands,
+        fm_searching,
+        editor_untitled,
         modal_error_title,
         fm_archive_read_only,
         fm_cut_local_only,
@@ -2984,6 +2988,32 @@ impl Translation for RuntimeTranslation {
         self.format(
             "git_diff_title_fmt",
             &[("repo", repo), ("branch", branch), ("files", files)],
+        )
+    }
+
+    fn git_diff_files_count_fmt(&self, count: usize) -> String {
+        let plural = self.pluralize(count, "file");
+        self.format(
+            "git_diff_files_count_fmt",
+            &[("count", &count.to_string()), ("plural", plural)],
+        )
+    }
+
+    fn git_diff_stash_title_fmt(&self, message: &str, files: &str) -> String {
+        self.format(
+            "git_diff_stash_title_fmt",
+            &[("message", message), ("files", files)],
+        )
+    }
+
+    fn references_title_fmt(&self, count: usize) -> String {
+        self.format("references_title_fmt", &[("count", &count.to_string())])
+    }
+
+    fn references_symbol_title_fmt(&self, symbol: &str, count: usize) -> String {
+        self.format(
+            "references_symbol_title_fmt",
+            &[("symbol", symbol), ("count", &count.to_string())],
         )
     }
 

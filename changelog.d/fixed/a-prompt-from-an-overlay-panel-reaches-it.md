@@ -1,0 +1,1 @@
+- **A prompt from an overlay panel reaches it.** A choice, text input or checklist asked by a panel shown as an overlay was answered to the panel underneath; like a confirmation, it now goes to the overlay.

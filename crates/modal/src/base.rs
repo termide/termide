@@ -15,6 +15,12 @@ use ratatui::{
 };
 use termide_theme::Theme;
 
+/// The label before a list modal's filter field, indented as its rows are:
+/// `  Filter: `.
+pub fn filter_label() -> String {
+    format!("  {} ", termide_i18n::t().ui_filter_label())
+}
+
 /// Create a styled modal block with title.
 ///
 /// This is the common style used across all modals:

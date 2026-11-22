@@ -98,6 +98,10 @@ pub struct FileManager {
     scrollbars: termide_core::ScrollBars,
     /// Modal window request (action, modal)
     modal_request: Option<(PendingAction, ActiveModal)>,
+    /// The archive whose password this panel asked for and still waits on,
+    /// so the answer reaches it even when another panel has the focus by
+    /// the time the question shows.
+    archive_password_for: Option<termide_vfs::VfsPath>,
     /// Visible area height (updated during rendering)
     visible_height: usize,
     /// Click tracker for double-click detection
@@ -301,6 +305,7 @@ impl FileManager {
             scroll_offset: 0,
             scrollbars: termide_core::ScrollBars::default(),
             modal_request: None,
+            archive_password_for: None,
             visible_height: 10, // Default value, will be updated during rendering
             click_tracker: IndexClickTracker::new(),
             selection: SelectionState::default(),
@@ -1104,15 +1109,23 @@ impl FileManager {
         };
         let modal =
             termide_modal::InputModal::new(t.modal_archive_password_title(), &prompt).password();
+        self.archive_password_for = Some(archive.clone());
         self.modal_request = Some((
             PendingAction::ArchivePassword { archive },
             ActiveModal::Input(Box::new(modal)),
         ));
     }
 
+    /// Whether this panel asked for the password of `archive` and has not
+    /// been given one yet.
+    pub fn awaits_archive_password(&self, archive: &termide_vfs::VfsPath) -> bool {
+        self.archive_password_for.as_ref() == Some(archive)
+    }
+
     /// Open the encrypted archive whose root is `archive` with `password`,
     /// the answer to [`Self::request_archive_password`].
     pub fn open_archive_with_password(&mut self, archive: termide_vfs::VfsPath, password: String) {
+        self.archive_password_for = None;
         self.navigation.prepare_for_going_down();
         self.vfs.enter_archive_with_password(archive, password);
     }
@@ -1796,8 +1809,12 @@ mod tests {
         fm.on_tick();
         let root = asked(&mut fm);
         assert!(fm.vfs.is_local(), "the panel stays in the directory");
+        // The answer is routed to the panel that asked, whichever has the
+        // focus when a waiting question finally shows.
+        assert!(fm.awaits_archive_password(&root));
 
-        fm.open_archive_with_password(root, "wrong".to_string());
+        fm.open_archive_with_password(root.clone(), "wrong".to_string());
+        assert!(!fm.awaits_archive_password(&root), "answered");
         wait_for_vfs(&mut fm);
         fm.on_tick();
         let root = asked(&mut fm);

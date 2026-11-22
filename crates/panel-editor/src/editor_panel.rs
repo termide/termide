@@ -103,9 +103,9 @@ impl Panel for Editor {
         let modified = if self.buffer.is_modified() { "*" } else { "" };
 
         let external_change = if self.file_state.external_change_detected {
-            " [changed on disk]"
+            format!(" [{}]", termide_i18n::t().editor_title_changed_on_disk())
         } else {
-            ""
+            String::new()
         };
 
         let search_info = if let Some(ref search) = self.search.state {

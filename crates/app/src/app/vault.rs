@@ -213,6 +213,10 @@ pub(crate) struct VaultState {
     key_changes: VecDeque<ApiKeyChange>,
     /// The settings, put aside while a vault prompt shows.
     parked_settings: Option<Box<SettingsModal>>,
+    /// Logins refused while a question was on screen, oldest first: each
+    /// is answered — from the vault or by asking — once the screen is free,
+    /// so its panel or git operation is never left waiting.
+    waiting: VecDeque<(Request, CredentialAttempt)>,
 }
 
 impl Default for VaultState {
@@ -235,6 +239,7 @@ impl VaultState {
             key_waiters: Vec::new(),
             key_changes: VecDeque::new(),
             parked_settings: None,
+            waiting: VecDeque::new(),
         }
     }
 
@@ -344,8 +349,34 @@ impl App {
         if self.vault.lock_if_idle(idle) {
             log::info!("password vault locked after idle time");
         }
+        self.answer_waiting_requests();
         self.serve_api_keys();
         self.continue_key_changes();
+    }
+
+    /// Whether a prompt for a refused login must wait: another question —
+    /// a vault prompt among them — is on screen. Open settings do not count —
+    /// a vault prompt puts them aside and brings them back.
+    fn vault_prompt_must_wait(&self) -> bool {
+        let asking = self.state.is_asking()
+            && !matches!(self.state.pending_action, Some(PendingAction::Settings));
+        asking || self.vault.prompt.is_some()
+    }
+
+    /// Answer the logins that were refused while a question was open, now
+    /// that the screen is free.
+    fn answer_waiting_requests(&mut self) {
+        while !self.vault.waiting.is_empty() {
+            let free = self.state.active_modal.is_none()
+                || matches!(self.state.active_modal, Some(ActiveModal::Settings(_)));
+            if !free || self.vault.prompt.is_some() {
+                return;
+            }
+            if let Some((request, attempt)) = self.vault.waiting.pop_front() {
+                self.answer(request, attempt);
+                self.state.needs_redraw = true;
+            }
+        }
     }
 
     /// Lock the vault now (menu action).
@@ -487,8 +518,17 @@ impl App {
     // === The flow ===
 
     /// Answer `request`, whose last login used `attempt`.
+    /// Over an open question, a request the unlocked vault cannot answer
+    /// waits (see [`Self::answer_waiting_requests`]) rather than replacing
+    /// that question with its prompt.
     fn answer(&mut self, request: Request, attempt: CredentialAttempt) {
-        if attempt == CredentialAttempt::Initial && self.vault.has_entry(&request) {
+        let stored = attempt == CredentialAttempt::Initial && self.vault.has_entry(&request);
+        if !(stored && self.vault.is_unlocked()) && self.vault_prompt_must_wait() {
+            log::debug!("a question is open; the password request waits behind it");
+            self.vault.waiting.push_back((request, attempt));
+            return;
+        }
+        if stored {
             self.fulfil_from_vault(request);
         } else {
             self.ask_password(request, attempt);

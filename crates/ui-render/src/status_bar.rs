@@ -9,7 +9,6 @@ use std::borrow::Cow;
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use termide_core::{SegmentKind, StatusSegment};
-use termide_i18n as i18n;
 use termide_system_monitor::{DiskSpaceInfo, DiskSpaceInfoExt};
 use termide_theme::Theme;
 
@@ -218,11 +217,6 @@ pub struct StatusBarParams<'a> {
     pub theme: &'a Theme,
     /// Status message (message, is_error)
     pub status_message: Option<&'a (String, bool)>,
-    /// Terminal dimensions
-    pub terminal_width: u16,
-    pub terminal_height: u16,
-    /// Recommended layout string (for Debug panel)
-    pub recommended_layout: &'a str,
     /// Background file operations summary (if any)
     pub background_ops: Option<BackgroundOpsSummary>,
     /// Whether disk indicator is selected via menu navigation
@@ -358,7 +352,6 @@ impl StatusBar {
         segments: &'a [StatusSegment],
         total_width: u16,
     ) -> Vec<Span<'a>> {
-        let t = i18n::t();
         let theme = params.theme;
 
         // An error message takes priority over everything; info messages
@@ -392,8 +385,6 @@ impl StatusBar {
             return align_right(segment_spans(left, theme), right, total_width, theme);
         }
 
-        let base_style = Style::default().fg(theme.disabled).bg(theme.accented_bg);
-
         let highlight_style = Style::default()
             .fg(theme.accented_fg)
             .bg(theme.accented_bg)
@@ -414,29 +405,10 @@ impl StatusBar {
         }
 
         // Default: simple title display
-        match panel_title {
-            "Debug" => {
-                // Debug: layout mode and dimensions
-                let terminal_info = format!("{}x{}", params.terminal_width, params.terminal_height);
-
-                finish(vec![
-                    Span::styled(format!(" {} ", t.status_terminal()), base_style),
-                    Span::styled(terminal_info, highlight_style),
-                    Span::styled(
-                        format!("{}{} ", t.ui_hint_separator(), t.status_layout()),
-                        base_style,
-                    ),
-                    Span::styled(params.recommended_layout.to_string(), highlight_style),
-                ])
-            }
-            _ => {
-                // Default: simple title display
-                finish(vec![Span::styled(
-                    format!(" {}", panel_title),
-                    highlight_style,
-                )])
-            }
-        }
+        finish(vec![Span::styled(
+            format!(" {}", panel_title),
+            highlight_style,
+        )])
     }
 }
 
@@ -586,15 +558,31 @@ mod tests {
         assert_eq!(line(&spans), " p     1G ");
     }
 
+    /// A panel without segments shows its title, whatever the title says:
+    /// the debug panel, titled "Debug" in English only, once showed the
+    /// terminal size instead — in that one language.
+    #[test]
+    fn a_panel_without_segments_shows_its_title() {
+        let theme = Theme::default();
+        let params = StatusBarParams {
+            theme: &theme,
+            status_message: None,
+            background_ops: None,
+            disk_selected: false,
+            plugin_status: None,
+        };
+        for title in ["Debug", "Отладка"] {
+            let spans = StatusBar::get_status_text(&params, title, None, &[], 30);
+            assert_eq!(line(&spans).trim_end(), format!(" {title}"));
+        }
+    }
+
     #[test]
     fn plugin_status_sits_before_the_other_indicators() {
         let theme = Theme::default();
         let params = StatusBarParams {
             theme: &theme,
             status_message: None,
-            terminal_width: 30,
-            terminal_height: 10,
-            recommended_layout: "",
             background_ops: Some(BackgroundOpsSummary {
                 has_operations: true,
                 status_text: "Copy".into(),
@@ -617,9 +605,6 @@ mod tests {
         let params = StatusBarParams {
             theme: &theme,
             status_message: None,
-            terminal_width: 25,
-            terminal_height: 10,
-            recommended_layout: "",
             background_ops: Some(BackgroundOpsSummary {
                 has_operations: true,
                 status_text: "Copy".into(),
@@ -662,9 +647,6 @@ mod tests {
         let params = StatusBarParams {
             theme: &theme,
             status_message: None,
-            terminal_width: 20,
-            terminal_height: 5,
-            recommended_layout: "",
             background_ops: None,
             disk_selected: false,
             plugin_status: None,

@@ -239,9 +239,6 @@ pub enum CommandResult {
     /// originating key should fall through to normal panel key handling.
     Handled(bool),
 
-    /// File path (for Editor panels).
-    FilePath(Option<PathBuf>),
-
     /// Filesystem watch info (response to GetFsWatchInfo).
     FsWatchInfo {
         /// Currently watched root directory

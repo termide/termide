@@ -91,6 +91,11 @@ pub struct AppState {
     /// waits here until the screen is clear. Bounded — the oldest goes when
     /// full, since a stale build report is worth less than a live question.
     pub queued_info_modals: Vec<ActiveModal>,
+    /// Questions raised in the background (a host key, an archive password)
+    /// while another question was open, oldest first. Each has a panel
+    /// waiting for its answer, so none is ever dropped: they take the screen
+    /// one by one as it clears, ahead of the queued reports.
+    pub queued_questions: std::collections::VecDeque<(PendingAction, ActiveModal)>,
     /// Action pending modal result
     pub pending_action: Option<PendingAction>,
     /// Receiver channel for background directory size calculation results
@@ -294,6 +299,7 @@ impl AppState {
             layout_info,
             active_modal: None,
             queued_info_modals: Vec::new(),
+            queued_questions: std::collections::VecDeque::new(),
             pending_action: None,
             dir_size_receiver: None,
             usage: crate::app::usage::UsageState::default(),
@@ -711,11 +717,6 @@ impl AppState {
         self.layout_mode = self.layout_info.mode;
     }
 
-    /// Get recommended layout based on terminal width
-    pub fn get_recommended_layout(&self) -> &'static str {
-        self.layout_info.recommended_layout_str()
-    }
-
     /// Close modal window
     pub fn close_modal(&mut self) {
         self.active_modal = None;
@@ -755,6 +756,46 @@ impl AppState {
     pub fn set_pending_action(&mut self, action: PendingAction, modal: ActiveModal) {
         self.pending_action = Some(action);
         self.active_modal = Some(modal);
+    }
+
+    /// Whether a question is on screen: a modal whose answer a
+    /// `pending_action` waits for.
+    pub fn is_asking(&self) -> bool {
+        self.active_modal.is_some() && self.pending_action.is_some()
+    }
+
+    /// Ask a question nobody just asked for: one a panel raised in the
+    /// background. Over an open question it waits its turn instead of
+    /// replacing it — which would lose that question, what was typed into
+    /// it and the answer its panel waits for. Otherwise it shows now, as
+    /// [`Self::set_pending_action`] does. Returns whether it shows now.
+    pub fn ask_when_free(&mut self, action: PendingAction, modal: ActiveModal) -> bool {
+        if self.is_asking() || !self.queued_questions.is_empty() {
+            self.queued_questions.push_back((action, modal));
+            log::debug!(
+                "A question is open; queued another behind it ({} waiting)",
+                self.queued_questions.len()
+            );
+            false
+        } else {
+            self.resource_modal_kind = None;
+            self.set_pending_action(action, modal);
+            true
+        }
+    }
+
+    /// Give the screen to the next waiting question, then to the next
+    /// waiting report, if the screen is clear. Returns whether it did.
+    pub fn deliver_queued_modal(&mut self) -> bool {
+        if self.active_modal.is_some() {
+            return false;
+        }
+        if let Some((action, modal)) = self.queued_questions.pop_front() {
+            self.resource_modal_kind = None;
+            self.set_pending_action(action, modal);
+            return true;
+        }
+        self.deliver_queued_message_modal()
     }
 
     /// Show a message that interrupts nothing: a report, an error, a result.
@@ -1052,6 +1093,70 @@ mod message_queue_tests {
         s.show_message_modal(report("build"));
 
         assert!(s.resource_modal_kind.is_none());
+    }
+
+    fn host_key(fingerprint: &str) -> PendingAction {
+        PendingAction::HostKey {
+            url: "sftp://h/".to_string(),
+            fingerprint: fingerprint.to_string(),
+        }
+    }
+
+    /// A question a panel raises in the background must not replace the
+    /// one on screen: that one's answer — and its panel waiting on it —
+    /// would be lost. It waits, then shows once the screen clears, each
+    /// waiting question in turn, ahead of the waiting reports.
+    #[test]
+    fn a_background_question_waits_behind_an_open_one() {
+        let mut s = state();
+        s.set_pending_action(PendingAction::QuitApplication, question("Quit?"));
+
+        assert!(!s.ask_when_free(host_key("first"), question("Trust first?")));
+        assert!(!s.ask_when_free(host_key("second"), question("Trust second?")));
+        s.show_message_modal(report("build"));
+
+        assert!(matches!(
+            s.pending_action,
+            Some(PendingAction::QuitApplication)
+        ));
+        assert!(format!("{:?}", s.active_modal()).contains("Quit?"));
+        assert!(!s.deliver_queued_modal(), "the screen is not free yet");
+
+        s.close_modal();
+        s.pending_action = None;
+        assert!(s.deliver_queued_modal());
+        assert!(
+            matches!(&s.pending_action, Some(PendingAction::HostKey { fingerprint, .. }) if fingerprint == "first")
+        );
+        assert!(!s.deliver_queued_modal(), "one question at a time");
+
+        s.close_modal();
+        s.pending_action = None;
+        assert!(s.deliver_queued_modal());
+        assert!(
+            matches!(&s.pending_action, Some(PendingAction::HostKey { fingerprint, .. }) if fingerprint == "second")
+        );
+
+        s.close_modal();
+        s.pending_action = None;
+        assert!(s.deliver_queued_modal(), "the report comes last");
+        assert!(format!("{:?}", s.active_modal()).contains("build"));
+        assert!(s.queued_questions.is_empty() && s.queued_info_modals.is_empty());
+    }
+
+    /// With no question open a background question shows at once, over a
+    /// plain report as before.
+    #[test]
+    fn a_background_question_with_none_open_shows_at_once() {
+        let mut s = state();
+        s.show_message_modal(report("build"));
+
+        assert!(s.ask_when_free(host_key("k"), question("Trust?")));
+        assert!(matches!(
+            s.pending_action,
+            Some(PendingAction::HostKey { .. })
+        ));
+        assert!(s.queued_questions.is_empty());
     }
 }
 

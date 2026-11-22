@@ -47,7 +47,7 @@ impl FileState {
             disk_size: None,
             external_change_detected: false,
             size: 0,
-            title: "Untitled".to_string(),
+            title: termide_i18n::t().editor_untitled().to_string(),
             unsaved_buffer_file: None,
             initial_directory: None,
             remote_path: None,
