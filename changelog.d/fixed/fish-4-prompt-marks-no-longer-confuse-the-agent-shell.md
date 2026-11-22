@@ -1,0 +1,1 @@
+- **fish 4's own prompt marks no longer confuse the agent's shell sessions.** fish 4 marks its prompt itself, next to the session's own mark, and under load its mark could arrive after the agent had typed: a line left open, or a program the agent started, then read as the shell back at its prompt. Only the session's own marks count now.
