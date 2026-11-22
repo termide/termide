@@ -64,6 +64,14 @@ pub trait VfsProvider: Send + Sync {
     /// Write data to a file (creates or overwrites).
     fn write_file(&self, path: &VfsPath, data: &[u8]) -> VfsOperation<()>;
 
+    /// Create an empty file only while nothing — a file, a directory or a
+    /// link, dangling or not — has the name; `VfsError::AlreadyExists`
+    /// when something does, and what is there stays as it was. Where the
+    /// protocol creates exclusively the server decides in one step, so a
+    /// name another client takes meanwhile is refused too; elsewhere the
+    /// name is looked up first.
+    fn create_file(&self, path: &VfsPath) -> VfsOperation<()>;
+
     /// Delete a file or empty directory.
     fn delete(&self, path: &VfsPath) -> VfsOperation<()>;
 

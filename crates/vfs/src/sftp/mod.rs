@@ -333,9 +333,14 @@ impl VfsProvider for SftpProvider {
             ));
 
             match result {
-                Ok((sftp, home_dir)) => {
+                Ok((sftp, home_dir, raw_opener)) => {
                     let (cmd_tx, cmd_rx) = async_mpsc::channel::<SftpCommand>(32);
-                    rt.spawn(sftp_actor(sftp, cmd_rx, Arc::clone(&inner_arc)));
+                    rt.spawn(sftp_actor(
+                        sftp,
+                        cmd_rx,
+                        Arc::clone(&inner_arc),
+                        Some(raw_opener),
+                    ));
                     if let Ok(mut inner) = inner_arc.lock() {
                         inner.state = ConnectionState::Connected;
                         inner.handle = Some(SftpHandle { cmd_tx });
@@ -464,6 +469,14 @@ impl VfsProvider for SftpProvider {
             data,
             reply,
         })
+    }
+
+    fn create_file(&self, path: &VfsPath) -> VfsOperation<()> {
+        let p = match Self::to_remote_path(path) {
+            Ok(p) => p,
+            Err(e) => return VfsOperation::ready(Err(e)),
+        };
+        self.dispatch_op(move |reply| SftpCommand::CreateNew { path: p, reply })
     }
 
     fn delete(&self, path: &VfsPath) -> VfsOperation<()> {

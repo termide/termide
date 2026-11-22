@@ -285,6 +285,10 @@ impl VfsProvider for ArchiveProvider {
         Self::read_only()
     }
 
+    fn create_file(&self, _path: &VfsPath) -> VfsOperation<()> {
+        Self::read_only()
+    }
+
     fn delete(&self, _path: &VfsPath) -> VfsOperation<()> {
         Self::read_only()
     }

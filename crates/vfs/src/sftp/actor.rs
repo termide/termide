@@ -3,12 +3,16 @@
 //! primitives it dispatches to.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
-use russh_sftp::client::SftpSession;
-use russh_sftp::protocol::{FileAttributes, FileType as SftpFileType, OpenFlags};
+use russh_sftp::client::{RawSftpSession, SftpSession};
+use russh_sftp::protocol::{
+    FileAttributes, FileType as SftpFileType, OpenFlags, Packet, StatusCode,
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{mpsc as async_mpsc, oneshot};
 
@@ -61,6 +65,14 @@ pub(super) enum SftpCommand {
         to: PathBuf,
         reply: Reply<()>,
     },
+    /// Rename `from` onto `to` in one step, replacing what `to` holds, with
+    /// `posix-rename@openssh.com`. `Ok(false)`, with nothing done, when
+    /// the server does not offer the extension.
+    RenameOver {
+        from: PathBuf,
+        to: PathBuf,
+        reply: Reply<bool>,
+    },
     Read {
         path: PathBuf,
         reply: Reply<Vec<u8>>,
@@ -68,6 +80,11 @@ pub(super) enum SftpCommand {
     Write {
         path: PathBuf,
         data: Vec<u8>,
+        reply: Reply<()>,
+    },
+    /// Create an empty file that must not exist yet (CREATE | EXCLUDE).
+    CreateNew {
+        path: PathBuf,
         reply: Reply<()>,
     },
     /// Recursive delete (file or directory), with depth limit.
@@ -169,18 +186,37 @@ impl SftpHandle {
     }
 }
 
+/// Opens a second SFTP session on the connection, uninitialised. The
+/// actor's `SftpSession` (russh-sftp 2.x) neither tells which extensions
+/// the server offers nor sends extended requests; a raw session does both.
+pub(super) type RawSessionOpener =
+    Box<dyn FnOnce() -> Pin<Box<dyn Future<Output = Option<RawSftpSession>> + Send>> + Send>;
+
+/// The extension that renames onto a taken name, replacing it in one step.
+const POSIX_RENAME: &str = "posix-rename@openssh.com";
+
+/// How long opening the raw session may take before the replace falls
+/// back to the two-step rename.
+const RAW_SESSION_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// Async actor task: owns the SftpSession and serves commands until the
 /// channel closes or `Shutdown` is received. `inner` lets the actor
 /// publish state transitions (Disconnected) so the rest of the VFS
-/// sees a coherent picture on teardown.
+/// sees a coherent picture on teardown. `raw_opener` is used the first
+/// time a `RenameOver` comes, so a connection that never replaces a file
+/// opens no second session.
 pub(super) async fn sftp_actor(
     initial: SftpSession,
     mut rx: async_mpsc::Receiver<SftpCommand>,
     inner: Arc<Mutex<SftpInner>>,
+    mut raw_opener: Option<RawSessionOpener>,
 ) {
     // Held as Option so a Reconnect attempt can take the old session
     // out by value (close() consumes it) and put a fresh one back.
     let mut sftp_opt: Option<SftpSession> = Some(initial);
+    // The raw session for `posix-rename@openssh.com`, once opened and only
+    // when the server offers the extension.
+    let mut posix_rename: Option<RawSftpSession> = None;
 
     // Open remote file handles, keyed by an opaque u64 the sync worker
     // refers to. Held inside the actor task — single owner, no Mutex.
@@ -234,11 +270,24 @@ pub(super) async fn sftp_actor(
                         .await,
                 ));
             }
+            SftpCommand::RenameOver { from, to, reply } => {
+                if let Some(open) = raw_opener.take() {
+                    posix_rename = open_posix_rename(open).await;
+                }
+                let result = match &posix_rename {
+                    Some(raw) => actor_posix_rename(raw, &from, &to).await.map(|()| true),
+                    None => Ok(false),
+                };
+                let _ = reply.send(result);
+            }
             SftpCommand::Read { path, reply } => {
                 let _ = reply.send(actor_read_file(sftp!(), &path).await);
             }
             SftpCommand::Write { path, data, reply } => {
                 let _ = reply.send(actor_write_file(sftp!(), &path, &data).await);
+            }
+            SftpCommand::CreateNew { path, reply } => {
+                let _ = reply.send(actor_create_new(sftp!(), &path).await);
             }
             SftpCommand::DeleteRecursive {
                 path,
@@ -375,6 +424,9 @@ pub(super) async fn sftp_actor(
     if let Some(s) = sftp_opt.take() {
         let _ = s.close().await;
     }
+    if let Some(raw) = posix_rename.take() {
+        let _ = raw.close_session();
+    }
     if let Ok(mut g) = inner.lock() {
         g.state = ConnectionState::Disconnected;
         g.handle = None;
@@ -465,6 +517,56 @@ async fn actor_exists(sftp: &SftpSession, path: &Path) -> bool {
     sftp.symlink_metadata(path_to_string(path)).await.is_ok()
 }
 
+/// Open and initialise the raw session; keep it only when the server
+/// offers `posix-rename@openssh.com`.
+async fn open_posix_rename(open: RawSessionOpener) -> Option<RawSftpSession> {
+    let raw = match tokio::time::timeout(RAW_SESSION_TIMEOUT, open()).await {
+        Ok(Some(raw)) => raw,
+        _ => {
+            log::debug!("sftp: no second session for {POSIX_RENAME}");
+            return None;
+        }
+    };
+    let offered = match tokio::time::timeout(RAW_SESSION_TIMEOUT, raw.init()).await {
+        Ok(Ok(version)) => version
+            .extensions
+            .get(POSIX_RENAME)
+            .is_some_and(|v| v == "1"),
+        _ => false,
+    };
+    if offered {
+        Some(raw)
+    } else {
+        log::debug!("sftp: the server does not offer {POSIX_RENAME}");
+        let _ = raw.close_session();
+        None
+    }
+}
+
+/// `posix-rename@openssh.com`: `rename(2)` on the server, which puts
+/// `from` at `to` in one step, replacing what `to` holds.
+async fn actor_posix_rename(raw: &RawSftpSession, from: &Path, to: &Path) -> VfsResult<()> {
+    let mut data = Vec::new();
+    for path in [from, to] {
+        let path = path_to_string(path);
+        data.extend_from_slice(&(path.len() as u32).to_be_bytes());
+        data.extend_from_slice(path.as_bytes());
+    }
+    match raw
+        .extended(POSIX_RENAME, data)
+        .await
+        .map_err(map_sftp_err)?
+    {
+        Packet::Status(status) if status.status_code == StatusCode::Ok => Ok(()),
+        Packet::Status(status) => Err(map_sftp_err(russh_sftp::client::error::Error::Status(
+            status,
+        ))),
+        _ => Err(VfsError::Sftp(format!(
+            "unexpected reply to {POSIX_RENAME}"
+        ))),
+    }
+}
+
 /// Create directory and all parents, ignoring "already exists" errors.
 async fn actor_mkdir_recursive(sftp: &SftpSession, path: &Path) -> VfsResult<()> {
     let mut current = PathBuf::new();
@@ -521,6 +623,26 @@ async fn actor_write_file(sftp: &SftpSession, path: &Path, data: &[u8]) -> VfsRe
     file.flush().await.map_err(map_sftp_err)?;
     file.shutdown().await.map_err(map_sftp_err)?;
     Ok(())
+}
+
+/// Create `path` empty, refused by the server itself when the name is
+/// taken: EXCLUDE is `O_EXCL`, which neither truncates nor follows a final
+/// symlink. SFTP v3 reports a taken name as a bare failure, so a refusal
+/// with something at the name is reported as `AlreadyExists`.
+async fn actor_create_new(sftp: &SftpSession, path: &Path) -> VfsResult<()> {
+    let opened = sftp
+        .open_with_flags(
+            path_to_string(path),
+            OpenFlags::CREATE | OpenFlags::EXCLUDE | OpenFlags::WRITE,
+        )
+        .await;
+    match opened {
+        Ok(mut file) => file.shutdown().await.map_err(map_sftp_err),
+        Err(_) if actor_exists(sftp, path).await => Err(VfsError::AlreadyExists {
+            path: path.to_path_buf(),
+        }),
+        Err(e) => Err(map_sftp_err(e)),
+    }
 }
 
 async fn actor_delete_recursive(

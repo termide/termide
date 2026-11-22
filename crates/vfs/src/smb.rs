@@ -586,6 +586,21 @@ impl VfsProvider for SmbProvider {
         })
     }
 
+    /// A CREATE with the `FileCreate` disposition: the server refuses a
+    /// taken name itself, so no other client can slip in between.
+    fn create_file(&self, path: &VfsPath) -> VfsOperation<()> {
+        let shown = path.path.clone();
+        self.on_share(path, move |client, tree, inner| {
+            Box::pin(async move {
+                client
+                    .write_file_compound_exclusive(tree, &inner, &[])
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| map_error(e, &shown))
+            })
+        })
+    }
+
     fn delete(&self, path: &VfsPath) -> VfsOperation<()> {
         let shown = path.path.clone();
         self.on_share(path, move |client, tree, inner| {

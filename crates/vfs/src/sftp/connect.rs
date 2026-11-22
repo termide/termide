@@ -18,12 +18,13 @@ use std::time::Duration;
 use russh::client;
 use russh::keys::{load_secret_key, PrivateKey, PrivateKeyWithHashAlg};
 use russh::ChannelStream;
-use russh_sftp::client::SftpSession;
+use russh_sftp::client::{RawSftpSession, SftpSession};
 
 use crate::error::{VfsError, VfsResult};
 use crate::ssh_config::{AgentSocket, JumpHost, SshHostConfig, Tokens};
 use crate::types::{AuthMethod, ConnectOptions, HostKey};
 
+use super::actor::RawSessionOpener;
 #[cfg(test)]
 use super::known_hosts::SessionKeys;
 use super::known_hosts::{self, KnownHostsFiles, Verdict, SESSION_KEYS};
@@ -506,7 +507,7 @@ pub(super) async fn do_connect(
     username: Option<String>,
     options: ConnectOptions,
     cancelled: Arc<AtomicBool>,
-) -> VfsResult<(SftpSession, Option<String>)> {
+) -> VfsResult<(SftpSession, Option<String>, RawSessionOpener)> {
     let route = route(&host, port, username.as_deref(), &SshHostConfig::for_host)?;
     let session = open_route(&route, &options, &cancelled).await?;
     let target = route.last().expect("a route ends with its target");
@@ -663,11 +664,12 @@ async fn open_verified_session(
     Ok(session)
 }
 
-/// Open the SFTP subsystem on an authenticated session.
+/// Open the SFTP subsystem on an authenticated session, and the means to
+/// open a second, raw one on it later (see `RawSessionOpener`).
 async fn open_sftp(
     session: client::Handle<VerifyingHandler>,
     username: &str,
-) -> VfsResult<(SftpSession, Option<String>)> {
+) -> VfsResult<(SftpSession, Option<String>, RawSessionOpener)> {
     let channel = session
         .channel_open_session()
         .await
@@ -688,7 +690,15 @@ async fn open_sftp(
         .filter(|s| !s.is_empty())
         .or_else(|| Some(format!("/home/{username}")));
 
-    Ok((sftp, home_dir))
+    let raw_opener: RawSessionOpener = Box::new(move || {
+        Box::pin(async move {
+            let channel = session.channel_open_session().await.ok()?;
+            channel.request_subsystem(true, "sftp").await.ok()?;
+            Some(RawSftpSession::new(channel.into_stream()))
+        })
+    });
+
+    Ok((sftp, home_dir, raw_opener))
 }
 
 #[cfg(test)]

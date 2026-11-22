@@ -540,6 +540,24 @@ impl VfsManager {
         )
     }
 
+    /// Create an empty file where nothing has the name yet; see
+    /// [`VfsProvider::create_file`].
+    pub fn create_file(&self, path: &VfsPath) -> VfsOperation<()> {
+        if path.is_local() {
+            self.cache.invalidate_with_parent(path);
+            return self.local.create_file(path);
+        }
+
+        self.dispatch_remote(
+            path,
+            |p| {
+                self.cache.invalidate_with_parent(path);
+                p.create_file(path)
+            },
+            || VfsOperation::error(VfsError::NotConnected),
+        )
+    }
+
     /// Create a directory.
     pub fn create_dir(&self, path: &VfsPath) -> VfsOperation<()> {
         if path.is_local() {
