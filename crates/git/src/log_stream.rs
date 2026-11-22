@@ -32,6 +32,9 @@ pub enum LogChunk {
     /// How many commits the history holds in all, counted apart so the first
     /// rows need not wait for it.
     Total(usize),
+    /// `git log` failed (a branch that is gone, say): git's own words.
+    /// The last `Rows`, with `done`, follows it.
+    Failed(String),
 }
 
 /// A running `git log` and the thread reading it.
@@ -64,27 +67,39 @@ impl LogStream {
         if let Some(branch) = branch {
             args.push(branch);
         }
+        // A branch named like a file or folder (`docs`) is a revision, not
+        // a path to filter by.
+        args.push("--");
         let spawned = hardened_git(repo, &args)
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn();
-        let stdout = match spawned {
+        let (stdout, stderr) = match spawned {
             Ok(mut process) => {
                 let stdout = process.stdout.take();
+                let stderr = process.stderr.take();
                 *child.lock().unwrap_or_else(PoisonError::into_inner) = Some(process);
-                stdout
+                (stdout, stderr)
             }
             Err(error) => {
                 log::warn!("cannot run git log: {error}");
-                None
+                (None, None)
             }
         };
+        // Read apart so a chatty stderr cannot fill its pipe and stall git.
+        let stderr = std::thread::spawn(move || {
+            let mut text = Vec::new();
+            if let Some(mut stderr) = stderr {
+                let _ = std::io::Read::read_to_end(&mut stderr, &mut text);
+            }
+            String::from_utf8_lossy(&text).trim().to_string()
+        });
 
         let revision = branch.unwrap_or("HEAD").to_string();
         let count_repo = repo.to_path_buf();
         let count_sender = sender.clone();
         std::thread::spawn(move || {
-            let total = git_command_stdout(&count_repo, &["rev-list", "--count", &revision])
+            let total = git_command_stdout(&count_repo, &["rev-list", "--count", &revision, "--"])
                 .and_then(|out| out.trim().parse().ok());
             if let Some(total) = total {
                 let _ = count_sender.send(LogChunk::Total(total));
@@ -92,6 +107,7 @@ impl LogStream {
         });
 
         let reaper = Arc::clone(&child);
+        let head_repo = (branch.is_none()).then(|| repo.to_path_buf());
         std::thread::spawn(move || {
             let mut reader = stdout.map(BufReader::new);
             let mut parser = Parser::new(unicode_graph);
@@ -101,6 +117,17 @@ impl LogStream {
                     Some(reader) => parser.read(reader, wanted),
                     None => (Vec::new(), 0, true),
                 };
+                if done {
+                    if let Some(error) = failure(&reaper, stderr, head_repo.as_deref()) {
+                        let _ = sender.send(LogChunk::Failed(error));
+                    }
+                    let _ = sender.send(LogChunk::Rows {
+                        rows,
+                        commits,
+                        done,
+                    });
+                    break;
+                }
                 if sender
                     .send(LogChunk::Rows {
                         rows,
@@ -108,7 +135,6 @@ impl LogStream {
                         done,
                     })
                     .is_err()
-                    || done
                 {
                     break;
                 }
@@ -142,6 +168,33 @@ impl Drop for LogStream {
         // its read with EOF, and the closed request channel ends its loop.
         kill(&self.child);
     }
+}
+
+/// Why `git log`, whose output just ended, failed; `None` when it did not,
+/// when the stream killed it, or when the HEAD of `head_repo` (the log of
+/// HEAD) has no commit yet, which is an empty history rather than an error.
+fn failure(
+    child: &Mutex<Option<Child>>,
+    stderr: std::thread::JoinHandle<String>,
+    head_repo: Option<&Path>,
+) -> Option<String> {
+    let mut process = child
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .take()?;
+    let status = process.wait().ok()?;
+    let stderr = stderr.join().unwrap_or_default();
+    if status.success() {
+        return None;
+    }
+    if let Some(repo) = head_repo {
+        // No commit on HEAD yet: nothing to show, nothing went wrong.
+        git_command_stdout(repo, &["rev-parse", "--verify", "-q", "HEAD"])?;
+    }
+    Some(match stderr.lines().next() {
+        Some(line) => line.to_string(),
+        None => format!("git log: {status}"),
+    })
 }
 
 fn kill(child: &Mutex<Option<Child>>) {
@@ -384,7 +437,50 @@ mod tests {
         git(dir.path(), &["init", "-q"]);
         let stream = LogStream::start(dir.path(), None, true);
         stream.request(10);
-        let (rows, commits, done) = next_rows(&stream);
-        assert!(rows.is_empty() && commits == 0 && done);
+        // An empty history, not a failure.
+        let chunk = next(&stream);
+        assert!(
+            matches!(&chunk, LogChunk::Rows { rows, commits: 0, done: true } if rows.is_empty()),
+            "{chunk:?}"
+        );
+    }
+
+    #[test]
+    fn a_branch_named_like_a_folder_shows_its_history() {
+        let dir = repo(2);
+        std::fs::create_dir(dir.path().join("docs")).unwrap();
+        std::fs::write(dir.path().join("docs/a.md"), "a").unwrap();
+        git(dir.path(), &["branch", "docs"]);
+        for unicode in [true, false] {
+            let stream = LogStream::start(dir.path(), Some("docs"), unicode);
+            stream.request(100);
+            let (mut rows, mut total) = (None, None);
+            while rows.is_none() || total.is_none() {
+                match next(&stream) {
+                    LogChunk::Rows { commits, done, .. } => rows = Some((commits, done)),
+                    LogChunk::Total(count) => total = Some(count),
+                    LogChunk::Failed(error) => panic!("{error}"),
+                }
+            }
+            assert_eq!(rows, Some((4, true)), "unicode: {unicode}");
+            assert_eq!(total, Some(4));
+        }
+    }
+
+    #[test]
+    fn a_failing_log_says_why() {
+        let dir = repo(2);
+        let stream = LogStream::start(dir.path(), Some("no-such-branch"), true);
+        stream.request(10);
+        let error = loop {
+            match next(&stream) {
+                LogChunk::Failed(error) => break error,
+                LogChunk::Rows { .. } => panic!("rows came without the failure"),
+                LogChunk::Total(_) => {}
+            }
+        };
+        assert!(!error.is_empty());
+        let (rows, _, done) = next_rows(&stream);
+        assert!(rows.is_empty() && done);
     }
 }

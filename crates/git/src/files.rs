@@ -30,6 +30,14 @@ pub struct UnstagedFile {
 /// two (source, destination) for a rename or copy, which is listed under
 /// its destination.
 fn parse_name_status_z(stdout: &[u8]) -> Vec<(char, PathBuf)> {
+    parse_name_status_with_sources_z(stdout)
+        .into_iter()
+        .map(|(code, path, _)| (code, path))
+        .collect()
+}
+
+/// [`parse_name_status_z`] keeping the source of a rename or copy.
+fn parse_name_status_with_sources_z(stdout: &[u8]) -> Vec<(char, PathBuf, Option<PathBuf>)> {
     let mut fields = nul_fields(stdout);
     let mut result = Vec::new();
     while let Some(status) = fields.next() {
@@ -37,11 +45,17 @@ fn parse_name_status_z(stdout: &[u8]) -> Vec<(char, PathBuf)> {
             continue;
         };
         let mut path = fields.next();
+        let mut source = None;
         if matches!(code, b'R' | b'C') {
+            source = path;
             path = fields.next();
         }
         if let Some(path) = path {
-            result.push((char::from(code), path_from_git_bytes(path)));
+            result.push((
+                char::from(code),
+                path_from_git_bytes(path),
+                source.map(path_from_git_bytes),
+            ));
         }
     }
     result
@@ -54,6 +68,17 @@ pub fn get_staged_files(repo: &Path) -> Vec<StagedFile> {
         .unwrap_or_default()
         .into_iter()
         .map(|(status, path)| StagedFile { path, status })
+        .collect()
+}
+
+/// The staged renames as `(source, destination)`, relative to the
+/// repository's top level; detected as [`get_staged_files`] detects them.
+pub(crate) fn staged_renames(repo: &Path) -> Vec<(PathBuf, PathBuf)> {
+    git_command_stdout_bytes(repo, &["diff", "--cached", "--name-status", "-z"])
+        .map(|stdout| parse_name_status_with_sources_z(&stdout))
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(code, path, source)| (code == 'R').then_some((source?, path)))
         .collect()
 }
 
@@ -98,6 +123,22 @@ mod tests {
                 ('R', PathBuf::from("new\tname.rs")),
                 ('C', PathBuf::from("y")),
                 ('D', PathBuf::from("gone")),
+            ]
+        );
+    }
+
+    #[test]
+    fn name_status_keeps_the_source_of_a_rename() {
+        let out = b"R087\0old name.rs\0new name.rs\0M\0a\0";
+        assert_eq!(
+            parse_name_status_with_sources_z(out),
+            [
+                (
+                    'R',
+                    PathBuf::from("new name.rs"),
+                    Some(PathBuf::from("old name.rs"))
+                ),
+                ('M', PathBuf::from("a"), None),
             ]
         );
     }

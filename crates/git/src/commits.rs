@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use crate::command::git_command_stdout;
+use crate::command::{git_command_stdout, git_command_stdout_bytes};
 
 /// Commit information
 #[derive(Debug, Clone)]
@@ -83,77 +83,20 @@ pub struct CommitDetails {
 pub fn get_commit_details(repo: &Path, short_hash: &str) -> Option<CommitDetails> {
     let output = git_command_stdout(
         repo,
-        &[
-            "show",
-            "--format=%H%n%an <%ae>%n%ai%n%B",
-            "--shortstat",
-            short_hash,
-        ],
+        &["show", "-s", "--format=%H%n%an <%ae>%n%ai%n%B", short_hash],
     )?;
-
-    // The output has: format lines, then diff content, then shortstat line at the end.
-    // Format: hash\nauthor\ndate\nmessage_lines...\n\n shortstat_line
     let mut lines = output.lines();
-
     let hash = lines.next()?.to_string();
     let author = lines.next()?.to_string();
     let date = lines.next()?.to_string();
+    let message = lines.collect::<Vec<_>>().join("\n").trim_end().to_string();
 
-    // Collect message lines until we hit an empty line followed by diff/shortstat.
-    // The %B format ends with an empty line, then git show appends diff output.
-    // We need to collect the message and find the shortstat line at the very end.
-    let remaining: Vec<&str> = lines.collect();
-
-    // The shortstat line is the last non-empty line.
-    // Message is everything between current position and the diff/shortstat section.
-    // Find shortstat line (contains "file(s) changed" or is empty for no changes).
-    let mut files_changed = 0;
-    let mut insertions = 0;
-    let mut deletions = 0;
-    let mut shortstat_idx = None;
-
-    for (i, line) in remaining.iter().enumerate().rev() {
-        let trimmed = line.trim();
-        if trimmed.contains("changed") && (trimmed.contains("file") || trimmed.contains("files")) {
-            // Parse shortstat: " 3 files changed, 10 insertions(+), 5 deletions(-)"
-            for part in trimmed.split(',') {
-                let part = part.trim();
-                if part.contains("file") {
-                    files_changed = part
-                        .split_whitespace()
-                        .next()
-                        .and_then(|n| n.parse().ok())
-                        .unwrap_or(0);
-                } else if part.contains("insertion") {
-                    insertions = part
-                        .split_whitespace()
-                        .next()
-                        .and_then(|n| n.parse().ok())
-                        .unwrap_or(0);
-                } else if part.contains("deletion") {
-                    deletions = part
-                        .split_whitespace()
-                        .next()
-                        .and_then(|n| n.parse().ok())
-                        .unwrap_or(0);
-                }
-            }
-            shortstat_idx = Some(i);
-            break;
-        }
-    }
-
-    // Message: lines from start of remaining until diff content begins.
-    // The message from %B ends with a trailing newline, so we trim trailing empty lines.
-    // After the message, there may be diff lines before shortstat.
-    // We take lines up to the first diff header ("diff --git") or shortstat.
-    let message_end = remaining
-        .iter()
-        .position(|line| line.starts_with("diff --git"))
-        .or(shortstat_idx)
-        .unwrap_or(remaining.len());
-
-    let message = remaining[..message_end].join("\n").trim_end().to_string();
+    // Counted from `--numstat`: the `--shortstat` summary is worded in the
+    // user's language.
+    let (files_changed, insertions, deletions) =
+        git_command_stdout_bytes(repo, &["show", "--format=", "--numstat", short_hash])
+            .map(|out| sum_numstat(&String::from_utf8_lossy(&out)))
+            .unwrap_or_default();
 
     // Get per-file status breakdown (added/deleted/modified)
     let (files_added, files_deleted, files_modified) = if let Some(output) = git_command_stdout(
@@ -193,6 +136,23 @@ pub fn get_commit_details(repo: &Path, short_hash: &str) -> Option<CommitDetails
         files_deleted,
         files_modified,
     })
+}
+
+/// Files, insertions and deletions in `--numstat` output (`added\tdeleted\tpath`
+/// a line; `-` for both counts of a binary file).
+pub(crate) fn sum_numstat(output: &str) -> (usize, usize, usize) {
+    let mut totals = (0, 0, 0);
+    for line in output.lines() {
+        let mut fields = line.splitn(3, '\t');
+        let (Some(added), Some(deleted), Some(_)) = (fields.next(), fields.next(), fields.next())
+        else {
+            continue;
+        };
+        totals.0 += 1;
+        totals.1 += added.parse::<usize>().unwrap_or(0);
+        totals.2 += deleted.parse::<usize>().unwrap_or(0);
+    }
+    totals
 }
 
 /// Diff statistics for a file.
@@ -244,6 +204,54 @@ mod tests {
             .output()
             .unwrap();
         assert!(out.status.success(), "git {args:?}: {out:?}");
+    }
+
+    #[test]
+    fn numstat_sums_files_and_lines_whatever_the_language() {
+        let out = "3\t1\tsrc/a.rs\n-\t-\tlogo.png\n0\t2\told.rs => new.rs\n\n";
+        assert_eq!(sum_numstat(out), (3, 3, 3));
+        assert_eq!(sum_numstat(""), (0, 0, 0));
+    }
+
+    #[test]
+    fn commit_details_count_the_changes_and_keep_the_whole_message() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path();
+        git(repo, &["init", "-q", "-b", "main"]);
+        std::fs::write(repo.join("a.txt"), "one\ntwo\n").unwrap();
+        std::fs::write(repo.join("b.txt"), "gone\n").unwrap();
+        git(repo, &["add", "."]);
+        git(repo, &["commit", "-q", "-m", "init"]);
+        std::fs::write(repo.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+        std::fs::remove_file(repo.join("b.txt")).unwrap();
+        std::fs::write(repo.join("c.txt"), "new\n").unwrap();
+        git(repo, &["add", "-A"]);
+        // A body line that reads like a summary must stay in the message.
+        git(
+            repo,
+            &[
+                "commit",
+                "-q",
+                "-m",
+                "Change",
+                "-m",
+                "2 files changed, 1 insertion(+)",
+            ],
+        );
+
+        let details = get_commit_details(repo, "HEAD").unwrap();
+        assert_eq!(details.message, "Change\n\n2 files changed, 1 insertion(+)");
+        assert_eq!(details.files_changed, 3);
+        assert_eq!(details.insertions, 3);
+        assert_eq!(details.deletions, 2);
+        assert_eq!(
+            (
+                details.files_added,
+                details.files_deleted,
+                details.files_modified
+            ),
+            (1, 1, 1)
+        );
     }
 
     /// The diff panel parses git's own patch format; a user's external diff

@@ -173,6 +173,7 @@ impl GitLogPanel {
             changed = true;
             match chunk {
                 LogChunk::Total(total) => self.total_commits = Some(total),
+                LogChunk::Failed(error) => self.status_message = Some(error),
                 LogChunk::Rows {
                     rows,
                     commits,

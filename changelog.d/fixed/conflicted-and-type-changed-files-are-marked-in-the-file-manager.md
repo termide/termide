@@ -1,0 +1,1 @@
+- **Conflicted and type-changed files are marked in the file manager.** Files in a merge conflict, files whose type changed (a file turned symlink) and staged files since deleted from disk showed as unchanged, and their folders unmarked. A conflict and a type change now show as modified (both deleted in a conflict as deleted), and a staged file gone from disk as deleted.
