@@ -82,6 +82,8 @@ enabled = false
 
 每个打开的项目都为它运行的每个插件拥有一份独立副本，包括停放在后台的项目。崩溃的插件会在 1、2、4…… 秒后重启。一分钟内崩溃三次后，它将保持关闭，直到其设置发生变化、它被重启、插件目录被重新读取或 termide 重启，其所属项目的状态栏会对此作出提示。
 
+termide 从不等待插件读取它发送的内容：停止读取 stdin 的插件会丢失在此期间发给它的事件，termide 对它的请求也会立即失败，直到它重新开始读取。
+
 ## 编写插件
 
 每条消息是一行 JSON-RPC 2.0。插件写到标准错误的任何内容都会进入 termide 的日志。用 Python 编写时，仓库中的 `examples/plugins/sdk/termide_plugin.py` 会替你处理协议，`examples/plugins/` 中有用它写成的插件。
@@ -222,7 +224,7 @@ termide 会与服务器一起询问文件所属项目的插件，并给出一个
 | `window/confirm` | `title`、`message` | `true`、`false` 或 `null` |
 | `window/choose` | `title`、`items`（字符串） | 所选项的索引，或 `null` |
 | `window/input` | `title`、`prompt`、`default`（可选） | 文本，或 `null` |
-| `window/form` | `title`、`fields`：`[{ "name", "label", "type", "options"?, "default"? }]`，`type` 为 `text`、`number`、`bool` 或 `select` | `{ name: value }`（开关为布尔值，数字为数字），或 `null` |
+| `window/form` | `title`、`fields`：`[{ "name", "label", "type", "options"?, "default"? }]`，`type` 为 `text`、`number`、`bool` 或 `select`，`default` 为字符串、数字或布尔值 | `{ name: value }`（开关为布尔值，数字为数字），或 `null` |
 | `window/message` | `title`、`message` | `null` |
 | `window/dialog` | `title`，以及 `message`、`input`、`list`、`buttons` 中的任意几项（见下） | `{ "button", "text"?, "checked"?, "selected"? }`，或 `null` |
 

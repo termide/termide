@@ -121,9 +121,6 @@ pub fn render_input_field_scrolled(
     theme: &Theme,
     scroll_offset: usize,
 ) {
-    use unicode_width::UnicodeWidthChar;
-
-    let width = width as usize;
     if width == 0 {
         return;
     }
@@ -136,42 +133,20 @@ pub fn render_input_field_scrolled(
     let selection_style = Style::default().fg(theme.bg).bg(theme.fg);
     let cursor_style = selection_style;
 
-    // Collect chars with their display widths
-    let chars: Vec<(usize, char, usize)> = text
-        .char_indices()
-        .enumerate()
-        .map(|(char_idx, (_byte_idx, c))| {
-            let cw = UnicodeWidthChar::width(c).unwrap_or(1);
-            (char_idx, c, cw)
-        })
-        .collect();
+    let total_chars = text.chars().count();
 
-    let total_chars = chars.len();
-
-    // Render characters
-    let mut screen_x = x;
-    let field_end = x + width as u16;
-
-    for (char_idx, c, cw) in chars.iter().skip(scroll_offset) {
-        if screen_x >= field_end {
-            break;
-        }
-
-        // Determine style for this character
-        let is_selected = selection_range
-            .map(|(start, end)| *char_idx >= start && *char_idx < end)
-            .unwrap_or(false);
-        let is_cursor = is_focused && *char_idx == cursor_pos;
-
-        let style = if is_cursor || (is_selected && is_focused) {
+    // A grapheme cluster at a time: a letter and its accents share a cell.
+    let drawn = termide_ui::render_field_text(buf, x, y, width, text, scroll_offset, |at, end| {
+        let is_selected = selection_range.is_some_and(|(s, e)| at >= s && at < e);
+        let is_cursor = is_focused && (at..end).contains(&cursor_pos);
+        if is_cursor || (is_selected && is_focused) {
             selection_style
         } else {
             text_style
-        };
-
-        buf.set_string(screen_x, y, c.to_string(), style);
-        screen_x += *cw as u16;
-    }
+        }
+    });
+    let screen_x = x + drawn;
+    let field_end = x + width;
 
     // Render cursor at end if cursor is past last char
     if is_focused && cursor_pos >= total_chars && screen_x < field_end {

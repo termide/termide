@@ -6,6 +6,7 @@
 //! these. They hold no state, so they live here beside the other shared
 //! helper modules rather than once per panel.
 
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 /// The `#fragment` part of a URL, if present and non-empty.
@@ -77,20 +78,73 @@ pub fn find_in_line(line: &str, needle: &str, ci: bool) -> Vec<usize> {
     out
 }
 
-/// Display width of `c` in an input field: a character with no width of its
-/// own still takes a cell.
-fn field_char_width(c: char) -> usize {
-    UnicodeWidthChar::width(c).unwrap_or(1)
+/// The grapheme clusters of an input field's `text`, each with the index of
+/// its first character and the cells it takes: a letter and its combining
+/// accents (a name in NFD, as macOS gives it) are one cell, a wide character
+/// two, and a cluster with no width of its own still takes one. Positions in
+/// a field are character indices, and the field keeps them at the start of a
+/// cluster, so the cursor never sits inside one.
+pub fn field_clusters(text: &str) -> impl Iterator<Item = (usize, &str, usize)> {
+    let mut start = 0;
+    text.graphemes(true).map(move |g| {
+        let at = start;
+        start += g.chars().count();
+        (at, g, crate::grapheme_utils::grapheme_display_width(g))
+    })
 }
 
-/// The character of `text` under display column `x`, counting wide
-/// characters as two; past the end it is the text length.
+/// The start of the cluster of `text` before character `pos`: where Left
+/// and Backspace go. 0 at the start.
+pub fn cluster_start_before(text: &str, pos: usize) -> usize {
+    field_clusters(text)
+        .map(|(at, _, _)| at)
+        .take_while(|&at| at < pos)
+        .last()
+        .unwrap_or(0)
+}
+
+/// The start of the cluster of `text` after the one at character `pos`:
+/// where Right and Delete go. The text length at the end.
+pub fn cluster_end_after(text: &str, pos: usize) -> usize {
+    field_clusters(text)
+        .map(|(at, g, _)| at + g.chars().count())
+        .find(|&end| end > pos)
+        .unwrap_or_else(|| text.chars().count())
+}
+
+/// Character `pos` of `text` moved back to the start of its cluster; the
+/// end of the text (or past it) is the text length.
+pub fn cluster_floor(text: &str, pos: usize) -> usize {
+    let len = text.chars().count();
+    if pos >= len {
+        return len;
+    }
+    field_clusters(text)
+        .map(|(at, _, _)| at)
+        .take_while(|&at| at <= pos)
+        .last()
+        .unwrap_or(0)
+}
+
+/// Character `pos` of `text` moved on to the end of its cluster, unless it
+/// already starts one.
+pub fn cluster_ceil(text: &str, pos: usize) -> usize {
+    let floor = cluster_floor(text, pos);
+    if floor == pos {
+        pos
+    } else {
+        cluster_end_after(text, floor)
+    }
+}
+
+/// The character of `text` under display column `x` — the start of the
+/// cluster drawn there, counting wide characters as two; past the end it is
+/// the text length.
 pub fn char_at_x(text: &str, x: usize) -> usize {
     let mut width = 0;
-    for (i, c) in text.chars().enumerate() {
-        let cw = field_char_width(c);
+    for (at, _, cw) in field_clusters(text) {
         if width + cw > x {
-            return i;
+            return at;
         }
         width += cw;
     }
@@ -99,20 +153,24 @@ pub fn char_at_x(text: &str, x: usize) -> usize {
 
 /// How many characters of `text` a field `width` cells wide scrolls past to
 /// keep the cursor at `cursor_pos` in view: none while it fits, else just
-/// enough to put it at the right edge.
+/// enough to put it at the right edge. Always the start of a cluster.
 pub fn input_scroll_offset(text: &str, cursor_pos: usize, width: usize) -> usize {
-    let widths: Vec<usize> = text.chars().map(field_char_width).collect();
-    if widths.iter().sum::<usize>() < width {
+    let clusters: Vec<(usize, usize)> = field_clusters(text).map(|(at, _, w)| (at, w)).collect();
+    if clusters.iter().map(|(_, w)| w).sum::<usize>() < width {
         return 0;
     }
-    let cursor_x: usize = widths.iter().take(cursor_pos).sum();
+    let cursor_x: usize = clusters
+        .iter()
+        .take_while(|(at, _)| *at < cursor_pos)
+        .map(|(_, w)| w)
+        .sum();
     if cursor_x < width {
         return 0;
     }
     let mut skipped = 0;
-    for (index, cw) in widths.iter().enumerate() {
+    for (at, cw) in clusters {
         if cursor_x - skipped < width {
-            return index;
+            return at;
         }
         skipped += cw;
     }
@@ -183,6 +241,21 @@ mod tests {
         assert_eq!(char_at_x("ab世c", 4), 3);
     }
     use super::*;
+
+    #[test]
+    fn field_positions_keep_to_cluster_starts() {
+        // c a f e+◌́ . : the accent is char 4, inside the cluster at 3.
+        let text = "cafe\u{301}.";
+        assert_eq!(cluster_start_before(text, 5), 3);
+        assert_eq!(cluster_end_after(text, 3), 5);
+        assert_eq!(cluster_floor(text, 4), 3);
+        assert_eq!(cluster_ceil(text, 4), 5);
+        assert_eq!(cluster_floor(text, 6), 6);
+        assert_eq!(char_at_x(text, 4), 5);
+        // Scrolled to show the end in 2 cells: never from inside é.
+        assert_eq!(input_scroll_offset(text, 6, 2), 5);
+        assert_eq!(input_scroll_offset(text, 6, 3), 3);
+    }
 
     #[test]
     fn find_in_line_case_insensitive() {

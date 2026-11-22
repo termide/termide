@@ -62,15 +62,23 @@ impl App {
 
     /// Lightweight check for live editing — only compare edit_version, debounced 1s.
     pub(in crate::app) fn check_outline_live_edit(&mut self) {
-        let needs_repopulate = self
+        let (needs_repopulate, stale) = self
             .layout_manager
             .panel_groups
             .iter_mut()
             .flat_map(|g| g.panels_mut())
             .find_map(|p| p.downcast_mut::<termide_panel_outline::OutlinePanel>())
-            .is_some_and(|outline| outline.needs_repopulate());
+            .map_or((false, false), |outline| {
+                (outline.needs_repopulate(), outline.is_stale())
+            });
         if needs_repopulate {
             self.populate_outline_from_any_editor();
+            return;
+        }
+        // A collapsed outline does not parse: leave the edits unseen, and
+        // the version where it is, so they are taken in once it is
+        // expanded (which repopulates it) instead of being marked done.
+        if stale {
             return;
         }
 
@@ -173,10 +181,21 @@ impl App {
             self.push_to_outline(path, &content, language.as_deref(), Some(cursor_line));
             return;
         }
+        // Else the editor of the file it tracks, as when it is expanded
+        // again with focus on itself, then any editor.
+        let tracked = self.find_outline_tracked_file();
+        let tracked_open = tracked.as_deref().is_some_and(|tracked| {
+            self.layout_manager
+                .iter_all_panels_mut()
+                .any(|p| p.as_editor().and_then(|e| e.file_path()) == Some(tracked))
+        });
         let editor_info: Option<(Option<std::path::PathBuf>, String, Option<String>)> = {
             let mut info = None;
             for panel in self.layout_manager.iter_all_panels_mut() {
                 if let Some(editor) = panel.as_editor_mut() {
+                    if tracked_open && editor.file_path() != tracked.as_deref() {
+                        continue;
+                    }
                     let path = editor.file_path().map(|p| p.to_path_buf());
                     let content = editor.content_string();
                     let language = path
@@ -262,7 +281,11 @@ impl App {
         'outer: for group in &mut self.layout_manager.panel_groups {
             for panel in group.panels_mut() {
                 if let Some(outline) = panel.downcast_mut::<termide_panel_outline::OutlinePanel>() {
-                    outline.update_content(path, content, language);
+                    if !outline.update_content(path, content, language) {
+                        // Collapsed: its symbols are those of an older
+                        // text, not for the editor to jump by.
+                        return;
+                    }
                     if let Some(line) = cursor_line {
                         outline.sync_cursor_line(line);
                     }

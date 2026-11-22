@@ -1,0 +1,1 @@
+- **A plugin that stops reading no longer freezes termide.** termide wrote events to a plugin's stdin on its own UI thread, so a plugin that stopped reading froze it once the pipe filled. Messages now go through a queue of their own, in order; when it is full, events to that plugin are dropped and requests to it fail at once.

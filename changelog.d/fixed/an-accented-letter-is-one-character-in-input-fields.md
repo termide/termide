@@ -1,0 +1,1 @@
+- **An accented letter is one character in input fields.** A name spelled with a combining accent, as macOS file names are, showed a blank cell after the letter in rename, find, path and other single-line fields; the cursor and clicks landed one cell off, and Backspace removed only the accent. Fields now draw, move, select and delete by whole letter.

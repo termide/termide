@@ -259,6 +259,28 @@ fn a_step_resumes_and_a_late_answer_is_dropped() {
 }
 
 #[test]
+fn another_thread_continuing_keeps_the_stop() {
+    let mut h = Harness::stopped_at_breakpoint();
+    h.event(
+        "continued",
+        json!({ "threadId": 2, "allThreadsContinued": false }),
+    );
+    assert!(h.session.is_stopped(), "thread 1 is still stopped");
+    assert_eq!(h.session.frames.len(), 2);
+    // The stopped thread itself continuing resumes.
+    h.event(
+        "continued",
+        json!({ "threadId": 1, "allThreadsContinued": false }),
+    );
+    assert_eq!(h.session.status, Status::Running);
+
+    // All threads, said or left unsaid, resume whichever thread it names.
+    let mut h = Harness::stopped_at_breakpoint();
+    h.event("continued", json!({ "threadId": 2 }));
+    assert_eq!(h.session.status, Status::Running);
+}
+
+#[test]
 fn another_frame_shows_its_own_variables() {
     let mut h = Harness::stopped_at_breakpoint();
     h.session.select_frame(1);

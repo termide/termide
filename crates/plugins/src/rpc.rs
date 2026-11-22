@@ -1,7 +1,9 @@
 //! JSON-RPC 2.0 over a pair of streams, one message per line, in both
 //! directions: either side may send requests and notifications.
 //!
-//! Blocking I/O on a reader thread, as the MCP client does. Replies to our
+//! Blocking I/O on a reader thread, as the MCP client does, and on a writer
+//! thread fed by a bounded queue, so a sender never waits on the pipe: a
+//! plugin that stops reading has its messages refused. Replies to our
 //! requests are handed to the waiting caller over a channel; the other
 //! side's requests and notifications go to the `on_incoming` callback, and a
 //! request is answered later with [`Peer::respond`], from any thread, so the
@@ -9,8 +11,8 @@
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -61,12 +63,39 @@ impl RpcError {
     }
 }
 
-type Pending = Arc<Mutex<HashMap<u64, Sender<Result<Value, String>>>>>;
-type SharedWriter = Arc<Mutex<Box<dyn Write + Send>>>;
+/// Requests waiting for their answer, and whether the connection ended: a
+/// request made after that fails at once instead of waiting it out.
+#[derive(Default)]
+struct Waiting {
+    replies: HashMap<u64, Sender<Result<Value, String>>>,
+    closed: bool,
+}
+
+impl Waiting {
+    /// The connection is gone: every waiting request learns it now.
+    fn close(&mut self) {
+        self.closed = true;
+        self.replies.clear();
+    }
+}
+
+type Pending = Arc<Mutex<Waiting>>;
+
+/// How many messages may wait for the writer thread. Past it the other side
+/// is taken to have stopped reading: a message is refused rather than left
+/// to block the caller, which is often the UI thread.
+const OUTBOX_CAPACITY: usize = 1024;
 
 /// One end of the connection.
+///
+/// Messages are written by a thread of its own, in the order they were
+/// sent, so a peer that stops reading never blocks a sender: once the
+/// bounded outbox is full, sending fails at once.
 pub struct Peer {
-    writer: SharedWriter,
+    outbox: SyncSender<String>,
+    /// Set while the outbox is full, so the overflow is logged once per
+    /// stall rather than once per message.
+    overflowing: AtomicBool,
     pending: Pending,
     next_id: AtomicU64,
 }
@@ -81,14 +110,18 @@ impl Peer {
         on_incoming: impl Fn(Incoming) + Send + 'static,
         on_closed: impl FnOnce() + Send + 'static,
     ) -> Self {
-        let pending: Pending = Arc::new(Mutex::new(HashMap::new()));
+        let pending: Pending = Arc::default();
         let reader_pending = Arc::clone(&pending);
         std::thread::spawn(move || {
             read_loop(reader, &reader_pending, &on_incoming);
             on_closed();
         });
+        let (outbox, queued) = mpsc::sync_channel(OUTBOX_CAPACITY);
+        let writer_pending = Arc::clone(&pending);
+        std::thread::spawn(move || write_loop(writer, &queued, &writer_pending));
         Self {
-            writer: Arc::new(Mutex::new(Box::new(writer))),
+            outbox,
+            overflowing: AtomicBool::new(false),
             pending,
             next_id: AtomicU64::new(1),
         }
@@ -110,13 +143,19 @@ impl Peer {
     ) -> Result<Value, String> {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel();
-        self.pending_map().insert(id, tx);
+        {
+            let mut pending = self.pending_map();
+            if pending.closed {
+                return Err(format!("{method}: the plugin closed the connection"));
+            }
+            pending.replies.insert(id, tx);
+        }
         let sent = self.write(&json!({
             "jsonrpc": "2.0", "id": id, "method": method, "params": params
         }));
         let outcome = sent.and_then(|()| wait(&rx, timeout, cancelled));
         if let Err(error) = &outcome {
-            self.pending_map().remove(&id);
+            self.pending_map().replies.remove(&id);
             // Given up on, not failed: the plugin may stop the work.
             if error.starts_with(ABORTED) || error.starts_with(NO_REPLY) {
                 let _ = self.notify(CANCEL_REQUEST, json!({ "id": id }));
@@ -150,20 +189,48 @@ impl Peer {
         self.write(&message)
     }
 
-    fn pending_map(
-        &self,
-    ) -> std::sync::MutexGuard<'_, HashMap<u64, Sender<Result<Value, String>>>> {
+    fn pending_map(&self) -> std::sync::MutexGuard<'_, Waiting> {
         self.pending.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    /// Queue `message` for the writer thread, never waiting for it.
     fn write(&self, message: &Value) -> Result<(), String> {
         let mut line = message.to_string();
         line.push('\n');
-        let mut writer = self.writer.lock().unwrap_or_else(PoisonError::into_inner);
-        writer
+        match self.outbox.try_send(line) {
+            Ok(()) => {
+                self.overflowing.store(false, Ordering::Relaxed);
+                Ok(())
+            }
+            Err(TrySendError::Full(_)) => {
+                if !self.overflowing.swap(true, Ordering::Relaxed) {
+                    log::warn!("plugin: not reading its input; dropping messages to it");
+                }
+                Err("the plugin is not reading its input".to_string())
+            }
+            Err(TrySendError::Disconnected(_)) => {
+                Err("cannot write to the plugin: the connection is closed".to_string())
+            }
+        }
+    }
+}
+
+/// Write each queued line in turn, until the peer is dropped or a write
+/// fails. A failed write ends the connection: the waiting requests fail,
+/// and later sends see the outbox disconnected.
+fn write_loop(mut writer: impl Write, queued: &Receiver<String>, pending: &Pending) {
+    for line in queued {
+        if let Err(error) = writer
             .write_all(line.as_bytes())
             .and_then(|()| writer.flush())
-            .map_err(|error| format!("cannot write to the plugin: {error}"))
+        {
+            log::debug!("plugin: cannot write to it ({error})");
+            pending
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .close();
+            break;
+        }
     }
 }
 
@@ -229,6 +296,7 @@ fn read_loop(reader: impl Read, pending: &Pending, on_incoming: &dyn Fn(Incoming
                     pending
                         .lock()
                         .unwrap_or_else(PoisonError::into_inner)
+                        .replies
                         .remove(&id)
                 });
                 if let Some(tx) = waiting {
@@ -238,11 +306,10 @@ fn read_loop(reader: impl Read, pending: &Pending, on_incoming: &dyn Fn(Incoming
             (None, None) => {}
         }
     }
-    // The other side is gone: every waiting request learns it now.
     pending
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .clear();
+        .close();
 }
 
 #[cfg(test)]
@@ -342,6 +409,68 @@ mod tests {
         let error = waiter.join().unwrap().unwrap_err();
         assert!(error.contains("closed"), "{error}");
         closed.recv_timeout(SECOND).unwrap();
+    }
+
+    /// A writer that never returns, as a pipe to a plugin that stopped
+    /// reading once its buffer is full.
+    struct Stuck(Mutex<Receiver<()>>);
+    impl Write for Stuck {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            let _ = self.0.lock().unwrap().recv();
+            Err(std::io::ErrorKind::BrokenPipe.into())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_peer_that_stops_reading_never_blocks_the_sender() {
+        let (a_in, _b_out) = pipe().unwrap();
+        let (release, stuck) = mpsc::channel();
+        let a = Peer::new(a_in, Stuck(Mutex::new(stuck)), |_| {}, || {});
+        let started = Instant::now();
+        let mut refused = 0;
+        for n in 0..OUTBOX_CAPACITY + 10 {
+            if a.notify("event", json!({ "n": n })).is_err() {
+                refused += 1;
+            }
+        }
+        // The writer thread holds one message, the outbox the rest.
+        assert!(refused >= 9, "only {refused} refused");
+        let error = a.request("x", json!({}), SECOND * 5, &never).unwrap_err();
+        assert!(error.contains("not reading"), "{error}");
+        assert!(started.elapsed() < SECOND, "the sender waited");
+        drop(release);
+    }
+
+    #[test]
+    fn a_request_after_the_connection_closed_fails_at_once() {
+        let (a_in, b_out) = pipe().unwrap();
+        let (b_in, a_out) = pipe().unwrap();
+        let (closed_tx, closed) = mpsc::channel();
+        let a = Peer::new(a_in, a_out, |_| {}, move || closed_tx.send(()).unwrap());
+        drop((b_out, b_in));
+        closed.recv_timeout(SECOND).unwrap();
+        let started = Instant::now();
+        let error = a.request("x", json!({}), SECOND * 5, &never).unwrap_err();
+        assert!(error.contains("closed"), "{error}");
+        assert!(started.elapsed() < SECOND, "the request waited");
+    }
+
+    #[test]
+    fn queued_messages_keep_their_order() {
+        let (a_in, _b_out) = pipe().unwrap();
+        let (b_in, a_out) = pipe().unwrap();
+        let a = Peer::new(a_in, a_out, |_| {}, || {});
+        for n in 0..100 {
+            a.notify("event", json!({ "n": n })).unwrap();
+        }
+        let mut lines = BufReader::new(b_in).lines();
+        for n in 0..100 {
+            let message: Value = serde_json::from_str(&lines.next().unwrap().unwrap()).unwrap();
+            assert_eq!(message["params"]["n"], n);
+        }
     }
 
     #[test]

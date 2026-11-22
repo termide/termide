@@ -446,7 +446,8 @@ root_markers = ["package.json", "tsconfig.json"]
 未提及的内置服务器仍然有效。针对内置语言的条目只修改其中设置的字段，因此仅写
 `command = "/opt/rust-analyzer"` 会保留内置的 `root_markers`。针对其他语言的条目会为
 该语言新增一个服务器。键名是 Termide 为文件识别出的语言标识，例如 `.tsx` 对应
-`typescriptreact`。
+`typescriptreact`。在 `[lsp.servers]` 中写 `<语言> = false` 会删除一个服务器（包括内置
+服务器）；在 **设置 → LSP** 中删除服务器时写入的就是它。
 
 服务器在文件上方最近的、含有其某个 `root_markers` 的目录中启动，每种语言、每个根目录
 运行一个服务器。对于 Rust 和 Go，该目录会扩大到工具链为包所归属的工作区：crate 作为成员
