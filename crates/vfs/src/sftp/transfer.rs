@@ -315,10 +315,12 @@ fn remote_sibling(remote: &Path, tag: &str) -> std::path::PathBuf {
 /// Upload `local` to `remote`. A regular file there, or none, is replaced
 /// only once the new content is whole on the server: it goes to a hidden
 /// sibling first, then takes the old file's place, so a cancelled or cut
-/// upload leaves the old file as it was. SFTP v3 renames only onto a free
-/// name, so the old file steps aside for the moment of the swap and comes
-/// back if the swap fails. A symlink at `remote` is written through, as
-/// before, rather than replaced by a file.
+/// upload leaves the old file as it was. A server offering
+/// `posix-rename@openssh.com` (OpenSSH does) swaps them in one step. SFTP
+/// v3 itself renames only onto a free name, so elsewhere the old file
+/// steps aside for the moment of the swap and comes back if the swap
+/// fails. A symlink at `remote` is written through, as before, rather than
+/// replaced by a file.
 pub(super) fn worker_upload_file(
     handle: &SftpHandle,
     local: &Path,
@@ -400,6 +402,19 @@ pub(super) fn worker_upload_file(
                     remote.display()
                 ),
             });
+        }
+    }
+    if existing.is_some() {
+        // One step where the server offers it: the name holds the old file
+        // until it holds the new one.
+        let (from, to) = (part.clone(), remote.to_path_buf());
+        match handle.dispatch(move |reply| SftpCommand::RenameOver { from, to, reply }) {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(e) => {
+                let _ = remove(&part);
+                return Err(e);
+            }
         }
     }
     let aside = existing
@@ -590,36 +605,62 @@ mod tests {
         assert!(name.starts_with(".index.html.termide-part."), "{name}");
     }
 
-    /// OpenSSH's sftp-server where this system has one, with an actor
-    /// serving it, as a connection would set up.
-    fn local_sftp_server() -> Option<SftpHandle> {
-        let server = [
+    fn sftp_server_path() -> Option<&'static str> {
+        [
             "/usr/libexec/sftp-server",
             "/usr/lib/openssh/sftp-server",
             "/usr/lib/ssh/sftp-server",
             "/usr/libexec/openssh/sftp-server",
         ]
         .into_iter()
-        .find(|p| Path::new(p).exists())?;
+        .find(|p| Path::new(p).exists())
+    }
+
+    /// A fresh sftp-server's stdio. The child lives as long as the
+    /// session's runtime task.
+    fn spawn_sftp_server(
+        server: &str,
+    ) -> Option<impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static> {
+        let mut child = tokio::process::Command::new(server)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .ok()?;
+        let stream = tokio::io::join(child.stdout.take()?, child.stdin.take()?);
+        tokio::spawn(async move {
+            let _ = child.wait().await;
+        });
+        Some(stream)
+    }
+
+    /// OpenSSH's sftp-server where this system has one, with an actor
+    /// serving it, as a connection would set up: the second session for
+    /// `posix-rename@openssh.com` is another sftp-server.
+    fn local_sftp_server() -> Option<SftpHandle> {
+        local_sftp_server_with(true)
+    }
+
+    /// As `local_sftp_server`, without the second session when
+    /// `posix_rename` is false: as a server that does not offer it.
+    fn local_sftp_server_with(posix_rename: bool) -> Option<SftpHandle> {
+        let server = sftp_server_path()?;
         let rt = super::super::try_runtime().ok()?;
         let (tx, rx) = tokio::sync::mpsc::channel(16);
         let session = rt.block_on(async {
-            let mut child = tokio::process::Command::new(server)
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .kill_on_drop(true)
-                .spawn()
-                .ok()?;
-            let stream = tokio::io::join(child.stdout.take()?, child.stdin.take()?);
-            let session = russh_sftp::client::SftpSession::new(stream).await.ok()?;
-            // The child lives as long as the session's runtime task.
-            tokio::spawn(async move {
-                let _ = child.wait().await;
-            });
-            Some(session)
+            let stream = spawn_sftp_server(server)?;
+            russh_sftp::client::SftpSession::new(stream).await.ok()
         })?;
+        let opener = posix_rename.then(|| -> super::super::actor::RawSessionOpener {
+            Box::new(move || {
+                Box::pin(async move {
+                    let stream = spawn_sftp_server(server)?;
+                    Some(russh_sftp::client::RawSftpSession::new(stream))
+                })
+            })
+        });
         let inner = Arc::new(std::sync::Mutex::new(super::super::SftpInner::new()));
-        rt.spawn(super::super::actor::sftp_actor(session, rx, inner));
+        rt.spawn(super::super::actor::sftp_actor(session, rx, inner, opener));
         Some(SftpHandle { cmd_tx: tx })
     }
 
@@ -642,13 +683,20 @@ mod tests {
         )
     }
 
+    /// In one step with `posix-rename@openssh.com`, and in two without.
     #[test]
     fn an_upload_replaces_the_file_whole_and_keeps_its_mode() {
+        for posix_rename in [true, false] {
+            let Some(handle) = local_sftp_server_with(posix_rename) else {
+                eprintln!("no sftp-server here; skipped");
+                return;
+            };
+            upload_replaces_whole_and_keeps_mode(&handle);
+        }
+    }
+
+    fn upload_replaces_whole_and_keeps_mode(handle: &SftpHandle) {
         use std::os::unix::fs::PermissionsExt as _;
-        let Some(handle) = local_sftp_server() else {
-            eprintln!("no sftp-server here; skipped");
-            return;
-        };
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().to_path_buf();
         let remote = dir.join("run.sh");
@@ -657,7 +705,7 @@ mod tests {
         let local = dir.join("local.sh");
         std::fs::write(&local, b"new").unwrap();
 
-        upload(&handle, &local, &remote).unwrap();
+        upload(handle, &local, &remote).unwrap();
         assert_eq!(std::fs::read(&remote).unwrap(), b"new");
         let mode = std::fs::metadata(&remote).unwrap().permissions().mode();
         assert_eq!(mode & 0o777, 0o750);
@@ -670,14 +718,14 @@ mod tests {
 
         // A new name is created; a symlink is written through.
         let fresh = dir.join("fresh");
-        upload(&handle, &local, &fresh).unwrap();
+        upload(handle, &local, &fresh).unwrap();
         assert_eq!(std::fs::read(&fresh).unwrap(), b"new");
         let target = dir.join("target");
         std::fs::write(&target, b"old").unwrap();
         let link = dir.join("link");
         std::os::unix::fs::symlink(&target, &link).unwrap();
         std::fs::write(&local, b"through").unwrap();
-        upload(&handle, &local, &link).unwrap();
+        upload(handle, &local, &link).unwrap();
         assert!(std::fs::symlink_metadata(&link)
             .unwrap()
             .file_type()
@@ -758,6 +806,85 @@ mod tests {
         assert!(matches!(result, Err(VfsError::Cancelled)), "{result:?}");
         assert_eq!(std::fs::read(&remote).unwrap(), b"old");
         assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2);
+    }
+
+    fn rename_over(handle: &SftpHandle, from: &Path, to: &Path) -> VfsResult<bool> {
+        let (from, to) = (from.to_path_buf(), to.to_path_buf());
+        handle.dispatch(move |reply| SftpCommand::RenameOver { from, to, reply })
+    }
+
+    /// OpenSSH offers `posix-rename@openssh.com`: the new file takes the
+    /// name in one step. Without the extension nothing is done.
+    #[test]
+    fn a_rename_over_replaces_in_one_step_where_offered() {
+        let (Some(offered), Some(plain)) = (local_sftp_server(), local_sftp_server_with(false))
+        else {
+            eprintln!("no sftp-server here; skipped");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let (part, target) = (tmp.path().join("part"), tmp.path().join("target"));
+        std::fs::write(&part, b"new").unwrap();
+        std::fs::write(&target, b"old").unwrap();
+
+        assert!(!rename_over(&plain, &part, &target).unwrap());
+        assert_eq!(std::fs::read(&target).unwrap(), b"old");
+        assert!(part.exists());
+
+        assert!(rename_over(&offered, &part, &target).unwrap());
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+        assert!(!part.exists());
+
+        // A failed rename is an error, not a fallback.
+        let missing = tmp.path().join("missing");
+        assert!(rename_over(&offered, &missing, &target).is_err());
+        assert_eq!(std::fs::read(&target).unwrap(), b"new");
+    }
+
+    fn create_new(handle: &SftpHandle, path: &Path) -> VfsResult<()> {
+        let path = path.to_path_buf();
+        handle.dispatch(move |reply| SftpCommand::CreateNew { path, reply })
+    }
+
+    /// "New file" on a taken name is refused by the server and reported as
+    /// such; what has the name — a file, a dangling link — stays.
+    #[test]
+    fn an_exclusive_create_refuses_a_taken_name() {
+        let Some(handle) = local_sftp_server_with(false) else {
+            eprintln!("no sftp-server here; skipped");
+            return;
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("notes");
+        std::fs::write(&file, b"keep me").unwrap();
+        let taken = create_new(&handle, &file);
+        assert!(
+            matches!(taken, Err(VfsError::AlreadyExists { .. })),
+            "{taken:?}"
+        );
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep me");
+
+        let link = tmp.path().join("dangling");
+        let target = tmp.path().join("target");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let taken = create_new(&handle, &link);
+        assert!(
+            matches!(taken, Err(VfsError::AlreadyExists { .. })),
+            "{taken:?}"
+        );
+        assert!(!target.exists());
+
+        let fresh = tmp.path().join("fresh");
+        create_new(&handle, &fresh).unwrap();
+        assert_eq!(std::fs::read(&fresh).unwrap(), b"");
+
+        // A missing directory is not "already exists".
+        let nowhere = tmp.path().join("no/such/dir");
+        let missing = create_new(&handle, &nowhere);
+        assert!(
+            !matches!(missing, Err(VfsError::AlreadyExists { .. }) | Ok(())),
+            "{missing:?}"
+        );
     }
 
     #[test]

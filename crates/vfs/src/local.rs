@@ -492,6 +492,32 @@ impl VfsProvider for LocalFileSystem {
         VfsOperation::new(rx)
     }
 
+    fn create_file(&self, path: &VfsPath) -> VfsOperation<()> {
+        let local_path = match Self::to_local_path(path) {
+            Ok(p) => p.to_path_buf(),
+            Err(e) => return VfsOperation::error(e),
+        };
+
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            // `O_EXCL`: neither truncates nor follows a final symlink.
+            let result = match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&local_path)
+            {
+                Ok(_) => Ok(()),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    Err(VfsError::AlreadyExists { path: local_path })
+                }
+                Err(e) => Err(map_io_error(e, local_path)),
+            };
+            let _ = tx.send(result);
+        });
+
+        VfsOperation::new(rx)
+    }
+
     fn delete(&self, path: &VfsPath) -> VfsOperation<()> {
         let local_path = match Self::to_local_path(path) {
             Ok(p) => p.to_path_buf(),
@@ -772,6 +798,34 @@ mod tests {
         // Read
         let read_content = provider.read_file(&file_path).recv().unwrap();
         assert_eq!(read_content, content);
+    }
+
+    /// An exclusive create refuses a taken name — a dangling link too — and
+    /// leaves it as it was.
+    #[test]
+    fn an_exclusive_create_refuses_a_taken_name() {
+        let (provider, temp_dir) = create_test_provider();
+        let file = temp_dir.path().join("notes.txt");
+        fs::write(&file, "keep me").unwrap();
+        let taken = provider.create_file(&VfsPath::local(&file)).recv();
+        assert!(matches!(taken, Err(VfsError::AlreadyExists { .. })));
+        assert_eq!(fs::read_to_string(&file).unwrap(), "keep me");
+
+        #[cfg(unix)]
+        {
+            let link = temp_dir.path().join("dangling");
+            std::os::unix::fs::symlink(temp_dir.path().join("target"), &link).unwrap();
+            let taken = provider.create_file(&VfsPath::local(&link)).recv();
+            assert!(matches!(taken, Err(VfsError::AlreadyExists { .. })));
+            assert!(!temp_dir.path().join("target").exists());
+        }
+
+        let fresh = temp_dir.path().join("fresh.txt");
+        provider
+            .create_file(&VfsPath::local(&fresh))
+            .recv()
+            .unwrap();
+        assert_eq!(fs::read(&fresh).unwrap(), b"");
     }
 
     #[test]

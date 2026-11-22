@@ -511,6 +511,23 @@ impl Mount {
         }
     }
 
+    /// Create `inner` empty, a GUARDED CREATE: the server answers EXIST
+    /// for a name already taken and leaves what has it alone.
+    async fn create_new(&mut self, inner: &str) -> VfsResult<()> {
+        let (dir, name) = self.resolve_parent(inner).await?;
+        let args = CREATE3args {
+            where_: diropargs3 {
+                dir,
+                name: filename3::from(name.as_bytes()),
+            },
+            how: createhow3::GUARDED(sattr3 {
+                mode: Nfs3Option::Some(FILE_MODE),
+                ..Default::default()
+            }),
+        };
+        call!(self, create(&args), inner).map(|_| ())
+    }
+
     /// Write `data` into `fh` at `offset`, unstably, in as many WRITEs as
     /// the server takes; the write verifier of the last.
     async fn write_chunk(
@@ -974,6 +991,12 @@ impl Server {
         self.settle(&export, result)
     }
 
+    async fn create_new(&mut self, path: &Path) -> VfsResult<()> {
+        let (export, inner) = self.on_export(path).await?;
+        let result = self.mount_of(&export).create_new(&inner).await;
+        self.settle(&export, result)
+    }
+
     /// Run `f` on the mount `export` if it is still there; drop it when its
     /// connection is gone.
     async fn on_mount<T>(
@@ -1293,6 +1316,11 @@ impl VfsProvider for NfsProvider {
         self.run(move |server| Box::pin(async move { server.write_all(&path, &data).await }))
     }
 
+    fn create_file(&self, path: &VfsPath) -> VfsOperation<()> {
+        let path = path.path.clone();
+        self.run(move |server| Box::pin(async move { server.create_new(&path).await }))
+    }
+
     fn delete(&self, path: &VfsPath) -> VfsOperation<()> {
         let path = path.path.clone();
         self.run(move |server| Box::pin(async move { server.delete(&path, false).await }))
@@ -1502,6 +1530,23 @@ mod tests {
             nfs.read_file(&at("/data/films/big.bin")).recv().unwrap(),
             b"short"
         );
+
+        // An exclusive create refuses a taken name and leaves it alone.
+        let taken = nfs.create_file(&at("/data/films/a.txt")).recv();
+        assert!(
+            matches!(taken, Err(VfsError::AlreadyExists { .. })),
+            "{taken:?}"
+        );
+        assert_eq!(
+            nfs.read_file(&at("/data/films/a.txt")).recv().unwrap(),
+            b"hello"
+        );
+        nfs.create_file(&at("/data/films/new.txt")).recv().unwrap();
+        assert_eq!(
+            nfs.read_file(&at("/data/films/new.txt")).recv().unwrap(),
+            b""
+        );
+        nfs.delete(&at("/data/films/new.txt")).recv().unwrap();
 
         nfs.create_dir_all(&at("/data/x/y")).recv().unwrap();
         nfs.rename(&at("/data/films/big.bin"), &at("/data/x/y/moved.bin"))

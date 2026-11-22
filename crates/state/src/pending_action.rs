@@ -283,6 +283,10 @@ pub enum PendingAction {
     GoToPath { current_directory: PathBuf },
     /// VFS information message (connection cancelled, error, etc.)
     VfsMessage,
+    /// A file manager's remote session died: reconnect, open local home or
+    /// close the panel. `ticket` names the panel that asked, which may no
+    /// longer have the focus when a queued dialog is answered.
+    ConnectionLost { ticket: u64 },
     /// Handle cancelled copy/move operation cleanup
     CancelCopyCleanup {
         /// Path to the partial file/directory being copied

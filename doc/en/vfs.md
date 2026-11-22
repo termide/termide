@@ -276,13 +276,20 @@ panel. The transfer registers as an operation in the
   [Operations panel](operations.md).
 - A file that SFTP replaces, in either direction, is swapped for the
   new one only once it has arrived whole, and keeps its permission
-  bits; a cancelled or broken transfer leaves it as it was. A symlink
+  bits; a cancelled or broken transfer leaves it as it was. On a server
+  that offers `posix-rename@openssh.com` (OpenSSH does) an upload swaps
+  the files in one step, so the name always holds one of them; elsewhere
+  the old file steps aside for the moment of the swap. A symlink
   on the server is written through rather than replaced. Downloads
   from SMB, NFS and FTP replace a local file the same way; an FTP
   upload writes the server's file in place, so a cancelled one leaves
   what got there.
 - A directory download stops at an entry name the server lists with a
   path in it (`../x`, `a/b`), rather than writing outside the folder.
+- A new file on SFTP, SMB or NFS is created by the server only while
+  the name is free, so a name another client takes at the same moment
+  is refused too. FTP cannot create that way: there the name is looked
+  up first.
 
 A move within one connection is renamed on the server, not downloaded
 and uploaded again; on SMB within one share and on NFS within one
@@ -304,6 +311,8 @@ operation fails and the panel shows a recovery dialog with three choices:
 (local)** (drop the connection and switch the panel to your local home
 directory), or **Close panel**. Pressing `Esc` dismisses the dialog and
 leaves the panel on its last listing. The panel never loops on the error.
+A dialog that waited behind another one answers the panel that raised it,
+even when another panel has the focus by then.
 
 A connection that is still being opened after `connection_timeout_secs`
 seconds under `[vfs]` (default `60`; **VFS → Connection timeout (secs)**

@@ -9,12 +9,12 @@ use anyhow::{Context, Result};
 use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use ignore::WalkBuilder;
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, Debouncer};
+use notify_debouncer_mini::{new_debouncer_opt, Config as DebounceConfig, Debouncer};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{channel, Receiver};
+use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -413,13 +413,78 @@ pub enum WatchTarget {
     Dir(PathBuf),
 }
 
+/// The OS watcher, with its rescan notices turned into errors.
+///
+/// An inotify queue overflow or an FSEvents "must scan subdirs" arrives as
+/// an `Ok` event flagged [`notify::event::Flag::Rescan`], which
+/// `notify-debouncer-mini` would fold away as a path change (or, without a
+/// path, drop); an error it passes straight to the callback, which raises
+/// [`WatchEvent::Rescan`].
+#[derive(Debug)]
+struct RescanAware<W>(W);
+
+/// Turn a rescan notice into the error the debouncer passes through.
+fn surface_rescan(event: notify::Result<notify::Event>) -> notify::Result<notify::Event> {
+    match event {
+        Ok(event) if event.need_rescan() => Err(notify::Error::generic("rescan needed")),
+        other => other,
+    }
+}
+
+fn debounce_config() -> DebounceConfig {
+    DebounceConfig::default().with_timeout(Duration::from_millis(FS_DEBOUNCE_MS))
+}
+
+/// The debouncer callback: changed paths go to `paths`, an error sets
+/// `rescan`.
+fn debounced_handler(
+    paths: Sender<PathBuf>,
+    rescan: Arc<AtomicBool>,
+) -> impl FnMut(notify_debouncer_mini::DebounceEventResult) + Send + 'static {
+    move |result| match result {
+        Ok(events) => {
+            for event in events {
+                let _ = paths.send(event.path);
+            }
+        }
+        // An error carries no path, and the events it stands for may be
+        // gone: have the listeners look again.
+        Err(_) => rescan.store(true, Ordering::Relaxed),
+    }
+}
+
+impl<W: notify::Watcher> notify::Watcher for RescanAware<W> {
+    fn new<F: notify::EventHandler>(
+        mut handler: F,
+        config: notify::Config,
+    ) -> notify::Result<Self> {
+        W::new(
+            move |event| handler.handle_event(surface_rescan(event)),
+            config,
+        )
+        .map(Self)
+    }
+    fn watch(&mut self, path: &Path, mode: RecursiveMode) -> notify::Result<()> {
+        self.0.watch(path, mode)
+    }
+    fn unwatch(&mut self, path: &Path) -> notify::Result<()> {
+        self.0.unwatch(path)
+    }
+    fn configure(&mut self, option: notify::Config) -> notify::Result<bool> {
+        self.0.configure(option)
+    }
+    fn kind() -> notify::WatcherKind {
+        W::kind()
+    }
+}
+
 /// Combines functionality of FileSystemWatcher and GitWatcher:
 /// - Reference counting for all watches
 /// - Filters .git/ to only index/HEAD/refs changes -> GitCommit events
 /// - Base debounce 300ms for files, manual 250ms debounce for git
 #[derive(Debug)]
 pub struct UnifiedWatcher {
-    debouncer: Debouncer<RecommendedWatcher>,
+    debouncer: Debouncer<RescanAware<RecommendedWatcher>>,
     /// Git repos by root, from the first acquire to the last release.
     repos: HashMap<PathBuf, RepoWatch>,
     /// Non-git dirs: dir_path -> reference count (NonRecursive mode)
@@ -444,20 +509,9 @@ impl UnifiedWatcher {
     pub fn new() -> Result<Self> {
         let (internal_tx, internal_rx) = channel();
         let rescan = Arc::new(AtomicBool::new(false));
-        let rescan_tx = Arc::clone(&rescan);
-
-        let debouncer = new_debouncer(
-            Duration::from_millis(FS_DEBOUNCE_MS),
-            move |result: notify_debouncer_mini::DebounceEventResult| match result {
-                Ok(events) => {
-                    for event in events {
-                        let _ = internal_tx.send(event.path);
-                    }
-                }
-                // An error carries no path, and the events it stands for
-                // may be gone: have the listeners look again.
-                Err(_) => rescan_tx.store(true, Ordering::Relaxed),
-            },
+        let debouncer = new_debouncer_opt::<_, RescanAware<RecommendedWatcher>>(
+            debounce_config(),
+            debounced_handler(internal_tx, Arc::clone(&rescan)),
         )
         .context("Failed to create filesystem watcher")?;
 
@@ -1707,6 +1761,68 @@ mod tests {
         w.rescan.store(true, Ordering::Relaxed);
         assert!(w.poll_events().contains(&WatchEvent::Rescan));
         assert!(!w.poll_events().contains(&WatchEvent::Rescan));
+    }
+
+    /// A watcher whose events the test feeds by hand: `new` hands its
+    /// handler over on `HANDLER`.
+    #[derive(Debug)]
+    struct ManualWatcher;
+
+    type BoxedHandler = Box<dyn notify::EventHandler>;
+
+    std::thread_local! {
+        static HANDLER: std::cell::RefCell<Option<BoxedHandler>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    impl notify::Watcher for ManualWatcher {
+        fn new<F: notify::EventHandler>(handler: F, _: notify::Config) -> notify::Result<Self> {
+            HANDLER.with(|slot| *slot.borrow_mut() = Some(Box::new(handler)));
+            Ok(Self)
+        }
+        fn watch(&mut self, _: &Path, _: RecursiveMode) -> notify::Result<()> {
+            Ok(())
+        }
+        fn unwatch(&mut self, _: &Path) -> notify::Result<()> {
+            Ok(())
+        }
+        fn kind() -> notify::WatcherKind {
+            notify::WatcherKind::NullWatcher
+        }
+    }
+
+    fn feed(event: notify::Event) {
+        HANDLER.with(|slot| slot.borrow_mut().as_mut().unwrap().handle_event(Ok(event)));
+    }
+
+    #[test]
+    fn an_overflow_notice_is_reported_as_a_rescan() {
+        use notify::event::{EventKind, Flag, ModifyKind};
+
+        let mut w = UnifiedWatcher::new().unwrap();
+        let (paths_tx, paths_rx) = channel();
+        let _debouncer = new_debouncer_opt::<_, RescanAware<ManualWatcher>>(
+            debounce_config(),
+            debounced_handler(paths_tx, Arc::clone(&w.rescan)),
+        )
+        .unwrap();
+
+        // An ordinary change still passes the debounce as its path.
+        let changed = PathBuf::from("/tmp/changed");
+        feed(notify::Event::new(EventKind::Modify(ModifyKind::Any)).add_path(changed.clone()));
+        assert_eq!(paths_rx.recv_timeout(Duration::from_secs(5)), Ok(changed));
+        assert!(!w.poll_events().contains(&WatchEvent::Rescan));
+
+        // What inotify sends on IN_Q_OVERFLOW and FSEvents on
+        // MUST_SCAN_SUBDIRS: no path, the rescan flag.
+        feed(notify::Event::new(EventKind::Other).set_flag(Flag::Rescan));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !w.rescan.load(Ordering::Relaxed) {
+            assert!(Instant::now() < deadline, "the rescan notice never arrived");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(w.poll_events().contains(&WatchEvent::Rescan));
+        assert!(paths_rx.try_recv().is_err());
     }
 
     /// Let events from the setup pass before the changes a test checks.

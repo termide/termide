@@ -702,6 +702,43 @@ impl VfsProvider for FtpProvider {
         VfsOperation::new(rx)
     }
 
+    /// FTP has no exclusive create (`STOU` picks a name of its own), so the
+    /// name is looked up first — the parent's listing too, which shows a
+    /// dangling link — and written only when free. A name another client
+    /// takes between the two is still replaced.
+    fn create_file(&self, path: &VfsPath) -> VfsOperation<()> {
+        let stream = match self.get_stream() {
+            Ok(s) => s,
+            Err(e) => return VfsOperation::error(e),
+        };
+        let remote_path = match Self::to_remote_path(path) {
+            Ok(p) => p,
+            Err(e) => return VfsOperation::error(e),
+        };
+        let lookup = self.symlink_metadata(path);
+        let shown = path.path.clone();
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        thread::spawn(move || {
+            let result = (|| -> VfsResult<()> {
+                match lookup.recv() {
+                    Ok(_) => return Err(VfsError::AlreadyExists { path: shown }),
+                    Err(VfsError::NotFound { .. }) => {}
+                    Err(e) => return Err(e),
+                }
+                let mut ftp = lock_ftp(&stream)?;
+                ftp.put_file(&remote_path, &mut std::io::empty())
+                    .map_err(|e| VfsError::RemoteError {
+                        message: format!("Failed to upload file: {}", e),
+                    })?;
+                Ok(())
+            })();
+            let _ = tx.send(result);
+        });
+
+        VfsOperation::new(rx)
+    }
+
     fn delete(&self, path: &VfsPath) -> VfsOperation<()> {
         let stream = match self.get_stream() {
             Ok(s) => s,

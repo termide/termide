@@ -580,7 +580,9 @@ impl FileManager {
         if self.vfs.is_remote() {
             let base = vfs_target.unwrap_or_else(|| self.vfs.current_path().clone());
             let new_path = base.join(&name);
-            let operation = create_remote_file_exclusive(self.vfs.manager_arc(), new_path);
+            // Refuses a taken name: SFTP, SMB and NFS on the server in one
+            // step, FTP (which cannot) after a lookup.
+            let operation = self.vfs.manager_arc().create_file(&new_path);
             return self.start_remote_create(operation, target_full_path, false);
         }
 
@@ -644,35 +646,6 @@ fn create_local_file_exclusive(path: &std::path::Path) -> Result<()> {
         }
         Err(e) => Err(e.into()),
     }
-}
-
-/// Create an empty remote file only when nothing has the name yet. Remote
-/// providers write with create-and-truncate, so the name is looked up
-/// first; the lookup and the write run off the UI thread. A name another
-/// client creates between the two is still replaced — the protocols offer
-/// no exclusive create through the VFS.
-fn create_remote_file_exclusive(
-    manager: std::sync::Arc<termide_vfs::VfsManager>,
-    path: termide_vfs::VfsPath,
-) -> termide_vfs::VfsOperation<()> {
-    use termide_vfs::VfsError;
-    let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || {
-        let taken = match manager.symlink_metadata(&path).recv() {
-            Ok(_) => Ok(true),
-            // Providers word "not there" differently; ask plainly.
-            Err(_) => manager.exists(&path).recv(),
-        };
-        let result = match taken {
-            Ok(true) => Err(VfsError::AlreadyExists {
-                path: path.path.clone(),
-            }),
-            Ok(false) => manager.write_file(&path, &[]).recv(),
-            Err(e) => Err(e),
-        };
-        let _ = tx.send(result);
-    });
-    termide_vfs::VfsOperation::new(rx)
 }
 
 #[cfg(test)]
@@ -740,18 +713,18 @@ mod tests {
         assert_eq!(fs::read(&fresh).unwrap(), b"");
     }
 
-    /// The remote path checks the name before writing; run it through the
-    /// VFS manager's local provider, which takes the same route.
+    /// The remote path asks the VFS for an exclusive create; run it through
+    /// the VFS manager's local provider, which keeps the same contract.
     #[test]
     fn remote_create_refuses_a_taken_name() {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("notes.txt");
         fs::write(&file, "keep me").unwrap();
-        let manager = std::sync::Arc::new(termide_vfs::VfsManager::new());
+        let manager = termide_vfs::VfsManager::new();
 
-        let taken =
-            create_remote_file_exclusive(manager.clone(), termide_vfs::VfsPath::local(&file))
-                .recv();
+        let taken = manager
+            .create_file(&termide_vfs::VfsPath::local(&file))
+            .recv();
         assert!(matches!(
             taken,
             Err(termide_vfs::VfsError::AlreadyExists { .. })
@@ -759,7 +732,8 @@ mod tests {
         assert_eq!(fs::read_to_string(&file).unwrap(), "keep me");
 
         let fresh = dir.path().join("fresh.txt");
-        create_remote_file_exclusive(manager, termide_vfs::VfsPath::local(&fresh))
+        manager
+            .create_file(&termide_vfs::VfsPath::local(&fresh))
             .recv()
             .unwrap();
         assert!(fresh.exists());

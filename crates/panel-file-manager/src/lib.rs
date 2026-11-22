@@ -102,6 +102,9 @@ pub struct FileManager {
     /// so the answer reaches it even when another panel has the focus by
     /// the time the question shows.
     archive_password_for: Option<termide_vfs::VfsPath>,
+    /// The ticket of the connection-lost dialog this panel raised and has
+    /// not been answered for, so the answer reaches this panel.
+    connection_question: Option<u64>,
     /// Visible area height (updated during rendering)
     visible_height: usize,
     /// Click tracker for double-click detection
@@ -306,6 +309,7 @@ impl FileManager {
             scrollbars: termide_core::ScrollBars::default(),
             modal_request: None,
             archive_password_for: None,
+            connection_question: None,
             visible_height: 10, // Default value, will be updated during rendering
             click_tracker: IndexClickTracker::new(),
             selection: SelectionState::default(),
@@ -1019,10 +1023,15 @@ impl FileManager {
     }
 
     /// Show the dead-remote-session recovery dialog. The buttons report their
-    /// id back through `PendingAction::VfsMessage`, which the app routes to
-    /// [`Self::reconnect_remote`] / [`Self::switch_to_local_home`] / panel
-    /// close. Dismissing (Esc) leaves the panel on its last listing.
+    /// id back through `PendingAction::ConnectionLost`, whose ticket the app
+    /// matches with [`Self::raised_connection_question`] to route the answer
+    /// to [`Self::reconnect_remote`] / [`Self::switch_to_local_home`] / panel
+    /// close of this panel. Dismissing (Esc) leaves the panel on its last
+    /// listing.
     fn show_connection_error_modal(&mut self, message: &str) {
+        static NEXT_TICKET: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let ticket = NEXT_TICKET.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        self.connection_question = Some(ticket);
         let t = termide_i18n::t();
         let modal = InfoActionModal::new(
             t.connection_error_title(),
@@ -1034,9 +1043,15 @@ impl FileManager {
             ],
         );
         self.modal_request = Some((
-            PendingAction::VfsMessage,
+            PendingAction::ConnectionLost { ticket },
             ActiveModal::InfoAction(Box::new(modal)),
         ));
+    }
+
+    /// Whether this panel raised the connection-lost dialog `ticket` and
+    /// has not been answered for it.
+    pub fn raised_connection_question(&self, ticket: u64) -> bool {
+        self.connection_question == Some(ticket)
     }
 
     /// Ask whether to trust the SSH server key that stopped the connection
@@ -1133,12 +1148,14 @@ impl FileManager {
     /// Reconnect the current remote path with a fresh session (drops the dead
     /// provider first). Driven by the recovery dialog's "Reconnect" button.
     pub fn reconnect_remote(&mut self) {
+        self.connection_question = None;
         self.vfs.reconnect();
     }
 
     /// Drop the remote connection and show the local home directory. Driven by
     /// the recovery dialog's "Open home (local)" button.
     pub fn switch_to_local_home(&mut self) {
+        self.connection_question = None;
         self.vfs.disconnect(); // evicts the provider and sets the local home path
         self.current_path = self.vfs.path_buf();
         let _ = self.load_directory();
@@ -1875,6 +1892,38 @@ mod tests {
             fm.modal_request.take(),
             Some((PendingAction::VfsMessage, ActiveModal::InfoAction(_)))
         ));
+    }
+
+    /// Each connection-lost dialog carries a ticket only the panel that
+    /// raised it answers to, so a dialog answered after the focus moved
+    /// still reaches it; answering clears it.
+    #[test]
+    fn a_connection_lost_dialog_names_the_panel_that_raised_it() {
+        let temp_dir = TempDir::new().unwrap();
+        let mut first = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        let mut second = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        let ticket_of = |fm: &mut FileManager| match fm.take_modal_request() {
+            Some((PendingAction::ConnectionLost { ticket }, ActiveModal::InfoAction(_))) => ticket,
+            other => panic!(
+                "expected the recovery dialog, got {:?}",
+                other.map(|(a, _)| a)
+            ),
+        };
+
+        first.show_connection_error_modal("gone");
+        let a = ticket_of(&mut first);
+        second.show_connection_error_modal("gone");
+        let b = ticket_of(&mut second);
+
+        assert_ne!(a, b);
+        assert!(first.raised_connection_question(a));
+        assert!(!first.raised_connection_question(b));
+        assert!(second.raised_connection_question(b));
+        assert!(!second.raised_connection_question(a));
+
+        second.switch_to_local_home();
+        assert!(!second.raised_connection_question(b), "answered");
+        assert!(first.raised_connection_question(a));
     }
 
     /// Alt+F9 hands the app the archives in the selection, leaving the rest
