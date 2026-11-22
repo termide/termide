@@ -388,6 +388,104 @@ fn the_agents_file_requests_pass_the_permission_checks() {
     );
 }
 
+/// A read the user let through grants the agent's `fs/` reads of the file
+/// it was judged for, however that file is spelled — not of the other
+/// locations the call lists, and not a write of it.
+#[test]
+fn a_granted_read_covers_only_the_file_it_was_judged_for() {
+    let project = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(outside.path().join("sub")).unwrap();
+    let file = |name: &str| {
+        let path = outside.path().join(name);
+        std::fs::write(&path, "KEY\n").unwrap();
+        path.to_str().unwrap().to_string()
+    };
+    let (a, b) = (file("a"), file("b"));
+    let respelled = format!("{}/sub/../a", outside.path().display());
+    let ask = (
+        "session/request_permission",
+        json!({ "sessionId": "s1",
+            "toolCall": { "toolCallId": "t1", "title": "read", "kind": "read",
+                "rawInput": { "path": a }, "locations": [{ "path": a }, { "path": b }] },
+            "options": [
+                { "optionId": "yes", "name": "Allow", "kind": "allow_once" },
+                { "optionId": "no", "name": "Reject", "kind": "reject_once" } ] }),
+    );
+    let read = |path: &str| {
+        (
+            "fs/read_text_file",
+            json!({ "sessionId": "s1", "path": path }),
+        )
+    };
+    let write = (
+        "fs/write_text_file",
+        json!({ "sessionId": "s1", "path": a, "content": "changed" }),
+    );
+    let (runtime, permissions, replies) = file_agent(
+        project.path().to_path_buf(),
+        Mode::Configured,
+        PermissionRules::default(),
+        vec![ask, read(&a), read(&respelled), read(&b), write],
+    );
+    runtime.prompt(UserMessage::text("go")).unwrap();
+    let wait = Duration::from_secs(10);
+    let envelope = permissions.recv_timeout(wait).unwrap();
+    envelope
+        .reply
+        .send(PermissionAnswer::AllowOnce.into())
+        .unwrap();
+    let allowed = replies.recv_timeout(wait).unwrap();
+    assert_eq!(allowed["result"]["outcome"]["optionId"], "yes", "{allowed}");
+    for _ in 0..2 {
+        let granted = replies.recv_timeout(wait).unwrap();
+        assert_eq!(granted["result"]["content"], "KEY\n", "{granted}");
+    }
+    assert!(permissions.try_recv().is_err());
+    // The other location was never judged: it is asked about.
+    let envelope = permissions.recv_timeout(wait).unwrap();
+    assert_eq!(envelope.request.tool, "read");
+    envelope.reply.send(PermissionAnswer::Deny.into()).unwrap();
+    assert!(replies.recv_timeout(wait).unwrap()["error"].is_object());
+    // Reading it was granted, not writing it.
+    let envelope = permissions.recv_timeout(wait).unwrap();
+    assert_eq!(envelope.request.tool, "write");
+    envelope.reply.send(PermissionAnswer::Deny.into()).unwrap();
+    assert!(replies.recv_timeout(wait).unwrap()["error"].is_object());
+    assert_eq!(std::fs::read_to_string(&a).unwrap(), "KEY\n");
+}
+
+/// An `execute` call's command is judged where its raw input says it runs;
+/// a directory it names that is not there leaves that unknown.
+#[test]
+fn a_command_is_judged_in_the_directory_its_call_names() {
+    let project = tempfile::tempdir().unwrap();
+    let outside = tempfile::tempdir().unwrap();
+    std::fs::create_dir(project.path().join("sub")).unwrap();
+    let cwd = project.path();
+    let dir = |raw: Value| command_dir(cwd, SHELL_TOOL, &raw);
+    assert_eq!(dir(json!({ "command": "ls" })), CommandDir::Cwd);
+    assert_eq!(dir(json!({ "command": "ls", "cwd": "." })), CommandDir::Cwd);
+    assert_eq!(
+        dir(json!({ "command": "ls", "workdir": "sub" })),
+        CommandDir::At(cwd.join("sub"))
+    );
+    assert_eq!(
+        dir(json!({ "command": "ls", "directory": outside.path() })),
+        CommandDir::At(dunce::canonicalize(outside.path()).unwrap())
+    );
+    for unknown in [json!("nope"), json!(""), json!(7)] {
+        assert_eq!(
+            dir(json!({ "command": "ls", "cwd": unknown })),
+            CommandDir::Unknown
+        );
+    }
+    assert_eq!(
+        command_dir(cwd, "read", &json!({ "cwd": "nope" })),
+        CommandDir::Cwd
+    );
+}
+
 /// An ACP `search` is judged as the read of what it searches, so plan mode
 /// lets it through; a `delete` or a `move` is held to the rules that refuse
 /// editing what it names, and otherwise asked about as itself.
@@ -1835,6 +1933,39 @@ fn codex_and_gemini_keep_their_tools_and_are_served_the_mcp_servers() {
         mcp.insert(Arc::new(Echo));
         runtime.update_host_tools(mcp).unwrap();
         assert_eq!(served_tools(url, auth), ["echo"]);
+    }
+}
+
+/// A call of the agent's own that only says it is termide's — in a title or
+/// a raw input the model writes — is judged as what it is.
+#[test]
+fn a_call_that_only_claims_to_be_termides_tool_is_judged() {
+    let dir = tempfile::tempdir().unwrap();
+    let (runtime, _seen) = recording_agent_with(
+        dir.path().to_path_buf(),
+        AcpFlavor::Codex,
+        None,
+        ModeHandle::new(Mode::Plan),
+        false,
+    );
+    let shared = &runtime.shared;
+    let options = json!([
+        { "kind": "allow_once", "optionId": "allow_once" },
+        { "kind": "reject_once", "optionId": "cancel" },
+    ]);
+    let claims = [
+        json!({ "toolCallId": "c1", "kind": "execute", "title": "mcp__termide__shell",
+            "rawInput": { "command": "rm -rf src" } }),
+        json!({ "toolCallId": "c2", "kind": "execute", "title": "rm -rf src",
+            "rawInput": { "command": "rm -rf src", "server": "termide", "tool": "shell" } }),
+    ];
+    for claim in claims {
+        let mut announced = claim.clone();
+        announced["sessionUpdate"] = json!("tool_call");
+        announced["status"] = json!("in_progress");
+        shared.on_update(&announced);
+        let answer = shared.ask_permission(&json!({ "toolCall": claim, "options": options }));
+        assert_eq!(answer["outcome"]["optionId"], "cancel", "{claim}");
     }
 }
 

@@ -232,6 +232,26 @@ def checklist_step(done, messages):
     return {"reasoning": "", "text": "Reminded: %s." % ("yes" if reminded else "no"), "tool": None}
 
 
+# A seventh, played when the user asks to "debug the stock server" (the TUI
+# harness's agent-debug-approval): the agent starts a debug command the
+# project's commands.toml brings, then repeats the first line of the answer.
+DEBUG = "debug the stock server"
+
+
+def debug_step(done, messages):
+    if done == 0:
+        return {
+            "reasoning": "",
+            "text": "I'll start it under the debugger.",
+            "tool": ("debug", {"action": "start", "command": "debug-stock"}),
+        }
+    answers = [m.get("content") or "" for m in messages if m.get("role") == "tool"]
+    text = answers[-1] if answers else ""
+    if isinstance(text, list):
+        text = "".join(part.get("text", "") for part in text if isinstance(part, dict))
+    return {"reasoning": "", "text": "Debug: " + text.splitlines()[0], "tool": None}
+
+
 def lsp_echo(messages):
     """The final step of BREAK: the first lines of the edit's LSP note."""
     for message in messages:
@@ -316,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             main = any(DELEGATE in u for u in users)
             if any(BREAK in u for u in users):
                 step = BREAK_SCRIPT[done] if done < len(BREAK_SCRIPT) else lsp_echo(messages)
+            elif any(DEBUG in u for u in users):
+                step = debug_step(done, messages)
             elif any(CHECKLIST in u for u in users):
                 step = checklist_step(done, messages)
             elif any(NOTES in u for u in users):

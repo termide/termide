@@ -2492,7 +2492,10 @@ impl Subagents {
 
         let mut rules = self.rules.clone();
         rules.mode = subagent_mode(self.mode.get(), definition.spec.mode);
-        let plan_guard = PlanGuard::new(ModeHandle::new(rules.mode)).with_refusals(&self.refusals);
+        // Live, as the panel's own: a switch of the panel's mode during the
+        // task reaches it, and the panel's plan mode overrides its own.
+        let mode = ModeHandle::following(&self.mode, definition.spec.mode);
+        let plan_guard = PlanGuard::new(mode.clone()).with_refusals(&self.refusals);
         // Stops a run that will not stop itself; the parent's cancel stops
         // it too.
         let budget = CancelToken::new();
@@ -2517,6 +2520,7 @@ impl Subagents {
             )),
         };
         let permissions = PermissionHooks::new(rules.clone(), asks)
+            .with_mode_handle(mode.clone())
             .with_classifier(Box::new(reviewer.classifier(budget.clone())))
             .with_refusals(self.refusals.clone());
         // The guard goes first, as in the panel's own chain: in plan mode a
@@ -2604,6 +2608,7 @@ impl Subagents {
                 skills,
                 hooks,
                 rules,
+                mode,
                 asker,
                 prompter,
                 panel: ctx.panel,
@@ -2643,6 +2648,7 @@ impl Subagents {
                         skills,
                         hooks,
                         rules,
+                        mode,
                         asker,
                         prompter,
                         panel: ctx.panel,
@@ -2860,7 +2866,7 @@ impl Subagents {
             cwd: cwd.clone(),
             prompter,
             cancel: budget.clone(),
-            mode: ModeHandle::new(run.rules.mode),
+            mode: run.mode.clone(),
             rules: run.rules,
             persist: None,
             system_prompt: run.system_prompt,
@@ -3348,6 +3354,8 @@ struct CliSubagent {
     skills: Vec<termide_agent_core::SkillInfo>,
     hooks: ChainedHooks,
     rules: PermissionRules,
+    /// Its live mode, following its parent's panel.
+    mode: ModeHandle,
     /// Puts its questions to the user of its parent's panel.
     asker: Option<termide_agent_core::UserAsker>,
     /// Puts its permission requests to that user.

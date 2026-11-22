@@ -354,6 +354,12 @@ pub enum PendingAction {
     ConfirmProjectCommand {
         command: termide_config::commands::CommandItem,
     },
+    /// Approve a command of the project's `commands.toml` an agent asked to
+    /// launch, the user having been shown what it runs; the agent launches
+    /// it again itself
+    ApproveProjectCommand {
+        command: termide_config::commands::CommandItem,
+    },
     /// Delete a command (with confirmation)
     DeleteCommand {
         /// Command name / TOML key.

@@ -613,7 +613,7 @@ fn command_spec(command: &CommandItem) -> String {
 }
 
 /// What a command runs, for a person to read: its build first, if any.
-fn command_text(command: &CommandItem) -> String {
+pub(in crate::app) fn command_text(command: &CommandItem) -> String {
     let meta = command.metadata.as_ref();
     let mut lines = Vec::new();
     if let Some(build) = meta.and_then(|m| m.build.as_deref()) {

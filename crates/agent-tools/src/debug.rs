@@ -225,7 +225,7 @@ impl Tool for DebugTool {
                 },
                 "params": {
                     "type": "object",
-                    "additionalProperties": { "type": "string" },
+                    "additionalProperties": { "type": ["string", "number", "boolean"] },
                     "description": "start: values for the command's parameters by name; the rest take their defaults"
                 },
                 "file": {

@@ -1555,6 +1555,114 @@ impl Provider for ReadsThenTells {
     }
 }
 
+/// A model that switches its panel to plan mode, as the user does mid-task,
+/// then writes a file, then says what it was told.
+struct PlansThenWrites {
+    panel: termide_agent_core::ModeHandle,
+    seen: std::sync::Mutex<Vec<String>>,
+}
+
+impl Provider for PlansThenWrites {
+    fn name(&self) -> &str {
+        "plans"
+    }
+
+    fn stream(
+        &self,
+        request: &termide_agent_core::Request<'_>,
+        _: &mut dyn FnMut(termide_agent_core::StreamEvent),
+        _: &CancelToken,
+    ) -> AssistantMessage {
+        use termide_agent_core::{AssistantContent, StopReason};
+        let results: Vec<String> = request
+            .messages
+            .iter()
+            .filter_map(|message| match message {
+                Message::ToolResult(result) => Some(result.plain_text()),
+                _ => None,
+            })
+            .collect();
+        let first = results.is_empty();
+        self.seen.lock().unwrap().extend(results);
+        let content = if first {
+            self.panel.set(Mode::Plan);
+            AssistantContent::ToolCall(ToolCall {
+                id: "w1".into(),
+                name: "write".into(),
+                arguments: serde_json::json!({ "path": "new.txt", "content": "x" }),
+                extra_content: None,
+            })
+        } else {
+            AssistantContent::Text {
+                text: "done".into(),
+            }
+        };
+        AssistantMessage {
+            content: vec![content],
+            stop_reason: if first {
+                StopReason::ToolUse
+            } else {
+                StopReason::Stop
+            },
+            usage: termide_agent_core::Usage::default(),
+            provider: "plans".into(),
+            model: request.model.id.clone(),
+            error_message: None,
+            failure: None,
+            timestamp: 0,
+        }
+    }
+}
+
+/// The panel's mode reaches a task already running: plan mode switched on
+/// mid-task holds the delegate's changes from then on.
+#[test]
+fn plan_mode_switched_on_mid_task_holds_the_subagent() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dirs = AgentDirs::new(tmp.path(), Some(tmp.path()), None);
+    let settings = with_cloud();
+    let panel = termide_agent_core::ModeHandle::new(Mode::All);
+    let provider = Arc::new(PlansThenWrites {
+        panel: panel.clone(),
+        seen: std::sync::Mutex::new(Vec::new()),
+    });
+    let mut active = active_on(&settings, "local");
+    active.provider = provider.clone();
+    let subagents = Subagents {
+        active: Arc::new(std::sync::RwLock::new(active)),
+        settings: settings.clone(),
+        recall: recall_tool(&settings, &dirs, tmp.path(), tmp.path()),
+        web: shared_web(&settings.web, &dirs),
+        dirs,
+        mcp: Connections::new(std::collections::BTreeMap::new()),
+        cwd: tmp.path().to_path_buf(),
+        project_root: tmp.path().to_path_buf(),
+        session_dir: None,
+        rules: settings.permissions.clone(),
+        mode: panel,
+        max_tokens: settings.output_limit(),
+        reasoning: ThinkingLevel::Off,
+        compaction: settings.compaction,
+        refusals: Refusals::default(),
+        hooks: None,
+    };
+    let result = subagents.run(
+        "lead",
+        &SubagentTask {
+            agent: DEFAULT_AGENT,
+            prompt: "write it",
+            call: "c1",
+            background: false,
+        },
+        &ToolContext::new(tmp.path().to_path_buf()),
+        &CancelToken::new(),
+        &mut |_| {},
+    );
+    assert_eq!(result.answer, Ok("done".to_string()));
+    assert!(!tmp.path().join("new.txt").exists());
+    assert_eq!(provider.seen.lock().unwrap().len(), 1);
+}
+
 /// A hook that refuses every call.
 struct Refuses;
 

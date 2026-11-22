@@ -14,7 +14,7 @@
 //! prompt sent before the session exists waits in the queue and goes out as
 //! soon as it does.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -37,7 +37,7 @@ use termide_agent_core::{
     PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision,
     ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
 };
-use termide_agent_core::{CompactionCall, CompactionReason, SHELL_TOOL};
+use termide_agent_core::{CommandDir, CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
 mod provider;
@@ -239,8 +239,10 @@ struct Shared {
     /// until its result is logged with it.
     decided: Mutex<HashMap<String, PermissionNote>>,
     /// The files the user let the agent read or edit when it asked this
-    /// turn: its `fs/` request for one of them is not asked about again.
-    granted_files: Mutex<BTreeSet<PathBuf>>,
+    /// turn, by [`grant_key`], each with whether it may be written: its
+    /// `fs/` request for one of them is not asked about again — a write
+    /// only where an edit was let through, a read where either was.
+    granted_files: Mutex<BTreeMap<PathBuf, bool>>,
     /// The calls on their way into the session log.
     calls: Mutex<CallLog>,
     /// The context's fill and size, `(used, size)`, as `usage_update` last
@@ -585,7 +587,7 @@ impl AcpRuntime {
             announced: Mutex::new(HashMap::new()),
             host_calls: Arc::default(),
             decided: Mutex::new(HashMap::new()),
-            granted_files: Mutex::new(BTreeSet::new()),
+            granted_files: Mutex::new(BTreeMap::new()),
             calls: Mutex::new(CallLog::default()),
             context: Mutex::new(None),
             context_limit: AtomicU64::new(0),
@@ -2823,7 +2825,8 @@ impl Shared {
                     .granted_files
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .contains(&absolute(&self.cwd, path));
+                    .get(&grant_key(&self.cwd, path))
+                    .is_some_and(|writable| *writable || !write);
                 if granted {
                     return Ok(());
                 }
@@ -2915,6 +2918,7 @@ impl Shared {
         let call = permission_call(&tool_call);
         let ctx = ToolContext {
             session: Some(self.session_view()),
+            runs_in: command_dir(&self.cwd, &call.name, &tool_call["rawInput"]),
             ..ToolContext::new(self.cwd.clone())
         };
         // The hooks decide the request as they would for the built-in agent:
@@ -2958,23 +2962,22 @@ impl Shared {
                 .unwrap_or_else(PoisonError::into_inner)
                 .insert(id.to_string(), note);
         }
-        // The files a let-through read or edit names, so its `fs/` requests
-        // are not asked about a second time.
+        // The file a let-through read or edit was judged for, so its `fs/`
+        // requests are not asked about a second time. Only that one: the
+        // other locations and diffs the call lists were never weighed.
         if !matches!(decision, ToolDecision::Block { .. })
             && matches!(call.name.as_str(), "read" | "edit")
             && tool_call["kind"] != "search"
         {
-            let locations = tool_call["locations"].as_array().into_iter().flatten();
-            let diffs = tool_call["content"].as_array().into_iter().flatten();
-            let paths = std::iter::once(&call.arguments["path"])
-                .chain(locations.map(|location| &location["path"]))
-                .chain(diffs.map(|block| &block["path"]))
-                .filter_map(Value::as_str)
-                .map(|path| absolute(&self.cwd, path));
-            self.granted_files
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner)
-                .extend(paths);
+            if let Some(path) = call.arguments["path"].as_str() {
+                let write = call.name == "edit";
+                *self
+                    .granted_files
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .entry(grant_key(&self.cwd, path))
+                    .or_insert(write) |= write;
+            }
         }
         // Always answer "once": termide stays the source of truth for grants,
         // so the agent keeps asking and termide keeps deciding silently,
@@ -3737,7 +3740,13 @@ fn fill_own_call(call: &Value, kind: &str, title: &str, arguments: &mut Value) {
 /// Claude Code names it `mcp__termide__<tool>` in `_meta.claudeCode.toolName`
 /// (and, before claude-agent-acp 0.109.1, in its title, now `termide: <tool>`)
 /// with the arguments as its raw input; Codex names the server and the tool in
-/// its raw input.
+/// its raw input, and marks the call as an MCP one.
+///
+/// Such a call is let through unasked, since termide's server judges it as
+/// it runs; so only what the agent's adapter says counts, not what the model
+/// can write. A title or a raw input is the model's to fill in a command or
+/// an edit of the agent's own, so either names termide's tool only on a call
+/// of no kind of the agent's own (`other`) or one the adapter marks as MCP.
 fn host_tool_of(update: &Value) -> Option<(String, Value)> {
     let input = &update["rawInput"];
     let object = |value: &Value| {
@@ -3746,15 +3755,20 @@ fn host_tool_of(update: &Value) -> Option<(String, Value)> {
             .cloned()
             .unwrap_or_else(|| json!({}))
     };
-    let claude_name = update["_meta"]["claudeCode"]["toolName"]
-        .as_str()
-        .or_else(|| update["title"].as_str());
-    if let Some(name) = claude_name.and_then(|name| name.strip_prefix(HOST_TOOL_PREFIX)) {
-        return Some((name.to_string(), object(input)));
+    let marked = update["_meta"]["is_mcp_tool_call"] == true;
+    let own_kind = !matches!(update["kind"].as_str(), None | Some("other"));
+    let claimed = |name: Option<&str>| {
+        name.and_then(|name| name.strip_prefix(HOST_TOOL_PREFIX))
+            .map(str::to_string)
+    };
+    let claude_name = claimed(update["_meta"]["claudeCode"]["toolName"].as_str())
+        .or_else(|| claimed(update["title"].as_str()).filter(|_| marked || !own_kind));
+    if let Some(name) = claude_name {
+        return Some((name, object(input)));
     }
     let tool = input["tool"]
         .as_str()
-        .filter(|_| input["server"] == SERVER_NAME)?;
+        .filter(|_| input["server"] == SERVER_NAME && (marked || !own_kind))?;
     Some((tool.to_string(), object(&input["arguments"])))
 }
 
@@ -4162,6 +4176,73 @@ fn absolute(cwd: &Path, path: &str) -> PathBuf {
         path.to_path_buf()
     } else {
         cwd.join(path)
+    }
+}
+
+/// Where the command of an `execute` call starts: the directory its raw
+/// input names (`cwd`, `workdir`, `directory` — the agents' spellings),
+/// the session's directory when it names none, and somewhere unknown when
+/// what it names is not a directory there is: the command's relative paths
+/// are then not known to stay inside the project.
+fn command_dir(cwd: &Path, tool: &str, raw: &Value) -> CommandDir {
+    if tool != SHELL_TOOL {
+        return CommandDir::Cwd;
+    }
+    let named = ["cwd", "workdir", "directory"]
+        .iter()
+        .map(|key| &raw[*key])
+        .find(|value| !value.is_null());
+    let Some(named) = named else {
+        return CommandDir::Cwd;
+    };
+    let dir = named
+        .as_str()
+        .filter(|dir| !dir.is_empty())
+        .and_then(|dir| dunce::canonicalize(absolute(cwd, dir)).ok())
+        .filter(|dir| dir.is_dir());
+    let Some(dir) = dir else {
+        return CommandDir::Unknown;
+    };
+    // Inside the project, spelled from the project's own path, which the
+    // rules read paths against (`/var` is `/private/var` on macOS).
+    match dunce::canonicalize(cwd).map(|root| dir.strip_prefix(&root).map(Path::to_path_buf)) {
+        Ok(Ok(rest)) if rest.as_os_str().is_empty() => CommandDir::Cwd,
+        Ok(Ok(rest)) => CommandDir::At(cwd.join(rest)),
+        _ => CommandDir::At(dir),
+    }
+}
+
+/// The file `path` names, as a grant is kept and looked up by: absolute,
+/// without `.` and `..`, and through the symlinks of as much of it as
+/// exists — so no other spelling of a path reaches a grant for another
+/// file, and every spelling of the granted one does.
+fn grant_key(cwd: &Path, path: &str) -> PathBuf {
+    let mut lexical = PathBuf::new();
+    for part in absolute(cwd, path).components() {
+        match part {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                lexical.pop();
+            }
+            other => lexical.push(other),
+        }
+    }
+    let mut missing = Vec::new();
+    let mut existing = lexical.as_path();
+    loop {
+        if let Ok(real) = dunce::canonicalize(existing) {
+            return missing
+                .iter()
+                .rev()
+                .fold(real, |path, name| path.join(name));
+        }
+        match (existing.parent(), existing.file_name()) {
+            (Some(parent), Some(name)) => {
+                missing.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return lexical,
+        }
     }
 }
 

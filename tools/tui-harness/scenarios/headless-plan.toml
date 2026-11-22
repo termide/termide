@@ -1,0 +1,24 @@
+# The shared config in plan mode, for headless-plan.scn: the edit rule
+# that lets the mock task edit is still there, and plan mode refuses it.
+[general]
+language = "en"
+icon_mode = "unicode"
+# The status bar's resource figures change on their own; keep them still.
+resource_monitor_interval = 60000
+
+[editor]
+show_blame = false
+
+[ai]
+connection = "local"
+
+[ai.connections.local]
+provider = "openai_compatible"
+base_url = "http://127.0.0.1:{mock_llm_port}/v1"
+model = "qwen3-coder-30b-a3b"
+
+[ai.permissions]
+mode = "plan"
+
+[ai.permissions.edit]
+"inventory/**" = "allow"

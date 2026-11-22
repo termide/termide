@@ -17,6 +17,7 @@ use termide_config::commands::{CommandItem, CommandsRegistry};
 use termide_debug::breakpoints;
 
 use super::super::debug::DebugChoice;
+use crate::app::menu_actions::commands_exec::command_text;
 use crate::app::App;
 use crate::PanelExt;
 
@@ -302,7 +303,14 @@ impl App {
     ) -> Result<(), String> {
         let spec = match (command, file) {
             (Some(name), _) => {
-                let (command, env) = agent_debug_command(&self.project_root, name, params)?;
+                let (declared, command, env) =
+                    agent_debug_command(&self.project_root, name, params)?;
+                // What a cloned project brings runs once the user has seen
+                // it, whoever launches it: the agent's permission card shows
+                // the command's name, not what it runs.
+                if declared.is_project && !self.project_command_approved(&declared) {
+                    return Err(self.ask_to_approve_for_agent(declared));
+                }
                 self.dap_spec(&command, &env)?
             }
             (None, Some(file)) => {
@@ -353,6 +361,35 @@ impl App {
         Ok(())
     }
 
+    /// Show the user the project's `command`, which an agent wants to
+    /// launch, to approve as the user's own launch shows it; the message
+    /// for the agent, which launches it again once approved. A question
+    /// already on screen is left alone: its answer decides something else.
+    fn ask_to_approve_for_agent(&mut self, command: CommandItem) -> String {
+        let name = command.name.clone();
+        if self.state.pending_action.is_some() {
+            return format!(
+                "`{name}` comes from the project's commands.toml and the user has not \
+                 approved it yet, and the user is busy with another question; ask the user \
+                 to approve it, then call `start` again"
+            );
+        }
+        let t = termide_i18n::t();
+        let modal = termide_modal::ConfirmModal::new(
+            t.command_confirm_project_title(),
+            t.command_confirm_project_fmt(&command.name, &command_text(&command)),
+        );
+        self.state.set_pending_action(
+            termide_state::PendingAction::ApproveProjectCommand { command },
+            crate::state::ActiveModal::Confirm(Box::new(modal)),
+        );
+        format!(
+            "`{name}` comes from the project's commands.toml and the user has not approved \
+             it yet; it is shown to them now with what it runs. Call `start` again once they \
+             have approved it"
+        )
+    }
+
     /// Set or remove the breakpoint at 1-based `line` of `file`, in the store
     /// and in the editors that have the file.
     fn agent_breakpoint(&mut self, file: &Path, line: usize, set: bool) -> Result<String, String> {
@@ -398,9 +435,14 @@ impl App {
     }
 }
 
+/// A debug command as declared, the same ready to launch, and its parameter
+/// values.
+type ResolvedDebugCommand = (CommandItem, CommandItem, Vec<(String, String)>);
+
 /// The command of `commands.toml` an agent's `start` names, by identifier or
-/// label, ready to launch: its placeholders filled from `params` and the
-/// rest of its parameters' defaults, and the values as its environment.
+/// label, as `commands.toml` declares it and ready to launch: its
+/// placeholders filled from `params` and the rest of its parameters'
+/// defaults, and the values as its environment.
 /// `Err` says why the agent cannot launch it — no such command, one that
 /// runs a debugger in a terminal or takes a value from the focused panel, a
 /// parameter it does not declare or a value its form could not hold. Reads
@@ -410,7 +452,7 @@ fn agent_debug_command(
     project_root: &Path,
     name: &str,
     params: &BTreeMap<String, String>,
-) -> Result<(CommandItem, Vec<(String, String)>), String> {
+) -> Result<ResolvedDebugCommand, String> {
     let registry = CommandsRegistry::load_merged(Some(project_root)).unwrap_or_default();
     let commands = registry.debug_commands();
     let wanted = name.trim();
@@ -461,7 +503,8 @@ fn agent_debug_command(
             command.name
         ));
     }
-    Ok(App::debug_command_with_params(command, &values))
+    let (launch, env) = App::debug_command_with_params(command, &values);
+    Ok(((*command).clone(), launch, env))
 }
 
 #[cfg(test)]
@@ -520,7 +563,7 @@ debugger = "lldb-dap"
     #[test]
     fn a_started_command_takes_its_params_in_line_build_and_env() {
         let dir = project();
-        let (command, env) = agent_debug_command(
+        let (_, command, env) = agent_debug_command(
             dir.path(),
             "Debug server",
             &params(&[("port", "9000"), ("data", "my dir")]),
