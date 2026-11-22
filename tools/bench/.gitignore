@@ -2,3 +2,5 @@
 /jobs/
 __pycache__/
 /mirror/
+/queues/tb21-*
+/sets/tb21-*
