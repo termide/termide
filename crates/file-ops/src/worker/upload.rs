@@ -300,6 +300,20 @@ impl OperationWorker for UploadWorker {
     }
 }
 
+/// Refuse a pipe, socket or device as an upload source: opening a FIFO
+/// blocks until a writer comes and a device such as /dev/zero never ends.
+/// The source is followed through a link, as the upload opens it. Inside a
+/// directory the providers' walks skip such entries themselves; a source
+/// that cannot be read is left for the upload to report.
+fn refuse_special_file(source: &Path) -> Result<(), OperationError> {
+    match fs::metadata(source) {
+        Ok(meta) if !meta.is_file() && !meta.is_dir() => {
+            Err(OperationError::SpecialFile(source.to_path_buf()))
+        }
+        _ => Ok(()),
+    }
+}
+
 /// Remove the source of a move once it has been uploaded: the file, or of a
 /// directory the regular files and the directories they leave empty. An
 /// upload skips symbolic links and special files inside a directory, so
@@ -391,6 +405,10 @@ impl UploadWorker {
     where
         F: Fn(OperationProgress),
     {
+        if let Err(e) = refuse_special_file(source) {
+            return OperationResult::Failed(e.to_string());
+        }
+
         let mut retry_state = RetryState::new(self.retry_policy.clone());
 
         loop {
@@ -493,6 +511,36 @@ impl UploadWorker {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    /// A socket, and a link to a device, are refused before the upload opens
+    /// them (a FIFO would block it forever, /dev/zero never end), and the
+    /// refusal is not retried as a network error.
+    #[test]
+    fn special_files_are_not_uploaded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let socket = tmp.path().join("s.sock");
+        let _listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let device = tmp.path().join("null");
+        std::os::unix::fs::symlink("/dev/null", &device).unwrap();
+        let dest = VfsPath::remote(termide_vfs::VfsProtocol::Sftp, "nowhere", "/up");
+
+        for sources in [vec![socket.clone()], vec![socket, device]] {
+            let mut worker = UploadWorker::new(
+                std::sync::Arc::new(VfsManager::new()),
+                sources,
+                dest.clone(),
+                false,
+            );
+            let (tx, _rx) = mpsc::channel();
+            match worker.execute(&OperationControl::new(), &tx) {
+                OperationResult::Failed(message) => {
+                    assert!(message.contains("not a regular file"), "{message}");
+                    assert!(!message.contains("connect"), "{message}");
+                }
+                other => panic!("special file was uploaded: {other:?}"),
+            }
+        }
+    }
 
     #[test]
     fn a_move_keeps_what_the_upload_skipped() {

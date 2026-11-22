@@ -103,7 +103,9 @@ directories and links.
 A symbolic link is copied as the link itself, a dangling one too, and
 anything already at the destination — a dangling link included — is asked
 about before it is replaced. Pipes, sockets and devices are not copied: the
-copy stops with an error naming the entry. A file whose name is not valid
+copy stops with an error naming the entry. Sent to a server, a selected
+pipe, socket or device is refused the same way, and those inside a folder
+are left out, as links are. A file whose name is not valid
 UTF-8 is not sent to a server, since the name could not be kept there; it
 is reported instead. Creating a file under a name that is taken fails with
 "already exists" and leaves the existing entry alone.
