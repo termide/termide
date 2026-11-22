@@ -127,6 +127,14 @@ fn is_cross_device(e: &std::io::Error) -> bool {
         || (cfg!(not(unix)) && e.kind() == std::io::ErrorKind::Other)
 }
 
+/// Whether a source (of lstat `metadata`) is a real folder and `dest` a real
+/// folder already there, so a move into it has to merge.
+fn merges_into_directory(metadata: &fs::Metadata, dest: &Path) -> bool {
+    metadata.is_dir()
+        && !metadata.is_symlink()
+        && fs::symlink_metadata(dest).is_ok_and(|m| m.is_dir() && !m.is_symlink())
+}
+
 /// Access and modification times of `metadata` (from lstat).
 fn source_times(metadata: &fs::Metadata) -> (filetime::FileTime, filetime::FileTime) {
     (
@@ -593,10 +601,16 @@ impl OperationWorker for LocalCopyWorker {
                         // Already moved — no need to track for delete phase
                         continue;
                     }
-                    Err(e) if is_cross_device(&e) => {
-                        // Cross-device move — fall through to copy+delete. This
-                        // source really will be walked, so account for it now:
-                        // drop the placeholder count of 1 and scan it for real.
+                    // Cross-device, or a folder moved with Overwrite onto a
+                    // folder that is there already (`rename` takes only an
+                    // empty one): fall through to copy+delete, merging into
+                    // it as a copy does. The source goes only once all of it
+                    // is copied. This source really will be walked, so
+                    // account for it now: drop the placeholder count of 1
+                    // and scan it for real.
+                    Err(e)
+                        if is_cross_device(&e) || merges_into_directory(&metadata, &final_dest) =>
+                    {
                         total_files = total_files.saturating_sub(1);
                         match self.scan_source(
                             source,
@@ -1019,6 +1033,56 @@ mod tests {
         assert_eq!(fs::read(&file).unwrap(), b"precious");
         assert_eq!(fs::read(dir.join("sub/deeper/c.txt")).unwrap(), b"ccc");
         assert_eq!(fs::read_dir(tmp.path()).unwrap().count(), 2);
+    }
+
+    /// A folder moved with Overwrite onto a folder of the same name that
+    /// holds files merges into it, as a copy does, and leaves no source;
+    /// `rename` alone refused with "Directory not empty".
+    #[test]
+    fn move_overwriting_a_non_empty_directory_merges_into_it() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("src/proj");
+        tree(&source);
+        let dest_parent = tmp.path().join("dst");
+        fs::create_dir_all(dest_parent.join("proj/sub")).unwrap();
+        fs::write(dest_parent.join("proj/a.txt"), b"old").unwrap();
+        fs::write(dest_parent.join("proj/kept.txt"), b"kept").unwrap();
+        fs::write(dest_parent.join("proj/sub/b.txt"), b"old").unwrap();
+
+        assert_success(&run_overwriting(LocalCopyWorker::new(
+            vec![source.clone()],
+            dest_parent.clone(),
+            true,
+        )));
+
+        let merged = dest_parent.join("proj");
+        assert_eq!(fs::read(merged.join("a.txt")).unwrap(), b"a");
+        assert_eq!(fs::read(merged.join("sub/b.txt")).unwrap(), b"bb");
+        assert_eq!(fs::read(merged.join("sub/deeper/c.txt")).unwrap(), b"ccc");
+        assert_eq!(fs::read(merged.join("kept.txt")).unwrap(), b"kept");
+        assert!(!source.exists(), "the moved folder is gone from its place");
+    }
+
+    /// When the merge cannot finish, the source stays whole.
+    #[test]
+    fn a_failed_merge_keeps_the_source() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("src/proj");
+        tree(&source);
+        let dest_parent = tmp.path().join("dst");
+        // A file where the source has a folder: the copy cannot put it there.
+        fs::create_dir_all(dest_parent.join("proj")).unwrap();
+        fs::write(dest_parent.join("proj/sub"), b"file").unwrap();
+
+        let result = run_overwriting(LocalCopyWorker::new(
+            vec![source.clone()],
+            dest_parent.clone(),
+            true,
+        ));
+
+        assert!(!result.is_success(), "{result:?}");
+        assert_eq!(fs::read(source.join("sub/deeper/c.txt")).unwrap(), b"ccc");
+        assert_eq!(fs::read(source.join("a.txt")).unwrap(), b"a");
     }
 
     #[test]

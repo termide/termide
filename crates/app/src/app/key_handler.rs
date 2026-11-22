@@ -520,6 +520,12 @@ impl App {
             _ => None,
         };
         let default_dest = match file_name {
+            // A remote destination is a percent-encoded URL.
+            Some(name) if termide_vfs::is_vfs_url(&dest_dir) => format!(
+                "{}/{}",
+                dest_dir.trim_end_matches('/'),
+                termide_vfs::encode_url_path(name)
+            ),
             Some(name) => format!("{}/{}", dest_dir.trim_end_matches('/'), name),
             None if dest_dir.ends_with('/') => dest_dir,
             None => format!("{}/", dest_dir),

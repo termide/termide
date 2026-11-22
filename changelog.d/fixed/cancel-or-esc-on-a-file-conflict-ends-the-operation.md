@@ -1,0 +1,1 @@
+- **Cancel or Esc on a file conflict ends the operation.** Cancel left the batch counted as running, so the files already copied were not refreshed in the panels, and `Esc` asked the same conflict again; a conflict raised while a copy was running waited for an answer forever after `Esc`. Both now end the operation cleanly and refresh the panels when some files were already done.

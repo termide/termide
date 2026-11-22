@@ -44,6 +44,10 @@ nfs://nas.local/srv/backup
 Notes:
 - Non-ASCII characters in `path` are accepted; the parser
   percent-decodes them back to UTF-8 before talking to the server.
+- `%`, `#` and `?` in a path, and `@` or `:` in a user name, are
+  written percent-encoded: `%25`, `%23`, `%3F`, `%40`, `%3A` — e.g.
+  `sftp://me%40corp.example@host/srv/issue%231`. Termide writes server
+  URLs this way itself.
 - Omitting the user or port makes SFTP take them from your SSH
   configuration (see [SSH configuration](#ssh-configuration-sftp)).
 - Otherwise, omitting the port uses the protocol default (22 / 21 / 990

@@ -1,0 +1,1 @@
+- **A remote panel ignores local changes at the same path.** A change on the local disk under a path equal to the one a server or archive panel showed replaced its listing with the local folder's. Local changes now reach only local panels, and folder sizes are no longer computed from the local disk for a remote panel.

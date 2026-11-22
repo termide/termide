@@ -215,7 +215,7 @@ impl VfsPath {
             let mut url = format!("{}://", self.protocol.scheme());
 
             if let Some(ref user) = self.username {
-                url.push_str(user);
+                url.push_str(&crate::url::encode_userinfo(user));
                 url.push('@');
             }
 
@@ -228,7 +228,9 @@ impl VfsPath {
                 url.push_str(&port.to_string());
             }
 
-            url.push_str(&self.path.display().to_string());
+            url.push_str(&crate::url::encode_url_path(
+                &self.path.display().to_string(),
+            ));
             url
         }
     }

@@ -34,55 +34,43 @@ pub fn truncate_name(name: &str, max_len: usize) -> String {
 /// Format file size in human-readable format (compact, whole numbers only).
 /// Used in file panel columns where space is limited.
 pub fn format_size_compact(bytes: u64) -> String {
-    let t = termide_i18n::t();
-    if bytes >= GIGABYTE {
-        format!(
-            "{:.0} {}",
-            bytes as f64 / GIGABYTE as f64,
-            t.size_gigabytes()
-        )
-    } else if bytes >= MEGABYTE {
-        format!(
-            "{:.0} {}",
-            bytes as f64 / MEGABYTE as f64,
-            t.size_megabytes()
-        )
-    } else if bytes >= KILOBYTE {
-        format!(
-            "{:.0} {}",
-            bytes as f64 / KILOBYTE as f64,
-            t.size_kilobytes()
-        )
-    } else {
-        format!("{} {}", bytes, t.size_bytes())
-    }
+    format_scaled(bytes, [0, 0, 0])
 }
 
 /// Format file size in human-readable format (detailed).
 /// B, KB — whole numbers; MB — one decimal; GB+ — two decimals.
 /// Used in file info modal where precision matters.
 pub fn format_size(bytes: u64) -> String {
+    format_scaled(bytes, [0, 1, 2])
+}
+
+/// `bytes` in the largest unit it reaches, with `decimals` places for KB, MB
+/// and GB. A value that rounds up to 1024 of a unit is shown in the next one:
+/// "1 MB", not "1024 KB".
+fn format_scaled(bytes: u64, decimals: [usize; 3]) -> String {
     let t = termide_i18n::t();
-    if bytes >= GIGABYTE {
-        format!(
-            "{:.2} {}",
-            bytes as f64 / GIGABYTE as f64,
-            t.size_gigabytes()
-        )
-    } else if bytes >= MEGABYTE {
-        format!(
-            "{:.1} {}",
-            bytes as f64 / MEGABYTE as f64,
-            t.size_megabytes()
-        )
-    } else if bytes >= KILOBYTE {
-        format!(
-            "{:.0} {}",
-            bytes as f64 / KILOBYTE as f64,
-            t.size_kilobytes()
-        )
-    } else {
-        format!("{} {}", bytes, t.size_bytes())
+    if bytes < KILOBYTE {
+        return format!("{} {}", bytes, t.size_bytes());
+    }
+    let units = [
+        (KILOBYTE, t.size_kilobytes()),
+        (MEGABYTE, t.size_megabytes()),
+        (GIGABYTE, t.size_gigabytes()),
+    ];
+    let mut unit = units
+        .iter()
+        .rposition(|&(size, _)| bytes >= size)
+        .unwrap_or(0);
+    loop {
+        let (size, name) = units[unit];
+        let places = decimals[unit];
+        let value = bytes as f64 / size as f64;
+        let scale = 10f64.powi(places as i32);
+        if unit + 1 < units.len() && (value * scale).round() / scale >= 1024.0 {
+            unit += 1;
+            continue;
+        }
+        return format!("{value:.places$} {name}");
     }
 }
 
@@ -446,6 +434,30 @@ pub fn paste_names_summary(paths: &[PathBuf]) -> String {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    /// A size that rounds up to 1024 of a unit reads in the next one.
+    #[test]
+    fn a_size_rounding_to_1024_of_a_unit_takes_the_next_unit() {
+        let t = termide_i18n::t();
+        let (b, kb, mb, gb) = (
+            t.size_bytes(),
+            t.size_kilobytes(),
+            t.size_megabytes(),
+            t.size_gigabytes(),
+        );
+        assert_eq!(format_size_compact(1023), format!("1023 {b}"));
+        assert_eq!(format_size_compact(1_048_575), format!("1 {mb}"));
+        assert_eq!(format_size_compact(1_048_575 - 1024), format!("1023 {kb}"));
+        assert_eq!(format_size_compact(GIGABYTE - 1), format!("1 {gb}"));
+        assert_eq!(format_size(1_048_575), format!("1.0 {mb}"));
+        assert_eq!(format_size(GIGABYTE - 1), format!("1.00 {gb}"));
+        assert_eq!(
+            format_size(GIGABYTE - 60 * KILOBYTE),
+            format!("1023.9 {mb}")
+        );
+        assert_eq!(format_size(1536), format!("2 {kb}"));
+        assert_eq!(format_size(3 * GIGABYTE / 2), format!("1.50 {gb}"));
+    }
 
     #[test]
     fn paste_names_summary_lists_names_then_folds_the_tail() {

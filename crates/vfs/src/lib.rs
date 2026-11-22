@@ -79,7 +79,7 @@ pub use types::{
     UploadProgress, VfsCopyOperation, VfsDownloadOperation, VfsEntry, VfsFileType, VfsMetadata,
     VfsOperation, VfsPath, VfsProtocol, VfsUploadOperation,
 };
-pub use url::{is_vfs_url, parse_vfs_url, UrlComponents};
+pub use url::{encode_url_path, is_vfs_url, parse_vfs_url, UrlComponents};
 
 /// Maximum directory nesting depth for recursive operations (safety guard).
 pub const MAX_RECURSION_DEPTH: usize = 100;
@@ -101,6 +101,11 @@ pub struct VfsManager {
     cache: DirCache,
     /// Pending authentication requests.
     pending_auth: Arc<RwLock<Vec<AuthRequest>>>,
+    /// The connection each view (a panel sharing this manager) shows, by
+    /// view id: a panel cloned from a remote one shares its manager, so a
+    /// connection is only closed when no other view still shows it.
+    views: std::sync::Mutex<HashMap<u64, String>>,
+    next_view: std::sync::atomic::AtomicU64,
 }
 
 impl std::fmt::Debug for VfsManager {
@@ -139,7 +144,41 @@ impl VfsManager {
             remote_providers: Arc::new(RwLock::new(HashMap::new())),
             cache: DirCache::new(),
             pending_auth: Arc::new(RwLock::new(Vec::new())),
+            views: std::sync::Mutex::new(HashMap::new()),
+            next_view: std::sync::atomic::AtomicU64::new(0),
         }
+    }
+
+    /// A new view id for a panel using this manager; it shows no
+    /// connection until [`VfsManager::set_view_connection`].
+    pub fn register_view(&self) -> u64 {
+        self.next_view
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Record the connection `view` shows, `None` for a local directory.
+    pub fn set_view_connection(&self, view: u64, connection_key: Option<String>) {
+        if let Ok(mut views) = self.views.lock() {
+            match connection_key {
+                Some(key) => views.insert(view, key),
+                None => views.remove(&view),
+            };
+        }
+    }
+
+    /// Stop showing a connection in `view` and close it unless another view
+    /// still shows it. Returns whether it was closed.
+    pub fn release_view_connection(&self, view: u64, connection_key: &str) -> bool {
+        let shared = self.views.lock().is_ok_and(|mut views| {
+            if views.get(&view).is_some_and(|key| key == connection_key) {
+                views.remove(&view);
+            }
+            views.values().any(|key| key == connection_key)
+        });
+        if !shared {
+            self.disconnect(connection_key);
+        }
+        !shared
     }
 
     /// Get the local filesystem provider.

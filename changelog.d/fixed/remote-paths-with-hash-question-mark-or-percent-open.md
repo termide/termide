@@ -1,0 +1,1 @@
+- **Server paths with `#`, `?` or `%` and user names with `@` work.** A server folder or file named with `#`, `?` or `%` turned into a different path when opened, copied or saved in a layout, and a user name containing `@`, such as an e-mail address, could not connect. Server URLs now escape these characters, while spaces and non-Latin names still show as they are.

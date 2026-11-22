@@ -120,14 +120,28 @@ impl OperationsPanel {
     /// `current_project` the root of the project on screen.
     /// Should be called before rendering.
     pub fn update_operations(&mut self, operations: &[&ActiveOperation], current_project: &Path) {
+        let selected = self.selected_operation_id();
+        let previous_index = self.selected_index;
         self.operations = operations
             .iter()
             .map(|op| OperationSnapshot::from_active(op, current_project))
             .collect();
 
-        // Ensure selected index is valid
+        // The selection follows its operation when others finish or start
+        // around it; when it finished itself, the one now in its place is
+        // selected.
+        if let Some(index) =
+            selected.and_then(|id| self.operations.iter().position(|op| op.id == id))
+        {
+            self.selected_index = index;
+        }
         if !self.operations.is_empty() && self.selected_index >= self.operations.len() {
             self.selected_index = self.operations.len() - 1;
+        }
+        if self.selected_index != previous_index {
+            let total = self.operations.len();
+            self.ensure_cursor_visible_up();
+            self.ensure_cursor_visible(total);
         }
     }
 
@@ -610,6 +624,38 @@ mod tests {
         assert_eq!((panel.scroll_offset, panel.selected_index), (2, 3));
         panel.handle_scroll(-10, panel.last_area);
         assert_eq!((panel.scroll_offset, panel.selected_index), (0, 1));
+    }
+
+    /// The selection stays on its operation when one above it finishes or a
+    /// new one appears above it; when it finishes itself, the next one in
+    /// its place is selected.
+    #[test]
+    fn the_selection_follows_its_operation_as_others_come_and_go() {
+        let here = Path::new("/work");
+        let op = |id| {
+            ActiveOperation::new(
+                OperationId(id),
+                OperationType::Copy,
+                "a".into(),
+                "b".into(),
+                1,
+                1,
+                here.into(),
+            )
+        };
+        let (one, two, three, four) = (op(1), op(2), op(3), op(4));
+        let mut panel = OperationsPanel::new();
+        panel.update_operations(&[&one, &two, &three], here);
+        panel.set_selected(1);
+
+        panel.update_operations(&[&two, &three], here);
+        assert_eq!(panel.selected_operation_id(), Some(OperationId(2)));
+
+        panel.update_operations(&[&four, &two, &three], here);
+        assert_eq!(panel.selected_operation_id(), Some(OperationId(2)));
+
+        panel.update_operations(&[&four, &three], here);
+        assert_eq!(panel.selected_operation_id(), Some(OperationId(3)));
     }
 
     #[test]

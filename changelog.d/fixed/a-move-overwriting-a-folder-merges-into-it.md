@@ -1,0 +1,1 @@
+- **A move that overwrites a folder merges into it.** Moving a folder onto an existing non-empty folder with Overwrite failed. Its contents are now merged into the existing folder, replacing files of the same name, and the source is removed only once everything is copied.

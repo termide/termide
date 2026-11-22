@@ -1,0 +1,1 @@
+- **Going to a file puts the cursor on it.** Typing a file's path into the path prompt, or choosing a file in the file name search, opened its folder but left the cursor at the top. The cursor now lands on the file.

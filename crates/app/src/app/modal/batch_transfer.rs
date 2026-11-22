@@ -117,7 +117,8 @@ impl App {
             let td_str = td.display().to_string();
             if termide_vfs::is_vfs_url(&td_str) && !termide_vfs::is_vfs_url(&dest_str) {
                 let base = td_str.trim_end_matches('/');
-                let tail = dest_str.trim_start_matches('/');
+                // The typed name is plain text; the URL is percent-encoded.
+                let tail = termide_vfs::encode_url_path(dest_str.trim_start_matches('/'));
                 dest_str = format!("{base}/{tail}");
             }
         }

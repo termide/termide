@@ -1,0 +1,1 @@
+- **Rename All renames every conflicting file.** It renamed only the file in the dialog and asked again for the next one, and on a conflict raised while a copy was running it skipped the file instead. The name pattern now applies to every remaining conflict, and Overwrite under it writes to the renamed name.
