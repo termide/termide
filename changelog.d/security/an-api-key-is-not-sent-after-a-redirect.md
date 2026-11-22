@@ -1,0 +1,1 @@
+- **An Anthropic API key is not sent after a redirect.** A redirect from the configured address was followed with the `x-api-key` header, to whatever host it named; the model connections now follow none and say where the server pointed, to be set as the base URL if it is right.

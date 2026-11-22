@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{buffer::Buffer, layout::Rect};
 
-use termide_config::{is_go_end, is_go_home, is_move_down, is_move_up, Config, KeyBinding};
+use termide_config::{is_go_end, is_go_home, is_move_down, is_move_up, Config};
 use termide_core::{
     CommandResult, HotkeyTable, Panel, PanelCommand, PanelEvent, PanelState, RenderContext,
     ThemeColors, WidthPreference,
@@ -116,8 +116,8 @@ pub struct GitLogPanel {
     modal_request: Option<(PendingAction, ActiveModal)>,
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// In-flight async refresh. While `Some`, the heavy
     /// `get_all_branches` / `get_log_with_graph` calls run on a worker
     /// thread; `tick()` swaps the result into place when ready.
@@ -136,23 +136,12 @@ fn build_git_log_hotkey_table(config: &Config) -> HotkeyTable {
     t.insert("info", &kb.info);
     t.insert("view_diff", &kb.view_diff);
 
-    // open_external: shared config binding (file_manager.keybindings.open_external)
-    let fm_kb = &config.file_manager.keybindings;
-    if let Some(ref binding) = fm_kb.open_external {
-        let mut keys: Vec<String> = match binding {
-            KeyBinding::Single(s) => vec![s.clone()],
-            KeyBinding::Multiple(v) => v.clone(),
-        };
-        if !keys.iter().any(|k| k == "O") {
-            keys.push("O".into());
-        }
-        t.insert("open_external", &Some(KeyBinding::Multiple(keys)));
-    } else {
-        t.insert(
-            "open_external",
-            &Some(KeyBinding::Multiple(vec!["O".into(), "Alt+Enter".into()])),
-        );
-    }
+    // The file manager's binding, as configured: the git log opens a file
+    // outside as the file manager does (doc/en/keybindings.md).
+    t.insert(
+        "open_external",
+        &config.file_manager.keybindings.open_external,
+    );
 
     t.insert("refresh", &kb.refresh);
     t
@@ -199,7 +188,7 @@ impl GitLogPanel {
             unicode_graph: true,
             modal_request: None,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             refresh_rx: None,
             refresh_pending: false,
         };
@@ -299,9 +288,7 @@ impl Panel for GitLogPanel {
                 self.restart_log();
             }
         }
-        let config_ptr = std::sync::Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_git_log_hotkey_table(config);
         }
     }

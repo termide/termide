@@ -10,7 +10,9 @@
 # Detached instances from the `--list-instances` table, header dropped: the id,
 # then the project path as the description fish shows next to it.
 function __termide_instances
-    termide --list-instances 2>/dev/null | awk 'NR > 1 { print $1 "\t" $5 }'
+    termide --list-instances 2>/dev/null | awk 'NR > 1 {
+        p = $0; if (match(p, / (at|de)tached  /)) p = substr(p, RSTART + RLENGTH)
+        print $1 "\t" p }'
 end
 
 complete -c termide -l log-level -d 'Minimum log level' -x -a 'trace debug info warn error'

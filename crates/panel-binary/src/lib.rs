@@ -107,8 +107,8 @@ pub struct BinaryPanel {
     theme_full: Option<Theme>,
     /// Configurable hotkeys (toggle hex/text).
     hotkeys: HotkeyTable,
-    /// Pointer of the last `Arc<Config>` used to build hotkeys.
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// Whether the panel is focused (set each render); the byte cursor is only
     /// drawn when focused, so an unfocused viewer shows no cursor.
     focused: bool,
@@ -141,7 +141,7 @@ impl BinaryPanel {
             theme: ThemeColors::default(),
             theme_full: None,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             focused: false,
         };
         panel.set_file(path);
@@ -323,9 +323,7 @@ impl Panel for BinaryPanel {
     fn prepare_render(&mut self, theme: &Theme, config: &Arc<Config>) {
         self.theme = ThemeColors::from(theme);
         self.theme_full = Some(*theme);
-        let ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != ptr {
-            self.last_config_ptr = ptr;
+        if self.last_config.changed(config) {
             let mut t = HotkeyTable::new();
             t.insert("toggle_hex", &config.viewer.keybindings.toggle_hex);
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);

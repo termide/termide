@@ -6,13 +6,16 @@ use termide_modal::ReservedHotkey;
 
 use super::super::App;
 
-/// Every global binding: a command's hotkey is matched after them, so one
-/// of these would never reach it.
+/// Every binding of termide's. A global one is matched before a command's
+/// hotkey, so a command could never get it; a panel's is matched after, so a
+/// command takes it there, which the form says.
 fn collect_global_reserved_hotkeys(config: &termide_config::Config) -> Vec<ReservedHotkey> {
     termide_config::enumerate_bindings(config)
         .into_iter()
-        .filter(|(location, _, _)| location.section == "general")
-        .map(|(_, _, binding)| ReservedHotkey { binding })
+        .map(|(location, _, binding)| ReservedHotkey {
+            binding,
+            panel_action: (location.section != "general").then(|| location.display()),
+        })
         .collect()
 }
 
@@ -31,6 +34,7 @@ impl App {
             }
             reserved.push(ReservedHotkey {
                 binding: key_str.to_string(),
+                panel_action: None,
             });
         }
         reserved

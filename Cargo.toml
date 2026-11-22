@@ -8,6 +8,8 @@ unicode-width = { path = "crates/unicode-width-fix" }
 [workspace.package]
 version = "0.50.0"
 edition = "2021"
+# The oldest toolchain the code builds with: the one rust-toolchain.toml pins.
+rust-version = "1.91"
 authors = ["Nick Nizovtsev"]
 license = "MIT"
 repository = "https://github.com/termide/termide"
@@ -98,6 +100,7 @@ tree-sitter-typescript = "0.23"
 name = "termide"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 authors.workspace = true
 description = "All-in-one terminal workspace: editor, file manager, terminal, git and coding agent"
 publish = false
@@ -154,7 +157,11 @@ assets = [
 ]
 auto-req = "no"
 
+# The gnu build is linked on Ubuntu 22.04 and uses symbols up to GLIBC_2.34
+# (check with `strings termide | grep GLIBC_`): an older system (RHEL 8,
+# Debian 11) is refused at install instead of failing at the first start.
 [package.metadata.generate-rpm.requires]
+"libc.so.6(GLIBC_2.34)(64bit)" = "*"
 
 [dependencies]
 # The root binary is a thin shell: CLI parsing, terminal setup, config load and

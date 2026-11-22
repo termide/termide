@@ -282,6 +282,7 @@ impl App {
             is_move,
             current_source: source,
             current_remote_target: Some(cancel_target),
+            operation_id: None,
         });
 
         // Start tracked upload operation (opens Operations panel)
@@ -295,6 +296,9 @@ impl App {
             0, // bytes will be updated during progress
         ) {
             Ok(operation_id) => {
+                if let Some(upload) = &mut self.state.batch.pending_upload {
+                    upload.operation_id = Some(operation_id);
+                }
                 // Store operation ID for pause/resume
                 self.state.active_operation_id = Some(operation_id);
             }

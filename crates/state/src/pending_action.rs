@@ -354,6 +354,13 @@ pub enum PendingAction {
     ConfirmProjectCommand {
         command: termide_config::commands::CommandItem,
     },
+    /// Trust the workspace at `root` with the language server of `lang`,
+    /// which builds it and so runs its code, once the user agrees; its
+    /// editors then start the server
+    TrustLanguageWorkspace {
+        lang: String,
+        root: std::path::PathBuf,
+    },
     /// Approve a command of the project's `commands.toml` an agent asked to
     /// launch, the user having been shown what it runs; the agent launches
     /// it again itself

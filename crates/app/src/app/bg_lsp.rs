@@ -9,6 +9,8 @@ use super::App;
 impl App {
     /// Poll LSP status for visible editors and completion for active editor
     pub(super) fn poll_lsp_completion(&mut self) {
+        self.ask_lsp_trust();
+
         // A restarted server knows none of the open documents: every editor
         // whose server is new opens its document again. Done only when a
         // server went live, not on every tick.
@@ -284,6 +286,76 @@ impl App {
 }
 
 impl App {
+    /// Ask about the workspaces a language server was held back in, since
+    /// it would run their code: one window at a time, when none is open.
+    fn ask_lsp_trust(&mut self) {
+        if let Some(manager) = self.state.lsp_manager.as_mut() {
+            for withheld in manager.take_withheld() {
+                if !self.state.lsp_trust_asks.contains(&withheld) {
+                    self.state.lsp_trust_asks.push_back(withheld);
+                }
+            }
+        }
+        if self.state.active_modal.is_some() {
+            return;
+        }
+        let Some(withheld) = self.state.lsp_trust_asks.pop_front() else {
+            return;
+        };
+        let t = termide_i18n::t();
+        let modal = termide_modal::ConfirmModal::new(
+            t.lsp_trust_title(),
+            t.lsp_trust_fmt(&withheld.command, &withheld.root.display().to_string()),
+        )
+        // It comes up unasked, maybe while the user types: a stray Enter
+        // must not grant the trust.
+        .defaulting_to_no();
+        self.state.set_pending_action(
+            termide_state::PendingAction::TrustLanguageWorkspace {
+                lang: withheld.lang,
+                root: withheld.root,
+            },
+            crate::state::ActiveModal::Confirm(Box::new(modal)),
+        );
+        self.state.needs_redraw = true;
+    }
+
+    /// Trust the workspace at `root` with the language server of `lang`,
+    /// the user having agreed, and start it for the editors waiting on it.
+    pub(super) fn trust_language_workspace(&mut self, lang: &str, root: &std::path::Path) {
+        let approvals = crate::state::workspace_approvals(&self.project_root);
+        if let Err(e) = approvals.trust_workspace(root) {
+            log::warn!("Cannot keep the trust of {}: {e}", root.display());
+            self.state.set_error(e);
+            return;
+        }
+        let Some(manager) = self.state.lsp_manager.as_mut() else {
+            return;
+        };
+        manager.release(lang, root);
+        let parked = self
+            .open_projects
+            .parked_mut()
+            .flat_map(|(_, project)| project.panels_mut());
+        for panel in self.layout_manager.iter_all_panels_mut().chain(parked) {
+            let Some(editor) = panel.as_editor_mut() else {
+                continue;
+            };
+            let Some(path) = editor.file_path().map(std::path::Path::to_path_buf) else {
+                continue;
+            };
+            // Only the editors left without a server: one already opened in
+            // a server must not open its document there twice.
+            let waits = termide_lsp::LspManager::detect_language(&path)
+                .is_some_and(|l| l == lang && manager.server_generation(&l, &path).is_none());
+            if waits {
+                editor.detach_lsp();
+                editor.init_lsp(manager);
+            }
+        }
+        self.state.needs_redraw = true;
+    }
+
     /// Restart the language server that handles `file`; its editors open
     /// their documents in the new process once it is up.
     pub(super) fn restart_language_server(&mut self, file: Option<std::path::PathBuf>) {
@@ -373,7 +445,10 @@ impl App {
                 None
             }
             (false, true) => {
-                self.state.lsp_manager = Some(termide_lsp::LspManager::new(servers));
+                self.state.lsp_manager = Some(crate::state::AppState::new_lsp_manager(
+                    servers,
+                    &self.state.lsp_trust_root,
+                ));
                 None
             }
             (false, false) => return,

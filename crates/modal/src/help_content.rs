@@ -83,7 +83,11 @@ impl HelpGenerator {
             Self::generate_panel_section(&config.general.keybindings, t),
             Self::generate_navigation_section(t),
             Self::generate_file_manager_section(&config.file_manager.keybindings, t),
-            Self::generate_editor_section(&config.editor.keybindings, t),
+            Self::generate_editor_section(
+                &config.editor.keybindings,
+                &config.viewer.keybindings.toggle_hex,
+                t,
+            ),
             Self::generate_viewers_section(&config.viewer.keybindings, &copy, t),
             Self::generate_git_status_section(&config.git_status.keybindings, t),
             Self::generate_git_diff_section(&config.git_diff.keybindings, t),
@@ -422,6 +426,10 @@ impl HelpGenerator {
                 description: t.help_desc_search_content().to_string(),
             },
             HelpEntry {
+                keys: Self::format_keys(&kb.search_replace),
+                description: t.help_desc_search_replace().to_string(),
+            },
+            HelpEntry {
                 keys: Self::format_keys(&kb.go_parent),
                 description: t.help_desc_go_parent().to_string(),
             },
@@ -491,14 +499,21 @@ impl HelpGenerator {
     }
 
     /// Generate editor keybindings section.
+    /// `toggle_hex` is configured among the viewer's keys and matched in the
+    /// editor, which it swaps for the hex view of its file.
     fn generate_editor_section(
         kb: &EditorKeybindings,
+        toggle_hex: &Option<KeyBinding>,
         t: &dyn termide_i18n::Translation,
     ) -> HelpSection {
         let entries = vec![
             HelpEntry {
                 keys: Self::format_keys(&kb.save),
                 description: t.help_desc_save().to_string(),
+            },
+            HelpEntry {
+                keys: Self::format_keys(toggle_hex),
+                description: t.help_desc_toggle_hex().to_string(),
             },
             HelpEntry {
                 keys: Self::format_keys(&kb.save_as),
@@ -1264,5 +1279,32 @@ mod tests {
             HelpGenerator::format_numbered_keys(kb.goto_panel()),
             "Ctrl+2 / Ctrl+5"
         );
+    }
+
+    #[test]
+    fn the_help_lists_replace_in_files_and_the_hex_toggle() {
+        let mut config = termide_config::Config::default();
+        config.normalize();
+        let t = termide_i18n::t();
+        let sections = HelpGenerator::generate(&config);
+        let entry = |panel: &str, description: &str| {
+            let section = HelpGenerator::section_for_panel(&sections, panel).unwrap();
+            sections[section]
+                .entries
+                .iter()
+                .find(|e| e.description == description)
+                .map(|e| e.keys.clone())
+        };
+        let replace = entry("file_manager", t.help_desc_search_replace());
+        let hex = entry("editor", t.help_desc_toggle_hex());
+        assert_eq!(
+            replace,
+            HelpGenerator::format_keys(&config.file_manager.keybindings.search_replace).into()
+        );
+        assert_eq!(
+            hex,
+            HelpGenerator::format_keys(&config.viewer.keybindings.toggle_hex).into()
+        );
+        assert!(!hex.unwrap().is_empty());
     }
 }

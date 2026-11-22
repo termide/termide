@@ -1004,6 +1004,11 @@ impl App {
                         self.start_command(command)?;
                     }
                 }
+                PendingAction::TrustLanguageWorkspace { lang, root } => {
+                    if value.get::<bool>().copied().unwrap_or(false) {
+                        self.trust_language_workspace(&lang, &root);
+                    }
+                }
                 PendingAction::ApproveProjectCommand { command } => {
                     if value.get::<bool>().copied().unwrap_or(false) {
                         self.approve_shown_command(&command);

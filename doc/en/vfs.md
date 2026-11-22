@@ -274,6 +274,10 @@ panel. The transfer registers as an operation in the
   operation left a partial file on the server, the panel asks
   whether to delete it — see the cancel-cleanup section in
   [Operations panel](operations.md).
+- A file that SFTP replaces, in either direction, is swapped for the
+  new one only once it has arrived whole, and keeps its permission
+  bits; a cancelled or broken transfer leaves it as it was. A symlink
+  on the server is written through rather than replaced.
 
 A move within one connection is renamed on the server, not downloaded
 and uploaded again; on SMB within one share and on NFS within one

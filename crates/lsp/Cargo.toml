@@ -17,6 +17,7 @@ serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 lsp-types.workspace = true
 url.workspace = true
+termide-fsutil = { path = "../fsutil" }
 
 [dev-dependencies]
 tempfile.workspace = true

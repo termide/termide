@@ -1,0 +1,1 @@
+- **Unsaved buffers keep backups of their own.** Two new buffers saved with the layout in the same millisecond got the same backup file, so one overwrote the other. And when a newer backup could not be written, the layout forgot the older one, which was then deleted. Each backup now has a name of its own, and an older one stays until a newer one is written.

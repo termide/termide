@@ -132,7 +132,8 @@ pub struct DbPanel {
 
     // --- input ---
     hotkeys: HotkeyTable,
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
 
     // --- render cache ---
     cached_theme: ThemeColors,
@@ -241,7 +242,7 @@ impl DbPanel {
             loading: true,
             query_error: None,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             cached_theme: ThemeColors::default(),
             last_area: Rect::default(),
             selector_y: 0,
@@ -989,9 +990,7 @@ impl Panel for DbPanel {
 
     fn prepare_render(&mut self, theme: &termide_theme::Theme, config: &Arc<Config>) {
         self.cached_theme = ThemeColors::from(theme);
-        let config_ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_db_hotkey_table(config);
         }
     }

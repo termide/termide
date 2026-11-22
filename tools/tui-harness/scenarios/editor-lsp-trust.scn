@@ -1,0 +1,23 @@
+# rust-analyzer builds the workspace it analyses, running its build scripts
+# and proc macros (doc/en/editor.md): opening a Rust file of a workspace not
+# trusted asks first, "No" by default, and declined it does not start.
+# `lsp` needs rust-analyzer on PATH.
+project empty
+lsp
+start
+run "mkdir src && printf '[package]\nname = \"trust\"\nversion = \"0.1.0\"\nedition = \"2021\"\n' > Cargo.toml && printf 'use std::fmt;\n\nfn main() {}\n' > src/main.rs"
+wait "Cargo.toml"
+run "true"
+key Down Enter
+wait "main.rs"
+key End F4
+wait "Start the language server?" 30
+expect "rust-analyzer builds the workspace"
+snapshot asked
+# Enter takes the default, No: nothing starts and nothing is reported.
+key Enter
+wait-gone "Start the language server?"
+sleep 8
+expect-not "[unused_imports]"
+expect-not "(indexing)"
+quit --force

@@ -571,6 +571,7 @@ impl Translation for RuntimeTranslation {
         command_params_run,
         command_params_cancel,
         command_confirm_project_title,
+        lsp_trust_title,
         command_config_label_command,
         command_config_label_group,
         command_config_label_display_name,
@@ -1236,6 +1237,8 @@ impl Translation for RuntimeTranslation {
         help_desc_redo,
         help_desc_search,
         help_desc_search_content,
+        help_desc_search_replace,
+        help_desc_toggle_hex,
         help_desc_select_all,
         help_desc_refresh,
         help_desc_go_parent,
@@ -1745,6 +1748,10 @@ impl Translation for RuntimeTranslation {
             "command_confirm_project_fmt",
             &[("name", name), ("command", command)],
         )
+    }
+
+    fn lsp_trust_fmt(&self, server: &str, root: &str) -> String {
+        self.format("lsp_trust_fmt", &[("server", server), ("root", root)])
     }
 
     fn agent_notice_trusted_fmt(&self, name: &str) -> String {

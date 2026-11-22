@@ -5,7 +5,7 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Built-in tools of the termide coding agent: read, edit, write, bash"
+description = "Built-in tools of the termide coding agent: read, edit, write, shell"
 publish = false
 
 [dependencies]

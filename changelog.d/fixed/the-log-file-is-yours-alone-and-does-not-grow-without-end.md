@@ -1,0 +1,1 @@
+- **The log file is yours alone and stops growing at 10 MB.** It is now created readable by you alone, and one past 10 MB is set aside as `<name>.1` and begun afresh, as the architecture notes had long claimed.

@@ -43,7 +43,9 @@ pub struct TextBuffer {
     /// The content as last loaded or saved. Undo and redo compare against it
     /// to tell whether the buffer is back to that state; cloning a rope
     /// shares its nodes, so keeping it costs only what edits replace.
-    saved: Rope,
+    /// `None` once nothing saved is known to hold the content: a remote
+    /// file whose upload failed.
+    saved: Option<Rope>,
     /// Line ending type (for saving)
     line_ending: LineEnding,
     /// Edit history for undo/redo
@@ -75,7 +77,7 @@ impl TextBuffer {
             rope: Rope::new(),
             file_path: None,
             modified: false,
-            saved: Rope::new(),
+            saved: Some(Rope::new()),
             line_ending: LineEnding::LF,
             history: History::new(),
             edit_version: 0,
@@ -92,7 +94,7 @@ impl TextBuffer {
     /// Create buffer from Rope (for use from Editor::from_text)
     pub fn from_rope(rope: Rope) -> Self {
         Self {
-            saved: rope.clone(),
+            saved: Some(rope.clone()),
             rope,
             file_path: None,
             modified: false,
@@ -113,7 +115,7 @@ impl TextBuffer {
     pub fn from_text(text: &str) -> Self {
         let rope = Rope::from_str(text);
         Self {
-            saved: rope.clone(),
+            saved: Some(rope.clone()),
             rope,
             file_path: None,
             modified: false,
@@ -150,7 +152,7 @@ impl TextBuffer {
         let rope = Rope::from_str(&contents);
 
         Ok(Self {
-            saved: rope.clone(),
+            saved: Some(rope.clone()),
             rope,
             file_path: Some(path.to_path_buf()),
             modified: false,
@@ -208,7 +210,7 @@ impl TextBuffer {
 
         self.file_path = Some(path.to_path_buf());
         self.modified = false;
-        self.saved = self.rope.clone();
+        self.saved = Some(self.rope.clone());
         Ok(())
     }
 
@@ -726,6 +728,14 @@ impl TextBuffer {
         }
     }
 
+    /// Take the buffer as unsaved again: a save it went through did not
+    /// reach where the file lives (a remote upload failed). Undo no longer
+    /// finds a saved state to come back to.
+    pub fn mark_unsaved(&mut self) {
+        self.modified = true;
+        self.saved = None;
+    }
+
     /// Check if buffer is modified
     pub fn is_modified(&self) -> bool {
         self.modified
@@ -750,7 +760,7 @@ impl TextBuffer {
         self.edit_version += 1;
         // Don't mark as modified - this is for internal use (log viewer)
         if !self.modified {
-            self.saved = self.rope.clone();
+            self.saved = Some(self.rope.clone());
         }
     }
 
@@ -780,7 +790,7 @@ impl TextBuffer {
         if let Some(action) = self.history.undo() {
             let cursor = self.apply_action(&action)?;
             // Back at the saved content means nothing is left to save.
-            self.modified = self.rope != self.saved;
+            self.modified = self.saved.as_ref() != Some(&self.rope);
             Ok(Some(cursor))
         } else {
             Ok(None)
@@ -792,7 +802,7 @@ impl TextBuffer {
         if let Some(action) = self.history.redo() {
             let cursor = self.apply_action(&action)?;
             // Back at the saved content means nothing is left to save.
-            self.modified = self.rope != self.saved;
+            self.modified = self.saved.as_ref() != Some(&self.rope);
             Ok(Some(cursor))
         } else {
             Ok(None)
@@ -1418,6 +1428,18 @@ mod lsp_change_tests {
         buf.insert(&Cursor::at(0, 0), "hi").unwrap();
         buf.undo().unwrap();
         assert!(!buf.is_modified());
+    }
+
+    #[test]
+    fn a_buffer_marked_unsaved_stays_modified_through_undo_and_redo() {
+        let mut buf = TextBuffer::new();
+        buf.insert(&Cursor::at(0, 0), "hi").unwrap();
+        buf.mark_unsaved();
+        assert!(buf.is_modified());
+        buf.undo().unwrap();
+        assert!(buf.is_modified());
+        buf.redo().unwrap();
+        assert!(buf.is_modified());
     }
 
     #[test]

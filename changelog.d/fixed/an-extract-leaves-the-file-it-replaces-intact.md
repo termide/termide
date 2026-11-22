@@ -1,0 +1,1 @@
+- **Extracting from an archive leaves the file it replaces intact until the new one is whole.** An extraction over an existing file emptied it first, so a cancel or a damaged entry lost it. Each file is now written beside its destination and put in place once complete.

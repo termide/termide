@@ -4,6 +4,7 @@
 //! agent's tools, the project store and the config all replace files
 //! through it.
 
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -250,5 +251,47 @@ mod tests {
             .collect();
         names.sort();
         assert_eq!(names, ["blocked", "session.toml"]);
+    }
+}
+
+/// `PATH` without its relative entries (`.`, an empty one, `bin`): a program
+/// termide starts by name in a project's directory would be found through
+/// them in the project, where a repository can plant one. Pass it as the
+/// child's `PATH`, which is also where the child is looked for.
+pub fn absolute_path_var() -> OsString {
+    absolute_entries(&std::env::var_os("PATH").unwrap_or_default())
+}
+
+fn absolute_entries(paths: &OsStr) -> OsString {
+    std::env::join_paths(std::env::split_paths(paths).filter(|dir| dir.is_absolute()))
+        .unwrap_or_default()
+}
+
+#[cfg(all(test, unix))]
+mod path_tests {
+    use super::*;
+
+    /// A program the project holds is not found through `.`.
+    #[test]
+    fn a_program_in_the_project_is_not_found_through_a_relative_path_entry() {
+        use std::os::unix::fs::PermissionsExt as _;
+        use std::process::Command;
+        let joined = std::env::join_paths(["", ".", "/usr/bin", "bin"]).unwrap();
+        assert_eq!(absolute_entries(&joined), OsString::from("/usr/bin"));
+
+        let project = tempfile::tempdir().unwrap();
+        let planted = project.path().join("planted-tool");
+        fs::write(&planted, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&planted, fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths([".", "/usr/bin"]).unwrap();
+        let found = |path: OsString| {
+            Command::new("planted-tool")
+                .current_dir(project.path())
+                .env("PATH", path)
+                .status()
+                .is_ok()
+        };
+        assert!(found(path.clone()), "the stand-in is reachable through `.`");
+        assert!(!found(absolute_entries(&path)));
     }
 }

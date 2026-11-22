@@ -103,18 +103,41 @@ impl App {
                         self.state.needs_redraw = true;
                         continue;
                     }
-                    // Check if this operation is part of a BatchOperation
-                    let has_batch = matches!(
-                        self.state.pending_action,
-                        Some(PendingAction::ContinueBatchOperation { .. })
-                    );
+                    // What waits on an operation is settled by that
+                    // operation alone, never by another one ending first:
+                    // a batch by its current step, a batch upload by its
+                    // current file, an editor's save by its upload.
+                    let is_batch_step = self.state.batch.sub_operation_id == Some(id);
+                    let has_batch = is_batch_step
+                        && matches!(
+                            self.state.pending_action,
+                            Some(PendingAction::ContinueBatchOperation { .. })
+                        );
+                    let is_upload_step = self
+                        .state
+                        .batch
+                        .pending_upload
+                        .as_ref()
+                        .is_some_and(|upload| upload.operation_id == Some(id));
+                    let editor_upload = self
+                        .state
+                        .editor_uploads
+                        .iter()
+                        .position(|upload| upload.operation_id == id)
+                        .map(|i| self.state.editor_uploads.remove(i));
 
                     match result {
                         OperationResult::Success | OperationResult::SuccessWithPath(_) => {
-                            should_refresh_file_managers = true;
+                            // An editor's save overwrote a file already listed.
+                            if editor_upload.is_none() {
+                                should_refresh_file_managers = true;
+                            }
 
                             // Handle remote delete for move operations (delete source after download)
-                            if let Some(pending_delete) = self.state.batch.pending_delete.take() {
+                            if let Some(pending_delete) = is_batch_step
+                                .then(|| self.state.batch.pending_delete.take())
+                                .flatten()
+                            {
                                 // Start async delete operation (fire and forget)
                                 let delete_op = pending_delete
                                     .vfs_manager
@@ -194,7 +217,10 @@ impl App {
                             }
 
                             // Handle batch upload continuation
-                            if let Some(mut batch_upload) = self.state.batch.pending_upload.take() {
+                            if let Some(mut batch_upload) = is_upload_step
+                                .then(|| self.state.batch.pending_upload.take())
+                                .flatten()
+                            {
                                 // Delete local source if this was a move operation
                                 if batch_upload.is_move {
                                     if let Err(e) =
@@ -266,8 +292,9 @@ impl App {
                                                 request,
                                                 batch_upload.vfs_manager.clone(),
                                             ) {
-                                                Ok(_) => {
+                                                Ok(next_id) => {
                                                     // Put back for next tick
+                                                    batch_upload.operation_id = Some(next_id);
                                                     self.state.batch.pending_upload =
                                                         Some(batch_upload);
                                                 }
@@ -337,16 +364,12 @@ impl App {
                                 }
                             }
 
-                            // Skip file manager refresh for editor uploads (file already existed)
-                            if self.state.skip_refresh_after_upload {
-                                self.state.skip_refresh_after_upload = false;
-                                should_refresh_file_managers = false;
-                                self.clear_any_editor_uploading_flag();
-                            }
-
-                            // Handle close editor after upload (for "save and close" flow)
-                            if let Some(editor_path) = self.state.close_editor_after_upload.take() {
-                                self.close_editor_by_path(&editor_path);
+                            if let Some(upload) = editor_upload {
+                                self.clear_editor_uploading_flag(&upload.editor_path);
+                                // "Save and close"
+                                if upload.close_after {
+                                    self.close_editor_by_path(&upload.editor_path);
+                                }
                             }
 
                             // Untrack completed operation from operations panel
@@ -416,7 +439,9 @@ impl App {
                             log::error!("Operation {} failed: {}", id, err);
 
                             // Clear pending remote delete (don't delete source if download failed)
-                            self.state.batch.pending_delete = None;
+                            if is_batch_step {
+                                self.state.batch.pending_delete = None;
+                            }
 
                             // Clear pending editor download on failure
                             if let Some(pending) = self.state.pending_editor_download.take() {
@@ -433,17 +458,13 @@ impl App {
                                 }
                             }
 
-                            // Clear editor upload flags on failure
-                            if self.state.skip_refresh_after_upload {
-                                self.state.skip_refresh_after_upload = false;
-                                self.clear_any_editor_uploading_flag();
-                            }
-                            if let Some(editor_path) = self.state.close_editor_after_upload.take() {
-                                self.clear_editor_uploading_flag(&editor_path);
+                            // The edits reached only the local copy.
+                            if let Some(upload) = editor_upload {
+                                self.editor_upload_failed(&upload.editor_path);
                             }
 
                             // Clear pending batch upload (don't continue if upload failed)
-                            if self.state.batch.pending_upload.take().is_some() {
+                            if is_upload_step && self.state.batch.pending_upload.take().is_some() {
                                 self.state.close_modal();
                             }
 
@@ -486,7 +507,9 @@ impl App {
                             should_refresh_file_managers = true;
 
                             // Clear pending remote delete (don't delete source if download cancelled)
-                            self.state.batch.pending_delete = None;
+                            if is_batch_step {
+                                self.state.batch.pending_delete = None;
+                            }
 
                             // Clear pending editor download on cancel
                             if let Some(pending) = self.state.pending_editor_download.take() {
@@ -503,13 +526,9 @@ impl App {
                                 }
                             }
 
-                            // Clear editor upload flags on cancel
-                            if self.state.skip_refresh_after_upload {
-                                self.state.skip_refresh_after_upload = false;
-                                self.clear_any_editor_uploading_flag();
-                            }
-                            if let Some(editor_path) = self.state.close_editor_after_upload.take() {
-                                self.clear_editor_uploading_flag(&editor_path);
+                            // The edits reached only the local copy.
+                            if let Some(upload) = editor_upload {
+                                self.editor_upload_failed(&upload.editor_path);
                             }
 
                             // Clear pending batch upload (don't continue if upload cancelled).
@@ -519,8 +538,10 @@ impl App {
                             // *only* partial file; files already finished in
                             // the batch are intact on the server and stay
                             // untouched.
-                            let partial_remote =
-                                self.state.batch.pending_upload.take().and_then(|pending| {
+                            let partial_remote = is_upload_step
+                                .then(|| self.state.batch.pending_upload.take())
+                                .flatten()
+                                .and_then(|pending| {
                                     let path = pending.current_remote_target.clone()?;
                                     let filename = path
                                         .file_name()
@@ -532,6 +553,11 @@ impl App {
                                                 .map(|n| n.to_string_lossy().into_owned())
                                         })?;
                                     Some((path, pending.vfs_manager, filename))
+                                })
+                                // SFTP writes into a hidden sibling it removes
+                                // itself: the path holds the untouched original.
+                                .filter(|(path, ..)| {
+                                    path.protocol != termide_vfs::VfsProtocol::Sftp
                                 });
                             if partial_remote.is_some() {
                                 self.state.close_modal();

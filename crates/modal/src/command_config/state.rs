@@ -33,6 +33,8 @@ impl CommandConfigModal {
             selected_button: 0,
             hotkey_error: false,
             hotkey_conflict: None,
+            panel_hotkeys: Vec::new(),
+            hotkey_takes: None,
             reserved_hotkeys: Vec::new(),
             last_buttons_area: None,
             last_group_field_area: None,
@@ -108,6 +110,8 @@ impl CommandConfigModal {
             selected_button: 0,
             hotkey_error: false,
             hotkey_conflict: None,
+            panel_hotkeys: Vec::new(),
+            hotkey_takes: None,
             reserved_hotkeys: Vec::new(),
             last_buttons_area: None,
             last_group_field_area: None,
@@ -128,10 +132,17 @@ impl CommandConfigModal {
     }
 
     pub fn with_reserved_hotkeys(mut self, reserved_hotkeys: Vec<ReservedHotkey>) -> Self {
-        self.reserved_hotkeys = reserved_hotkeys
-            .into_iter()
-            .filter_map(|item| termide_config::parse_keybinding(&item.binding).ok())
-            .collect();
+        self.reserved_hotkeys.clear();
+        self.panel_hotkeys.clear();
+        for item in reserved_hotkeys {
+            let Ok(parsed) = termide_config::parse_keybinding(&item.binding) else {
+                continue;
+            };
+            match item.panel_action {
+                Some(action) => self.panel_hotkeys.push((parsed, action)),
+                None => self.reserved_hotkeys.push(parsed),
+            }
+        }
         self.validate_hotkey();
         self
     }
@@ -199,7 +210,7 @@ impl CommandConfigModal {
         } else {
             1 + 3 + 3 + 3 + 2 + 3
         };
-        if self.hotkey_error || self.hotkey_conflict.is_some() {
+        if self.has_hotkey_note() {
             height += 1;
         }
         height += 5;
@@ -342,6 +353,7 @@ impl CommandConfigModal {
         let text = self.hotkey_input.text().trim();
         self.hotkey_error = !text.is_empty() && !is_valid_hotkey(text);
         self.hotkey_conflict = None;
+        self.hotkey_takes = None;
         if self.hotkey_error || text.is_empty() {
             return;
         }
@@ -350,7 +362,18 @@ impl CommandConfigModal {
         };
         if self.reserved_hotkeys.contains(&parsed) {
             self.hotkey_conflict = Some(i18n::t().command_config_hotkey_conflict().to_string());
+            return;
         }
+        self.hotkey_takes = self
+            .panel_hotkeys
+            .iter()
+            .find(|(key, _)| *key == parsed)
+            .map(|(_, action)| i18n::t().settings_kb_conflict_fmt(text, action));
+    }
+
+    /// Whether a line under the hotkey field says something about it.
+    pub(super) fn has_hotkey_note(&self) -> bool {
+        self.hotkey_error || self.hotkey_conflict.is_some() || self.hotkey_takes.is_some()
     }
 
     pub(super) fn mode_label(mode: CommandMode) -> &'static str {
@@ -620,12 +643,32 @@ mod tests {
         assert_eq!(result.cwd, CommandCwd::Panel);
     }
 
+    /// A command's key is matched before a panel's, so taking a panel key
+    /// is said, yet allowed: it may be what the user wants.
+    #[test]
+    fn a_panel_key_is_warned_about_but_saved() {
+        setup_i18n();
+        let mut modal = CommandConfigModal::new_create("Create command", vec![])
+            .with_reserved_hotkeys(vec![ReservedHotkey {
+                binding: "F3".to_string(),
+                panel_action: Some("file_manager.view".to_string()),
+            }]);
+        modal.hotkey_input.set_text("F3");
+        modal.validate_hotkey();
+        assert!(modal.hotkey_conflict.is_none());
+        let note = modal.hotkey_takes.clone().expect("the panel key is said");
+        assert!(note.contains("file_manager.view"), "{note}");
+        modal.command_input.set_text("cargo build");
+        assert!(modal.try_confirm().is_some());
+    }
+
     #[test]
     fn reserved_hotkey_conflict_is_detected() {
         setup_i18n();
         let mut modal = CommandConfigModal::new_create("Create command", vec![])
             .with_reserved_hotkeys(vec![ReservedHotkey {
                 binding: "Ctrl+B".to_string(),
+                panel_action: None,
             }]);
         modal.hotkey_input.set_text("Ctrl+B");
         modal.validate_hotkey();

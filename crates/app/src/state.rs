@@ -7,7 +7,7 @@
 //! state management and modal handling.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc};
 
 use termide_config::{BookmarksConfig, Config};
@@ -35,9 +35,9 @@ pub use termide_modal::ActiveModal;
 // paths under `crate::state` remain unchanged.
 pub use crate::state_types::{
     kill_process_tree, BatchOperationState, CacheState, CommandOperationHandle,
-    CommandOperationResult, GitOperationHandle, GitOperationResult, PendingBatchUpload,
-    PendingCommandLaunch, PendingEditorDownload, PendingRemoteDelete, ResourceModalKind,
-    ScrollBarDrag, StashState,
+    CommandOperationResult, EditorUpload, GitOperationHandle, GitOperationResult,
+    PendingBatchUpload, PendingCommandLaunch, PendingEditorDownload, PendingRemoteDelete,
+    ResourceModalKind, ScrollBarDrag, StashState,
 };
 
 /// The key prefix of a Sessions row in the AI menu, before the directory
@@ -120,11 +120,9 @@ pub struct AppState {
     pub pending_editor_download: Option<PendingEditorDownload>,
     /// Grouped state for an in-flight batch operation (upload/delete/tracking).
     pub batch: BatchOperationState,
-    /// Close editor after current upload completes (for "save and close" flow).
-    /// Stores the file path of the editor to close (to find the correct panel).
-    pub close_editor_after_upload: Option<PathBuf>,
-    /// Skip file manager refresh after upload (for editor saves - file already exists)
-    pub skip_refresh_after_upload: bool,
+    /// Remote editors' saves being uploaded, each settled when its own
+    /// operation ends
+    pub editor_uploads: Vec<EditorUpload>,
     /// Unified watcher for filesystem and git changes
     pub watcher: Option<UnifiedWatcher>,
     /// Watches the app holds on `watcher`: one per panel wanting the target.
@@ -175,6 +173,13 @@ pub struct AppState {
     pub last_git_spinner_update: Option<std::time::Instant>,
     /// LSP manager for language server integration
     pub lsp_manager: Option<LspManager>,
+    /// The root of the project open now, whose approvals say which
+    /// workspaces a language server that runs their code may start in;
+    /// shared with the manager, which asks at each start.
+    pub lsp_trust_root: std::sync::Arc<std::sync::Mutex<PathBuf>>,
+    /// Workspaces whose language server was held back, still to be asked
+    /// about, one window at a time.
+    pub lsp_trust_asks: std::collections::VecDeque<termide_lsp::WithheldServer>,
     /// All diagnostics from LSP servers, keyed by file path
     pub all_diagnostics: HashMap<PathBuf, Vec<lsp_types::Diagnostic>>,
     /// What the language servers last published for each file; with
@@ -228,6 +233,14 @@ pub struct AppState {
     pub cache: CacheState,
 }
 
+/// The approvals of the project rooted at `project_root`: its launches and
+/// trusted workspaces, kept in termide's data directory.
+pub(crate) fn workspace_approvals(project_root: &Path) -> termide_agent_core::approvals::Approvals {
+    termide_agent_core::approvals::Approvals::new(
+        termide_project::approvals_path(project_root).ok(),
+    )
+}
+
 impl Default for AppState {
     fn default() -> Self {
         Self::new()
@@ -262,12 +275,12 @@ impl AppState {
         };
 
         // Create LSP manager if enabled
-        let lsp_manager = if config.lsp.enabled {
-            let lsp_config = Self::create_lsp_config(&config);
-            Some(LspManager::new(lsp_config))
-        } else {
-            None
-        };
+        let project_root = std::env::current_dir().unwrap_or_default();
+        let lsp_trust_root = std::sync::Arc::new(std::sync::Mutex::new(project_root.clone()));
+        let lsp_manager = config
+            .lsp
+            .enabled
+            .then(|| Self::new_lsp_manager(Self::create_lsp_config(&config), &lsp_trust_root));
 
         // Load bookmarks from data directory
         let bookmarks = BookmarksConfig::load();
@@ -297,8 +310,7 @@ impl AppState {
                 id_counter: u64::MAX / 2,
                 ..Default::default()
             },
-            close_editor_after_upload: None,
-            skip_refresh_after_upload: false,
+            editor_uploads: Vec::new(),
             watcher: None,
             held_watches: HashMap::new(),
             theme,
@@ -322,7 +334,9 @@ impl AppState {
             plugin_diagnostics: HashMap::new(),
             bookmarks,
             project_bookmarks: None,
-            project_root: std::env::current_dir().unwrap_or_default(),
+            project_root,
+            lsp_trust_root,
+            lsp_trust_asks: std::collections::VecDeque::new(),
             open_projects: Vec::new(),
             held_project_button: None,
             reopenable_projects: Vec::new(),
@@ -339,6 +353,25 @@ impl AppState {
             stash: StashState::default(),
             cache: CacheState::default(),
         }
+    }
+
+    /// A language server manager for `config`. A server that runs the code
+    /// of the workspace it analyses ([`termide_lsp::runs_workspace_code`])
+    /// starts only in a workspace the project open at the time trusts.
+    pub(crate) fn new_lsp_manager(
+        config: LspConfig,
+        project_root: &std::sync::Arc<std::sync::Mutex<PathBuf>>,
+    ) -> LspManager {
+        let mut manager = LspManager::new(config);
+        let project_root = std::sync::Arc::clone(project_root);
+        manager.set_workspace_trust(Box::new(move |root| {
+            let project = project_root
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone();
+            workspace_approvals(&project).workspace_trusted(root)
+        }));
+        manager
     }
 
     /// Create LSP configuration from app config

@@ -1,0 +1,1 @@
+- **zsh and fish completion describe a detached instance by its project.** They showed a piece of the uptime or the state instead, since the uptime column holds a space; now the whole project path, spaces included, follows the id.

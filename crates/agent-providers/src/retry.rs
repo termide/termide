@@ -19,6 +19,17 @@ pub struct Failure {
     pub detail: String,
 }
 
+/// What to say of a redirect the API answered with, which is not followed
+/// (the key would go along); `None` for any other answer.
+pub(crate) fn redirect(response: &ureq::Response) -> Option<String> {
+    (300..400).contains(&response.status()).then(|| {
+        format!(
+            "the server redirects to {}, which is not followed: set the address it names as the base URL",
+            response.header("location").unwrap_or("another address")
+        )
+    })
+}
+
 impl Failure {
     /// An HTTP error response: `body` is the response text, `retry_after`
     /// its `Retry-After` header.

@@ -1,0 +1,1 @@
+- **A `number` parameter takes only a number.** The command parameter form ran a command with whatever text a `number` field held, while the agent refused it. The form now refuses `Run` too, with the focus on the field and its label in red, until it holds a number or nothing.

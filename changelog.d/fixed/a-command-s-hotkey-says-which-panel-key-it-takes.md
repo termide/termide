@@ -1,0 +1,1 @@
+- **A command's hotkey says which panel key it takes.** A command's hotkey is matched before any panel's keys, so one on `F3` or `Ctrl+F` silently took those keys in every panel. The `Add command...` form now says whose key it was (`F3 is also bound to file_manager.view`) and still saves it, and Settings → Keybindings names the command when a panel action is given its key.

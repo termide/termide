@@ -287,6 +287,9 @@ pub struct SettingsModal {
     /// The flags each debugger gets on this system when the settings name
     /// none, by name; given by the app, shown beside the flags field.
     debugger_defaults: std::collections::HashMap<String, Vec<String>>,
+    /// The commands' hotkeys, with `commands.<name>` for each: matched before
+    /// any panel's key, so a panel action given one loses it to the command.
+    command_hotkeys: Vec<(termide_config::ParsedKeyBinding, String, String)>,
     /// The plugins installed, by name, for the Plugins tab.
     plugin_names: Vec<String>,
     /// Those of them termide carries itself: off until given a mode.

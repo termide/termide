@@ -2,6 +2,19 @@
 
 本指南介绍在您的系统上安装 Termide 的不同方法。
 
+## 快速安装（Linux/macOS）
+
+该脚本会检测您的系统并提供适合的安装方式：二进制文件、`.deb` 或 `.rpm` 软件包、Homebrew、Nix 或 Cargo。
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | sh
+```
+
+当系统的 glibc 低于 2.34 时，它会改用静态 musl 构建；每个下载都会与发布中旁边的 `.sha256` 文件核对，缺少该文件或不匹配时不安装任何内容。只有在安装目录需要时才使用 `sudo`。可通过环境变量改变其行为：
+
+- `TERMIDE_VERSION` — 安装指定版本而不是最新版本。
+- `TERMIDE_INSTALL_DIR` — 将二进制文件安装到 `/usr/local/bin`（Termux 下为 `$PREFIX/bin`）以外的位置。
+
 ## 下载预编译二进制文件（推荐）
 
 最简单的入门方式是下载适合您平台的预编译二进制文件。
@@ -10,35 +23,35 @@
 
 访问 [GitHub Releases](https://github.com/termide/termide/releases) 页面，下载适合您平台的最新版本：
 
-**Linux x86_64**（也适用于 WSL/WSL2）：
+**Linux x86_64**（也适用于 WSL/WSL2；需要 glibc 2.34 或更新版本——RHEL 9、Debian 12、Ubuntu 22.04 及以后；更旧的系统请使用静态 musl 构建）：
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 **Linux x86_64 — 静态 musl**（Alpine、distroless 容器、任何没有 glibc
 的系统）：
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
 ```
 
 **Linux ARM64**（树莓派、ARM 服务器）：
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-unknown-linux-gnu.tar.gz
 ```
 
 **Linux ARM64 — 静态 musl**（Android/Termux、Alpine ARM、任何无 glibc 的 ARM64 系统）：
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ```
 
 **macOS Intel (x86_64)**：
 ```bash
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-apple-darwin.tar.gz
 ```
 
 **macOS Apple Silicon (M1/M2/M3)**：
 ```bash
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-apple-darwin.tar.gz
 ```
 
 ### 第 2 步：解压
@@ -75,7 +88,7 @@ russh-sftp —— 无 OpenSSL、无 libssh2），因此这与普通构建是相�
 musl 编译。
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
 tar xzf termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
@@ -95,17 +108,19 @@ nix build github:termide/termide#termide-static
 
 ## 通过包管理器安装
 
+与 gnu 构建一样，这些软件包需要 glibc 2.34 或更新版本；发布中每个包旁边都有对应的 `.sha256` 文件。
+
 ### Debian/Ubuntu (.deb)
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide_0.50.0-1_amd64.deb
-sudo dpkg -i termide_0.50.0-1_amd64.deb
+wget https://github.com/termide/termide/releases/download/0.50.0/termide_0.50.0-1_amd64.deb
+sudo apt install ./termide_0.50.0-1_amd64.deb
 ```
 
 ### Fedora/RHEL/CentOS (.rpm)
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-1.x86_64.rpm
 sudo rpm -i termide-0.50.0-1.x86_64.rpm
 ```
 
@@ -320,7 +335,7 @@ Termide 也可在 Windows Subsystem for Linux（WSL 和 WSL2）中运行：
 1. 如果尚未安装，请先安装 WSL2
 2. 在 WSL 中下载 Linux x86_64 二进制文件：
    ```bash
-   wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
+   wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
    tar xzf termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
    ./termide
    ```
@@ -332,7 +347,7 @@ Termide 可在 [Termux](https://termux.dev) 中运行。请使用**静态 ARM64 
 
 ```bash
 pkg install git openssh   # termide 会调用的工具（以及所需的 LSP 服务器）
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 tar xzf termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 ```

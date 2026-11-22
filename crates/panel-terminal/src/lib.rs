@@ -124,8 +124,8 @@ pub struct Terminal {
     color_preview: Option<ColorPreview>,
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// Cached foreground command name (avoids /proc reads on every render frame).
     /// Mutex for interior mutability from `&self` in `title()`.
     cached_fg_command: std::sync::Mutex<(String, std::time::Instant)>,
@@ -398,7 +398,7 @@ impl Terminal {
             panel_bounds: None,
             color_preview: None,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             cached_fg_command: std::sync::Mutex::new((
                 "shell".to_string(),
                 std::time::Instant::now(),
@@ -537,8 +537,9 @@ impl Terminal {
         Ok(term)
     }
 
-    /// Create new terminal that runs a specific command (e.g., ssh user@host)
-    pub fn new_with_command(rows: u16, cols: u16, command: &str) -> Result<Self> {
+    /// Create new terminal that runs `argv` (e.g. `ssh -- user@host`), the
+    /// program first; no shell reads it.
+    pub fn new_with_command(rows: u16, cols: u16, argv: &[String]) -> Result<Self> {
         let pty_system = native_pty_system();
         let size = PtySize {
             rows,
@@ -548,15 +549,11 @@ impl Terminal {
         };
         let pair = pty_system.openpty(size)?;
 
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.is_empty() {
-            anyhow::bail!("Empty command");
-        }
-
-        let mut cmd = CommandBuilder::new(parts[0]);
-        for arg in &parts[1..] {
-            cmd.arg(*arg);
-        }
+        let (program, args) = argv
+            .split_first()
+            .ok_or_else(|| anyhow::anyhow!("Empty command"))?;
+        let mut cmd = CommandBuilder::new(program);
+        cmd.args(args);
 
         let working_dir = std::env::current_dir().unwrap_or_else(|_| "/".into());
         cmd.cwd(&working_dir);
@@ -594,7 +591,13 @@ impl Terminal {
             is_alive,
             has_new_data,
         );
-        term.title = TitleSource::Command(command.to_string());
+        term.title = TitleSource::Command(
+            argv.iter()
+                .filter(|a| *a != "--")
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" "),
+        );
         term.initial_cwd = working_dir;
         Ok(term)
     }
@@ -1217,9 +1220,7 @@ impl Panel for Terminal {
         if self.keybindings != config.terminal.keybindings {
             self.keybindings = config.terminal.keybindings.clone();
         }
-        let config_ptr = std::sync::Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_terminal_hotkey_table(config);
         }
     }

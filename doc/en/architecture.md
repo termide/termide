@@ -811,14 +811,15 @@ leaves the actor free to serve other panels' metadata requests.
 **Resource Limits:**
 - File size limit (100 MB) for editor
 - Scrollback buffer limit for terminal
-- Log rotation to prevent disk exhaustion
+- A log file past 10 MB is set aside as `<name>.1` and begun afresh
 
 **Untrusted projects:**
 A project's files come with the repository, so nothing in them decides what
 termide runs, where a key is sent, or how freely the agent acts.
 - `.termide/config.toml` passes through `config::layer_rules`: programs
   (debuggers, LSP servers, shell, browser), the log file, a connection's
-  address and key variable, the agent's mode and `allow` rules are dropped
+  address and key variable, the agent's mode and `allow` rules, the limit on
+  the messages agents pass one another and the vault's lock time are dropped
   from it; the settings modal shows those fields as global-only
 - Plugins live only in the global plugins directory; a project switches one
   within the mode the global config gives it

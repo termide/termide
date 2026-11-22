@@ -232,6 +232,10 @@ impl App {
 
         // Load project-local bookmarks from .termide/ if present
         state.project_root = project_root.clone();
+        *state
+            .lsp_trust_root
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = project_root.clone();
         state.project_bookmarks = termide_config::BookmarksConfig::load_from_project(&project_root);
 
         // Initialize logger in the project directory (before other initializations that log)
@@ -548,6 +552,23 @@ impl App {
                 .join(", ");
             log::warn!(
                 "Keybinding {} is assigned to multiple actions in the same section: {}",
+                c.binding,
+                where_str,
+            );
+        }
+        // A global action takes the chord before any panel sees it.
+        for c in conflicts
+            .iter()
+            .filter(|c| c.kind == termide_config::ConflictKind::CrossSectionShadowed)
+        {
+            let where_str = c
+                .locations
+                .iter()
+                .map(|l| l.display())
+                .collect::<Vec<_>>()
+                .join(", ");
+            log::warn!(
+                "Keybinding {} is taken by a global action before the panel's: {}",
                 c.binding,
                 where_str,
             );

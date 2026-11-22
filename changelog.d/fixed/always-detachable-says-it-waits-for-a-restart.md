@@ -1,0 +1,1 @@
+- **The Always detachable setting says it takes effect after a restart**, as the Option as Alt one does: termide reads it only when it starts.

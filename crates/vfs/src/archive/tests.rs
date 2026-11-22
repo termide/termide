@@ -531,6 +531,55 @@ fn cancelling_removes_the_partial_file() {
     let result = extract::extract(&open, Path::new("/src/deep/big.bin"), &dest, &control, None);
     assert!(matches!(result, Err(VfsError::Cancelled)));
     assert!(!dest.exists());
+    assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1, "only t.zip");
+}
+
+#[test]
+fn a_cancelled_or_bad_entry_leaves_the_file_it_would_replace() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("t.zip");
+    write_zip(&archive);
+    let provider = opened(&archive);
+    let open = provider.opened().unwrap();
+    let dest = dir.path().join("big.bin");
+    fs::write(&dest, b"mine").unwrap();
+
+    let control = Control::none();
+    control.cancel.store(true, Ordering::Relaxed);
+    let result = extract::extract(&open, Path::new("/src/deep/big.bin"), &dest, &control, None);
+    assert!(matches!(result, Err(VfsError::Cancelled)));
+    assert_eq!(fs::read(&dest).unwrap(), b"mine");
+
+    // An entry whose bytes do not match their checksum fails once read,
+    // and the file stays.
+    let tar = dir.path().join("bad.zip");
+    {
+        use zip::write::SimpleFileOptions;
+        let mut zip = zip::ZipWriter::new(fs::File::create(&tar).unwrap());
+        let stored =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        zip.start_file("lie.txt", stored).unwrap();
+        zip.write_all(b"the bytes as written").unwrap();
+        zip.finish().unwrap();
+    }
+    let mut bytes = fs::read(&tar).unwrap();
+    let at_text = bytes.windows(5).position(|w| w == b"bytes").unwrap();
+    bytes[at_text] = b'B';
+    fs::write(&tar, bytes).unwrap();
+    let provider = opened(&tar);
+    let open = provider.opened().unwrap();
+    let dest = dir.path().join("lie.txt");
+    fs::write(&dest, b"mine").unwrap();
+    let result = extract::extract(&open, Path::new("/lie.txt"), &dest, &Control::none(), None);
+    assert!(result.is_err());
+    assert_eq!(fs::read(&dest).unwrap(), b"mine");
+
+    let leftovers: Vec<_> = fs::read_dir(dir.path())
+        .unwrap()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().ends_with(".termide-part"))
+        .collect();
+    assert!(leftovers.is_empty());
 }
 
 #[test]

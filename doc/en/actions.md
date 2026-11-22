@@ -25,7 +25,7 @@ The project file belongs to the current project root, so it can be committed and
 
 The two files do not override each other: a project command and a global command with the same identifier are two separate menu entries. Project commands are listed first and drawn in bold.
 
-Since the project file comes with the repository, a project command runs only once you have seen it. The first time one is started — from the menu, the palette, its hotkey or `F5` — a window shows what it runs (its `build`, then the command with its `env`) and asks; agreeing runs it and approves it as it is, in termide's data directory under the project (`projects/<name>-<hash>/trust.toml`). If the repository changes the command, its mode, `build`, debugger, `env` or key, it asks again. Until a project command is approved, its hotkey asks only if it is held with `Ctrl` or `Alt` or is an F-key: pressing it shows the same window as the menu. A key text is typed with — a plain letter, `Shift`+letter, `Enter` — is bound only once the command is approved: start it once from the menu, and the key works from then on. A command you write in the `Add command...` or **Set up debugging** form is approved as you save it.
+Since the project file comes with the repository, a project command runs only once you have seen it. The first time one is started — from the menu, the palette, its hotkey or `F5` — a window shows what it runs (its `build`, then the command with its `env` and its debugger's arguments) and asks; agreeing runs it and approves it as it is, in termide's data directory under the project (`projects/<name>-<hash>/trust.toml`). If the repository changes the command, its mode, `build`, debugger, `env`, key or a parameter's default, it asks again. Until a project command is approved, its hotkey asks only if it is held with `Ctrl` or `Alt` or is an F-key and no termide action is bound to it: pressing it shows the same window as the menu. A key text is typed with — a plain letter, `Shift`+letter, `Enter` — or one termide already uses, such as the editor's `Ctrl+S`, is bound only once the command is approved: start it once from the menu, and the key works from then on. A command you write in the `Add command...` or **Set up debugging** form is approved as you save it.
 
 ## File format
 
@@ -63,10 +63,11 @@ mode = "background"
 | `params` | no | Values asked for before the command runs, see [Parameters](#parameters) |
 | `env` | no | Environment variables for the command, as a table: `env = { RUST_LOG = "debug" }`; values may hold [placeholders](#placeholders) |
 | `debugger` | no | `lldb-dap`, `gdb-dap`, `debugpy`, `dlv-dap`, `lldb`, `gdb`, `dlv` or `pdb`: the command runs under this debugger, see [Debugging](#debugging) |
+| `debugger_args` | no | With `debugger`: the debugger's own flags, as an array of words, see [Debugging](#debugging) |
 | `build` | no | With `debugger`: a shell command run first; the debugger starts only if it succeeds |
 | `console` | no | With a debug adapter: `terminal` (the default) runs the program in a terminal panel, where it reads the keyboard; `panel` shows its output in the debug panel |
 
-An unknown `mode` falls back to `terminal`. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
+An unknown `mode` falls back to `terminal`, an unknown parameter `type` to `text` and an unknown `console` to `[debug] console`; a key termide does not know, such as a misspelt `comand`, is ignored. Each is written to the log. If a file cannot be parsed, none of its commands appear; the reason is written to the log.
 
 ## The Commands menu
 
@@ -109,7 +110,7 @@ Saving from the form, renaming or deleting edits `commands.toml` in place: the o
 
 ## Execution modes
 
-A command with a `debugger` runs in the project root, in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging). Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none. With `cwd = "project"` a command runs in the project root whatever panel is focused: that is the static point its relative paths are written against, the folder its own `commands.toml` sits in. A project over several repositories can take one repository's commands by linking its `.termide/commands.toml` (or the whole `.termide`) to that repository's: a project command with `cwd = "project"` then runs in the folder that holds the `.termide` the real file sits in — the repository its paths were written for — not in the project root. Where a command runs is part of what an approval covers — changing `cwd` asks for the project's command again.
+A command with a `debugger` runs in the debug panel or a terminal panel, whatever its `mode`, see [Debugging](#debugging); it runs in the project root as with `cwd = "project"` (in the repository a linked `commands.toml` comes from, as below) unless `cwd = "panel"` sends it to the focused panel's directory. Every other command runs in the working directory of the focused panel (for example, the directory shown in a file manager or the current directory of a terminal), or in the project root if the panel has none. With `cwd = "project"` a command runs in the project root whatever panel is focused: that is the static point its relative paths are written against, the folder its own `commands.toml` sits in. A project over several repositories can take one repository's commands by linking its `.termide/commands.toml` (or the whole `.termide`) to that repository's: a project command with `cwd = "project"` then runs in the folder that holds the `.termide` the real file sits in — the repository its paths were written for — not in the project root. Where a command runs is part of what an approval covers — changing `cwd` asks for the project's command again.
 
 | Mode | How it runs | Output |
 |------|-------------|--------|
@@ -167,7 +168,7 @@ default = true
 | Type | Field | Value passed |
 |------|-------|--------------|
 | `text` | Text input | The text as typed |
-| `number` | Text input | The text as typed; it is not checked to be a number |
+| `number` | Text input | The text as typed; `Run` is refused, the field's label in red, while it holds anything but a number or nothing |
 | `bool` | Checkbox, toggled with `Space` / `Enter` or a click | `true` or `false` |
 | `select` | Choice switched with `←` / `→`; starts at `default`, otherwise at the first option | The selected option |
 
@@ -209,7 +210,7 @@ A placeholder may stand anywhere: as a word of its own (`p4 edit {file}`), in qu
 
 Commands with a hotkey are also listed in the command palette (`Ctrl+P`) as `Run command: <label>`.
 
-The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a letter, a digit, `F1`–`F12` or a named key (`Enter`, `Tab`, `Space`, `Home`, `PageUp`, arrows and so on), and it rejects a hotkey that another command or a global Termide shortcut already uses (`Hotkey is already in use`). A hotkey written into the file by hand is not checked: if it matches a global shortcut, the shortcut wins and the command never runs from the keyboard. It takes effect the next time the `Commands` menu is opened or the file is saved from Termide.
+The form's `Hotkey:` field accepts `Ctrl`, `Alt` and `Shift` combined with a letter, a digit, `F1`–`F12` or a named key (`Enter`, `Tab`, `Space`, `Home`, `PageUp`, arrows and so on), and it rejects a hotkey that another command or a global Termide shortcut already uses (`Hotkey is already in use`). A panel's key is matched after a command's, so a command on it takes it in that panel: the form saves it but says whose key it was, as `F3 is also bound to file_manager.view`, and Settings → Keybindings names the command when that panel key is rebound onto it. A hotkey written into the file by hand is not checked: if it matches a global shortcut, the shortcut wins and the command never runs from the keyboard. It takes effect the next time the `Commands` menu is opened or the file is saved from Termide.
 
 ## Debugging
 

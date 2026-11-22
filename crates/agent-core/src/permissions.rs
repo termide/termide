@@ -1086,6 +1086,11 @@ impl PermissionHooks {
             // these only move it on or look at it. `start`, and `evaluate`,
             // which can call the program's own functions, stay with the mode.
             (mode, "debug") if mode != Mode::Plan && debug_moves_only(call) => Decision::Allow,
+            // A service on this machine or its network answers a fetch
+            // there: a page the agent read can ask it to carry what that
+            // service holds, or to change something on it, so the user sees
+            // it first.
+            (Mode::Plan | Mode::Edit, "fetch") if reaches_this_network(&subject) => Decision::Ask,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
             // The subagent is held to plan mode too, so it only reads.
             (Mode::Plan, "task") => Decision::Allow,
@@ -1919,6 +1924,107 @@ fn inside_project(call: &ToolCall, ctx: &ToolContext) -> bool {
     let subject = subject_of(call, ctx);
     (!Path::new(&subject).is_absolute() && !subject.starts_with(".."))
         || Project::of(&ctx.cwd).holds(&real_path(&ctx.cwd.join(&subject)))
+}
+
+/// Whether `url` names this machine or a private network: a loopback,
+/// private, link-local or unspecified address in any of the forms a browser
+/// reads (`127.1`, `0x7f000001`, `[::ffff:10.0.0.1]`), `localhost`, a name
+/// under a local-only domain, or a single label, which a resolver completes
+/// from the local search domains. A public name that resolves to such an
+/// address is not caught: the name is all there is to judge before the
+/// fetch.
+fn reaches_this_network(url: &str) -> bool {
+    let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let authority = rest.split(['/', '?', '#', '\\']).next().unwrap_or(rest);
+    let host_port = authority.rsplit_once('@').map_or(authority, |(_, h)| h);
+    let host = match host_port.strip_prefix('[') {
+        Some(v6) => v6.split(']').next().unwrap_or(v6),
+        None => host_port.split(':').next().unwrap_or(host_port),
+    };
+    let host = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.is_empty() {
+        return false;
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv6Addr>() {
+        return local_ip(std::net::IpAddr::V6(ip));
+    }
+    if let Some(v4) = browser_ipv4(&host) {
+        return local_ip(std::net::IpAddr::V4(v4));
+    }
+    const LOCAL_DOMAINS: [&str; 6] = [
+        "localhost",
+        "local",
+        "internal",
+        "lan",
+        "home.arpa",
+        "intranet",
+    ];
+    !host.contains('.')
+        || LOCAL_DOMAINS
+            .iter()
+            .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
+fn local_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => {
+            let [a, b, ..] = v4.octets();
+            v4.is_loopback()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_unspecified()
+                || v4.is_broadcast()
+                // Shared address space (carrier-grade NAT), and 0.0.0.0/8.
+                || (a == 100 && (64..128).contains(&b))
+                || a == 0
+        }
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return local_ip(std::net::IpAddr::V4(v4));
+            }
+            let first = v6.segments()[0];
+            v6.is_loopback()
+                || v6.is_unspecified()
+                // Unique local fc00::/7 and link-local fe80::/10.
+                || (first & 0xfe00) == 0xfc00
+                || (first & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+/// An IPv4 address as a browser reads a host: one to four parts, each
+/// decimal, octal (leading `0`) or hex (`0x`), the last filling the bytes
+/// left, so `127.1` and `2130706433` are `127.0.0.1`.
+fn browser_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
+    let parts: Vec<&str> = host.split('.').collect();
+    if parts.is_empty() || parts.len() > 4 {
+        return None;
+    }
+    let mut numbers = Vec::with_capacity(parts.len());
+    for part in &parts {
+        let (digits, radix) = if let Some(hex) = part.strip_prefix("0x") {
+            (hex, 16)
+        } else if part.len() > 1 && part.starts_with('0') {
+            (&part[1..], 8)
+        } else {
+            (*part, 10)
+        };
+        let n = if digits.is_empty() {
+            0
+        } else {
+            u64::from_str_radix(digits, radix).ok()?
+        };
+        numbers.push(n);
+    }
+    let (last, head) = numbers.split_last()?;
+    if head.iter().any(|&n| n > 255) || *last >= 1u64 << (8 * (5 - numbers.len())) {
+        return None;
+    }
+    let mut value = *last;
+    for (i, &n) in head.iter().enumerate() {
+        value += n << (8 * (3 - i));
+    }
+    u32::try_from(value).ok().map(std::net::Ipv4Addr::from)
 }
 
 /// Pattern offered when the user allows a call for longer than once: the

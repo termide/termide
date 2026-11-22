@@ -74,7 +74,8 @@ pub struct CsvPanel {
 
     colors: ThemeColors,
     hotkeys: HotkeyTable,
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
 }
 
 struct Sorted {
@@ -129,7 +130,7 @@ impl CsvPanel {
             grid: GridState::default(),
             colors: ThemeColors::default(),
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
         };
         panel.start_indexing();
         panel
@@ -399,9 +400,7 @@ impl Panel for CsvPanel {
 
     fn prepare_render(&mut self, theme: &Theme, config: &Arc<Config>) {
         self.colors = ThemeColors::from(theme);
-        let ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != ptr {
-            self.last_config_ptr = ptr;
+        if self.last_config.changed(config) {
             let mut t = HotkeyTable::new();
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
             self.hotkeys = t;

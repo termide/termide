@@ -1,0 +1,1 @@
+- **A move to a remote host keeps the links it did not upload.** Moving a folder to SFTP or another remote skipped the symbolic links and special files inside it, then deleted the whole folder, so they were lost. Now only what was uploaded is deleted; what stays is reported with the folders that hold it.

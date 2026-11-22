@@ -51,6 +51,35 @@ pub struct LspConfig {
 /// A server's identity: its language and the workspace it runs in.
 type ServerKey = (String, PathBuf);
 
+/// Whether the server `command` runs code the workspace it analyses brings:
+/// rust-analyzer builds the workspace, running its build scripts and
+/// procedural macros, and the cargo and rustup it calls follow the
+/// configuration found there (`.cargo/config.toml`, `rust-toolchain.toml`,
+/// `rust-analyzer.toml`, which can name commands of its own). No setting
+/// sent to it turns all of that off, so such a server starts only in a
+/// workspace the user trusts. Only the file name is compared.
+#[must_use]
+pub fn runs_workspace_code(command: &str) -> bool {
+    let name = Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    name.strip_suffix(".exe").unwrap_or(name) == "rust-analyzer"
+}
+
+/// A server held back in a workspace not trusted ([`runs_workspace_code`]),
+/// for the user to be asked about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WithheldServer {
+    pub lang: String,
+    pub command: String,
+    pub root: PathBuf,
+}
+
+/// Whether the workspace rooted at a path is trusted with a server that
+/// runs its code.
+pub type WorkspaceTrust = Box<dyn Fn(&Path) -> bool + Send>;
+
 /// How often a crashed server is restarted on its own: at most
 /// `max_restarts` within `window`, the n-th after `base_backoff * 2^n`.
 /// Past that it stays crashed until restarted by hand.
@@ -144,6 +173,13 @@ pub struct LspManager {
     closed: Arc<Mutex<bool>>,
     next_id: u64,
     restart_policy: RestartPolicy,
+    /// Which workspaces a server that runs their code may start in; without
+    /// it, none.
+    workspace_trust: Option<WorkspaceTrust>,
+    /// Servers held back in a workspace not trusted, until it is.
+    withheld: HashSet<ServerKey>,
+    /// The ones of them the user is still to be asked about.
+    to_ask: Vec<WithheldServer>,
 }
 
 impl std::fmt::Debug for LspManager {
@@ -179,7 +215,35 @@ impl LspManager {
             closed: Arc::new(Mutex::new(false)),
             next_id: 1,
             restart_policy: RestartPolicy::default(),
+            workspace_trust: None,
+            withheld: HashSet::new(),
+            to_ask: Vec::new(),
         }
+    }
+
+    /// Say which workspaces a server that runs their code
+    /// ([`runs_workspace_code`]) may start in. Asked at each start.
+    pub fn set_workspace_trust(&mut self, trust: WorkspaceTrust) {
+        self.workspace_trust = Some(trust);
+    }
+
+    /// The servers held back since the last call, each once, for the user
+    /// to be asked whether to trust their workspace.
+    pub fn take_withheld(&mut self) -> Vec<WithheldServer> {
+        std::mem::take(&mut self.to_ask)
+    }
+
+    /// Let the server of `lang` held back in `root` start: its workspace is
+    /// trusted now. Its editors start it with [`Self::ensure_server`].
+    pub fn release(&mut self, lang: &str, root: &Path) {
+        self.withheld
+            .remove(&(lang.to_string(), root.to_path_buf()));
+    }
+
+    fn workspace_trusted(&self, root: &Path) -> bool {
+        self.workspace_trust
+            .as_ref()
+            .is_some_and(|trust| trust(root))
     }
 
     /// Detect language from file name or extension
@@ -342,6 +406,21 @@ impl LspManager {
             .is_some_and(|slot| !slot.never_started())
         {
             return Ok(());
+        }
+
+        if runs_workspace_code(&server_config.command) && !self.workspace_trusted(&workspace_root) {
+            if self.withheld.insert(key) {
+                self.to_ask.push(WithheldServer {
+                    lang: lang.to_string(),
+                    command: server_config.command.clone(),
+                    root: workspace_root.clone(),
+                });
+            }
+            anyhow::bail!(
+                "{} is not started in {}: the workspace is not trusted",
+                server_config.command,
+                workspace_root.display()
+            );
         }
 
         log::info!("Starting LSP server for {} in {:?}", lang, workspace_root);
@@ -507,11 +586,23 @@ impl LspManager {
     /// Restart the server handling this file by hand, whatever its state,
     /// with a fresh budget of automatic restarts. A server whose start failed
     /// is started; once live, editors open their documents in it as after
-    /// any restart. `false` when no server was ever tried for the file.
+    /// any restart. One held back in a workspace not trusted is asked about
+    /// again ([`Self::take_withheld`]). `false` when no server was ever
+    /// tried for the file.
     pub fn restart_server(&mut self, lang: &str, file_path: &Path) -> bool {
         let Some(key) = self.server_key(lang, file_path) else {
             return false;
         };
+        if self.withheld.contains(&key) {
+            if let Some(config) = self.config.servers.get(lang) {
+                self.to_ask.push(WithheldServer {
+                    lang: key.0.clone(),
+                    command: config.command.clone(),
+                    root: key.1.clone(),
+                });
+            }
+            return true;
+        }
         let Some(slot) = self.servers.get_mut(&key) else {
             return false;
         };
@@ -550,6 +641,8 @@ impl LspManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .retain(|lang, _| !changed.contains(lang));
+        // Held back under the old command, which may not run code at all.
+        self.withheld.retain(|(lang, _)| !changed.contains(lang));
         let keys: Vec<ServerKey> = self
             .servers
             .keys()
@@ -1020,6 +1113,76 @@ mod tests {
         );
         let unmarked = ["no-such-marker-anywhere.lock".to_string()];
         assert_eq!(LspManager::find_workspace_root(&file, &unmarked), None);
+    }
+
+    #[test]
+    fn only_rust_analyzer_runs_the_workspace_code() {
+        assert!(runs_workspace_code("rust-analyzer"));
+        assert!(runs_workspace_code("/opt/bin/rust-analyzer"));
+        assert!(runs_workspace_code("C:/tools/rust-analyzer.exe"));
+        assert!(!runs_workspace_code("pylsp"));
+        assert!(!runs_workspace_code("rust-analyzer-wrapper"));
+        assert!(!runs_workspace_code(""));
+    }
+
+    /// A server that builds its workspace starts there only once the
+    /// workspace is trusted; until then the user is asked about it once,
+    /// and again on a restart by hand.
+    #[cfg(unix)]
+    #[test]
+    fn a_server_that_builds_the_workspace_waits_for_its_trust() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let starts = dir.path().join("starts");
+        let server = dir.path().join("rust-analyzer");
+        std::fs::write(
+            &server,
+            format!(
+                "#!/bin/sh\necho x >> '{}'\nexec cat >/dev/null\n",
+                starts.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&server, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut config = LspConfig::default();
+        config.servers.insert(
+            "test".into(),
+            LspServerConfig {
+                command: server.to_string_lossy().into_owned(),
+                args: Vec::new(),
+                root_markers: Vec::new(),
+            },
+        );
+        let mut manager = LspManager::new(config);
+        let file = dir.path().join("a.rs");
+        std::fs::write(&file, "").unwrap();
+
+        assert!(manager.ensure_server("test", &file).is_err());
+        assert!(manager.ensure_server("test", &file).is_err());
+        let asked = manager.take_withheld();
+        assert_eq!(asked.len(), 1, "asked about once");
+        assert!(manager.take_withheld().is_empty());
+        assert!(!manager.server_start_failed("test", &file));
+        assert!(manager.restart_server("test", &file));
+        assert_eq!(manager.take_withheld(), asked, "asked again on a restart");
+
+        let trusted = Arc::new(Mutex::new(Vec::<PathBuf>::new()));
+        let shared = Arc::clone(&trusted);
+        manager.set_workspace_trust(Box::new(move |root| {
+            shared.lock().unwrap().iter().any(|r| r == root)
+        }));
+        assert!(manager.ensure_server("test", &file).is_err());
+        assert!(!starts.exists(), "nothing ran before the trust");
+
+        trusted.lock().unwrap().push(asked[0].root.clone());
+        manager.release("test", &asked[0].root);
+        manager.ensure_server("test", &file).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !starts.exists() {
+            assert!(Instant::now() < deadline, "the server did not start");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(manager.take_withheld().is_empty());
     }
 
     /// Restarts against stand-in servers written in `sh`.

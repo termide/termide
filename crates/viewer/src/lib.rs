@@ -83,8 +83,8 @@ pub struct Viewer {
     pub is_light: bool,
     /// Configurable hotkeys (toggle preview/source, open externally).
     pub hotkeys: HotkeyTable,
-    /// Pointer of the last `Arc<Config>` used to build hotkeys.
-    pub last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    pub last_config: termide_core::SeenArc<Config>,
     /// Origin URL when the content was fetched (not read from a file). `None`
     /// for file-backed viewers. Used for the title, base-URL link resolution,
     /// and navigation; URL-backed viewers are not persisted across runs.
@@ -127,7 +127,7 @@ impl Viewer {
             theme_full: None,
             is_light: false,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             source_url: None,
             history: Vec::new(),
             hist_idx: 0,
@@ -297,9 +297,7 @@ impl Viewer {
         self.theme_full = Some(*theme);
         self.is_light = new_light;
 
-        let ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != ptr {
-            self.last_config_ptr = ptr;
+        if self.last_config.changed(config) {
             let mut t = HotkeyTable::new();
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
             t.insert("open_external", &config.viewer.keybindings.open_external);

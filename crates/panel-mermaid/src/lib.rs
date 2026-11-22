@@ -49,7 +49,8 @@ pub struct MermaidPanel {
     colors: ThemeColors,
     is_light: bool,
     hotkeys: HotkeyTable,
-    last_config_ptr: usize,
+    /// The config the hotkeys were last built from.
+    last_config: termide_core::SeenArc<Config>,
     /// Events of a command, which cannot return them: delivered on `tick`.
     pending: Vec<PanelEvent>,
 }
@@ -73,7 +74,7 @@ impl MermaidPanel {
             colors: ThemeColors::default(),
             is_light: false,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             pending: Vec::new(),
         };
         panel.set_file(path);
@@ -278,9 +279,7 @@ impl Panel for MermaidPanel {
         self.colors = ThemeColors::from(theme);
         self.is_light = theme.is_light_theme();
 
-        let ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != ptr {
-            self.last_config_ptr = ptr;
+        if self.last_config.changed(config) {
             let mut t = HotkeyTable::new();
             t.insert("toggle_view", &config.viewer.keybindings.toggle_view);
             self.hotkeys = t;
@@ -499,7 +498,7 @@ mod tests {
             colors: ThemeColors::default(),
             is_light: false,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             pending: Vec::new(),
         };
         p.rebuild();

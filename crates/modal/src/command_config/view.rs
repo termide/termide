@@ -51,7 +51,7 @@ impl Modal for CommandConfigModal {
             constraints.push(Constraint::Length(3)); // display name
             constraints.push(Constraint::Length(2)); // mode selector
             constraints.push(Constraint::Length(3)); // hotkey
-            if self.hotkey_error || self.hotkey_conflict.is_some() {
+            if self.has_hotkey_note() {
                 constraints.push(Constraint::Length(1)); // error hint
             }
             constraints.push(Constraint::Length(1)); // cwd checkbox
@@ -67,7 +67,7 @@ impl Modal for CommandConfigModal {
             constraints.push(Constraint::Length(3)); // command
             constraints.push(Constraint::Length(2)); // mode selector
             constraints.push(Constraint::Length(3)); // hotkey
-            if self.hotkey_error || self.hotkey_conflict.is_some() {
+            if self.has_hotkey_note() {
                 constraints.push(Constraint::Length(1)); // error hint
             }
             constraints.push(Constraint::Length(1)); // cwd checkbox
@@ -328,16 +328,17 @@ impl Modal for CommandConfigModal {
         chunk_idx += 1;
 
         // Hotkey error hint
-        if self.hotkey_error || self.hotkey_conflict.is_some() {
+        if self.has_hotkey_note() {
             let err_chunks = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([Constraint::Length(15), Constraint::Min(1)])
                 .split(chunks[chunk_idx]);
-            let message = self
-                .hotkey_conflict
-                .as_deref()
-                .unwrap_or_else(|| t.command_config_hotkey_invalid());
-            Paragraph::new(Span::styled(message, Style::default().fg(theme.error)))
+            let (message, color) = match (&self.hotkey_conflict, &self.hotkey_takes) {
+                (Some(conflict), _) => (conflict.as_str(), theme.error),
+                (None, Some(takes)) if !self.hotkey_error => (takes.as_str(), theme.warning),
+                _ => (t.command_config_hotkey_invalid(), theme.error),
+            };
+            Paragraph::new(Span::styled(message, Style::default().fg(color)))
                 .render(err_chunks[1], buf);
             chunk_idx += 1;
         }

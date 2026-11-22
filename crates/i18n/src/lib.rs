@@ -337,6 +337,8 @@ pub trait Translation: Send + Sync {
     fn help_desc_redo(&self) -> &str;
     fn help_desc_search(&self) -> &str;
     fn help_desc_search_content(&self) -> &str;
+    fn help_desc_search_replace(&self) -> &str;
+    fn help_desc_toggle_hex(&self) -> &str;
     fn help_desc_select_all(&self) -> &str;
     fn help_desc_refresh(&self) -> &str;
     fn help_desc_go_parent(&self) -> &str;
@@ -510,6 +512,8 @@ pub trait Translation: Send + Sync {
     fn command_run_label_fmt(&self, name: &str) -> String;
     fn command_confirm_project_title(&self) -> &str;
     fn command_confirm_project_fmt(&self, name: &str, command: &str) -> String;
+    fn lsp_trust_title(&self) -> &str;
+    fn lsp_trust_fmt(&self, server: &str, root: &str) -> String;
 
     // Command config modal (create/edit)
     fn command_config_label_command(&self) -> &str;

@@ -79,6 +79,7 @@ pub fn is_available() -> bool {
     *GIT_AVAILABLE.get_or_init(|| {
         Command::new("git")
             .arg("--version")
+            .env("PATH", termide_fsutil::absolute_path_var())
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)

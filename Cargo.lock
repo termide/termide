@@ -5335,6 +5335,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "termide-agent-core",
+ "termide-fsutil",
 ]
 
 [[package]]
@@ -5400,6 +5401,7 @@ dependencies = [
  "termide-detach",
  "termide-fetch",
  "termide-file-ops",
+ "termide-fsutil",
  "termide-git",
  "termide-highlight",
  "termide-i18n",
@@ -5717,6 +5719,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "termide-fsutil",
  "url",
 ]
 
@@ -6157,6 +6160,7 @@ dependencies = [
  "dunce",
  "serde_json",
  "tempfile",
+ "termide-fsutil",
  "termide-plugins",
 ]
 
@@ -6546,6 +6550,7 @@ dependencies = [
  "libc",
  "mio 1.2.4",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

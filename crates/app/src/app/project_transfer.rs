@@ -562,6 +562,7 @@ fn repair_git_worktrees(root: &Path) {
         .arg("-C")
         .arg(root)
         .args(["worktree", "repair"])
+        .env("PATH", termide_fsutil::absolute_path_var())
         .stdin(std::process::Stdio::null())
         .output()
     {

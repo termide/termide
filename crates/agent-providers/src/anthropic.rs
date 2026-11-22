@@ -192,7 +192,12 @@ impl AnthropicProvider {
         }
         let http = attribution::apply(http, self.attribution);
         let response = match http.send_string(body) {
-            Ok(response) => response,
+            Ok(response) => {
+                if let Some(message) = crate::retry::redirect(&response) {
+                    return Err(Failure::http(response.status(), "", None, message));
+                }
+                response
+            }
             Err(ureq::Error::Status(code, response)) => {
                 let retry_after = response.header("retry-after").map(str::to_string);
                 let text = response.into_string().unwrap_or_default();
@@ -289,9 +294,14 @@ impl Provider for AnthropicProvider {
         }
         let http = attribution::apply(http, self.attribution);
         let body = match http.call() {
-            Ok(response) => response
-                .into_string()
-                .map_err(|error| format!("cannot read the model list: {error}"))?,
+            Ok(response) => {
+                if let Some(message) = crate::retry::redirect(&response) {
+                    return Err(message);
+                }
+                response
+                    .into_string()
+                    .map_err(|error| format!("cannot read the model list: {error}"))?
+            }
             Err(ureq::Error::Status(code, response)) => {
                 let text = response.into_string().unwrap_or_default();
                 return Err(format!("HTTP {code}: {}", error_text(&text)));
@@ -877,8 +887,11 @@ fn parse_arguments(raw: &str) -> Value {
     }
 }
 
+/// The client of the API. It follows no redirect: one would carry the key
+/// (`x-api-key`) to wherever the `Location` points.
 fn build_agent(connect: Duration, read: Duration) -> ureq::Agent {
     termide_http::agent_builder()
+        .redirects(0)
         .timeout_connect(connect)
         .timeout_read(read)
         .user_agent(concat!("termide-agent/", env!("CARGO_PKG_VERSION")))
@@ -931,6 +944,35 @@ mod tests {
     use termide_agent_core::{
         AssistantMessage, ModelSpec, ToolCall, ToolResultMessage, ToolSpec, UserMessage,
     };
+
+    /// A redirect is not followed: the key would go along to its target.
+    #[test]
+    fn a_redirect_does_not_carry_the_key_away() {
+        use std::io::{Read as _, Write as _};
+        let elsewhere = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        elsewhere.set_nonblocking(true).unwrap();
+        let target = elsewhere.local_addr().unwrap();
+        let api = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/v1/models", api.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = api.accept().unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = stream.read(&mut buf);
+            let reply = format!(
+                "HTTP/1.1 302 Found\r\nLocation: http://{target}/steal\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            );
+            stream.write_all(reply.as_bytes()).unwrap();
+        });
+        let agent = build_agent(Duration::from_secs(5), Duration::from_secs(5));
+        let response = agent.get(&url).set("x-api-key", "secret").call().unwrap();
+        server.join().unwrap();
+        let message = crate::retry::redirect(&response).expect("a redirect");
+        assert!(
+            message.contains(&format!("http://{target}/steal")),
+            "{message}"
+        );
+        assert!(elsewhere.accept().is_err(), "the redirect was followed");
+    }
 
     fn model(id: &str) -> ModelSpec {
         ModelSpec {

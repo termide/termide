@@ -71,6 +71,8 @@ windows-sys = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
 tempfile.workspace = true
+# Runs OpenSSH's sftp-server to test SFTP transfers against.
+tokio = { workspace = true, features = ["process"] }
 # Encoders to build test archives.
 lzma-rust2 = { workspace = true, features = ["std", "xz", "encoder"] }
 bzip2.workspace = true

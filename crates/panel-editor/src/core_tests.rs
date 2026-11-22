@@ -1103,6 +1103,50 @@ fn unsaved_changes_to_a_file_are_backed_up_with_its_path() {
     );
 }
 
+/// When a newer backup cannot be written, the layout keeps naming the
+/// older one, so the cleanup after it does not delete the changes it holds.
+#[cfg(unix)]
+#[test]
+fn a_backup_that_cannot_be_rewritten_keeps_the_older_one() {
+    use std::os::unix::fs::PermissionsExt as _;
+    use termide_project::PanelState;
+    let project_dir = tempfile::tempdir().unwrap();
+    let (mut editor, _file) = create_editor_with_content("on disk");
+    editor.restore_unsaved_changes("first").unwrap();
+    assert!(editor.ensure_unsaved_changes_backup());
+    let Some(PanelState::Editor {
+        unsaved_buffer_file: Some(backup),
+        ..
+    }) = editor.to_state(project_dir.path())
+    else {
+        panic!("the changes were not backed up");
+    };
+
+    // Neither a new file beside it nor the old one may be written.
+    let buffers = project_dir.path().join("buffers");
+    std::fs::set_permissions(
+        buffers.join(&backup),
+        std::fs::Permissions::from_mode(0o400),
+    )
+    .unwrap();
+    std::fs::set_permissions(&buffers, std::fs::Permissions::from_mode(0o500)).unwrap();
+    editor.restore_unsaved_changes("second").unwrap();
+    let state = editor.to_state(project_dir.path());
+    std::fs::set_permissions(&buffers, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let Some(PanelState::Editor {
+        unsaved_buffer_file: Some(kept),
+        ..
+    }) = state
+    else {
+        panic!("the older backup was dropped from the layout");
+    };
+    assert_eq!(kept, backup);
+    assert_eq!(
+        termide_project::load_unsaved_buffer(project_dir.path(), &backup).unwrap(),
+        "first"
+    );
+}
+
 /// A backup put back over the file it was taken from makes the buffer
 /// modified, with the file on disk untouched.
 #[test]

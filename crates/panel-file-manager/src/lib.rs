@@ -160,8 +160,8 @@ pub struct FileManager {
     search_results_area: Option<Rect>,
     /// Hotkey table for configurable keyboard shortcuts
     hotkeys: HotkeyTable,
-    /// Pointer of the last Arc<Config> used to build hotkeys (skip rebuild when unchanged)
-    last_config_ptr: usize,
+    /// The config the cached settings and hotkeys were taken from.
+    last_config: termide_core::SeenArc<Config>,
     /// Background directory reload result (watcher- or constructor-
     /// triggered, non-blocking).
     async_reload_receiver: Option<mpsc::Receiver<AsyncDirReloadResult>>,
@@ -326,7 +326,7 @@ impl FileManager {
             bar_focus: BarFocus::Input,
             search_results_area: None,
             hotkeys: HotkeyTable::default(),
-            last_config_ptr: 0,
+            last_config: termide_core::SeenArc::default(),
             async_reload_receiver: None,
             reload_dirty: false,
             pending_dir_load: None,
@@ -601,9 +601,7 @@ impl Panel for FileManager {
         self.vim_mode = config.general.vim_mode;
         // `0` in config.toml would give up on every connection at once.
         self.cached_vfs_timeout_secs = config.vfs.connection_timeout_secs.max(1);
-        let config_ptr = std::sync::Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             // `FileManagerSettings` embeds ~32 keybinding Strings; only re-clone
             // when the config Arc actually changes, not every frame.
             self.cached_config = config.file_manager.clone();

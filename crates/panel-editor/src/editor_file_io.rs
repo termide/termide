@@ -193,6 +193,14 @@ impl Editor {
         self.file_state.set_uploading(uploading);
     }
 
+    /// The upload of a remote save failed or was cancelled: the edits are
+    /// only in the local copy, so the buffer is unsaved again and closing
+    /// it asks first.
+    pub fn upload_failed(&mut self) {
+        self.file_state.set_uploading(false);
+        self.buffer.mark_unsaved();
+    }
+
     /// Save file as (Save As)
     ///
     /// The target is always a local path, so afterwards the buffer is a plain

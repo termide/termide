@@ -653,39 +653,12 @@ impl App {
                 self.auto_save_layout();
             }
             BookmarkType::SshConnection => {
-                // Open SSH connection in terminal
-                // Parse ssh://[user@]host[:port] format into proper ssh command
-                let ssh_cmd = {
-                    let url_part = path.strip_prefix("ssh://").unwrap_or(path);
-                    let mut cmd_parts = vec!["ssh".to_string()];
-
-                    // Split off any path component (ignore it for SSH)
-                    let authority = url_part.split('/').next().unwrap_or(url_part);
-
-                    // Parse user@host:port format
-                    let (user_host, port) = if let Some(colon_pos) = authority.rfind(':') {
-                        // Check if what's after colon looks like a port number
-                        let after_colon = &authority[colon_pos + 1..];
-                        if after_colon.chars().all(|c| c.is_ascii_digit())
-                            && !after_colon.is_empty()
-                            && after_colon.parse::<u16>().is_ok_and(|p| p > 0)
-                        {
-                            (&authority[..colon_pos], Some(after_colon))
-                        } else {
-                            (authority, None)
-                        }
-                    } else {
-                        (authority, None)
-                    };
-
-                    // Add port if specified
-                    if let Some(port) = port {
-                        cmd_parts.push("-p".to_string());
-                        cmd_parts.push(port.to_string());
-                    }
-
-                    cmd_parts.push(user_host.to_string());
-                    cmd_parts.join(" ")
+                // ssh://[user@]host[:port]; a destination ssh would read as
+                // an option is refused, not passed on.
+                let Some(ssh_args) = termide_config::bookmarks::ssh_command_args(path) else {
+                    log::warn!("Refused SSH bookmark address: {path}");
+                    self.show_error_modal(termide_i18n::t().ssh_open_failed_fmt(path));
+                    return Ok(());
                 };
 
                 let width = self.state.terminal.width;
@@ -693,7 +666,7 @@ impl App {
                 let term_height = height.saturating_sub(3);
                 let term_width = width.saturating_sub(2);
 
-                match Terminal::new_with_command(term_height, term_width, &ssh_cmd) {
+                match Terminal::new_with_command(term_height, term_width, &ssh_args) {
                     Ok(terminal) => {
                         self.add_panel(Box::new(terminal));
                         self.auto_save_layout();

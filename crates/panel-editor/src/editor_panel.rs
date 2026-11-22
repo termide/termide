@@ -179,9 +179,7 @@ impl Panel for Editor {
             .set_light_theme(theme.is_light_theme());
         self.render_cache.highlight.set_default_fg(theme.fg);
 
-        let config_ptr = Arc::as_ptr(config) as usize;
-        if self.last_config_ptr != config_ptr {
-            self.last_config_ptr = config_ptr;
+        if self.last_config.changed(config) {
             self.hotkeys = build_editor_hotkey_table(config);
             self.sync_custom_highlight(config);
         }
@@ -763,7 +761,8 @@ impl Panel for Editor {
                         Ok(()) => Some(filename.to_string()),
                         Err(e) => {
                             log::warn!("Failed to save the unsaved changes: {e}");
-                            None
+                            termide_project::has_unsaved_buffer(project_dir, filename)
+                                .then(|| filename.to_string())
                         }
                     }
                 });
@@ -784,7 +783,11 @@ impl Panel for Editor {
             // Save content to the project directory
             if let Err(e) = termide_project::save_unsaved_buffer(project_dir, &filename, &content) {
                 log::warn!("Failed to save unsaved buffer: {}", e);
-                return None;
+                // The backup written before stays named, or the layout's
+                // cleanup would delete it.
+                if !termide_project::has_unsaved_buffer(project_dir, &filename) {
+                    return None;
+                }
             }
 
             Some(PanelState::Editor {

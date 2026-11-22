@@ -3,7 +3,8 @@
 # The release version, which Cargo.toml's [workspace.package] holds and the
 # install instructions, the Nix flake and the AUR packages repeat.
 #
-#     tools/release/version.sh --check     # every copy matches Cargo.toml
+#     tools/release/version.sh --check     # every copy matches Cargo.toml,
+#                                          # every CI Rust pin rust-toolchain.toml
 #     tools/release/version.sh 0.50.0      # bump every copy to 0.50.0
 #
 # The bump rewrites each file that names the current version (CHANGELOG.md,
@@ -19,12 +20,12 @@ cd "$(git rev-parse --show-toplevel)"
 EXPECTED=(
     "Cargo.toml:1"
     "flake.nix:1"
-    "README.md:21"
-    "README.ru.md:21"
-    "README.zh.md:21"
-    "doc/en/installation.md:16"
-    "doc/ru/installation.md:16"
-    "doc/zh/installation.md:16"
+    "README.md:31"
+    "README.ru.md:31"
+    "README.zh.md:31"
+    "doc/en/installation.md:27"
+    "doc/ru/installation.md:27"
+    "doc/zh/installation.md:27"
     "packaging/aur/PKGBUILD:1"
     "packaging/aur/PKGBUILD-bin:1"
 )
@@ -63,7 +64,24 @@ check() {
         fi
     done < <(git grep -l "$escaped" -- ':!CHANGELOG.md' ':!changelog.d' ':!Cargo.lock' \
         ':!packaging/crates-io-redirect' ':!*.rs' ':!tools/release/version.sh' || true)
+    check_toolchain || failed=1
     [ "$failed" -eq 0 ] && printf 'version: %s everywhere\n' "$version"
+    return "$failed"
+}
+
+# The compiler is pinned in rust-toolchain.toml, which rustup and the Nix
+# flake read; the workflows repeat it in each dtolnay/rust-toolchain step.
+check_toolchain() {
+    local channel failed=0
+    channel=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)
+    while IFS=: read -r file line pin; do
+        if [ "$pin" != "$channel" ]; then
+            printf 'version: %s:%s pins Rust %s, rust-toolchain.toml %s\n' \
+                "$file" "$line" "$pin" "$channel" >&2
+            failed=1
+        fi
+    done < <(git grep -n -o 'dtolnay/rust-toolchain@[^ ]*' -- .github/workflows \
+        | sed 's/dtolnay\/rust-toolchain@//')
     return "$failed"
 }
 

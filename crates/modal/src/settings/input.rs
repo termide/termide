@@ -542,16 +542,37 @@ impl SettingsModal {
         new_section: &str,
         new_action: &str,
     ) -> Option<String> {
-        for (loc, parsed, display) in termide_config::enumerate_bindings(&self.config) {
-            if &parsed != new_binding {
-                continue;
+        let new_loc = termide_config::BindingLocation::new(new_section, new_action);
+        let new_table = termide_config::dispatch_table(&new_loc);
+        // The clash that costs the most is named: an action in the same key
+        // table, then a global one that takes the chord first, then the rest.
+        let rank = |loc: &termide_config::BindingLocation| {
+            let table = termide_config::dispatch_table(loc);
+            if table == new_table {
+                0
+            } else if table == "general" {
+                1
+            } else {
+                2
             }
-            if loc.section == new_section && loc.action == new_action {
-                continue;
-            }
-            return Some(i18n::t().settings_kb_conflict_fmt(&display, &loc.display()));
-        }
-        None
+        };
+        let binding = termide_config::enumerate_bindings(&self.config)
+            .into_iter()
+            .filter(|(loc, parsed, _)| parsed == new_binding && *loc != new_loc)
+            .min_by_key(|(loc, _, _)| rank(loc))
+            .map(|(loc, _, display)| (rank(&loc), display, loc.display()));
+        // A command's key is matched after the global ones and before any
+        // panel's: as costly as a global clash.
+        let command = self
+            .command_hotkeys
+            .iter()
+            .find(|(parsed, _, _)| parsed == new_binding)
+            .map(|(_, key, name)| (1, key.clone(), name.clone()));
+        [binding, command]
+            .into_iter()
+            .flatten()
+            .min_by_key(|(rank, _, _)| *rank)
+            .map(|(_, display, held)| i18n::t().settings_kb_conflict_fmt(&display, &held))
     }
 
     /// Whether this action already accepts `parsed`, under any of the spellings
@@ -760,6 +781,43 @@ mod keybinding_picker_tests {
 
     fn keys(modal: &SettingsModal) -> Vec<String> {
         kb_keys_of(&modal.config, 0, "close_panel")
+    }
+
+    /// The warning used to name the first holder in config order, a global
+    /// action, while the clash that left a key dead was in the same section.
+    #[test]
+    fn the_conflict_warning_names_the_clash_that_matters_most() {
+        let mut modal = kb_modal();
+        let chord = KeyBinding::Single("Alt+F12".to_string());
+        modal.config.general.keybindings.quit = Some(chord.clone());
+        modal.config.editor.keybindings.save = Some(chord.clone());
+        modal.config.git_status.keybindings.refresh = Some(chord);
+        let parsed = termide_config::parse_keybinding("Alt+F12").unwrap();
+
+        let in_editor = modal
+            .find_conflict_for_binding(&parsed, "editor", "undo")
+            .expect("a conflict");
+        assert!(in_editor.contains("editor.save"), "{in_editor}");
+        let in_git_diff = modal
+            .find_conflict_for_binding(&parsed, "git_diff", "refresh")
+            .expect("a conflict");
+        assert!(in_git_diff.contains("general.quit"), "{in_git_diff}");
+
+        let mut modal =
+            kb_modal().with_command_hotkeys(vec![("Ctrl+Alt+F9".into(), "build".into())]);
+        let key = termide_config::parse_keybinding("Ctrl+Alt+F9").unwrap();
+        let note = modal
+            .find_conflict_for_binding(&key, "editor", "save")
+            .expect("the command's key is named");
+        assert!(note.contains("commands.build"), "{note}");
+        modal.config.editor.keybindings.undo = Some(KeyBinding::Single("Ctrl+Alt+F9".to_string()));
+        let note = modal
+            .find_conflict_for_binding(&key, "editor", "save")
+            .unwrap();
+        assert!(
+            note.contains("editor.undo"),
+            "the same section still comes first: {note}"
+        );
     }
 
     /// The row starts with the cursor on its first key.

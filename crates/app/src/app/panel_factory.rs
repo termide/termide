@@ -183,7 +183,18 @@ impl App {
             .filter(|(_, args)| !args.is_empty())
             .collect();
         let plugin_names = self.plugin_names();
+        let command_hotkeys = self
+            .commands_registry()
+            .map(|registry| {
+                registry
+                    .commands_with_hotkeys()
+                    .into_iter()
+                    .map(|(command, key)| (key.to_string(), command.name.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         let modal = SettingsModal::new(config, global_layer, in_project)
+            .with_command_hotkeys(command_hotkeys)
             .with_plugins(plugin_names)
             .with_debugger_defaults(debugger_defaults)
             .with_stored_api_keys(self.vault.stored_api_keys());

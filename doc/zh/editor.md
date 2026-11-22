@@ -465,6 +465,14 @@ rust-analyzer 以 `cargo.targetDir = true` 启动：它的 `cargo check` 以及�
 的构建都输出到 `target/rust-analyzer`，因此为调试器或在终端中执行的 `cargo build` 不会在它
 检查时等待构建目录的锁。代价是这些产物要构建两次；更新后的首次启动会构建一次。
 
+rust-analyzer 会运行它所分析的 workspace 的代码：构建其中的构建脚本和过程宏，它调用的
+cargo 和 rustup 还会遵循该 workspace 的 `.cargo/config.toml`、`rust-toolchain.toml` 和
+`rust-analyzer.toml`，这些文件可以指定自己的程序。没有任何设置能把这些全部关闭，因此它只在
+你信任的 workspace 中启动。打开尚未信任的 workspace 中的 Rust 文件时，会询问“启动语言服务器？”
+并给出该 workspace，默认选项为“否”；选择“是”会把信任与项目一起保存在 termide 的数据目录中、
+已批准的命令旁边，服务器随即为已打开的编辑器启动。拒绝后，在 termide 重启或在该 workspace 的
+编辑器中选择“重启语言服务器”之前不会再询问。智能体编辑这类文件时也会同样询问。
+
 ### 跳转到定义
 
 | 快捷键 | 操作 |
