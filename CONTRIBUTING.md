@@ -109,8 +109,9 @@ each commit:
 - ✅ Test suite (`cargo nextest run --workspace`, or `cargo test --workspace`
   without nextest)
 
-CI also runs `cargo deny check` and a release-mode test of the grammars on
-Linux, which the hook leaves out as too slow for a commit.
+CI also runs `cargo deny check`, the doctests (`cargo test --workspace --doc`)
+and a release-mode test of the grammars on Linux, which the hook leaves out as
+too slow for a commit.
 
 The hook lives at `.githooks/pre-commit` and is versioned with the code, so it
 is present in every clone — but git only runs it once you point the repository
@@ -371,7 +372,7 @@ To add support for a new language:
 
 1. Create a new TOML file in `crates/i18n/i18n/` (e.g., `ja.toml` for Japanese), using `en.toml` as a template
 2. Add the language to `SUPPORTED_LANGUAGES` in `crates/i18n/src/lib.rs`
-3. Add the new keys to the `i18n_get_string_methods!` macro in `crates/i18n/src/runtime.rs`
+3. Embed the file: add its code to the `match` in `load_language` in `crates/i18n/src/loader.rs`, and to the list in its `test_load_all_languages` test
 4. Create documentation in `doc/<lang>/README.md` (optional but appreciated)
 5. Test thoroughly, especially:
    - UI text rendering

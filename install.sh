@@ -3,11 +3,22 @@
 # https://github.com/termide/termide
 #
 # Usage: curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | sh
+#
+# Environment, as install.ps1 takes it:
+#   TERMIDE_VERSION      install this version instead of the latest
+#   TERMIDE_INSTALL_DIR  where the binary goes (default /usr/local/bin;
+#                        INSTALL_DIR is still read)
 
 set -e
 
 REPO="termide/termide"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+# Termux has no /usr/local and no sudo: its prefix holds the binaries.
+if [ -n "$TERMUX_VERSION" ] && [ -n "$PREFIX" ]; then
+    DEFAULT_DIR="$PREFIX/bin"
+else
+    DEFAULT_DIR="/usr/local/bin"
+fi
+INSTALL_DIR="${TERMIDE_INSTALL_DIR:-${INSTALL_DIR:-$DEFAULT_DIR}}"
 BOLD="\033[1m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
@@ -60,8 +71,13 @@ detect_distro() {
     fi
 }
 
-# Get latest version from GitHub
+# Get the version to install: TERMIDE_VERSION, or the latest from GitHub
 get_latest_version() {
+    if [ -n "$TERMIDE_VERSION" ]; then
+        # Tags carry no `v`: TERMIDE_VERSION=v0.51.0 means 0.51.0.
+        VERSION="${TERMIDE_VERSION#v}"
+        return
+    fi
     VERSION=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
     if [ -z "$VERSION" ]; then
         error "Failed to get latest version"
@@ -102,17 +118,35 @@ verify_sha256() {
 install_deb() {
     info "Installing via deb package..."
     URL="https://github.com/$REPO/releases/download/$VERSION/termide_${VERSION}-1_amd64.deb"
-    TMP_FILE="/tmp/termide_${VERSION}.deb"
-    curl -fsSL "$URL" -o "$TMP_FILE"
-    sudo dpkg -i "$TMP_FILE"
-    rm -f "$TMP_FILE"
+    TMP_DIR=$(mktemp -d)
+    TMP_FILE="$TMP_DIR/termide_${VERSION}.deb"
+    curl -fsSL "$URL" -o "$TMP_FILE" || error "Download failed: $URL"
+    verify_sha256 "$TMP_FILE" "$URL.sha256"
+    # apt, unlike dpkg -i, installs what the package depends on
+    sudo apt-get install -y "$TMP_FILE"
+    rm -rf "$TMP_DIR"
 }
 
 # Install using rpm package
 install_rpm() {
     info "Installing via rpm package..."
     URL="https://github.com/$REPO/releases/download/$VERSION/termide-${VERSION}-1.x86_64.rpm"
-    sudo dnf install -y "$URL" || sudo rpm -i "$URL"
+    TMP_DIR=$(mktemp -d)
+    TMP_FILE="$TMP_DIR/termide-${VERSION}.rpm"
+    curl -fsSL "$URL" -o "$TMP_FILE" || error "Download failed: $URL"
+    verify_sha256 "$TMP_FILE" "$URL.sha256"
+    sudo dnf install -y "$TMP_FILE" || sudo rpm -i "$TMP_FILE"
+    rm -rf "$TMP_DIR"
+}
+
+# Whether glibc version $1 (such as 2.35) is at least $2.$3
+glibc_at_least() {
+    MAJOR=$(echo "$1" | cut -d. -f1)
+    MINOR=$(echo "$1" | cut -d. -f2)
+    case "$MAJOR$MINOR" in
+        ""|*[!0-9]*) return 1 ;;
+    esac
+    [ "$MAJOR" -gt "$2" ] || { [ "$MAJOR" -eq "$2" ] && [ "$MINOR" -ge "$3" ]; }
 }
 
 # Install using binary tarball
@@ -128,11 +162,17 @@ install_binary() {
             x86_64) LOADER="/lib64/ld-linux-x86-64.so.2" ;;
             aarch64) LOADER="/lib/ld-linux-aarch64.so.1" ;;
         esac
-        if [ -e "$LOADER" ]; then
-            TARGET="${ARCH}-unknown-linux-gnu"
-        else
+        # The gnu build is linked against glibc 2.34; an older one (RHEL 8,
+        # Debian 11, Ubuntu 20.04) cannot load it either.
+        GLIBC=$(getconf GNU_LIBC_VERSION 2>/dev/null | sed -n 's/^glibc //p')
+        if [ ! -e "$LOADER" ]; then
             info "No glibc loader ($LOADER) found, using the static musl build"
             TARGET="${ARCH}-unknown-linux-musl"
+        elif ! glibc_at_least "$GLIBC" 2 34; then
+            info "glibc ${GLIBC:-of unknown version} is older than 2.34, using the static musl build"
+            TARGET="${ARCH}-unknown-linux-musl"
+        else
+            TARGET="${ARCH}-unknown-linux-gnu"
         fi
     else
         TARGET="${ARCH}-apple-darwin"
@@ -145,8 +185,17 @@ install_binary() {
     curl -fsSL "$URL" -o "$ARCHIVE" || error "Download failed: $URL"
     verify_sha256 "$ARCHIVE" "$URL.sha256"
     tar xzf "$ARCHIVE" -C "$TMP_DIR"
-    sudo install -m 755 "$TMP_DIR/termide" "$INSTALL_DIR/"
+    # sudo only where it is needed: root in a container, Termux or a
+    # directory of the user's own have none, or no need of it.
+    if [ -d "$INSTALL_DIR" ] && [ -w "$INSTALL_DIR" ] || [ "$(id -u)" = 0 ]; then
+        mkdir -p "$INSTALL_DIR"
+        install -m 755 "$TMP_DIR/termide" "$INSTALL_DIR/"
+    else
+        sudo mkdir -p "$INSTALL_DIR"
+        sudo install -m 755 "$TMP_DIR/termide" "$INSTALL_DIR/"
+    fi
     rm -rf "$TMP_DIR"
+    info "Shell completions: run 'termide --install-completions'."
 }
 
 # Install using Homebrew
@@ -250,7 +299,7 @@ main() {
     detect_arch
     [ "$OS" = "linux" ] && detect_distro
 
-    info "Fetching latest version..."
+    info "Fetching the version to install..."
     get_latest_version
 
     show_menu

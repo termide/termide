@@ -8,4 +8,7 @@
 
 ## Reporting a Vulnerability
 
-If you encounter security problems, please create an issue or contact the project maintainer at nizovtsevnv@gmail.com
+Please do not report a vulnerability in a public issue. Report it privately
+through GitHub: open the repository's **Security** tab and choose
+[**Report a vulnerability**](https://github.com/termide/termide/security/advisories/new),
+or write to the project maintainer at nizovtsevnv@gmail.com.

@@ -12,7 +12,7 @@ cargo install cargo-deb
 cargo deb
 ```
 
-Output: `target/debian/termide_<version>_<arch>.deb`
+Output: `target/debian/termide_<version>-1_<arch>.deb`
 
 ## Fedora/RHEL (.rpm)
 

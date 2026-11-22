@@ -2,6 +2,25 @@
 
 Это руководство описывает различные способы установки Termide на вашу систему.
 
+## Быстрая установка (Linux/macOS)
+
+Скрипт определяет систему и предлагает подходящие способы: бинарный файл,
+пакет `.deb` или `.rpm`, Homebrew, Nix или Cargo.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | sh
+```
+
+Где glibc системы старше 2.34, он берёт статическую сборку musl; каждую
+загрузку сверяет с файлом `.sha256`, опубликованным рядом с ней в релизе, и
+ничего не устанавливает, если файла нет или он не совпадает. `sudo` он
+вызывает, только когда этого требует каталог установки. Переменные
+окружения меняют его поведение:
+
+- `TERMIDE_VERSION` — установить указанную версию вместо последней.
+- `TERMIDE_INSTALL_DIR` — установить бинарный файл не в `/usr/local/bin`
+  (`$PREFIX/bin` в Termux), а в другое место.
+
 ## Скачать готовый бинарный файл (Рекомендуется)
 
 Самый простой способ начать работу — скачать готовый бинарный файл для вашей платформы.
@@ -10,35 +29,36 @@
 
 Посетите страницу [GitHub Releases](https://github.com/termide/termide/releases) и скачайте последнюю версию для вашей платформы:
 
-**Linux x86_64** (также работает в WSL/WSL2):
+**Linux x86_64** (также работает в WSL/WSL2; glibc 2.34 и новее — RHEL 9,
+Debian 12, Ubuntu 22.04 и позже; более старым системам — статическая сборка musl):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 **Linux x86_64 — статический musl** (Alpine, distroless-контейнеры,
 любая система без glibc):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
 ```
 
 **Linux ARM64** (Raspberry Pi, ARM серверы):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-unknown-linux-gnu.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-unknown-linux-gnu.tar.gz
 ```
 
 **Linux ARM64 — статический musl** (Android/Termux, Alpine ARM, любая ARM64-система без glibc):
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ```
 
 **macOS Intel (x86_64)**:
 ```bash
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-apple-darwin.tar.gz
 ```
 
 **macOS Apple Silicon (M1/M2/M3)**:
 ```bash
-curl -LO https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-apple-darwin.tar.gz
 ```
 
 ### Шаг 2: Распаковка
@@ -76,7 +96,7 @@ russh-sftp — без OpenSSL и libssh2), поэтому это тот же к�
 под musl.
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
 tar xzf termide-0.50.0-x86_64-unknown-linux-musl.tar.gz
 ./termide
 
@@ -98,17 +118,19 @@ nix build github:termide/termide#termide-static
 
 ## Установка через пакетный менеджер
 
+Пакетам, как и gnu-сборке, нужна glibc 2.34 или новее; рядом с каждым в релизе лежит его файл `.sha256`.
+
 ### Debian/Ubuntu (.deb)
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide_0.50.0-1_amd64.deb
-sudo dpkg -i termide_0.50.0-1_amd64.deb
+wget https://github.com/termide/termide/releases/download/0.50.0/termide_0.50.0-1_amd64.deb
+sudo apt install ./termide_0.50.0-1_amd64.deb
 ```
 
 ### Fedora/RHEL/CentOS (.rpm)
 
 ```bash
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-1.x86_64.rpm
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-1.x86_64.rpm
 sudo rpm -i termide-0.50.0-1.x86_64.rpm
 ```
 
@@ -329,7 +351,7 @@ Termide также работает в Windows Subsystem for Linux (WSL и WSL2)
 1. Установите WSL2, если еще не установлен
 2. Скачайте Linux x86_64 бинарный файл внутри WSL:
    ```bash
-   wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
+   wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
    tar xzf termide-0.50.0-x86_64-unknown-linux-gnu.tar.gz
    ./termide
    ```
@@ -342,7 +364,7 @@ Android (libc Bionic):
 
 ```bash
 pkg install git openssh   # инструменты, к которым обращается termide (плюс нужные LSP)
-wget https://github.com/termide/termide/releases/latest/download/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
+wget https://github.com/termide/termide/releases/download/0.50.0/termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 tar xzf termide-0.50.0-aarch64-unknown-linux-musl.tar.gz
 ./termide
 ```

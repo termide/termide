@@ -131,7 +131,19 @@ line, the toggle to the source) and `help` (`F1`'s window on the focused
 panel's section, filtered by typing; closing the last panel leaves a file
 manager at the project root) and `i18n-status-bars` (in Russian, the
 editor's status bar, the find bar and the Markdown preview's status bar
-read in the interface language).
+read in the interface language), `agent-checklist` (the `checklist`
+tool's headline, the list under its rule in the state strip, and the
+reminder of the unfinished list in the next request), `agent-debug-approval`
+(an agent's `debug start` of a project command waiting for the user's
+approval, the command shown as their own launch shows it), `git-commit`
+(a commit from the commit window running behind a slow hook and reporting
+the new commit's hash), `headless-acp` (`--prompt` on a `claude_code`
+connection, reported as stream-json), `headless-plan` (`--prompt` in plan
+mode refusing an edit an allow rule would pass elsewhere), `loop-until`
+(`/loop` with a stop condition ending once the judge finds it met) and
+`editor-lsp-trust` (a Rust file of a workspace not trusted asking before
+rust-analyzer starts, and declined, starting nothing; needs
+rust-analyzer).
 
 ## Writing one
 

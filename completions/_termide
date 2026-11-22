@@ -15,7 +15,9 @@
 _termide_instances() {
   local -a instances
   instances=(${(f)"$(termide --list-instances 2>/dev/null |
-    awk 'NR > 1 { gsub(/:/, "\\:", $5); print $1 ":" $5 }')"})
+    awk 'NR > 1 {
+      p = $0; if (match(p, / (at|de)tached  /)) p = substr(p, RSTART + RLENGTH)
+      gsub(/:/, "\\:", p); print $1 ":" p }')"})
   if (( ${#instances} )); then
     _describe -t instances 'detached instance' instances
   else

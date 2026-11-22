@@ -21,6 +21,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # A tag that is not the version Cargo.toml and its copies carry would
+      # publish files named for one version holding another.
+      - name: Check the tag against the version
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tools/release/version.sh --check
+          CARGO_VERSION=$(awk '/^\[workspace\.package\]/{s=1; next} /^\[/{s=0} s && /^version = "/{gsub(/version = "|"/, ""); print; exit}' Cargo.toml)
+          if [ "$CARGO_VERSION" != "${{ github.ref_name }}" ]; then
+            echo "::error::Tag ${{ github.ref_name }} does not match the version ${CARGO_VERSION} in Cargo.toml"
+            exit 1
+          fi
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@1.91.1
         with:
@@ -200,22 +212,18 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb
 
-      - name: Install cross-compilation tools (aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-
       - name: Build and package
         run: cargo deb --target ${{ matrix.target }}
+
+      - name: Checksum
+        working-directory: target/${{ matrix.target }}/debian
+        run: for f in *.deb; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: termide-deb-${{ matrix.target }}
-          path: target/${{ matrix.target }}/debian/*.deb
+          path: target/${{ matrix.target }}/debian/*.deb*
 
   # Build RPM packages
   build-rpm:
@@ -238,25 +246,21 @@ jobs:
       - name: Install cargo-generate-rpm
         run: cargo install cargo-generate-rpm
 
-      - name: Install cross-compilation tools (aarch64)
-        if: matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
-
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
 
       - name: Generate RPM
         run: cargo generate-rpm --target ${{ matrix.target }}
 
+      - name: Checksum
+        working-directory: target/${{ matrix.target }}/generate-rpm
+        run: for f in *.rpm; do sha256sum "$f" | cut -d' ' -f1 > "$f.sha256"; done
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: termide-rpm-${{ matrix.target }}
-          path: target/${{ matrix.target }}/generate-rpm/*.rpm
+          path: target/${{ matrix.target }}/generate-rpm/*.rpm*
 
   # Sign the Windows binary via SignPath (free OSS code signing).
   # Skipped when the secrets are not configured: releases keep working before
@@ -347,6 +351,12 @@ jobs:
           # Extract section for this version from CHANGELOG.md
           # Start from "## [VERSION]" line, end before next "## [" line
           BODY=$(awk "/^## \\[${VERSION}\\]/{found=1; next} /^## \\[/{if(found) exit} found{print}" CHANGELOG.md)
+          # A tag without its section (fragments not folded in, a typo in the
+          # heading) would publish a release with no notes.
+          if [ -z "$(printf '%s' "$BODY" | tr -d '[:space:]')" ]; then
+            echo "::error::CHANGELOG.md has no section for ${VERSION}"
+            exit 1
+          fi
           # Write to file to preserve newlines
           echo "$BODY" > release_notes.md
 
@@ -391,10 +401,12 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          # Calculate SHA256 checksums
-          SRC_SHA=$(curl -sL "https://github.com/termide/termide/archive/refs/tags/${VERSION}.tar.gz" | sha256sum | cut -d' ' -f1)
-          BIN_X64_SHA=$(curl -sL "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" | sha256sum | cut -d' ' -f1)
-          BIN_ARM_SHA=$(curl -sL "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" | sha256sum | cut -d' ' -f1)
+          # Calculate SHA256 checksums. A failed download fails the step: the
+          # checksum of an error page would be published otherwise.
+          sha() { curl -fsSL --retry 3 "$1" -o /tmp/sha-input && sha256sum /tmp/sha-input | cut -d' ' -f1; }
+          SRC_SHA=$(sha "https://github.com/termide/termide/archive/refs/tags/${VERSION}.tar.gz")
+          BIN_X64_SHA=$(sha "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-x86_64-unknown-linux-gnu.tar.gz")
+          BIN_ARM_SHA=$(sha "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-aarch64-unknown-linux-gnu.tar.gz")
 
           # Update termide (source package)
           GIT_SSH_COMMAND="ssh -i ~/.ssh/aur -o StrictHostKeyChecking=accept-new" git clone ssh://aur@aur.archlinux.org/termide.git /tmp/aur-termide
@@ -482,11 +494,12 @@ jobs:
         env:
           VERSION: ${{ github.ref_name }}
         run: |
-          # Calculate SHA256 for all platforms
-          SHA_DARWIN_X64=$(curl -sL "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-x86_64-apple-darwin.tar.gz" | sha256sum | cut -d' ' -f1)
-          SHA_DARWIN_ARM=$(curl -sL "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-aarch64-apple-darwin.tar.gz" | sha256sum | cut -d' ' -f1)
-          SHA_LINUX_X64=$(curl -sL "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-x86_64-unknown-linux-gnu.tar.gz" | sha256sum | cut -d' ' -f1)
-          SHA_LINUX_ARM=$(curl -sL "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-aarch64-unknown-linux-gnu.tar.gz" | sha256sum | cut -d' ' -f1)
+          # Calculate SHA256 for all platforms; a failed download fails the step
+          sha() { curl -fsSL --retry 3 "$1" -o /tmp/sha-input && sha256sum /tmp/sha-input | cut -d' ' -f1; }
+          SHA_DARWIN_X64=$(sha "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-x86_64-apple-darwin.tar.gz")
+          SHA_DARWIN_ARM=$(sha "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-aarch64-apple-darwin.tar.gz")
+          SHA_LINUX_X64=$(sha "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-x86_64-unknown-linux-gnu.tar.gz")
+          SHA_LINUX_ARM=$(sha "https://github.com/termide/termide/releases/download/${VERSION}/termide-${VERSION}-aarch64-unknown-linux-gnu.tar.gz")
 
           # Clone homebrew-termide over SSH (deploy key), mirroring the AUR job
           GIT_SSH_COMMAND="ssh -i ~/.ssh/homebrew_tap -o StrictHostKeyChecking=accept-new" \
