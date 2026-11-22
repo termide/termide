@@ -962,10 +962,13 @@ pub enum PanelEvent {
     },
 
     /// The connection to `url` (password-free) was refused; `attempt` says
-    /// which password it used. See [`crate::credentials`].
+    /// which password it used. `key` is the encrypted SSH private key whose
+    /// passphrase it wants instead of the account's password. See
+    /// [`crate::credentials`].
     CredentialsRequired {
         url: String,
         attempt: crate::CredentialAttempt,
+        key: Option<PathBuf>,
     },
 
     /// The connection to `url` succeeded with the password last provided.

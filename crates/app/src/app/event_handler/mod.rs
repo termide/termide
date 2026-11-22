@@ -283,8 +283,8 @@ impl App {
                 self.event_git_operation(operation, repo_path, None)?;
             }
 
-            PanelEvent::CredentialsRequired { url, attempt } => {
-                self.event_credentials_required(url, attempt);
+            PanelEvent::CredentialsRequired { url, attempt, key } => {
+                self.event_credentials_required(url, attempt, key);
             }
 
             PanelEvent::CredentialsAccepted { url } => {

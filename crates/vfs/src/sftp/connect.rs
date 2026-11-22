@@ -21,7 +21,7 @@ use russh::ChannelStream;
 use russh_sftp::client::SftpSession;
 
 use crate::error::{VfsError, VfsResult};
-use crate::ssh_config::{JumpHost, SshHostConfig, Tokens};
+use crate::ssh_config::{AgentSocket, JumpHost, SshHostConfig, Tokens};
 use crate::types::{AuthMethod, ConnectOptions, HostKey};
 
 #[cfg(test)]
@@ -273,66 +273,106 @@ async fn try_authenticate(
 
     cancelled_check()?;
 
+    let agent = host_cfg.agent_socket();
     match auth {
         AuthMethod::None => {
             // Most permissive interpretation of "None": try SSH agent.
-            try_auth_agent(session, username).await
+            try_auth_agent(session, username, &agent).await
         }
         AuthMethod::Password(password) => try_auth_password(session, username, password).await,
         AuthMethod::SshKey {
             private_key,
             passphrase,
         } => try_auth_keyfile(session, username, private_key, passphrase.as_deref()).await,
-        AuthMethod::SshAgent => try_auth_agent(session, username).await,
+        AuthMethod::SshAgent => try_auth_agent(session, username, &agent).await,
         AuthMethod::Auto => {
-            // Phase 2b: honor ~/.ssh/config IdentityFile / IdentitiesOnly.
-            // Priority order matches OpenSSH's default behavior:
-            //   1. SSH agent (unless IdentitiesOnly=yes)
+            // Honours ~/.ssh/config. Order as in OpenSSH:
+            //   1. SSH agent (unless IdentitiesOnly=yes or IdentityAgent none)
             //   2. Keys from IdentityFile entries in ssh_config
             //   3. Default keys in ~/.ssh/id_*
+            // all skipped when PreferredAuthentications leaves out publickey.
             let identities_only = host_cfg.identities_only.unwrap_or(false);
+            let publickey = host_cfg.allows_auth("publickey");
+            // The first encrypted key met, whose passphrase is asked for
+            // once nothing else got in.
+            let mut encrypted: Option<PathBuf> = None;
 
-            if !identities_only && try_auth_agent(session, username).await.is_ok() {
+            if publickey
+                && !identities_only
+                && try_auth_agent(session, username, &agent).await.is_ok()
+            {
                 return Ok(());
             }
             cancelled_check()?;
 
-            // Try keys from ssh_config first (they're authoritative).
-            for raw_key in &host_cfg.identity_files {
-                let key_path = raw_key
+            let configured = host_cfg.identity_files.iter().map(|raw_key| {
+                raw_key
                     .to_str()
-                    .map_or_else(|| raw_key.clone(), crate::ssh_config::expand_tilde);
+                    .map_or_else(|| raw_key.clone(), crate::ssh_config::expand_tilde)
+            });
+            let defaults = if identities_only {
+                Vec::new()
+            } else {
+                default_key_files()
+            };
+            let keys: Vec<PathBuf> = if publickey {
+                configured.chain(defaults).collect()
+            } else {
+                Vec::new()
+            };
+            for key_path in keys {
                 if !key_path.exists() {
                     continue;
                 }
-                if try_auth_keyfile(session, username, &key_path, None)
-                    .await
-                    .is_ok()
-                {
-                    return Ok(());
+                match try_auth_keyfile(session, username, &key_path, None).await {
+                    Ok(()) => return Ok(()),
+                    Err(VfsError::KeyPassphraseRequired(path)) => {
+                        encrypted.get_or_insert(path);
+                    }
+                    Err(_) => {}
                 }
                 cancelled_check()?;
             }
 
-            // Fallback to default keys unless IdentitiesOnly forbids it.
-            if !identities_only {
-                for key_path in default_key_files() {
-                    if try_auth_keyfile(session, username, &key_path, None)
-                        .await
-                        .is_ok()
-                    {
-                        return Ok(());
-                    }
-                    cancelled_check()?;
-                }
-            }
-
-            Err(VfsError::AuthenticationFailed(
-                "No authentication method succeeded (tried SSH agent and SSH keys). \
-                 Provide a password or specific key."
-                    .into(),
-            ))
+            auto_failure(host_cfg, encrypted)
         }
+    }
+}
+
+/// What an `Auto` login that got nowhere reports: the passphrase of an
+/// encrypted key when public keys come before passwords, else a request
+/// for the password, unless `PreferredAuthentications` rules passwords out.
+fn auto_failure(host_cfg: &SshHostConfig, encrypted: Option<PathBuf>) -> VfsResult<()> {
+    let rank = |method: &str| {
+        host_cfg.preferred_authentications.as_ref().map_or(
+            // OpenSSH's default order: publickey, keyboard-interactive, password.
+            match method {
+                "publickey" => 0,
+                "keyboard-interactive" => 1,
+                "password" => 2,
+                _ => usize::MAX,
+            },
+            |methods| {
+                methods
+                    .iter()
+                    .position(|m| m == method)
+                    .unwrap_or(usize::MAX)
+            },
+        )
+    };
+    let password = rank("password").min(rank("keyboard-interactive"));
+    match encrypted {
+        Some(path) if rank("publickey") < password => Err(VfsError::KeyPassphraseRequired(path)),
+        _ if password == usize::MAX => Err(VfsError::ConnectionFailed(
+            "No allowed authentication method succeeded \
+             (PreferredAuthentications rules out passwords)"
+                .into(),
+        )),
+        _ => Err(VfsError::AuthenticationFailed(
+            "No authentication method succeeded (tried SSH agent and SSH keys). \
+             Provide a password or specific key."
+                .into(),
+        )),
     }
 }
 
@@ -358,14 +398,32 @@ async fn try_auth_keyfile(
     key_path: &Path,
     passphrase: Option<&str>,
 ) -> VfsResult<()> {
-    let key = load_secret_key(key_path, passphrase).map_err(|e| {
-        VfsError::AuthenticationFailed(format!(
-            "Failed to load private key '{}': {}",
-            key_path.display(),
-            e
-        ))
-    })?;
+    let key = load_key(key_path, passphrase)?;
     authenticate_with_key(session, username, key).await
+}
+
+/// The private key at `key_path`. An encrypted key without a passphrase,
+/// or with one that does not decrypt it, is `KeyPassphraseRequired`.
+fn load_key(key_path: &Path, passphrase: Option<&str>) -> VfsResult<PrivateKey> {
+    load_secret_key(key_path, passphrase).map_err(|e| {
+        let encrypted = match e {
+            russh::keys::Error::KeyIsEncrypted => true,
+            _ if passphrase.is_some() => matches!(
+                load_secret_key(key_path, None),
+                Err(russh::keys::Error::KeyIsEncrypted)
+            ),
+            _ => false,
+        };
+        if encrypted {
+            VfsError::KeyPassphraseRequired(key_path.to_path_buf())
+        } else {
+            VfsError::AuthenticationFailed(format!(
+                "Failed to load private key '{}': {}",
+                key_path.display(),
+                e
+            ))
+        }
+    })
 }
 
 async fn authenticate_with_key(
@@ -389,15 +447,24 @@ async fn authenticate_with_key(
 async fn try_auth_agent(
     session: &mut client::Handle<VerifyingHandler>,
     username: &str,
+    socket: &AgentSocket,
 ) -> VfsResult<()> {
     use russh::keys::agent::client::AgentClient;
-    if std::env::var_os("SSH_AUTH_SOCK").is_none() {
-        return Err(VfsError::AuthenticationFailed(
-            "SSH agent not available (SSH_AUTH_SOCK unset)".into(),
-        ));
-    }
-    let mut agent = AgentClient::connect_env()
-        .await
+    let connected = match socket {
+        AgentSocket::Disabled => {
+            return Err(VfsError::AuthenticationFailed(
+                "SSH agent disabled (IdentityAgent)".into(),
+            ));
+        }
+        AgentSocket::Environment if std::env::var_os("SSH_AUTH_SOCK").is_none() => {
+            return Err(VfsError::AuthenticationFailed(
+                "SSH agent not available (SSH_AUTH_SOCK unset)".into(),
+            ));
+        }
+        AgentSocket::Environment => AgentClient::connect_env().await,
+        AgentSocket::Path(path) => AgentClient::connect_uds(path).await,
+    };
+    let mut agent = connected
         .map_err(|e| VfsError::AuthenticationFailed(format!("agent connect failed: {e}")))?;
     let identities = agent
         .request_identities()
@@ -423,6 +490,7 @@ async fn try_auth_agent(
 async fn try_auth_agent(
     _session: &mut client::Handle<VerifyingHandler>,
     _username: &str,
+    _socket: &AgentSocket,
 ) -> VfsResult<()> {
     Err(VfsError::AuthenticationFailed(
         "SSH agent not supported on this platform".into(),
@@ -500,13 +568,17 @@ async fn open_tunnel(
 
 /// An error from jump host `host`, named so. Host key errors already name
 /// it and keep their type for the host key questions; a refused login
-/// stops being `AuthenticationFailed`, which would ask for the target's
-/// password.
+/// stops being `AuthenticationFailed` or `KeyPassphraseRequired`, which
+/// would ask for the target's password or passphrase.
 fn at_jump_host(host: &str, error: VfsError) -> VfsError {
     match error {
         VfsError::AuthenticationFailed(message) | VfsError::ConnectionFailed(message) => {
             VfsError::ConnectionFailed(format!("Jump host {host}: {message}"))
         }
+        VfsError::KeyPassphraseRequired(path) => VfsError::ConnectionFailed(format!(
+            "Jump host {host}: key {} is encrypted; load it into the SSH agent",
+            path.display()
+        )),
         other => other,
     }
 }
@@ -1257,6 +1329,80 @@ K5M9Mc5iG/5ni8RBmJQYAAAAAAECAwQF
         assert!(matches!(
             route("t", None, None, &net.lookup()),
             Err(VfsError::ConnectionFailed(_))
+        ));
+    }
+
+    /// An Ed25519 key encrypted with the passphrase `secret` (one bcrypt
+    /// round, to keep the test fast).
+    const ENCRYPTED_KEY: &str = "-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAACmFlczI1Ni1jdHIAAAAGYmNyeXB0AAAAGAAAABAT0FC1ja
+b/QpQ57h49eOgtAAAAAQAAAAEAAAAzAAAAC3NzaC1lZDI1NTE5AAAAILf/nLA9a/IA7//Z
+RtVFXV1F7NroWYcK6JzYXE2TsU9zAAAAkD67msIwlafxp89sOwoI4MRaylQS3py/TTLBnn
+2oHyz23haNBASSQwsEvZsQqA4eY5DKWee0vPng/Wccx99Trcpb6bOtQF3yMd9OFleaiRGN
+gQ4Ovo5CcOVQ8gWsqQSXzVvhMnh5kkY37F4zVrVoBHdJdiRAjndw1XjO6VMnWqBhJ4vVF5
+Ryz2htShUNggyZzQ==
+-----END OPENSSH PRIVATE KEY-----
+";
+
+    #[test]
+    fn an_encrypted_key_asks_for_its_passphrase_until_it_is_right() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("id_ed25519");
+        std::fs::write(&path, ENCRYPTED_KEY).unwrap();
+        for passphrase in [None, Some("wrong")] {
+            match load_key(&path, passphrase) {
+                Err(VfsError::KeyPassphraseRequired(p)) => assert_eq!(p, path),
+                other => panic!("{passphrase:?}: {other:?}"),
+            }
+        }
+        assert!(load_key(&path, Some("secret")).is_ok());
+
+        let plain = dir.path().join("plain");
+        std::fs::write(&plain, HOST_KEY).unwrap();
+        assert!(load_key(&plain, None).is_ok());
+        // A passphrase given for a plain key is not asked for again.
+        assert!(load_key(&plain, Some("x")).is_ok());
+
+        let garbage = dir.path().join("garbage");
+        std::fs::write(&garbage, "not a key").unwrap();
+        assert!(matches!(
+            load_key(&garbage, Some("x")),
+            Err(VfsError::AuthenticationFailed(_))
+        ));
+    }
+
+    #[test]
+    fn auto_failure_follows_preferred_authentications() {
+        let key = PathBuf::from("/keys/id");
+        let with = |methods: Option<&str>| SshHostConfig {
+            preferred_authentications: methods.map(|m| m.split(',').map(str::to_string).collect()),
+            ..SshHostConfig::default()
+        };
+        // Default order: the key's passphrase comes before a password.
+        assert!(matches!(
+            auto_failure(&with(None), Some(key.clone())),
+            Err(VfsError::KeyPassphraseRequired(_))
+        ));
+        assert!(matches!(
+            auto_failure(&with(None), None),
+            Err(VfsError::AuthenticationFailed(_))
+        ));
+        assert!(matches!(
+            auto_failure(&with(Some("password,publickey")), Some(key.clone())),
+            Err(VfsError::AuthenticationFailed(_))
+        ));
+        // No password allowed: never ask for one.
+        assert!(matches!(
+            auto_failure(&with(Some("publickey")), None),
+            Err(VfsError::ConnectionFailed(_))
+        ));
+        assert!(matches!(
+            auto_failure(&with(Some("publickey")), Some(key.clone())),
+            Err(VfsError::KeyPassphraseRequired(_))
+        ));
+        assert!(matches!(
+            auto_failure(&with(Some("keyboard-interactive")), Some(key)),
+            Err(VfsError::AuthenticationFailed(_))
         ));
     }
 }

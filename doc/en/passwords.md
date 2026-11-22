@@ -6,7 +6,8 @@ to contain them.
 
 The vault serves:
 
-- **Remote file systems** — SFTP, FTP, FTPS, SMB (see [VFS](vfs.md)).
+- **Remote file systems** — SFTP, FTP, FTPS, SMB (see [VFS](vfs.md)),
+  and the passphrases of the SSH keys SFTP logs in with.
 - **Databases** — PostgreSQL and MySQL (see [Database Viewer](database.md)).
 - **Git over HTTPS** — user name and password or token for push, pull and
   fetch.
@@ -38,7 +39,8 @@ Termide asks for the login password itself instead.
 Passwords are filed by server: scheme, host and port (default ports are
 left out) plus the user name. A database password belongs to the server
 login, not to one database, so switching databases in a panel keeps
-finding it. The passphrase of the SSH key used by git is kept as one entry.
+finding it. The passphrase of the SSH key used by git is kept as one entry;
+an SFTP key's passphrase is filed by the key's path.
 
 ## Bookmarks with a password in the URL
 

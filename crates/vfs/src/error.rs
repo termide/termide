@@ -71,6 +71,12 @@ pub enum VfsError {
     #[error("Wrong password")]
     WrongPassword,
 
+    /// SSH authentication needs this private key, which is encrypted: no
+    /// passphrase was given for it, or the one given did not decrypt it.
+    /// Connect again with `ConnectOptions::with_ssh_key`.
+    #[error("Passphrase required for key {}", .0.display())]
+    KeyPassphraseRequired(PathBuf),
+
     /// The SSH server offered a key that no `known_hosts` file records for
     /// the host. Nothing was sent to the server; trust the key with
     /// `VfsManager::trust_host_key` and connect again.
