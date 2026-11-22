@@ -62,7 +62,7 @@ Two ways to get a remote panel open:
 2. **Bookmarks** — store frequently-used remotes once and reach them
    through the `Bookmarks` menu. Bookmark entries accept the same URL
    syntax as above; they're stored in
-   `~/.config/termide/bookmarks.toml` (or the project-local
+   `~/.config/termide/bookmarks.toml` on Linux, `~/Library/Application Support/termide/bookmarks.toml` on macOS, `%APPDATA%\termide\bookmarks.toml` on Windows (or the project-local
    `.termide/bookmarks.toml` if you keep team-shared shortcuts in the
    repo).
 

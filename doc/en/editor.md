@@ -304,7 +304,7 @@ When word wrap is enabled (configurable in settings), long lines are automatical
 - **Line numbers**: Displayed for logical lines, not visual rows; the gutter is only as wide as the last line number needs, so a short file gives the width back to the text
 - **Editing operations**: All editing commands (cut, copy, paste, undo/redo) work seamlessly with wrapped content
 
-Enable/disable word wrap in your configuration file (`~/.config/termide/config.toml`):
+Enable/disable word wrap in your configuration file (`~/.config/termide/config.toml` on Linux, `~/Library/Application Support/termide/config.toml` on macOS, `%APPDATA%\termide\config.toml` on Windows):
 ```toml
 [editor]
 word_wrap = true  # or false
@@ -428,7 +428,7 @@ refused.
 
 ### Configuration
 
-Enable or disable git diff visualization in your configuration file (`~/.config/termide/config.toml`):
+Enable or disable git diff visualization in your configuration file (`~/.config/termide/config.toml` on Linux, `~/Library/Application Support/termide/config.toml` on macOS, `%APPDATA%\termide\config.toml` on Windows):
 
 ```toml
 [editor]
@@ -497,7 +497,7 @@ The completion popup displays:
 
 ### Configuration
 
-Configure LSP in your configuration file (`~/.config/termide/config.toml`):
+Configure LSP in your configuration file (`~/.config/termide/config.toml` on Linux, `~/Library/Application Support/termide/config.toml` on macOS, `%APPDATA%\termide\config.toml` on Windows):
 
 ```toml
 [lsp]
@@ -565,7 +565,7 @@ the first start after an update builds them once.
 
 | Shortcut           | Action                                     |
 |-------------------|--------------------------------------------|
-| `Shift+F12`       | Find all references to symbol under cursor |
+| `Shift+F12`, `F24` | Find all references to symbol under cursor |
 
 Opens a dedicated References panel listing all locations where the symbol is used. Click any reference to navigate to it.
 
@@ -643,7 +643,7 @@ Termide includes an optional Vim-style editing mode with full Cyrillic keyboard 
 
 ### Enabling Vim Mode
 
-Enable Vim mode in your configuration file (`~/.config/termide/config.toml`):
+Enable Vim mode in your configuration file (`~/.config/termide/config.toml` on Linux, `~/Library/Application Support/termide/config.toml` on macOS, `%APPDATA%\termide\config.toml` on Windows):
 
 ```toml
 [general]

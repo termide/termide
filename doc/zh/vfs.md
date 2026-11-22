@@ -59,7 +59,7 @@ nfs://nas.local/srv/backup
    VFS URL。
 2. **Bookmarks** — 把常用的远程位置保存一次，然后通过 `Bookmarks`
    菜单访问。书签条目接受同样的 URL 语法，保存在
-   `~/.config/termide/bookmarks.toml`（或项目本地的
+   Linux 上为 `~/.config/termide/bookmarks.toml`，macOS 上为 `~/Library/Application Support/termide/bookmarks.toml`，Windows 上为 `%APPDATA%\termide\bookmarks.toml`（或项目本地的
    `.termide/bookmarks.toml`，用于团队共享）。
 
 两种方式都会打开一个根目录指向远程目录的普通文件管理器视图；其他

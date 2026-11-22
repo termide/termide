@@ -49,7 +49,7 @@
 - **自给自足** - 单个静态二进制文件，无任何运行时依赖：SSH、TLS 和加密均为纯 Rust 实现，因此同一个文件可在 Alpine、distroless 容器或 Termux 中运行。系统中已有的工具 —— git、语言服务器、供智能体网页搜索使用的浏览器 —— 存在时会自动使用。
 - **桌面与服务器皆宜** - 在工作站上支持原生图形和系统剪贴板；通过 SSH 使用时，`termide --detached` 让编辑器、shell 和任务在断线后继续运行（[可分离实例](doc/zh/detached-instances.md)），文件管理器可通过 SFTP / FTP 访问其他主机。
 - **你的数据归你所有** - 没有遥测，也不检查更新：termide 只连接你指定的服务器、数据库和模型端点。在你配置模型之前，智能体处于关闭状态；使用本地模型时，你的代码永远不会离开本机。
-- **机密受到保护** - 连接密码保存在由主密码保护的加密保险库中（Argon2 + ChaCha20-Poly1305），绝不会出现在书签、布局或日志中（[密码保险库](doc/zh/passwords.md)）；API 密钥从环境变量读取。
+- **机密受到保护** - 连接密码保存在由主密码保护的加密保险库中（Argon2、X25519 和 XChaCha20-Poly1305），绝不会出现在书签、布局或日志中（[密码保险库](doc/zh/passwords.md)）；智能体连接的 API 密钥取自环境变量或同一保险库。
 - **没有任何隐藏** - 智能体模型看到的每一段提示词 —— 系统提示词、服务提示词、工具描述 —— 都是可以阅读和覆盖的普通文件，`/prompt` 可显示组装后的完整结果（[系统提示词](doc/zh/agent.md#系统提示词)）。设置、快捷键、主题和命令均为 TOML 格式。
 
 ## 功能特性
@@ -88,7 +88,7 @@
 - **后台操作** - 复制、移动、上传和下载，带进度显示，支持暂停、恢复和取消
 - **数据库查看器** - 通过书签 URL 打开 SQLite、PostgreSQL 和 MySQL：服务端排序、按列过滤、单元格编辑，整行导出为 TSV、JSON 或 INSERT
 - **CSV 与 TSV 表格** - 以可排序表格显示分隔符文件，自动猜测分隔符和标题行；按窗口从磁盘读取，任意大小的文件都能立即打开
-- **密码保险库** - 远程主机、数据库和 git 的密码保存在由主密码保护的加密保险库中
+- **密码保险库** - 远程主机、数据库和 git 的密码、SSH 密钥口令以及智能体 API 密钥保存在由主密码保护的加密保险库中
 - **书签与目录切换器** - 保存常用位置，使用 `Ctrl+\` 快速切换目录
 
 ### 服务器与运维
@@ -613,6 +613,7 @@ command = "./run.py"
 - [suppaftp](https://github.com/veeso/suppaftp) - FTP / FTPS
 - [rustls](https://github.com/rustls/rustls) - 无需 OpenSSL 的 TLS
 - [SQLx](https://github.com/launchbadge/sqlx) - SQLite、PostgreSQL 和 MySQL 访问
-- [RustCrypto](https://github.com/RustCrypto) - 密码保险库使用的 Argon2 和 ChaCha20-Poly1305
+- [RustCrypto](https://github.com/RustCrypto) - 密码保险库使用的 Argon2 和 XChaCha20-Poly1305
+- [x25519-dalek](https://github.com/dalek-cryptography/curve25519-dalek) - 密码保险库使用的 X25519 密钥交换
 - [nucleo](https://github.com/helix-editor/nucleo) - 模糊匹配
 - [pulldown-cmark](https://github.com/pulldown-cmark/pulldown-cmark) 和 [html5ever](https://github.com/servo/html5ever) - Markdown 和 HTML 解析

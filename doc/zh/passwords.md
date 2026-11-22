@@ -59,7 +59,7 @@ lock_after_mins = 15   # 0 表示在 termide 退出前保持解锁
 
 ## 密码库文件
 
-密码库是 `~/.config/termide/vault.toml`（仅所有者可访问）。每个用户只有一个密码库，不会按项目区分。
+密码库是 Linux 上为 `~/.config/termide/vault.toml`，macOS 上为 `~/Library/Application Support/termide/vault.toml`，Windows 上为 `%APPDATA%\termide\vault.toml`（仅所有者可访问）。每个用户只有一个密码库，不会按项目区分。
 
 - **机密是加密的。** 它们使用临时 X25519、HKDF-SHA256 和 XChaCha20-Poly1305 密封到一个 X25519 密钥对。私钥使用由主密码经 Argon2id（64 MiB，3 轮）派生的密钥加密。
 - **保存无需解锁。** 保存只用到公钥，因此 Termide 只在确实需要已保存的密码时才询问主密码。

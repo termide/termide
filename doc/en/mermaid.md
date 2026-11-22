@@ -67,5 +67,7 @@ Diagram kinds that are not yet laid out (e.g. `requirementDiagram`,
   menu — copy the rendered diagram (the pseudographics) to the clipboard.
 - **`Ctrl+S`**, or the **`Save diagram as…`** menu entry — save the diagram
   source (`.mmd`) to a chosen path.
+- **`Ctrl+R`** — re-read the source from disk to pick up external edits,
+  keeping the scroll position.
 
 The panel is saved with the project layout and reopens at the same file.

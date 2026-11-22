@@ -63,7 +63,7 @@ nfs://nas.local/srv/backup
 2. **Bookmarks** — сохранить часто используемые удалённые точки и
    возвращаться к ним через меню `Bookmarks`. Записи закладок
    принимают тот же URL-синтаксис; хранятся в
-   `~/.config/termide/bookmarks.toml` (или в `.termide/bookmarks.toml`
+   `~/.config/termide/bookmarks.toml` в Linux, `~/Library/Application Support/termide/bookmarks.toml` в macOS, `%APPDATA%\termide\bookmarks.toml` в Windows (или в `.termide/bookmarks.toml`
    проекта, если нужны проектные shortcut'ы).
 
 В обоих случаях открывается обычная панель файлового менеджера в

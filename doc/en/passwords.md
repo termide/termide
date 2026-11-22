@@ -84,7 +84,7 @@ server process; clients never receive it.
 
 ## The vault file
 
-The vault is `~/.config/termide/vault.toml` (owner-only permissions). There
+The vault is `~/.config/termide/vault.toml` on Linux, `~/Library/Application Support/termide/vault.toml` on macOS, `%APPDATA%\termide\vault.toml` on Windows (owner-only permissions). There
 is one vault per user, never one per project.
 
 - **Secrets are encrypted.** They are sealed to an X25519 key pair, using

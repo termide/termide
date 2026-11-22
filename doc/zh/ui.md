@@ -45,7 +45,7 @@
 **保存。** 每项更改立即生效并保存：开关和下拉列表在选择时，文本和数字字段在按 `Enter` 时。没有"应用"按钮，也无需取消。
 
 **设置存储位置。** 第一个按钮切换存储位置：
-- **全局** — `~/.config/termide/config.toml`，所有项目共用。
+- **全局** — Linux 上为 `~/.config/termide/config.toml`，macOS 上为 `~/Library/Application Support/termide/config.toml`，Windows 上为 `%APPDATA%\termide\config.toml`，所有项目共用。
 - **项目** — `<项目>/.termide/config.toml`，只保存与全局设置不同的部分。切换时创建该文件，设置本身不变。
 - 切换回全局会删除项目文件，并询问如何处理其设置：**丢弃**（使用全局设置）或**移至全局**（成为所有项目的全局设置）。
 
@@ -416,5 +416,7 @@ Termide 通过 `KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES | REPORT_ALT
 - 开启 Caps Lock 时 `Alt+T` 这类绑定依然生效（否则事件到达时是 `{Char('T'), Alt|Shift}`，无法匹配 `{Char('t'), Alt}`）。
 - 真正的 `Shift+字母` 绑定（例如 `Ctrl+Shift+F` 用于内容搜索）仍与无 Shift 版本区分清楚——只在真的报告了 Caps Lock 时才剥离 Shift。
 - 不支持 Kitty 协议的终端（不发送 Caps Lock 位）会回退到严格的修饰符比较，行为保持不变——在这些终端中建议关闭 Caps Lock 使用。
+
+在 macOS 上 termide 还会请求 `REPORT_ALL_KEYS_AS_ESCAPE_CODES`，使 `Option+<字母>` 以 `Alt+<字母>` 到达；代价是死键和输入法组字不再生效，可通过 `general.report_all_keys = false` 关闭——见 [keybindings.md](keybindings.md#macos-option-不是-alt)。
 
 内嵌终端模拟器的方向键和 Home/End 的修饰编码见 [terminal.md](terminal.md#交互操作)。

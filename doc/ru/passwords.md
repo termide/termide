@@ -88,7 +88,7 @@ lock_after_mins = 15   # 0 — не блокировать до выхода и�
 
 ## Файл хранилища
 
-Хранилище — это `~/.config/termide/vault.toml` (доступ только для
+Хранилище — это `~/.config/termide/vault.toml` в Linux, `~/Library/Application Support/termide/vault.toml` в macOS, `%APPDATA%\termide\vault.toml` в Windows (доступ только для
 владельца). Хранилище одно на пользователя, проектных хранилищ не бывает.
 
 - **Секреты зашифрованы.** Они запечатаны на пару ключей X25519: эфемерный
