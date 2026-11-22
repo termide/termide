@@ -158,12 +158,12 @@ fn get_extension(filename: &str) -> String {
 pub fn is_raster_image(filename: &str) -> bool {
     matches!(
         get_extension(filename).as_str(),
-        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "tiff" | "tif"
+        "png" | "jpg" | "jpeg" | "gif" | "webp" | "bmp" | "ico" | "tiff" | "tif"
     )
 }
 
 fn is_vector_image(filename: &str) -> bool {
-    matches!(get_extension(filename).as_str(), "svg" | "ico")
+    get_extension(filename) == "svg"
 }
 
 fn is_video(filename: &str) -> bool {

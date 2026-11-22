@@ -304,8 +304,8 @@ The file manager can preview images and videos using console image viewers.
 
 | File type | Action |
 |-----------|--------|
-| Raster images (PNG, JPG, JPEG, GIF, WebP, BMP, TIFF) | ImagePanel (native graphics) or xdg-open fallback |
-| Vector images (SVG, ICO) | xdg-open (system viewer) |
+| Raster images (PNG, JPG, JPEG, GIF, WebP, BMP, ICO, TIFF) | ImagePanel (native graphics) or xdg-open fallback |
+| Vector images (SVG) | xdg-open (system viewer) |
 | Videos (MP4, MKV, AVI, MOV, WebM, FLV, WMV, M4V) | xdg-open (system player) |
 | Binary files | xdg-open (system default) |
 | Text files | Editor panel |

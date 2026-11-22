@@ -339,3 +339,29 @@ impl Panel for ImagePanel {
         self.file_path.parent().map(|p| p.to_path_buf())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    /// Every extension the file manager routes to this panel must decode.
+    #[test]
+    fn the_routed_raster_formats_decode() {
+        let dir = std::env::temp_dir().join(format!("termide-image-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let img = image::RgbaImage::from_pixel(4, 4, image::Rgba([10, 20, 30, 255]));
+        for ext in ["png", "jpg", "gif", "webp", "bmp", "ico", "tiff"] {
+            let path = dir.join(format!("pixel.{ext}"));
+            // JPEG has no alpha channel; the rest take RGBA as found in the wild.
+            let saved = if ext == "jpg" {
+                image::DynamicImage::ImageRgba8(img.clone())
+                    .to_rgb8()
+                    .save(&path)
+            } else {
+                img.save(&path)
+            };
+            saved.unwrap_or_else(|e| panic!("encode {ext}: {e}"));
+            let back = image::open(&path).unwrap_or_else(|e| panic!("decode {ext}: {e}"));
+            assert_eq!((back.width(), back.height()), (4, 4), "{ext}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
