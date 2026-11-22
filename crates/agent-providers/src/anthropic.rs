@@ -435,7 +435,8 @@ fn convert_messages(messages: &[Message], replay_model: Option<&str>) -> Vec<Val
                                 json!({ "type": "thinking", "thinking": text, "signature": signature })
                             });
                         }
-                        AssistantContent::Text { text } if !text.is_empty() => {
+                        // The API rejects a text block of whitespace only.
+                        AssistantContent::Text { text } if !text.trim().is_empty() => {
                             blocks.push(json!({ "type": "text", "text": text }));
                         }
                         AssistantContent::ToolCall(call) => {
@@ -1591,5 +1592,46 @@ mod tests {
             None,
         );
         assert_eq!(wire[0]["content"][0]["input"], json!({}));
+    }
+
+    /// The API rejects a whitespace-only text block, so one is left out,
+    /// and a reply of nothing else is left out whole.
+    #[test]
+    fn a_whitespace_only_text_block_is_left_out() {
+        let call = ToolCall {
+            id: "c1".into(),
+            name: "read".into(),
+            arguments: json!({}),
+            extra_content: None,
+        };
+        let reply = |content: Vec<AssistantContent>| {
+            Message::Assistant(AssistantMessage {
+                content,
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "anthropic".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            })
+        };
+        let wire = convert_messages(
+            &[
+                Message::User(UserMessage::text("hi")),
+                reply(vec![
+                    AssistantContent::Text {
+                        text: "\n\n".into(),
+                    },
+                    AssistantContent::ToolCall(call),
+                ]),
+                reply(vec![AssistantContent::Text { text: " \n".into() }]),
+            ],
+            None,
+        );
+        assert_eq!(wire.len(), 2);
+        let blocks = wire[1]["content"].as_array().unwrap();
+        assert_eq!(blocks.len(), 1);
+        assert_eq!(blocks[0]["type"], "tool_use");
     }
 }

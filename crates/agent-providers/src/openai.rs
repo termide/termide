@@ -184,7 +184,7 @@ impl OpenAiCompatProvider {
                 Message::ToolResult(result) => tool_images.extend(result.images().map(image_part)),
                 _ => flush_tool_images(&mut messages, &mut tool_images),
             }
-            messages.push(self.convert(message, index >= turn_start));
+            messages.extend(self.convert(message, index >= turn_start));
         }
         flush_tool_images(&mut messages, &mut tool_images);
 
@@ -289,9 +289,12 @@ impl OpenAiCompatProvider {
     }
 
     /// One message in the wire shape; `in_turn` says an assistant message
-    /// belongs to the current turn, whose reasoning may go back.
-    fn convert(&self, message: &Message, in_turn: bool) -> Value {
-        match message {
+    /// belongs to the current turn, whose reasoning may go back. An
+    /// assistant message with nothing to send — no text, no calls, no
+    /// reasoning going back — is `None`: servers reject an assistant message
+    /// with null content and no calls.
+    fn convert(&self, message: &Message, in_turn: bool) -> Option<Value> {
+        Some(match message {
             // Plain text stays a string, which every compatible server takes;
             // only a message with images needs the list of parts.
             Message::User(user) if user.images().next().is_none() => {
@@ -358,9 +361,12 @@ impl OpenAiCompatProvider {
                         object.insert("reasoning".into(), json!(reasoning));
                     }
                 }
+                if object.len() == 2 && object["content"].is_null() {
+                    return None;
+                }
                 Value::Object(object)
             }
-        }
+        })
     }
 
     fn attempt(
@@ -799,10 +805,12 @@ pub(crate) mod tests {
     #[test]
     fn a_message_with_images_goes_as_parts() {
         let provider = OpenAiCompatProvider::new("p", "http://x/v1/");
-        let plain = provider.convert(&Message::User(UserMessage::text("hi")), false);
+        let plain = provider
+            .convert(&Message::User(UserMessage::text("hi")), false)
+            .unwrap();
         assert_eq!(plain, json!({ "role": "user", "content": "hi" }));
         let shot = UserMessage::text("see").with_images(vec![("image/png".into(), "QUJD".into())]);
-        let wire = provider.convert(&Message::User(shot), false);
+        let wire = provider.convert(&Message::User(shot), false).unwrap();
         assert_eq!(
             wire["content"],
             json!([
@@ -1213,6 +1221,54 @@ pub(crate) mod tests {
         // The current turn's goes under both names, Ollama's among them.
         assert_eq!(body["messages"][3]["reasoning_content"], "check");
         assert_eq!(body["messages"][3]["reasoning"], "check");
+    }
+
+    #[test]
+    fn an_assistant_message_with_nothing_to_send_is_left_out() {
+        let reply = |content: Vec<AssistantContent>| {
+            Message::Assistant(AssistantMessage {
+                content,
+                stop_reason: StopReason::Stop,
+                usage: Usage::default(),
+                provider: "p".into(),
+                model: "m".into(),
+                error_message: None,
+                failure: None,
+                timestamp: 0,
+            })
+        };
+        let messages = vec![
+            Message::User(UserMessage::text("hi")),
+            reply(vec![]),
+            Message::User(UserMessage::text("again")),
+            reply(vec![AssistantContent::thinking("only thought")]),
+        ];
+        let request = Request {
+            model: &model(),
+            system_prompt: "",
+            messages: &messages,
+            tools: &[],
+            thinking: ThinkingLevel::Off,
+        };
+        // Reasoning not sent back: neither reply has anything to carry.
+        let quiet = OpenAiCompatProvider::new("p", "http://x/v1");
+        let body = quiet.build_body(&request);
+        let roles: Vec<&str> = body["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|m| m["role"].as_str().unwrap())
+            .collect();
+        assert_eq!(roles, ["user", "user"]);
+        // Sent back, the current turn's reasoning-only reply goes.
+        let echoing = OpenAiCompatProvider::new("p", "http://x/v1").with_compat(Compat {
+            send_reasoning: true,
+            ..Compat::default()
+        });
+        let body = echoing.build_body(&request);
+        let wire = body["messages"].as_array().unwrap();
+        assert_eq!(wire.len(), 3);
+        assert_eq!(wire[2]["reasoning_content"], "only thought");
     }
 
     /// The switch that sends reasoning back is the user's word, so it reaches

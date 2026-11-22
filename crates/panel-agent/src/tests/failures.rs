@@ -34,6 +34,31 @@ fn a_failed_run_offers_what_fits_and_tries_again_on_the_same_request() {
     assert!(panel.pending.is_none());
 }
 
+/// The failed reply a retry leaves out of the agent's context is left out
+/// of the logged one too: a reopened session sees what the agent saw.
+#[test]
+fn a_retried_failure_is_left_out_of_the_logged_context() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        ..setup(vec![limited(), reply("done")])
+    });
+    panel.send("do it".to_string());
+    settle(&mut panel);
+    let rows = failure_rows(&panel);
+    let now = rows.iter().position(|row| row == "Try again now").unwrap();
+    panel.apply_form_action(ChoiceAction::Chosen(now));
+    settle(&mut panel);
+
+    let path = panel.session.as_ref().unwrap().path().to_path_buf();
+    drop(panel);
+    let reopened = Session::open(&path).unwrap();
+    assert_eq!(
+        roles(&reopened.context_messages()),
+        vec!["user", "assistant"]
+    );
+}
+
 #[test]
 fn waiting_policy_tries_again_unasked_once_the_wait_is_over() {
     let mut panel = panel(vec![limited(), reply("done")]);

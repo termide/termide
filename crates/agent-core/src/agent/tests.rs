@@ -1293,8 +1293,11 @@ fn retry_asks_again_without_the_failed_reply() {
         ToolRegistry::new(),
     );
     collect(&mut agent, "go", &mut NoHooks);
-    agent.retry(&mut NoHooks, &CancelToken::new(), &mut |_| {});
+    let mut events = Vec::new();
+    agent.retry(&mut NoHooks, &CancelToken::new(), &mut |e| events.push(e));
 
+    // Said, so the session log drops the failed reply too.
+    assert_eq!(events.first(), Some(&AgentEvent::ReplyDropped));
     // The second call saw the request alone, not the failure after it.
     assert_eq!(roles(&provider.seen_requests()[1]), vec!["user"]);
     assert_eq!(roles(agent.messages()), vec!["user", "assistant"]);
@@ -1317,8 +1320,11 @@ fn retry_closes_the_calls_of_a_failed_reply_unrun() {
         registry_with(echo.clone()),
     );
     collect(&mut agent, "go", &mut NoHooks);
-    agent.retry(&mut NoHooks, &CancelToken::new(), &mut |_| {});
+    let mut events = Vec::new();
+    agent.retry(&mut NoHooks, &CancelToken::new(), &mut |e| events.push(e));
 
+    // The reply stays, its calls answered: nothing is dropped.
+    assert!(!events.contains(&AgentEvent::ReplyDropped));
     assert!(echo.executed.lock().unwrap().is_empty());
     assert_eq!(
         roles(agent.messages()),
@@ -1477,6 +1483,42 @@ fn pause_stops_after_the_current_step_and_resume_continues() {
         roles(agent.messages()),
         vec!["user", "assistant", "tool_result", "assistant"]
     );
+}
+
+/// Steering typed in the step a pause stops after stays queued, and the
+/// resumed run delivers it.
+#[test]
+fn steering_typed_before_a_pause_reaches_the_resumed_run() {
+    let mut registry = ToolRegistry::new();
+    let provider = Arc::new(ScriptedProvider::new(vec![
+        tool_reply(
+            vec![("c1", "echo", json!({ "text": "x" }))],
+            StopReason::ToolUse,
+        ),
+        text_reply("done after resume"),
+    ]));
+    let mut agent = Agent::new(provider.clone(), registry.clone(), model(), "/tmp".into());
+    registry.insert(Arc::new(EchoTool {
+        executed: Default::default(),
+        steer_on_execute: Some((agent.queues(), "also check the tests".into())),
+        pause_on_execute: Some(agent.queues()),
+    }));
+    *agent.tools_mut() = registry;
+
+    let events = collect(&mut agent, "go", &mut NoHooks);
+    assert!(events.contains(&AgentEvent::Paused));
+    assert_eq!(agent.queues().lens(), (1, 0));
+
+    let mut resumed = Vec::new();
+    agent.resume(&mut NoHooks, &CancelToken::new(), &mut |e| resumed.push(e));
+    assert_eq!(
+        roles(agent.messages()),
+        vec!["user", "assistant", "tool_result", "user", "assistant"]
+    );
+    assert!(matches!(
+        &provider.seen_requests()[1][3],
+        Message::User(u) if u.plain_text() == "also check the tests"
+    ));
 }
 
 /// A tool under a given name that logs its start and end; with a
@@ -1809,6 +1851,37 @@ fn a_new_request_over_a_pause_answers_the_calls_it_left() {
         m,
         Message::ToolResult(r) if r.tool_call_id == "c2" && r.is_error
     )));
+}
+
+/// The judge and the brief read the transcript a pause left: the call it
+/// left waiting gets a result in their copy, so the request stays valid,
+/// and the transcript itself is untouched.
+#[test]
+fn side_calls_over_a_pause_answer_the_calls_it_left() {
+    let (mut agent, _echo, provider) = pausing_agent(vec![
+        two_calls(),
+        text_reply("DONE: all good"),
+        text_reply("the brief"),
+    ]);
+    collect(&mut agent, "go", &mut NoHooks);
+    let before = agent.messages().to_vec();
+    agent
+        .judge("ship it", &CancelToken::new(), &mut |_| {})
+        .expect("judge succeeds");
+    agent.handoff(&CancelToken::new(), &mut |_| {});
+    let seen = provider.seen_requests();
+    for request in &seen[1..] {
+        assert_eq!(
+            roles(request),
+            vec!["user", "assistant", "tool_result", "tool_result", "user"]
+        );
+        assert!(matches!(
+            &request[3],
+            Message::ToolResult(r) if r.tool_call_id == "c2" && r.is_error
+        ));
+    }
+    assert_eq!(seen.len(), 3);
+    assert_eq!(agent.messages(), &before[..]);
 }
 
 #[test]

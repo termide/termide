@@ -1,0 +1,1 @@
+- **Goal checks and handoffs work after a pause or a stop.** The `/goal` judge and the handoff brief read the transcript as it stood, and a pause or a stop between tool calls left calls without results there, which the provider rejects. Their copy of the transcript now answers such calls as not run, as a new request does.

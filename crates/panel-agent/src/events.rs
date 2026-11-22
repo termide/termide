@@ -263,6 +263,16 @@ impl AgentPanel {
             }
             AgentEvent::TurnStart => {}
             AgentEvent::TurnEnd => self.log_context_fill(),
+            // The agent took a failed reply out of its context to try the
+            // request again: the log records it, so a reopened session
+            // replays the same context. The reply stays on show.
+            AgentEvent::ReplyDropped => {
+                if let Some(session) = &mut self.session {
+                    if let Err(error) = session.append_reply_dropped() {
+                        log::warn!("agent session write failed: {error}");
+                    }
+                }
+            }
             AgentEvent::MessageStart { prompt_tokens } => {
                 // The reasoning and answer blocks are created lazily on their
                 // first delta, so the reasoning lands above the answer and a

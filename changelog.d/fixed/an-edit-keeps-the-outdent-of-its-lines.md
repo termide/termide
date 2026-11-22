@@ -1,0 +1,1 @@
+- **An edit keeps the outdent of its lines.** When an edit matched only ignoring indentation, a new line indented less than the first one was put at the first line's indentation, moving, say, a Python `return` into the block above it. Such a line now keeps its depth relative to the first.

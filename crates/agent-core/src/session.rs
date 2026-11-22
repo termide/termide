@@ -202,6 +202,10 @@ pub enum EntryKind {
     /// The user undid a request: the branch continues from this entry's
     /// parent, the undone messages stay in the file on a dead branch.
     Rewind,
+    /// The failed reply that ended the context, with no calls, was left
+    /// out of it to try its request again, as [`crate::Agent::retry`] drops
+    /// it. It stays in the file and in the history shown.
+    ReplyDropped,
     /// A plan was carried out from a clean context: the messages before
     /// this entry are cut down to the decisions, see
     /// [`crate::prune::prune_to_decisions`]. They stay in the file whole.
@@ -493,6 +497,28 @@ fn last_retry<'a>(branch: impl IntoIterator<Item = &'a Entry>) -> Option<Failure
         })
         .last()
         .flatten()
+}
+
+/// Clear the usage of the replies a compaction kept, as the live compaction
+/// does: it measured the context before the summary replaced its head, and
+/// left in place the replayed context would read as its old size.
+fn forget_usage<'a>(messages: impl Iterator<Item = &'a mut Message>) {
+    for message in messages {
+        if let Message::Assistant(assistant) = message {
+            assistant.usage = Usage::default();
+        }
+    }
+}
+
+/// Replay [`EntryKind::ReplyDropped`]: take the failed reply that ends
+/// `messages` out, as [`crate::Agent::retry`] did. Anything else at the end
+/// is left alone.
+pub(crate) fn drop_failed_reply<T>(messages: &mut Vec<T>, message: impl Fn(&T) -> &Message) {
+    if messages.last().is_some_and(|last| {
+        matches!(message(last), Message::Assistant(reply) if reply.stop_reason == StopReason::Error)
+    }) {
+        messages.pop();
+    }
 }
 
 /// The entries from the root to `leaf`, oldest first; `path` names the log
@@ -1187,7 +1213,8 @@ impl Session {
                     summary, keep_last, ..
                 } => {
                     let start = messages.len().saturating_sub(*keep_last);
-                    let tail = messages.split_off(start);
+                    let mut tail = messages.split_off(start);
+                    forget_usage(tail.iter_mut());
                     messages = vec![prompts.summary_message(summary)];
                     messages.extend(tail);
                 }
@@ -1195,6 +1222,7 @@ impl Session {
                 EntryKind::Fitted {
                     budget, keep_tail, ..
                 } => messages = fit(&messages, *budget, *keep_tail).messages,
+                EntryKind::ReplyDropped => drop_failed_reply(&mut messages, |m| m),
             }
         }
         messages
@@ -1239,7 +1267,8 @@ impl Session {
                     summary, keep_last, ..
                 } => {
                     let start = messages.len().saturating_sub(*keep_last);
-                    let tail = messages.split_off(start);
+                    let mut tail = messages.split_off(start);
+                    forget_usage(tail.iter_mut().map(|logged| &mut logged.message));
                     messages = vec![LoggedMessage {
                         message: prompts.summary_message(summary),
                         timestamp: entry.timestamp,
@@ -1274,6 +1303,9 @@ impl Session {
                             },
                         })
                         .collect();
+                }
+                EntryKind::ReplyDropped => {
+                    drop_failed_reply(&mut messages, |logged| &logged.message);
                 }
                 EntryKind::Pruned => {
                     messages = prune_by(&messages, |logged| &logged.message)
@@ -1315,7 +1347,8 @@ impl Session {
                     tokens_before,
                     ..
                 } => {
-                    let tail = context.split_off(context.len().saturating_sub(*keep_last));
+                    let mut tail = context.split_off(context.len().saturating_sub(*keep_last));
+                    forget_usage(tail.iter_mut());
                     context = vec![prompts.summary_message(summary)];
                     context.extend(tail);
                     steps.push(HistoryStep::Compacted {
@@ -1336,6 +1369,7 @@ impl Session {
                     });
                 }
                 EntryKind::Pruned => context = prune_to_decisions(&context),
+                EntryKind::ReplyDropped => drop_failed_reply(&mut context, |m| m),
                 EntryKind::ModelChange { .. }
                 | EntryKind::SessionName { .. }
                 | EntryKind::AgentChange { .. }
@@ -1473,6 +1507,12 @@ impl Session {
         self.append(EntryKind::Pruned)
     }
 
+    /// Record that the failed reply ending the context was left out of it
+    /// to try its request again: see [`EntryKind::ReplyDropped`].
+    pub fn append_reply_dropped(&mut self) -> std::io::Result<String> {
+        self.append(EntryKind::ReplyDropped)
+    }
+
     /// Model recorded last on the current branch.
     #[must_use]
     pub fn current_model(&self) -> Option<SessionModel> {
@@ -1494,6 +1534,7 @@ impl Session {
                 | EntryKind::SessionName { .. }
                 | EntryKind::AgentChange { .. }
                 | EntryKind::Rewind
+                | EntryKind::ReplyDropped
                 | EntryKind::Pruned
                 | EntryKind::ReasoningChange { .. }
                 | EntryKind::ThinkingChange { .. }
@@ -1680,6 +1721,7 @@ impl Session {
                 | EntryKind::Spent { .. }
                 | EntryKind::ContextFill { .. }
                 | EntryKind::Checklist { .. }
+                | EntryKind::ReplyDropped
                 | EntryKind::CompactionFailed { .. } => {}
             }
         }
@@ -2275,6 +2317,7 @@ impl From<&Session> for SessionSummary {
             | EntryKind::SessionName { .. }
             | EntryKind::AgentChange { .. }
             | EntryKind::Rewind
+            | EntryKind::ReplyDropped
             | EntryKind::Pruned
             | EntryKind::ReasoningChange { .. }
             | EntryKind::ThinkingChange { .. }

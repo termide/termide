@@ -246,12 +246,17 @@ fn context_start(branch: &[Entry]) -> usize {
     else {
         return 0;
     };
-    let messages: Vec<usize> = branch[..at]
-        .iter()
-        .enumerate()
-        .filter(|(_, entry)| matches!(entry.kind, EntryKind::Message { .. }))
-        .map(|(index, _)| index)
-        .collect();
+    // A failed reply left out to try its request again is not counted.
+    let mut messages: Vec<usize> = Vec::new();
+    for (index, entry) in branch[..at].iter().enumerate() {
+        match entry.kind {
+            EntryKind::Message { .. } => messages.push(index),
+            EntryKind::ReplyDropped => {
+                messages.pop();
+            }
+            _ => {}
+        }
+    }
     match messages.len().checked_sub(keep_last) {
         Some(first) => messages.get(first).copied().unwrap_or(at),
         None => 0,

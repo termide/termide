@@ -1,0 +1,1 @@
+- **A reopened compacted session does not compact again at once.** The replies a compaction kept still carried the usage measured before it when a session was reopened, so the context read as its old size and was compacted again on the next request. Replaying a compaction now clears it, as the compaction itself does.

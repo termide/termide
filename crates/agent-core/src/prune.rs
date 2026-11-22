@@ -11,7 +11,7 @@
 //! replayed past its [`crate::session::EntryKind::Pruned`] entry, so both
 //! agree by construction.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::message::{AssistantContent, AssistantMessage, Message, Usage};
 
@@ -38,50 +38,61 @@ pub fn prune_by<'a, T>(
     items: &'a [T],
     message: impl Fn(&'a T) -> &'a Message,
 ) -> Vec<(&'a T, Message)> {
-    let kept_calls: HashSet<&str> = items
-        .iter()
-        .filter_map(|item| match message(item) {
-            Message::Assistant(assistant) => Some(assistant.tool_calls()),
-            _ => None,
-        })
-        .flatten()
-        .filter(|call| KEPT_TOOLS.contains(&call.name.as_str()))
-        .map(|call| call.id.as_str())
-        .collect();
-    // A kept call whose result never came (a run cut short) is left out
-    // with it: a call without a result is not a valid history.
-    let answered: HashSet<&str> = items
-        .iter()
-        .filter_map(|item| match message(item) {
-            Message::ToolResult(result) => Some(result.tool_call_id.as_str()),
-            _ => None,
-        })
-        .filter(|id| kept_calls.contains(id))
-        .collect();
+    // Each result answers the nearest call before it with its id: servers
+    // that send no ids get `call_0`, `call_1`… in every reply, so an id
+    // alone does not tell one turn's call from another's. A kept call
+    // whose result never came (a run cut short) is left out with it: a
+    // call without a result is not a valid history.
+    let mut open: HashMap<&str, (usize, usize, bool)> = HashMap::new();
+    let mut kept_calls: HashSet<(usize, usize)> = HashSet::new();
+    let mut kept_results: HashSet<usize> = HashSet::new();
+    for (index, item) in items.iter().enumerate() {
+        match message(item) {
+            Message::Assistant(assistant) => {
+                for (block, content) in assistant.content.iter().enumerate() {
+                    if let AssistantContent::ToolCall(call) = content {
+                        let kept = KEPT_TOOLS.contains(&call.name.as_str());
+                        open.insert(call.id.as_str(), (index, block, kept));
+                    }
+                }
+            }
+            Message::ToolResult(result) => {
+                if let Some((call_index, block, true)) = open.remove(result.tool_call_id.as_str()) {
+                    kept_calls.insert((call_index, block));
+                    kept_results.insert(index);
+                }
+            }
+            Message::User(_) => {}
+        }
+    }
 
     items
         .iter()
-        .filter_map(|item| {
+        .enumerate()
+        .filter_map(|(index, item)| {
             let pruned = match message(item) {
                 Message::User(_) => Some(message(item).clone()),
-                Message::ToolResult(result) => answered
-                    .contains(result.tool_call_id.as_str())
-                    .then(|| message(item).clone()),
+                Message::ToolResult(_) => {
+                    kept_results.contains(&index).then(|| message(item).clone())
+                }
                 Message::Assistant(assistant) => {
                     let has_calls = assistant.tool_calls().next().is_some();
                     let content: Vec<AssistantContent> = assistant
                         .content
                         .iter()
-                        .filter(|block| match block {
+                        .enumerate()
+                        .filter(|(block_index, block)| match block {
                             // A run's closing answer keeps its words; text
                             // between tool calls is the exploration's.
                             AssistantContent::Text { text } => {
                                 !has_calls && !text.trim().is_empty()
                             }
                             AssistantContent::Thinking { .. } => false,
-                            AssistantContent::ToolCall(call) => answered.contains(call.id.as_str()),
+                            AssistantContent::ToolCall(_) => {
+                                kept_calls.contains(&(index, *block_index))
+                            }
                         })
-                        .cloned()
+                        .map(|(_, block)| block.clone())
                         .collect();
                     (!content.is_empty()).then(|| {
                         Message::Assistant(AssistantMessage {
@@ -245,6 +256,32 @@ mod tests {
             assistant(vec![AssistantContent::ToolCall(call("q1", "question"))]),
         ];
         assert_eq!(shape(&prune_to_decisions(&history)), ["user:go"]);
+    }
+
+    /// A server that sends no call ids gets `call_0` in every reply: each
+    /// result goes with the nearest call before it, so a read's result does
+    /// not ride along on a later question's id, nor answer it.
+    #[test]
+    fn results_go_with_the_nearest_call_of_their_id() {
+        let history = vec![
+            user("go"),
+            assistant(vec![AssistantContent::ToolCall(call("call_0", "read"))]),
+            result("call_0", "read", false),
+            assistant(vec![AssistantContent::ToolCall(call("call_0", "question"))]),
+            result("call_0", "question", false),
+            assistant(vec![AssistantContent::ToolCall(call("call_0", "shell"))]),
+            result("call_0", "shell", false),
+            // Cut short: this question was never answered.
+            assistant(vec![AssistantContent::ToolCall(call("call_0", "question"))]),
+        ];
+        assert_eq!(
+            shape(&prune_to_decisions(&history)),
+            [
+                "user:go",
+                "calls[question:call_0]",
+                "result:question:call_0"
+            ]
+        );
     }
 
     #[test]

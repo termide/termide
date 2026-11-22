@@ -118,14 +118,17 @@ impl Accumulator {
                 on_event(StreamEvent::TextDelta(text.to_string()));
             }
         }
-        for key in ["reasoning_content", "reasoning"] {
-            if let Some(text) = delta.get(key).and_then(Value::as_str) {
-                if !text.is_empty() {
-                    self.received_content = true;
-                    self.reasoning.push_str(text);
-                    on_event(StreamEvent::ThinkingDelta(text.to_string()));
-                }
-            }
+        // Servers name the field one way or the other; vllm-mlx sends both
+        // with the same text in every delta, so only the first non-empty one
+        // counts.
+        let reasoning = ["reasoning_content", "reasoning"]
+            .into_iter()
+            .filter_map(|key| delta.get(key).and_then(Value::as_str))
+            .find(|text| !text.is_empty());
+        if let Some(text) = reasoning {
+            self.received_content = true;
+            self.reasoning.push_str(text);
+            on_event(StreamEvent::ThinkingDelta(text.to_string()));
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
             for call in calls {
@@ -372,6 +375,26 @@ data: [DONE]
         }));
         // The keepalive chunk with empty content produced no text event.
         assert!(!events.contains(&StreamEvent::TextDelta(String::new())));
+    }
+
+    #[test]
+    fn reasoning_sent_under_both_keys_counts_once() {
+        // vllm-mlx sends `reasoning_content` and `reasoning` with the same
+        // text in every delta (waybarrios/vllm-mlx#310).
+        let transcript = r#"data: {"choices":[{"index":0,"delta":{"reasoning_content":"think ","reasoning":"think "}}]}
+data: {"choices":[{"index":0,"delta":{"reasoning":"more"}}]}
+data: {"choices":[{"index":0,"delta":{"content":"hi"},"finish_reason":"stop"}]}
+data: [DONE]
+"#;
+        let (message, events) = replay(transcript);
+        assert!(
+            matches!(&message.content[0], AssistantContent::Thinking { text, .. } if text == "think more")
+        );
+        let thinking = events
+            .iter()
+            .filter(|e| matches!(e, StreamEvent::ThinkingDelta(_)))
+            .count();
+        assert_eq!(thinking, 2);
     }
 
     #[test]

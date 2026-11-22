@@ -1,0 +1,1 @@
+- **A blank or empty reply no longer breaks the next request.** A reply of whitespace only went back to Anthropic as a text block, and an empty one to OpenAI-compatible servers as an assistant message with no content and no calls; both are rejected. Such text and such messages are now left out of the request.

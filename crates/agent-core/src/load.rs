@@ -15,7 +15,7 @@ use crate::compaction::{message_chars, CompactionPrompts};
 use crate::fit::fit;
 use crate::message::{Message, ToolCall};
 use crate::prune::prune_to_decisions;
-use crate::session::{EntryKind, Session};
+use crate::session::{drop_failed_reply, EntryKind, Session};
 
 /// One tool's results in the context, in estimated tokens.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -110,6 +110,7 @@ impl ContextLoad {
                     messages.extend(tail);
                 }
                 EntryKind::Pruned => messages = prune_to_decisions(&messages),
+                EntryKind::ReplyDropped => drop_failed_reply(&mut messages, |m| m),
                 EntryKind::Fitted {
                     budget, keep_tail, ..
                 } => messages = fit(&messages, *budget, *keep_tail).messages,

@@ -1,0 +1,1 @@
+- **Long output on one line keeps both ends.** Command and terminal output was cut only at line breaks, so output with none near the cut, such as minified JSON or a progress bar, came back empty with "0 lines omitted". A line too long to cut around is now cut inside, and the note says how many bytes went.
