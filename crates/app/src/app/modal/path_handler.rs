@@ -1,9 +1,11 @@
 //! Path-related modal result handlers: goto-path, follow-symlink, chmod/permissions,
-//! and batch-copy symlink flag live-sync.
+//! batch-copy symlink flag live-sync, and conflicts a running copy worker raises.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::Result;
+use termide_state::{PendingAction, WorkerConflict};
+use termide_ui::path_utils;
 
 use crate::app::App;
 use crate::panel_ext::PanelExt;
@@ -59,27 +61,105 @@ impl App {
         Self::apply_permissions(&file_path, mode);
     }
 
-    /// Handle conflict resolution from ConflictModal for OperationManager operations.
+    /// Ask about a conflict a running worker raised: about the worker's
+    /// destination, or about the name picked for the item when `renamed`
+    /// holds one that is taken too.
+    pub(in crate::app) fn ask_worker_conflict(
+        &mut self,
+        conflict: WorkerConflict,
+        renamed: Option<String>,
+    ) {
+        let shown = match &renamed {
+            Some(name) => renamed_destination(&conflict.destination, name),
+            None => conflict.destination.clone(),
+        };
+        let modal =
+            termide_modal::ConflictModal::new(&conflict.source, &shown, conflict.remaining_items);
+        self.state.set_pending_action(
+            PendingAction::ResolveOperationConflict { conflict, renamed },
+            ActiveModal::Conflict(Box::new(modal)),
+        );
+        self.state.needs_redraw = true;
+    }
+
+    /// Handle the conflict dialog's answer for a running worker. Rename asks
+    /// for the name first; every other answer goes to the worker now.
     pub(in crate::app) fn handle_resolve_operation_conflict(
         &mut self,
-        operation_id: termide_file_ops::OperationId,
+        conflict: WorkerConflict,
+        renamed: Option<String>,
         value: termide_modal::ModalOutput,
-    ) -> Result<()> {
-        if let Some(modal_resolution) = value.get::<termide_modal::ConflictResolution>() {
-            let file_ops_resolution = worker_resolution(modal_resolution);
+    ) {
+        // The worker waits for some answer: one the dialog did not give
+        // ends the operation.
+        let resolution = value
+            .get::<termide_modal::ConflictResolution>()
+            .copied()
+            .unwrap_or(termide_modal::ConflictResolution::Cancel);
+        match worker_resolution(&resolution, renamed.as_deref()) {
+            Some(answer) => self.answer_worker_conflict(&conflict, answer),
+            None => self.ask_worker_rename(conflict),
+        }
+    }
 
-            // Send resolution to the operation
-            if !self
-                .state
-                .resolve_operation_conflict(operation_id, file_ops_resolution)
-            {
-                log::error!(
-                    "Failed to send conflict resolution for operation {}",
-                    operation_id
+    /// Ask for the name of a worker conflict's item, the way the batch flow
+    /// asks before a copy starts: the rename pattern prompt, on `$0`.
+    fn ask_worker_rename(&mut self, conflict: WorkerConflict) {
+        let original_name = path_utils::get_file_name_string(&conflict.source);
+        let (created, modified) = item_times(&conflict.source);
+        let modal = termide_modal::RenamePatternModal::new(
+            &format!("Rename {}", original_name),
+            &original_name,
+            "$0",
+            created,
+            modified,
+        );
+        self.state.set_pending_action(
+            PendingAction::RenameOperationConflict { conflict },
+            ActiveModal::RenamePattern(Box::new(modal)),
+        );
+        self.state.needs_redraw = true;
+    }
+
+    /// Handle the name typed for a worker conflict's item: a free name goes
+    /// to the worker, a taken one is asked about, as the batch flow does.
+    /// Esc on the prompt goes back to the conflict dialog (`handle_modal_key`).
+    pub(in crate::app) fn handle_rename_operation_conflict(
+        &mut self,
+        conflict: WorkerConflict,
+        value: termide_modal::ModalOutput,
+    ) {
+        let Some(pattern) = value.get::<String>() else {
+            self.ask_worker_conflict(conflict, None);
+            return;
+        };
+        let name = picked_name(pattern, &conflict.source);
+        match rename_target(&conflict.destination, &name) {
+            RenameTarget::Free => {
+                self.answer_worker_conflict(
+                    &conflict,
+                    termide_file_ops::ConflictResolution::Rename(name),
                 );
             }
+            RenameTarget::Taken => self.ask_worker_conflict(conflict, Some(name)),
+            RenameTarget::Invalid => self.ask_worker_rename(conflict),
         }
-        Ok(())
+    }
+
+    fn answer_worker_conflict(
+        &mut self,
+        conflict: &WorkerConflict,
+        answer: termide_file_ops::ConflictResolution,
+    ) {
+        if !self
+            .state
+            .resolve_operation_conflict(conflict.operation_id, answer)
+        {
+            log::error!(
+                "Failed to send conflict resolution for operation {}",
+                conflict.operation_id
+            );
+        }
     }
 
     /// Handle the file manager's "go to path" result. A URL (`sftp://…`)
@@ -166,31 +246,85 @@ impl App {
     }
 }
 
-/// The answer to a conflict a copy worker raised, as the worker takes it.
+/// The answer to a conflict a copy worker raised, as the worker takes it;
+/// `None` for Rename, whose name is asked for first. With `renamed`, the
+/// dialog was about that name, picked for the item and taken too:
+/// overwriting replaces the file under it.
 fn worker_resolution(
     resolution: &termide_modal::ConflictResolution,
-) -> termide_file_ops::ConflictResolution {
+    renamed: Option<&str>,
+) -> Option<termide_file_ops::ConflictResolution> {
     use termide_file_ops::ConflictResolution as Worker;
     use termide_modal::ConflictResolution as Modal;
-    match resolution {
-        Modal::Overwrite => Worker::Overwrite,
-        Modal::Skip => Worker::Skip,
-        Modal::OverwriteAll => Worker::OverwriteAll,
-        Modal::SkipAll => Worker::SkipAll,
+    Some(match (resolution, renamed) {
+        // The worker has no "overwrite all" for a name of the user's: this
+        // item goes under it, later conflicts are still asked about.
+        (Modal::Overwrite | Modal::OverwriteAll, Some(name)) => Worker::Rename(name.to_string()),
+        (Modal::Overwrite, None) => Worker::Overwrite,
+        (Modal::OverwriteAll, None) => Worker::OverwriteAll,
+        (Modal::Skip, _) => Worker::Skip,
+        (Modal::SkipAll, _) => Worker::SkipAll,
         // The worker names this and every later conflict "name (N)".
-        Modal::RenameAll => Worker::RenameAll,
-        Modal::Rename => {
-            // A name of the user's choosing has no prompt on this path yet.
-            log::warn!("Rename resolution not yet supported, skipping file");
-            Worker::Skip
-        }
-        Modal::Cancel => Worker::Cancel,
+        (Modal::RenameAll, _) => Worker::RenameAll,
+        (Modal::Rename, _) => return None,
+        (Modal::Cancel, _) => Worker::Cancel,
+    })
+}
+
+/// The name a rename pattern gives the item at `source`, counted as the
+/// first, as the prompt's preview shows it.
+fn picked_name(pattern: &str, source: &Path) -> String {
+    let original_name = path_utils::get_file_name_string(source);
+    let (created, modified) = item_times(source);
+    termide_state::RenamePattern::new(pattern.to_string()).apply(
+        &original_name,
+        1,
+        created,
+        modified,
+    )
+}
+
+fn item_times(path: &Path) -> (Option<std::time::SystemTime>, Option<std::time::SystemTime>) {
+    let metadata = path.metadata().ok();
+    (
+        metadata.as_ref().and_then(|m| m.created().ok()),
+        metadata.as_ref().and_then(|m| m.modified().ok()),
+    )
+}
+
+/// Where the item of a worker conflict lands under `name`: beside the taken
+/// destination, as the worker puts it.
+fn renamed_destination(destination: &Path, name: &str) -> PathBuf {
+    destination.parent().unwrap_or(Path::new("")).join(name)
+}
+
+/// What a name picked for a worker conflict's item amounts to.
+#[derive(Debug, PartialEq, Eq)]
+enum RenameTarget {
+    /// Nothing is there: the worker can write it.
+    Free,
+    /// Something is there, a dangling link too: asked about first, since
+    /// the worker would replace it unasked.
+    Taken,
+    /// Not a file name: asked for again.
+    Invalid,
+}
+
+fn rename_target(destination: &Path, name: &str) -> RenameTarget {
+    let pattern = termide_state::RenamePattern::new(String::new());
+    if !pattern.is_valid_result(name) || name == "." || name == ".." {
+        return RenameTarget::Invalid;
+    }
+    if std::fs::symlink_metadata(renamed_destination(destination, name)).is_ok() {
+        RenameTarget::Taken
+    } else {
+        RenameTarget::Free
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::worker_resolution;
+    use super::{picked_name, rename_target, worker_resolution, RenameTarget};
     use termide_file_ops::ConflictResolution as Worker;
     use termide_modal::ConflictResolution as Modal;
 
@@ -198,9 +332,67 @@ mod tests {
     #[test]
     fn rename_all_reaches_the_worker() {
         assert!(matches!(
-            worker_resolution(&Modal::RenameAll),
-            Worker::RenameAll
+            worker_resolution(&Modal::RenameAll, None),
+            Some(Worker::RenameAll)
         ));
-        assert!(matches!(worker_resolution(&Modal::Cancel), Worker::Cancel));
+        assert!(matches!(
+            worker_resolution(&Modal::Cancel, None),
+            Some(Worker::Cancel)
+        ));
+    }
+
+    /// Plain Rename is not answered as Skip: the name is asked for first.
+    #[test]
+    fn rename_asks_for_a_name_instead_of_skipping() {
+        assert!(worker_resolution(&Modal::Rename, None).is_none());
+        assert!(worker_resolution(&Modal::Rename, Some("b.txt")).is_none());
+    }
+
+    /// Overwriting a picked name that is taken writes the item under that
+    /// name, not over the file the worker first asked about.
+    #[test]
+    fn overwriting_a_taken_picked_name_renames_onto_it() {
+        for answer in [Modal::Overwrite, Modal::OverwriteAll] {
+            assert!(matches!(
+                worker_resolution(&answer, Some("b.txt")),
+                Some(Worker::Rename(name)) if name == "b.txt"
+            ));
+        }
+        assert!(matches!(
+            worker_resolution(&Modal::Overwrite, None),
+            Some(Worker::Overwrite)
+        ));
+        assert!(matches!(
+            worker_resolution(&Modal::Skip, Some("b.txt")),
+            Some(Worker::Skip)
+        ));
+    }
+
+    /// The pattern names the item as the prompt's preview does.
+    #[test]
+    fn the_pattern_names_the_item() {
+        let source = std::path::Path::new("/nonexistent/src/a.txt");
+        assert_eq!(picked_name("$0", source), "a.txt");
+        assert_eq!(picked_name("$1_new.$-1", source), "a_new.txt");
+    }
+
+    /// A free name goes to the worker; a taken one — the item's own name
+    /// as the prompt starts with, or a dangling link — is asked about; a
+    /// name with a separator is asked for again.
+    #[test]
+    fn a_picked_name_is_checked_beside_the_destination() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let destination = tmp.path().join("a.txt");
+        std::fs::write(&destination, "old").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(tmp.path().join("gone"), tmp.path().join("link")).unwrap();
+
+        assert_eq!(rename_target(&destination, "c.txt"), RenameTarget::Free);
+        assert_eq!(rename_target(&destination, "a.txt"), RenameTarget::Taken);
+        #[cfg(unix)]
+        assert_eq!(rename_target(&destination, "link"), RenameTarget::Taken);
+        assert_eq!(rename_target(&destination, "x/y"), RenameTarget::Invalid);
+        assert_eq!(rename_target(&destination, ""), RenameTarget::Invalid);
+        assert_eq!(rename_target(&destination, ".."), RenameTarget::Invalid);
     }
 }

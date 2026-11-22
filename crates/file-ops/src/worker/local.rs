@@ -1536,6 +1536,44 @@ mod tests {
         assert_eq!(generate_unique_path(&link), tmp.path().join("a (2).txt"));
     }
 
+    /// A conflict answered Rename with a name copies the item under that
+    /// name beside the taken one, which keeps its content.
+    #[test]
+    fn a_conflict_answered_with_a_name_copies_under_it() {
+        use crate::types::{ConflictMode, ConflictResolution, OperationEvent, OperationId};
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("a.txt");
+        fs::write(&source, b"new").unwrap();
+        let dest = tmp.path().join("dest");
+        fs::create_dir(&dest).unwrap();
+        fs::write(dest.join("a.txt"), b"old").unwrap();
+
+        let (event_tx, events) = mpsc::channel();
+        let (resolution_tx, resolution_rx) = mpsc::channel();
+        // Answers the conflict the way the app does once the name is typed.
+        let answerer = std::thread::spawn(move || {
+            let event = events.recv().unwrap();
+            assert!(matches!(event, OperationEvent::ConflictDetected(..)));
+            resolution_tx
+                .send(ConflictResolution::Rename("a_new.txt".to_string()))
+                .unwrap();
+        });
+        let mut ctx = ConflictContext {
+            operation_id: OperationId::new(1),
+            conflict_mode: ConflictMode::Ask,
+            event_tx,
+            resolution_rx,
+        };
+        let control = OperationControl::new();
+        let (tx, _rx) = mpsc::channel();
+        let mut worker = LocalCopyWorker::new(vec![source], dest.clone(), false);
+        assert_success(&worker.execute_with_conflicts(&control, &tx, Some(&mut ctx)));
+        answerer.join().unwrap();
+
+        assert_eq!(fs::read(dest.join("a.txt")).unwrap(), b"old");
+        assert_eq!(fs::read(dest.join("a_new.txt")).unwrap(), b"new");
+    }
+
     /// A dangling symlink source is copied as the link itself.
     #[cfg(unix)]
     #[test]
