@@ -1,0 +1,1 @@
+- **A branch named like a folder shows its log.** The git log of a branch such as `docs` stayed empty when the repository also had a `docs/` folder, since git could not tell the branch from the path; it is now read as the branch. When git cannot read a history at all (a branch deleted meanwhile, say), the log panel shows git's message instead of an empty list.

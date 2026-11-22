@@ -1,0 +1,1 @@
+- **Commit and stash details count changes under any language.** The files changed, insertions and deletions in a commit's details in the git log and in a stash's details read git's English summary line, so under a git speaking another language they showed zero. They are now counted from git's numeric output.

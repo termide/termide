@@ -1,0 +1,1 @@
+- **Git details of a file reached through a symlink.** The properties of a file or folder opened through a symlinked path (`/tmp` on macOS, a linked home directory) left out its repository's uncommitted changes, ahead and behind counts and ignored mark. The path is now resolved as git resolves the repository's.

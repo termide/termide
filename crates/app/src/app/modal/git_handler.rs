@@ -272,17 +272,14 @@ impl App {
         // value is bool from ConfirmModal
         if let Some(&confirmed) = value.get::<bool>() {
             if confirmed {
-                // If file is staged, unstage it first
-                if is_staged {
-                    if let Err(e) = termide_git::unstage_file(repo_path, file_path) {
-                        self.show_error_modal(
-                            termide_i18n::t().editor_unstage_failed_fmt(&e.to_string()),
-                        );
-                        return Ok(());
-                    }
-                }
-                // Now revert the file
-                if let Err(e) = termide_git::revert_file(repo_path, file_path) {
+                // A staged file is unstaged first (a staged rename undone
+                // whole), then restored.
+                let reverted = if is_staged {
+                    termide_git::revert_staged_file(repo_path, file_path)
+                } else {
+                    termide_git::revert_file(repo_path, file_path)
+                };
+                if let Err(e) = reverted {
                     self.show_error_modal(termide_i18n::t().git_revert_failed_fmt(&e.to_string()));
                 } else {
                     self.state

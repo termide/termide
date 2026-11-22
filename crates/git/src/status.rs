@@ -31,14 +31,22 @@ pub enum GitStatus {
     Ignored,
 }
 
-/// Parse git status porcelain code to GitStatus enum.
+/// Parse a porcelain `XY` code (index, work tree) to what the file shows.
 fn parse_status_code(code: &str) -> GitStatus {
-    match code {
-        "!!" => GitStatus::Ignored,
-        " M" | "M " | "MM" => GitStatus::Modified,
-        "A " | " A" | "AM" | "AA" => GitStatus::Added,
-        " D" | "D " | "DD" => GitStatus::Deleted,
-        "??" => GitStatus::Added,
+    let &[x, y] = code.as_bytes() else {
+        return GitStatus::Unmodified;
+    };
+    match (x, y) {
+        (b'!', b'!') => GitStatus::Ignored,
+        (b'?', b'?') => GitStatus::Added,
+        // Unmerged: deleted on both sides is gone; any other conflict
+        // leaves a file to resolve.
+        (b'D', b'D') => GitStatus::Deleted,
+        (b'U', _) | (_, b'U') | (b'A', b'A') => GitStatus::Modified,
+        // Gone from the work tree (`MD`, `AD`) or deleted in the index.
+        (_, b'D') | (b'D', _) => GitStatus::Deleted,
+        (b'A', _) | (_, b'A') => GitStatus::Added,
+        (b'M' | b'T', _) | (_, b'M' | b'T') => GitStatus::Modified,
         _ => GitStatus::Unmodified,
     }
 }
@@ -403,7 +411,14 @@ pub fn get_repo_status(repo_path: &Path, item_path: &Path) -> Option<GitRepoStat
     let repo_root_str = git_command_stdout(git_work_dir, &["rev-parse", "--show-toplevel"])?;
     let repo_root = PathBuf::from(repo_root_str.trim());
 
-    let relative_path = item_path.strip_prefix(&repo_root).ok()?;
+    // git reports the root with symlinks resolved (`/tmp` is
+    // `/private/tmp` on macOS), so resolve the item's path the same way.
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let item_canonical = canonical(item_path);
+    let relative_path = item_canonical
+        .strip_prefix(canonical(&repo_root))
+        .ok()?
+        .to_path_buf();
     let is_repo_root = relative_path.as_os_str().is_empty();
     let git_path_str = if is_repo_root {
         ".".to_string()
@@ -590,6 +605,88 @@ mod tests {
         // A directory no pattern matches is reported file by file.
         assert!(cache.ignored_files.contains(Path::new("logs/run.log")));
         assert!(!cache.ignored_files.contains(Path::new("logs")));
+    }
+
+    #[test]
+    fn conflicts_type_changes_and_deleted_work_files_are_not_shown_clean() {
+        use GitStatus::*;
+        for (code, status) in [
+            ("UU", Modified),
+            ("AU", Modified),
+            ("UA", Modified),
+            ("DU", Modified),
+            ("UD", Modified),
+            ("AA", Modified),
+            ("DD", Deleted),
+            ("MD", Deleted),
+            ("AD", Deleted),
+            (" T", Modified),
+            ("T ", Modified),
+            ("TM", Modified),
+            ("MT", Modified),
+            (" M", Modified),
+            ("MM", Modified),
+            ("A ", Added),
+            ("AM", Added),
+            (" A", Added),
+            ("D ", Deleted),
+            (" D", Deleted),
+            ("??", Added),
+            ("!!", Ignored),
+        ] {
+            assert_eq!(parse_status_code(code), status, "{code:?}");
+        }
+    }
+
+    #[test]
+    fn a_merge_conflict_marks_the_file_and_its_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = &dunce::canonicalize(dir.path()).unwrap();
+        let commit = |message: &str| {
+            git(
+                root,
+                &["-c", "commit.gpgsign=false", "commit", "-q", "-am", message],
+            )
+        };
+        git(root, &["init", "-q", "-b", "main"]);
+        std::fs::create_dir(root.join("src")).unwrap();
+        std::fs::write(root.join("src/a.rs"), "base\n").unwrap();
+        git(root, &["add", "."]);
+        commit("base");
+        git(root, &["checkout", "-q", "-b", "side"]);
+        std::fs::write(root.join("src/a.rs"), "side\n").unwrap();
+        commit("side");
+        git(root, &["checkout", "-q", "main"]);
+        std::fs::write(root.join("src/a.rs"), "main\n").unwrap();
+        commit("main");
+        let merge = std::process::Command::new("git")
+            .args(["merge", "-q", "side"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(!merge.status.success(), "the merge must conflict");
+
+        let cache = get_git_status(root).unwrap();
+        assert_eq!(cache.get_status("src/a.rs"), GitStatus::Modified);
+        assert_eq!(cache.get_directory_status("src"), GitStatus::Modified);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repo_status_follows_a_symlinked_path_to_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        git(&root, &["init", "-q"]);
+        touch(&root, "src/changed.rs");
+        let link = dir.path().join("link");
+        std::os::unix::fs::symlink(&root, &link).unwrap();
+
+        // Reached through the symlink, as `/tmp` is on macOS.
+        let status = get_repo_status(&link, &link.join("src")).expect("a repository");
+        assert_eq!(status.uncommitted_changes, 1);
+        let status = get_repo_status(&link, &link).expect("a repository");
+        assert_eq!(status.uncommitted_changes, 1);
     }
 
     #[test]

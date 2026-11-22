@@ -2,7 +2,9 @@
 
 use std::path::Path;
 
-use super::command::{git_command_stdout, run_git_simple, run_git_with_stderr};
+use super::command::{
+    git_command_stdout, git_command_stdout_bytes, run_git_simple, run_git_with_stderr,
+};
 
 /// Format a stash ref string, e.g. `stash@{0}`.
 fn stash_ref(index: usize) -> String {
@@ -189,14 +191,12 @@ pub fn stash_info(repo: &Path, index: usize) -> Option<StashInfo> {
         .map(|l| l.to_string())
         .collect();
 
-    // Get diffstat (last line: "N files changed, M insertions(+), K deletions(-)")
-    let stat_output =
-        git_command_stdout(repo, &["stash", "show", "--stat", &ref_str]).unwrap_or_default();
-    let (files_changed, insertions, deletions) = stat_output
-        .lines()
-        .last()
-        .map(parse_diffstat_line)
-        .unwrap_or((file_names.len(), 0, 0));
+    // Counted from `--numstat`: the `--stat` summary is worded in the
+    // user's language.
+    let (files_changed, insertions, deletions) =
+        git_command_stdout_bytes(repo, &["stash", "show", "--numstat", &ref_str])
+            .map(|out| crate::commits::sum_numstat(&String::from_utf8_lossy(&out)))
+            .unwrap_or((file_names.len(), 0, 0));
 
     Some(StashInfo {
         message,
@@ -206,36 +206,6 @@ pub fn stash_info(repo: &Path, index: usize) -> Option<StashInfo> {
         deletions,
         file_names,
     })
-}
-
-/// Parse diffstat summary line: "5 files changed, 32 insertions(+), 14 deletions(-)"
-fn parse_diffstat_line(line: &str) -> (usize, usize, usize) {
-    let mut files = 0;
-    let mut ins = 0;
-    let mut del = 0;
-    for part in line.split(',') {
-        let part = part.trim();
-        if part.contains("file") {
-            files = part
-                .split_whitespace()
-                .next()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0);
-        } else if part.contains("insertion") {
-            ins = part
-                .split_whitespace()
-                .next()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0);
-        } else if part.contains("deletion") {
-            del = part
-                .split_whitespace()
-                .next()
-                .and_then(|n| n.parse().ok())
-                .unwrap_or(0);
-        }
-    }
-    (files, ins, del)
 }
 
 #[cfg(test)]
