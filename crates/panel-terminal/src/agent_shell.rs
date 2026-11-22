@@ -149,7 +149,8 @@ unset __termide_keymap
 /// event marks a command's start, `fish_postexec` its end with its exit
 /// code, and `fish_prompt` the prompt: fish drops what is typed while it
 /// waits for the terminal's answers to its queries, at start, so a command
-/// is typed only at a prompt. (fish 4 marks all three itself too.)
+/// is typed only at a prompt. (fish 4 marks all three itself too, with
+/// options; the tap reads only these bare marks.)
 const FISH_INIT: &str = r#"# termide: the agent's shell session.
 status job-control none
 set -g fish_history ''
@@ -727,8 +728,8 @@ impl AgentShell {
     }
 
     /// Let the prompt that follows a command finish drawing before input is
-    /// sent, so that its marks — fish draws two — come before the input and
-    /// do not pass for a prompt the input led to. Nothing to wait for while
+    /// sent, so that its mark comes before the input and
+    /// does not pass for a prompt the input led to. Nothing to wait for while
     /// a program runs; a second at most otherwise.
     fn settle_prompt(&self) {
         let deadline = Instant::now() + SETTLE_MAX;

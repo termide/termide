@@ -121,12 +121,12 @@ impl Scanner {
 fn parse_mark(body: &[u8]) -> Option<MarkKind> {
     let rest = body.strip_prefix(b"\x1b]133;")?;
     match rest {
+        // Only the bare marks the session's init writes count. fish 4 also
+        // marks its prompt and commands itself, with options
+        // (`A;click_events=1`, `C;cmdline_url=…`); its prompt mark may come
+        // well after ours, once input is sent, and would read as a prompt the
+        // input led to.
         b"A" => Some(MarkKind::Prompt),
-        // `k=s` marks a continuation prompt: the shell still reads the
-        // command line, which is not over.
-        [b'A', b';', params @ ..] if !params.split(|b| *b == b';').any(|p| p == b"k=s") => {
-            Some(MarkKind::Prompt)
-        }
         b"C" => Some(MarkKind::Start),
         [b'D', code @ ..] => {
             let code = code
@@ -366,11 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn a_prompt_is_marked_with_or_without_options() {
+    fn only_the_bare_marks_of_the_init_are_read() {
         let tap = OutputTap::new(64, None);
-        tap.push(b"\x1b]133;A\x07$ \x1b]133;A;click_events=1\x1b\\> \x1b]133;B\x07\x1b]133;C;cmdline_url=ls\x07");
+        tap.push(b"\x1b]133;A\x07$ \x1b]133;A;click_events=1\x1b\\> \x1b]133;B\x07\x1b]133;C;cmdline_url=ls\x07\x1b]133;C\x07");
         let kinds: Vec<_> = tap.marks_since(0).iter().map(|mark| mark.kind).collect();
-        assert_eq!(kinds, [MarkKind::Prompt, MarkKind::Prompt]);
+        assert_eq!(
+            kinds,
+            [MarkKind::Prompt, MarkKind::Start],
+            "fish 4's own marks, with options, are not the init's"
+        );
     }
 
     #[test]
