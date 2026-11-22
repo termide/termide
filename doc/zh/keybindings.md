@@ -355,3 +355,214 @@ goto_project_1 = "Shift+F1"
 ```
 
 `goto_project_N` 的按键会显示在 `项目` 菜单中对应项目的旁边。
+
+### 所有操作
+
+每个部分接受的全部操作及其默认按键。Settings → Keybindings 列出的是同样的名称。`config.toml` 中的按键会替换该操作的整个列表；`[]` 使该操作没有按键。
+
+#### `[general.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `toggle_menu` | `Alt+M`, `F9` |
+| `new_file_manager` | `Alt+F` |
+| `new_terminal` | `Alt+T` |
+| `new_editor` | `Alt+E` |
+| `new_journal` | `Alt+L` |
+| `open_help` | `Alt+H`, `F1` |
+| `open_preferences` | `Alt+P` |
+| `open_projects` | `Alt+\` |
+| `new_project` | `Alt+N` |
+| `open_git_status` | `Alt+G` |
+| `open_bookmark_add` | `Alt+B` |
+| `open_outline` | `Alt+O` |
+| `open_agent` | `Alt+A` |
+| `open_diagnostics` | `Alt+I` |
+| `open_git_log` | `Alt+C` |
+| `close_panel` | `Alt+W`, `Alt+X`, `F10` |
+| `toggle_stack` | `Alt+Backspace`, `F11` |
+| `swap_left` | `Alt+PageUp` |
+| `swap_right` | `Alt+PageDown` |
+| `move_first` | `Alt+Home` |
+| `move_last` | `Alt+End` |
+| `resize_smaller` | `Alt+-` |
+| `resize_larger` | `Alt+=` |
+| `toggle_fullscreen_panel` | `Alt+F11` |
+| `panel_grow_vertical` | `Alt+Shift+=` |
+| `panel_shrink_vertical` | `Alt+Shift+-` |
+| `panel_action_menu` | `Alt+K`, `Shift+F10` |
+| `prev_group` | `Alt+Left` |
+| `next_group` | `Alt+Right` |
+| `prev_panel` | `Alt+Up` |
+| `next_panel` | `Alt+Down` |
+| `goto_panel_1` | —（无按键） |
+| `goto_panel_2` | —（无按键） |
+| `goto_panel_3` | —（无按键） |
+| `goto_panel_4` | —（无按键） |
+| `goto_panel_5` | —（无按键） |
+| `goto_panel_6` | —（无按键） |
+| `goto_panel_7` | —（无按键） |
+| `goto_panel_8` | —（无按键） |
+| `goto_panel_9` | —（无按键） |
+| `prev_project` | —（无按键） |
+| `next_project` | —（无按键） |
+| `goto_project_1` | `Alt+1` |
+| `goto_project_2` | `Alt+2` |
+| `goto_project_3` | `Alt+3` |
+| `goto_project_4` | `Alt+4` |
+| `goto_project_5` | `Alt+5` |
+| `goto_project_6` | `Alt+6` |
+| `goto_project_7` | `Alt+7` |
+| `goto_project_8` | `Alt+8` |
+| `goto_project_9` | `Alt+9` |
+| `quit` | `Alt+Q` |
+| `detach_instance` | `Alt+D` |
+| `open_command_palette` | `Ctrl+P` |
+| `open_path` | `Ctrl+G` |
+| `copy` | `Ctrl+C` |
+| `cut` | `Ctrl+X` |
+| `paste` | `Ctrl+V` |
+
+#### `[editor.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `save` | `F2`, `Ctrl+S` |
+| `save_as` | `Ctrl+Shift+S` |
+| `reload` | `Ctrl+Shift+R` |
+| `undo` | `Ctrl+Z` |
+| `redo` | `Ctrl+Y`, `Ctrl+Shift+Z` |
+| `duplicate_line` | `Ctrl+D` |
+| `delete_line` | `F8` |
+| `toggle_comment` | `Ctrl+/`, `Ctrl+.` |
+| `search` | `Ctrl+F` |
+| `search_next` | `F3` |
+| `search_prev` | `Shift+F3` |
+| `replace` | `Ctrl+H` |
+| `replace_current` | `Ctrl+R` |
+| `replace_all` | `Ctrl+Alt+R`, `Alt+R` |
+| `select_all` | `Ctrl+A` |
+| `trigger_completion` | `Ctrl+J`, `Ctrl+Space` |
+| `show_hover` | `Ctrl+K` |
+| `goto_definition` | `F12` |
+| `find_references` | `Shift+F12`, `F24` |
+| `rename_symbol` | `F4` |
+| `code_action` | `Alt+Enter` |
+| `toggle_breakpoint` | `Ctrl+F8` |
+| `start_debug` | `F5` |
+| `next_change` | `F7` |
+| `prev_change` | `Shift+F7` |
+| `stage_change` | —（无按键） |
+| `unstage_change` | —（无按键） |
+| `revert_change` | —（无按键） |
+| `send_to_agent` | —（无按键） |
+| `fold` | `Alt+,` |
+| `unfold` | `Alt+.` |
+| `fold_all` | —（无按键） |
+| `unfold_all` | —（无按键） |
+
+#### `[file_manager.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `rename` | `F2`, `R` |
+| `view` | `F3`, `V` |
+| `edit` | `F4`, `E` |
+| `copy` | `F5`, `C` |
+| `move_item` | `F6`, `M` |
+| `create_dir` | `F7`, `D` |
+| `create_file` | `F`, `Ctrl+N`, `Shift+F4` |
+| `delete` | `Delete`, `F8` |
+| `delete_permanently` | `Shift+Delete`, `Shift+F8` |
+| `info` | `F12`, `Space` |
+| `pack` | `P`, `Alt+F5` |
+| `unpack` | `Alt+F9` |
+| `search` | `Ctrl+F`, `Alt+F7` |
+| `search_content` | `Ctrl+Shift+F` |
+| `search_replace` | `Ctrl+Shift+H` |
+| `refresh` | `Ctrl+R` |
+| `go_parent` | `Backspace` |
+| `go_home` | `~` |
+| `switch_directory` | `Ctrl+\`, `Alt+F1` |
+| `go_to_path` | `Ctrl+G` |
+| `toggle_selection` | `Insert` |
+| `select_all` | `Ctrl+A` |
+| `select_group` | `+` |
+| `unselect_group` | `-` |
+| `invert_selection` | `*` |
+| `open_external` | `O`, `Alt+Enter` |
+| `toggle_hidden` | `.` |
+
+#### `[git_status.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `stage` | `S` |
+| `unstage` | `U` |
+| `view` | `F3` |
+| `edit` | `F4` |
+| `info` | `Space`, `F12` |
+| `revert` | `Backspace`, `Delete` |
+| `refresh` | `Ctrl+R` |
+| `toggle_folds` | `Ctrl+O` |
+
+#### `[git_diff.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `toggle_collapse` | `Enter` |
+| `toggle_folds` | `Ctrl+O` |
+| `edit` | `F4`, `E` |
+| `refresh` | `F5`, `Ctrl+R` |
+| `scroll_half_up` | `Ctrl+U` |
+| `scroll_half_down` | `Ctrl+D` |
+| `toggle_stage` | `Space` |
+| `discard` | `D` |
+| `undo_discard` | `U` |
+| `select_lines` | `V` |
+| `prev_hunk` | `[` |
+| `next_hunk` | `]` |
+| `keep_all` | `A` |
+| `reject_all` | `X` |
+
+#### `[git_log.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `info` | `Space` |
+| `view_diff` | `D` |
+| `refresh` | `Ctrl+R` |
+
+#### `[terminal.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `scroll_up` | `Shift+PageUp` |
+| `scroll_down` | `Shift+PageDown` |
+| `scroll_top` | `Shift+Home` |
+| `scroll_bottom` | `Shift+End` |
+| `search` | `Ctrl+F` |
+| `switch_directory` | `Ctrl+\` |
+| `send_to_agent` | —（无按键） |
+| `prev_prompt` | `Ctrl+Shift+Up` |
+| `next_prompt` | `Ctrl+Shift+Down` |
+| `copy_command_output` | —（无按键） |
+
+#### `[database.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `sort` | `S` |
+| `filter` | `Ctrl+F`, `F3` |
+| `clear_filter` | `Shift+F3` |
+| `detail` | `Space`, `F12` |
+| `copy_row` | `Ctrl+Y` |
+| `refresh` | `Ctrl+R` |
+
+#### `[viewer.keybindings]`
+
+| 操作 | 默认按键 |
+|---|---|
+| `toggle_hex` | `Ctrl+L` |
+| `toggle_view` | `Ctrl+E` |
+| `open_external` | `O`, `Alt+Enter` |
