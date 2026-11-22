@@ -32,7 +32,7 @@ This skill follows a comprehensive 12-step workflow:
 2. **Change Analysis** - Analyze uncommitted changes, commits, and file states
 3. **Version Detection** - Detect current version from multiple sources
 4. **Version Selection** - Ask user for new version (patch/minor/major/custom/recreate)
-5. **File Updates** - Update version in 12+ files across the project
+5. **File Updates** - Update the version in the 10 files `tools/release/version.sh` lists
 6. **Documentation Review** - Prompt user to review and update docs if needed
 7. **Changelog Generation** - Auto-generate CHANGELOG.md section from changes
 8. **Re-check Quality** - Run quality checks again after file updates
@@ -54,10 +54,11 @@ Run these commands in sequence. If ANY fail, stop immediately and report errors:
 cargo fmt --check
 
 # 2. Clippy strict mode
-cargo clippy -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
-# 3. Run test suite
-cargo test
+# 3. Run test suite (as CI and the pre-commit hook do; `cargo test --workspace`
+#    when cargo-nextest is not installed)
+cargo nextest run --workspace
 
 # 4. Release build check
 cargo build --release
@@ -66,7 +67,7 @@ cargo build --release
 **Error Handling:**
 - If `cargo fmt --check` fails: Show diffs and suggest running `cargo fmt`
 - If `cargo clippy` fails: Show warnings/errors, suggest fixing before release
-- If `cargo test` fails: Show failed tests, abort release
+- If the tests fail: Show failed tests, abort release
 - If `cargo build --release` fails: Show build errors, abort release
 
 **Output to user:**
@@ -136,7 +137,7 @@ done
 ```
 
 This reveals:
-- Which features were actually added (new files in src/panels/, etc.)
+- Which features were actually added (new files in crates/panel-*/, etc.)
 - Configuration changes (config.rs, constants.rs)
 - Documentation updates (README.md, doc/*)
 
@@ -308,8 +309,8 @@ tools/release/version.sh NEW_VERSION
 
 The script reads the current version from `[workspace.package]` in
 `Cargo.toml`, replaces it in every file that repeats it — `Cargo.toml`,
-`flake.nix` (2), the three READMEs (23 each: release asset names), the three
-`installation.md` (16 each), `packaging/aur/PKGBUILD` and `PKGBUILD-bin` —
+`flake.nix` (1), the three READMEs (31 each: release asset names), the three
+`installation.md` (27 each), `packaging/aur/PKGBUILD` and `PKGBUILD-bin` —
 resets the AUR `pkgrel` to 1, refreshes the workspace's entries in
 `Cargo.lock` (`cargo update --workspace`; the AUR build fetches `--locked`),
 and checks the result. It fails when a file names the version a different
@@ -497,8 +498,8 @@ Add new link after existing ones:
 
 ```bash
 cargo fmt --check
-cargo clippy -- -D warnings
-cargo test
+cargo clippy --workspace --all-targets -- -D warnings
+cargo nextest run --workspace
 cargo build --release
 ```
 

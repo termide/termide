@@ -12,7 +12,7 @@ curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | s
 
 当系统的 glibc 低于 2.34 时，它会改用静态 musl 构建；每个下载都会与发布中旁边的 `.sha256` 文件核对，缺少该文件或不匹配时不安装任何内容。只有在安装目录需要时才使用 `sudo`。可通过环境变量改变其行为：
 
-- `TERMIDE_VERSION` — 安装指定版本而不是最新版本。
+- `TERMIDE_VERSION` — 安装指定版本而不是最新版本。二进制文件、软件包、Nix 和 Cargo 都遵循它；Homebrew 始终安装 tap 中的当前版本。
 - `TERMIDE_INSTALL_DIR` — 将二进制文件安装到 `/usr/local/bin`（Termux 下为 `$PREFIX/bin`）以外的位置。
 
 ## 下载预编译二进制文件（推荐）

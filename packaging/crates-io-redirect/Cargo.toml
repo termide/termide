@@ -18,7 +18,7 @@
 name = "termide"
 version = "0.0.0" # ⚠ REPLACE before publishing: must be > current crates.io max version
 edition = "2021"
-description = "Obsolete crates.io placeholder — Termide is distributed via GitHub, not crates.io. Install with: cargo install --git https://github.com/termide/termide"
+description = "Obsolete crates.io placeholder — Termide is distributed via GitHub, not crates.io. Install with: CFLAGS=-fno-strict-aliasing cargo install --git https://github.com/termide/termide --locked"
 license = "MIT"
 repository = "https://github.com/termide/termide"
 homepage = "https://github.com/termide/termide"

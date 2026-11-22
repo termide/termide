@@ -5224,7 +5224,6 @@ name = "termide"
 version = "0.50.0"
 dependencies = [
  "anyhow",
- "cc",
  "clap",
  "crossterm",
  "dirs",

@@ -17,7 +17,9 @@ curl -fsSL https://raw.githubusercontent.com/termide/termide/main/install.sh | s
 вызывает, только когда этого требует каталог установки. Переменные
 окружения меняют его поведение:
 
-- `TERMIDE_VERSION` — установить указанную версию вместо последней.
+- `TERMIDE_VERSION` — установить указанную версию вместо последней. Её
+  учитывают бинарный файл, пакеты, Nix и Cargo; Homebrew ставит текущую версию
+  из tap, что бы в ней ни стояло.
 - `TERMIDE_INSTALL_DIR` — установить бинарный файл не в `/usr/local/bin`
   (`$PREFIX/bin` в Termux), а в другое место.
 

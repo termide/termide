@@ -51,8 +51,8 @@ jobs:
         run: cargo test --workspace
 
       - name: Install cargo-deny
-        # Rust-cache lets us skip rebuilding cargo-deny on every run;
-        # `--locked` keeps the version reproducible.
+        # install-action fetches a prebuilt cargo-deny binary instead of
+        # compiling it on every run.
         uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny
@@ -144,11 +144,11 @@ jobs:
         # VFS uses rustls / russh — fully pure-Rust, no native OpenSSL —
         # so no extra features are required for static builds.
         if: ${{ !matrix.use_cross }}
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Build (cross)
         if: matrix.use_cross
-        run: cross build --release --target ${{ matrix.target }}
+        run: cross build --release --locked --target ${{ matrix.target }}
 
       - name: Package (Unix)
         if: matrix.archive == 'tar.gz'
@@ -210,10 +210,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cargo-deb
-        run: cargo install cargo-deb
+        run: cargo install cargo-deb --locked --version 3.8.0
 
       - name: Build and package
-        run: cargo deb --target ${{ matrix.target }}
+        run: cargo deb --locked --target ${{ matrix.target }}
 
       - name: Checksum
         working-directory: target/${{ matrix.target }}/debian
@@ -244,10 +244,10 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install cargo-generate-rpm
-        run: cargo install cargo-generate-rpm
+        run: cargo install cargo-generate-rpm --locked --version 0.21.1
 
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
+        run: cargo build --release --locked --target ${{ matrix.target }}
 
       - name: Generate RPM
         run: cargo generate-rpm --target ${{ matrix.target }}

@@ -13,7 +13,7 @@ This `termide` package from crates.io is OBSOLETE and is NOT the Termide IDE.
 Termide is a multi-crate Cargo workspace and is not published to crates.io.
 Install the real thing from GitHub instead:
 
-    cargo install --git https://github.com/termide/termide --locked
+    CFLAGS=-fno-strict-aliasing cargo install --git https://github.com/termide/termide --locked
 
 or download a prebuilt binary / run the installer:
 
