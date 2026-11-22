@@ -193,6 +193,8 @@ impl App {
                             PendingAction::Settings => {}
                             // Declined: the edits stay unsaved in the editor.
                             PendingAction::OverwriteRemoteSave { .. } => {}
+                            // Dismissed: the panel stays on its last listing.
+                            PendingAction::ConnectionLost { .. } => {}
                             other => self.state.pending_action = Some(other),
                         }
                     }
@@ -336,26 +338,42 @@ impl App {
         Ok(())
     }
 
-    /// Route the dead-remote-session recovery dialog's button to the active
-    /// file manager (reconnect / open local) or close the panel. Plain VFS
-    /// "OK" modals return id "ok" and fall through to the no-op arm.
-    fn handle_vfs_message_action(&mut self, value: termide_modal::ModalOutput) {
+    /// Answer the connection-lost dialog `ticket` on the file manager that
+    /// raised it: a dialog that waited behind another may be answered after
+    /// the focus moved to another panel. When that panel is gone the answer
+    /// has nothing to act on, and no other panel is reconnected or closed
+    /// in its place.
+    fn handle_connection_lost_answer(&mut self, ticket: u64, value: termide_modal::ModalOutput) {
         use termide_modal::InfoActionResult;
         let Some(InfoActionResult::Action(id)) = value.get::<InfoActionResult>() else {
             return;
         };
+        let asked = |panel: &dyn termide_core::Panel| {
+            panel
+                .downcast_ref::<termide_panel_file_manager::FileManager>()
+                .is_some_and(|fm| fm.raised_connection_question(ticket))
+        };
         match id.as_str() {
-            "reconnect" => {
-                if let Some(fm) = self.active_file_manager_mut() {
+            "reconnect" | "go_local" => {
+                let Some(fm) = self
+                    .layout_manager
+                    .iter_all_panels_mut()
+                    .filter_map(|panel| panel.as_file_manager_mut())
+                    .find(|fm| fm.raised_connection_question(ticket))
+                else {
+                    return;
+                };
+                if id == "reconnect" {
                     fm.reconnect_remote();
-                }
-            }
-            "go_local" => {
-                if let Some(fm) = self.active_file_manager_mut() {
+                } else {
                     fm.switch_to_local_home();
                 }
             }
-            "close" => self.close_panel_at_index(),
+            "close" => {
+                if self.layout_manager.focus_panel_where(asked) {
+                    self.close_panel_at_index();
+                }
+            }
             _ => {}
         }
     }
@@ -940,8 +958,9 @@ impl App {
                 // VFS message / connection-error recovery dialog. Plain "OK"
                 // modals return id "ok" (ignored); the dead-session dialog
                 // returns reconnect / go_local / close.
-                PendingAction::VfsMessage => {
-                    self.handle_vfs_message_action(value);
+                PendingAction::VfsMessage => {}
+                PendingAction::ConnectionLost { ticket } => {
+                    self.handle_connection_lost_answer(ticket, value);
                 }
                 // Handle cancelled copy/move operation cleanup
                 PendingAction::CancelCopyCleanup {
