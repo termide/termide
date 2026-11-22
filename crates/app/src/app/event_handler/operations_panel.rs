@@ -153,7 +153,7 @@ impl App {
         self.state.needs_redraw = true;
     }
 
-    /// Handle CancelOperation event - cancel an operation
+    /// Cancel an operation, once the user confirmed it.
     pub(in crate::app) fn event_cancel_operation(&mut self, op_id: termide_file_ops::OperationId) {
         // Check if this is a command operation (not managed by OperationManager)
         if let Some(op) = self.state.active_operations.get(&op_id) {

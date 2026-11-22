@@ -345,10 +345,6 @@ impl App {
                 self.event_toggle_operation_pause(op_id);
             }
 
-            PanelEvent::CancelOperation(op_id) => {
-                self.event_cancel_operation(op_id);
-            }
-
             PanelEvent::OpenOperationActionMenu {
                 op_id,
                 anchor_x,

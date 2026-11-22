@@ -109,7 +109,7 @@ impl App {
         // Route through the same PanelEvent path the keyboard shortcuts
         // (Space / Esc / Delete) use, so popup-menu and key-driven cancels
         // run identical follow-up logic — e.g. the "Delete partial upload?"
-        // modal is wired to the PanelEvent::CancelOperation handler.
+        // modal follows the confirmed cancel (`event_cancel_operation`).
         match key.as_str() {
             OPERATION_ACTION_PAUSE | OPERATION_ACTION_RESUME => {
                 self.process_panel_events(vec![PanelEvent::ToggleOperationPause(op_id)])?;

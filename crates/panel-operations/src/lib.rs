@@ -568,7 +568,7 @@ mod tests {
     }
 
     /// Cancelling is always gated behind a confirmation modal: the key must
-    /// emit `ShowConfirm(CancelOperation)` and never cancel directly.
+    /// emit `ShowConfirm(CancelOperation)`, the only way to cancel.
     fn assert_requests_confirmation(code: KeyCode, id: u64) {
         // The cancel path pulls the confirmation message from i18n.
         let _ = termide_i18n::init();
@@ -584,12 +584,6 @@ mod tests {
                 } if op.0 == id
             )),
             "{code:?} should emit ShowConfirm(CancelOperation), got {events:?}"
-        );
-        assert!(
-            !events
-                .iter()
-                .any(|e| matches!(e, PanelEvent::CancelOperation(_))),
-            "{code:?} must not cancel without confirmation, got {events:?}"
         );
     }
 

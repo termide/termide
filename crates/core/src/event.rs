@@ -857,9 +857,6 @@ pub enum PanelEvent {
     /// Toggle pause/resume for a file operation
     ToggleOperationPause(crate::OperationId),
 
-    /// Cancel a file operation
-    CancelOperation(crate::OperationId),
-
     /// Open the per-operation popup menu (Pause/Resume/Cancel) anchored
     /// at the operation type icon on its card.
     OpenOperationActionMenu {
