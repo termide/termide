@@ -153,17 +153,33 @@ pub(crate) fn keyword_line_segments(
         // Operator/punctuation run (ASCII punctuation that isn't a delimiter we
         // already handle); everything else (whitespace) is default.
         if c.is_ascii_punctuation() {
+            let comment_at = |j: usize| {
+                let rest = &line[j..];
+                syntax
+                    .line_comment
+                    .as_deref()
+                    .is_some_and(|lc| rest.starts_with(lc))
+                    || syntax
+                        .block_comment
+                        .as_ref()
+                        .is_some_and(|(open, _)| rest.starts_with(open.as_str()))
+            };
             let mut j = i;
             while j < line.len() {
                 let ch = line[j..].chars().next().unwrap();
-                // Stop so the next iteration can re-detect comments/strings.
-                if ch.is_ascii_punctuation() && ch != '"' && ch != '\'' && ch != '_' {
+                // Stop so the next iteration can re-detect comments/strings:
+                // a comment lead-in that begins mid-run is not an operator.
+                if ch.is_ascii_punctuation()
+                    && ch != '"'
+                    && ch != '\''
+                    && ch != '_'
+                    && (j == i || !comment_at(j))
+                {
                     j += ch.len_utf8();
                 } else {
                     break;
                 }
             }
-            // Avoid swallowing a comment lead-in that begins mid-run.
             push(&line[i..j], style("operator"));
             i = j;
             continue;
@@ -225,5 +241,31 @@ mod tests {
                 .any(|(t, s)| t.as_ref().contains("note") && s.fg == Some(Color::Blue)),
             "## starts a comment"
         );
+    }
+
+    #[test]
+    fn a_comment_right_after_punctuation_is_a_comment() {
+        let syntax = KeywordSyntax::new(
+            "test".to_string(),
+            Some("//".to_string()),
+            Some(("/*".to_string(), "*/".to_string())),
+            std::iter::empty(),
+            std::iter::empty(),
+        );
+        let style = |name: &str| {
+            Style::default().fg(match name {
+                "comment" => Color::Blue,
+                _ => Color::White,
+            })
+        };
+        let comment = |line: &str| -> Vec<String> {
+            keyword_line_segments(line, &syntax, &style)
+                .into_iter()
+                .filter(|(_, s)| s.fg == Some(Color::Blue))
+                .map(|(t, _)| t.into_owned())
+                .collect()
+        };
+        assert_eq!(comment("x=1;// note"), ["// note"]);
+        assert_eq!(comment("foo()/* c */ bar"), ["/* c */"]);
     }
 }

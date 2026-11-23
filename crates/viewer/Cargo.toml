@@ -11,12 +11,14 @@ publish = false
 
 [dependencies]
 crossterm.workspace = true
+percent-encoding.workspace = true
 ratatui.workspace = true
 url.workspace = true
 
 # Workspace crates
 termide-config = { path = "../config" }
 termide-core = { path = "../core" }
+termide-i18n = { path = "../i18n" }
 termide-modal = { path = "../modal" }
 termide-richtext = { path = "../richtext" }
 termide-ui = { path = "../ui" }

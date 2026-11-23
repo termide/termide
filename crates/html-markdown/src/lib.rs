@@ -486,7 +486,7 @@ impl Writer {
             "h1" | "h2" | "h3" | "h4" | "h5" | "h6" | "p" => self.flush_block(),
             "pre" if self.pre_depth > 0 => {
                 self.pre_depth -= 1;
-                let code = std::mem::take(&mut self.line);
+                let code = self.take_line();
                 self.out.push_str(code.trim_matches('\n'));
                 self.out.push_str("\n```\n\n");
             }
@@ -623,9 +623,18 @@ impl Writer {
         }
     }
 
+    /// Take the current line out; a link still open starts over at the
+    /// beginning of the next one, since what it held so far is gone.
+    fn take_line(&mut self) -> String {
+        for link in &mut self.links {
+            link.1 = 0;
+        }
+        std::mem::take(&mut self.line)
+    }
+
     /// End the current line (a list item, a `<br>`).
     fn flush_line(&mut self) {
-        let text = std::mem::take(&mut self.line);
+        let text = self.take_line();
         let text = text.trim();
         if text.is_empty() {
             return;
@@ -700,7 +709,10 @@ fn render_table(table: &Table) -> String {
 /// Turn the text `buf` gained since `start` into a link to `href`; a link
 /// with no target or no text stays plain text.
 fn wrap_link(buf: &mut String, href: Option<String>, start: usize) {
-    let start = start.min(buf.len());
+    let mut start = start.min(buf.len());
+    while !buf.is_char_boundary(start) {
+        start -= 1;
+    }
     let text = buf[start..].trim().to_string();
     let Some(href) = href else { return };
     if text.is_empty() {
@@ -898,5 +910,13 @@ mod tests {
             r#"<p><img src="a.png" alt="decor"> <a href="/home"><img src="logo.png" alt="Home"></a></p>"#,
         );
         assert_eq!(out, "[Home](https://example.com/home)");
+    }
+
+    #[test]
+    fn a_block_inside_a_link_restarts_the_link_text() {
+        let out = md(r#"<p>ab<a href="https://x">c<div>d</div>日本</a></p>"#);
+        assert_eq!(out, "abc\n\nd\n\n[日本](https://x/)");
+        let out = md(r#"<p>abcdef<a href="https://x">g<div>h</div>ij</a></p>"#);
+        assert_eq!(out, "abcdefg\n\nh\n\n[ij](https://x/)");
     }
 }

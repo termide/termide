@@ -90,7 +90,7 @@ pub(super) fn draw_edge(
             // box never clobbers it) and extending toward the child. A run too
             // short to hold it without covering the corner moves the label to
             // the row above, beside the box.
-            let len = label.chars().count();
+            let len = crate::canvas::label_width(label);
             let (lx, fits) = if left {
                 (outer.saturating_sub(len), outer > entry_x + len)
             } else {
@@ -157,7 +157,7 @@ pub(super) fn draw_edge(
         // direction so sibling labels (e.g. a left and a right branch leaving
         // the same box) spread apart instead of colliding.
         let lx = if entry_x < sx {
-            sx.saturating_sub(label.chars().count())
+            sx.saturating_sub(crate::canvas::label_width(label))
         } else {
             sx + 1
         };
@@ -203,7 +203,7 @@ pub(super) fn draw_edge(
             label_at(
                 labels,
                 label,
-                lx.saturating_sub(label.chars().count() / 2),
+                lx.saturating_sub(crate::canvas::label_width(label) / 2),
                 entry_y,
             );
             return;

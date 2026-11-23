@@ -50,33 +50,64 @@ pub enum DiagramKind {
     Unknown,
 }
 
-/// Detect the diagram kind from the first meaningful line.
+/// The source from its header line on: a leading YAML front-matter block
+/// (`---` … `---`), comments and `%%{init: …}%%` directives (which may span
+/// several lines) come before the header and are skipped.
+#[must_use]
+pub fn diagram_body(src: &str) -> &str {
+    let mut rest = src;
+    let mut front_matter = false;
+    let mut directive = false;
+    let mut first = true;
+    while !rest.is_empty() {
+        let (raw, next) = match rest.find('\n') {
+            Some(i) => (&rest[..i], &rest[i + 1..]),
+            None => (rest, ""),
+        };
+        let line = raw.trim();
+        if front_matter {
+            front_matter = line != "---";
+        } else if directive {
+            directive = !line.contains("}%%");
+        } else if first && line == "---" {
+            front_matter = true;
+        } else if line.starts_with("%%{") {
+            directive = !line.contains("}%%");
+        } else if !line.is_empty() && !line.starts_with("%%") {
+            return rest;
+        }
+        if !line.is_empty() {
+            first = false;
+        }
+        rest = next;
+    }
+    rest
+}
+
+/// Detect the diagram kind from its header line.
 #[must_use]
 pub fn detect_kind(src: &str) -> DiagramKind {
-    for raw in src.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with("%%") {
-            continue; // blank or comment
-        }
-        let head = line.split_whitespace().next().unwrap_or("");
-        return match head {
-            "sequenceDiagram" => DiagramKind::Sequence,
-            "flowchart" | "graph" => DiagramKind::Flowchart,
-            "stateDiagram" | "stateDiagram-v2" => DiagramKind::State,
-            "pie" => DiagramKind::Pie,
-            "classDiagram" => DiagramKind::Class,
-            "erDiagram" => DiagramKind::Er,
-            "gantt" => DiagramKind::Gantt,
-            "journey" => DiagramKind::Journey,
-            "mindmap" => DiagramKind::Mindmap,
-            "timeline" => DiagramKind::Timeline,
-            "gitGraph" => DiagramKind::GitGraph,
-            "quadrantChart" => DiagramKind::Quadrant,
-            "requirementDiagram" | "C4Context" => DiagramKind::Other,
-            _ => DiagramKind::Unknown,
-        };
+    let line = diagram_body(src).lines().next().unwrap_or("").trim();
+    let head = line.split_whitespace().next().unwrap_or("");
+    match head {
+        "sequenceDiagram" => DiagramKind::Sequence,
+        "flowchart" | "flowchart-elk" | "graph" => DiagramKind::Flowchart,
+        "stateDiagram" | "stateDiagram-v2" => DiagramKind::State,
+        "pie" => DiagramKind::Pie,
+        "classDiagram" | "classDiagram-v2" => DiagramKind::Class,
+        "erDiagram" => DiagramKind::Er,
+        "gantt" => DiagramKind::Gantt,
+        "journey" => DiagramKind::Journey,
+        "mindmap" => DiagramKind::Mindmap,
+        "timeline" => DiagramKind::Timeline,
+        "gitGraph" => DiagramKind::GitGraph,
+        "quadrantChart" => DiagramKind::Quadrant,
+        "requirementDiagram" | "C4Context" | "C4Container" | "C4Component" | "C4Dynamic"
+        | "C4Deployment" | "zenuml" | "sankey" | "sankey-beta" | "xychart" | "xychart-beta"
+        | "block" | "block-beta" | "packet" | "packet-beta" | "kanban" | "architecture"
+        | "architecture-beta" | "radar-beta" | "treemap" | "treemap-beta" => DiagramKind::Other,
+        _ => DiagramKind::Unknown,
     }
-    DiagramKind::Unknown
 }
 
 // ===========================================================================
@@ -192,5 +223,40 @@ mod tests {
             detect_kind("%% comment\nsequenceDiagram"),
             DiagramKind::Sequence
         );
+    }
+
+    #[test]
+    fn front_matter_and_directives_come_before_the_header() {
+        let src = "---\ntitle: Flow\nconfig:\n  theme: dark\n---\nflowchart LR\nA-->B";
+        assert_eq!(detect_kind(src), DiagramKind::Flowchart);
+        assert_eq!(diagram_body(src), "flowchart LR\nA-->B");
+        let src = "%%{init: {'theme': 'dark'}}%%\nsequenceDiagram\nA->>B: hi";
+        assert_eq!(detect_kind(src), DiagramKind::Sequence);
+        let src = "%%{\n  init: {\n    'theme': 'dark'\n  }\n}%%\ngantt\n";
+        assert_eq!(detect_kind(src), DiagramKind::Gantt);
+    }
+
+    #[test]
+    fn header_variants_and_unrendered_kinds() {
+        assert_eq!(detect_kind("classDiagram-v2\nA <|-- B"), DiagramKind::Class);
+        assert_eq!(
+            detect_kind("flowchart-elk TD\nA-->B"),
+            DiagramKind::Flowchart
+        );
+        for head in [
+            "C4Container",
+            "C4Component",
+            "C4Dynamic",
+            "C4Deployment",
+            "sankey-beta",
+            "xychart-beta",
+            "block-beta",
+            "kanban",
+            "architecture-beta",
+            "packet-beta",
+            "radar-beta",
+        ] {
+            assert_eq!(detect_kind(head), DiagramKind::Other, "{head}");
+        }
     }
 }

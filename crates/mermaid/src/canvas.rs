@@ -1,5 +1,11 @@
 //! A growable character grid used to compose diagram pseudographics.
 
+use unicode_width::UnicodeWidthChar;
+
+/// Fills the cell a double-width character spills into; dropped when the
+/// grid becomes text, so the character's two columns line up with the rest.
+pub(crate) const WIDE_TAIL: char = '\0';
+
 /// A growable grid of characters addressed by `(x, y)`.
 pub(crate) struct Canvas {
     rows: Vec<Vec<char>>,
@@ -20,14 +26,18 @@ impl Canvas {
     }
 
     pub(crate) fn put(&mut self, x: usize, y: usize, ch: char) {
-        self.ensure(x, y);
-        self.rows[y][x] = ch;
+        let width = cell_width(ch);
+        self.ensure(x + width - 1, y);
+        put_cells(&mut self.rows[y], x, ch);
     }
 
-    /// Write text left-to-right starting at `(x, y)`.
+    /// Write text left-to-right starting at `(x, y)`, a double-width
+    /// character taking two cells.
     pub(crate) fn text(&mut self, x: usize, y: usize, s: &str) {
-        for (i, ch) in s.chars().enumerate() {
-            self.put(x + i, y, ch);
+        let mut x = x;
+        for ch in s.chars() {
+            self.put(x, y, ch);
+            x += cell_width(ch);
         }
     }
 
@@ -64,7 +74,7 @@ impl Canvas {
         self.hline(x + 1, x + w - 2, y, '─');
         self.put(x, y + 1, '│');
         self.put(x + w - 1, y + 1, '│');
-        let pad = inner_w.saturating_sub(label.chars().count()) / 2;
+        let pad = inner_w.saturating_sub(label_width(label)) / 2;
         self.text(x + 1 + pad, y + 1, label);
         self.put(x, y + 2, corners[2]);
         self.put(x + w - 1, y + 2, corners[3]);
@@ -90,7 +100,7 @@ impl Canvas {
             self.put(x, row, '│');
             self.put(x + w - 1, row, '│');
         }
-        let pad = inner_w.saturating_sub(label.chars().count()) / 2;
+        let pad = inner_w.saturating_sub(label_width(label)) / 2;
         self.text(x + 1 + pad, y + h / 2, label);
         self.put(x, y + h - 1, corners[2]);
         self.put(x + w - 1, y + h - 1, corners[3]);
@@ -116,7 +126,7 @@ impl Canvas {
         // Title (centered).
         self.put(x, y + 1, '│');
         self.put(x + w - 1, y + 1, '│');
-        let pad = inner_w.saturating_sub(title.chars().count()) / 2;
+        let pad = inner_w.saturating_sub(label_width(title)) / 2;
         self.text(x + 1 + pad, y + 1, title);
         let mut row = y + 2;
         if !body.is_empty() {
@@ -152,7 +162,7 @@ impl Canvas {
         self.rows
             .into_iter()
             .map(|r| {
-                let mut s: String = r.into_iter().collect();
+                let mut s: String = r.into_iter().filter(|&ch| ch != WIDE_TAIL).collect();
                 let trimmed = s.trim_end();
                 s.truncate(trimmed.len());
                 s
@@ -161,7 +171,88 @@ impl Canvas {
     }
 }
 
-/// Display width of a label (character count; assumes mostly single-width).
+/// Cells a character takes on the canvas: two for a double-width one, one
+/// for the rest (a zero-width mark still needs a cell of its own here).
+pub(crate) fn cell_width(ch: char) -> usize {
+    if ch.width().unwrap_or(1) >= 2 {
+        2
+    } else {
+        1
+    }
+}
+
+/// Display width of a label: the cells [`Canvas::text`] gives it.
 pub(crate) fn label_width(s: &str) -> usize {
-    s.chars().count()
+    s.chars().map(cell_width).sum()
+}
+
+/// Put `ch` into `row` at `x` (which must have room for its width), clearing
+/// the other half of any double-width character it overwrites.
+pub(crate) fn put_cells(row: &mut [char], x: usize, ch: char) {
+    let width = cell_width(ch);
+    if row[x] == WIDE_TAIL && x > 0 {
+        row[x - 1] = ' ';
+    }
+    let last = x + width - 1;
+    if row.get(last + 1) == Some(&WIDE_TAIL) {
+        row[last + 1] = ' ';
+    }
+    row[x] = ch;
+    if width == 2 {
+        row[x + 1] = WIDE_TAIL;
+    }
+}
+
+/// Write `s` into `row` from `x`, stopping at the row's end; a double-width
+/// character that does not fit whole is left out.
+pub(crate) fn write_cells(row: &mut [char], x: usize, s: &str) {
+    let mut x = x;
+    for ch in s.chars() {
+        let width = cell_width(ch);
+        if x + width > row.len() {
+            break;
+        }
+        put_cells(row, x, ch);
+        x += width;
+    }
+}
+
+/// The longest prefix of `s` that fits in `max` cells.
+pub(crate) fn clip_to_width(s: &str, max: usize) -> &str {
+    let mut used = 0;
+    for (i, ch) in s.char_indices() {
+        used += cell_width(ch);
+        if used > max {
+            return &s[..i];
+        }
+    }
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_wide_label_takes_two_cells_per_character() {
+        let mut c = Canvas::new();
+        c.draw_box(0, 0, label_width("日本"), "日本");
+        let lines = c.into_lines();
+        assert_eq!(lines, vec!["┌────┐", "│日本│", "└────┘"]);
+    }
+
+    #[test]
+    fn overwriting_half_of_a_wide_character_clears_the_other_half() {
+        let mut c = Canvas::new();
+        c.text(0, 0, "日本x");
+        c.put(1, 0, '│');
+        c.put(2, 0, '-');
+        assert_eq!(c.into_lines(), vec![" │- x"]);
+    }
+
+    #[test]
+    fn clipping_never_splits_a_wide_character() {
+        assert_eq!(clip_to_width("ab日本", 3), "ab");
+        assert_eq!(clip_to_width("ab日本", 4), "ab日");
+    }
 }

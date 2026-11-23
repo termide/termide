@@ -1,0 +1,1 @@
+- **A link around a block in a fetched page no longer crashes.** Converting an HTML page to Markdown — the agent's `fetch` tool, the HTML preview's Save As Markdown — panicked when a link held a block element followed by non-ASCII text, and with ASCII it linked the wrong text. The link now covers the text after the block.

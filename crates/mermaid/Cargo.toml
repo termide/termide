@@ -9,3 +9,4 @@ repository.workspace = true
 publish = false
 
 [dependencies]
+unicode-width.workspace = true

@@ -453,7 +453,7 @@ impl Panel for CsvPanel {
         }
 
         if let Some(err) = &self.error {
-            let msg = format!(" Cannot open: {err}");
+            let msg = format!(" {}", termide_i18n::t().open_failed_fmt(err));
             buf.set_stringn(
                 area.x,
                 area.y,

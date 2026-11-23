@@ -66,7 +66,9 @@ The preview has a movable cursor and supports text selection:
 - **Follow a link** (click or `Enter`): web links open in the viewer,
   image links in the image preview, a link to another local file in the viewer
   for its type (a sibling `.md` in this preview), and `#heading` anchors jump
-  within the page.
+  within the page. Heading anchors are named as on GitHub (`## Set up` is
+  `#set-up`, a repeated heading `#set-up-1`), and `## Title {#id}` sets one
+  explicitly without showing it.
   `O`, `Alt+Enter` or `Alt+Click` opens the link outside (the browser, a
   system application); `[`/`]` are history back/forward. See the
   [HTML preview](html.md) for the details and the fetch policy.

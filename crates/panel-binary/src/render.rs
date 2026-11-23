@@ -50,7 +50,8 @@ impl BinaryPanel {
         let off_style = Style::default().fg(self.theme.line_numbers);
 
         let mut spans: Vec<Span<'a>> = Vec::with_capacity(cols as usize * 2 + 4);
-        spans.push(Span::styled(format!("{off:08X}"), off_style));
+        let width = self.offset_width() as usize;
+        spans.push(Span::styled(format!("{off:0width$X}"), off_style));
         spans.push(Span::styled("  ", dim));
 
         for i in 0..cols as usize {
@@ -126,5 +127,13 @@ mod tests {
         assert!(text.starts_with("00000010"), "offset: {text:?}");
         assert!(text.contains("48 69 00 ff"), "hex: {text:?}");
         assert!(text.trim_end().ends_with("Hi··"), "ascii: {text:?}");
+    }
+
+    #[test]
+    fn a_file_past_4_gib_pads_every_offset_alike() {
+        let p = panel_with((1 << 36) + 1, 80, 10);
+        let line = p.hex_row(0x10, b"Hi", 16);
+        let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+        assert!(text.starts_with("0000000010  48"), "offset: {text:?}");
     }
 }

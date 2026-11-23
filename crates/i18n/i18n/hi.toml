@@ -1624,6 +1624,7 @@ settings_kb_key_taken_fmt = "{key} इस क्रिया से पहले
 settings_kb_conflict_fmt = "{key} {held} से भी बंधी है"
 usage_counting_fmt = "सत्र लॉग गिने जा रहे हैं: {total} में से {done}"
 binary_open_failed_fmt = "फ़ाइल नहीं खुल सकती: {error}"
+open_failed_fmt = "नहीं खुल सकता: {error}"
 editor_force_save_failed_fmt = "बलपूर्वक सहेजना विफल: {error}"
 editor_clipboard_error_fmt = "क्लिपबोर्ड त्रुटि: {error}"
 editor_replace_failed_fmt = "बदलना विफल: {error}"

@@ -247,10 +247,12 @@ fn open(b: &mut Builder, st: &mut HtmlState, name: &str, attrs: &[(String, Strin
             Close::List
         }
         "ol" => {
-            b.start_list(Some(1));
+            let start = attr(attrs, "start").trim().parse().unwrap_or(1);
+            b.start_list(Some(start));
             Close::List
         }
         "li" => {
+            end_open_item(b, st);
             b.start_item();
             Close::Item
         }
@@ -358,6 +360,21 @@ fn close(b: &mut Builder, st: &mut HtmlState, name: &str) {
             &mut st.pre,
             &mut st.suppress,
         );
+    }
+}
+
+/// A new `<li>` ends the item still open in the same list, as the HTML
+/// parser does when the previous `</li>` is omitted.
+fn end_open_item(b: &mut Builder, st: &mut HtmlState) {
+    let list = st
+        .stack
+        .iter()
+        .rposition(|f| matches!(f.name.as_str(), "ul" | "ol" | "menu"));
+    let item = st.stack.iter().rposition(|f| f.name == "li");
+    if let Some(item) = item {
+        if list.is_none_or(|list| item > list) {
+            close(b, st, "li");
+        }
     }
 }
 
@@ -549,5 +566,29 @@ mod tests {
             out.iter().any(|l| l.contains("plain bold both end")),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn a_new_item_ends_the_open_one() {
+        let out = render("<ul><li>One<li>Two</ul>");
+        assert!(out.iter().any(|l| l.trim_end() == "• One"), "{out:?}");
+        assert!(out.iter().any(|l| l.trim_end() == "• Two"), "{out:?}");
+    }
+
+    #[test]
+    fn a_nested_list_keeps_its_parent_item_open() {
+        let out = render("<ul><li>One<ul><li>a<li>b</ul><li>Two</ul>");
+        let joined = out.join("\n");
+        assert!(joined.contains("• One"), "{out:?}");
+        assert!(joined.contains("• a") && joined.contains("• b"), "{out:?}");
+        assert!(out.iter().any(|l| l.trim_end() == "• Two"), "{out:?}");
+    }
+
+    #[test]
+    fn an_ordered_list_honours_start() {
+        let out = render("<ol start=\"4\"><li>four</li><li>five</li></ol>");
+        let joined = out.join("\n");
+        assert!(joined.contains("4. four"), "{out:?}");
+        assert!(joined.contains("5. five"), "{out:?}");
     }
 }

@@ -22,6 +22,7 @@ use termide_core::{
 };
 use termide_mermaid::parser::{self, DiagramKind};
 use termide_ui::ScrollBar;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 /// Mermaid diagram viewer.
 pub struct MermaidPanel {
@@ -121,7 +122,7 @@ impl MermaidPanel {
         self.canvas_width = self
             .canvas
             .iter()
-            .map(|l| l.chars().count())
+            .map(|l| UnicodeWidthStr::width(l.as_str()))
             .max()
             .unwrap_or(0);
     }
@@ -295,7 +296,7 @@ impl Panel for MermaidPanel {
 
         if let Some(err) = &self.error {
             let msg = ratatui::text::Line::styled(
-                format!(" Cannot open: {err}"),
+                format!(" {}", termide_i18n::t().open_failed_fmt(err)),
                 Style::default().fg(self.colors.error),
             );
             buf.set_line(area.x, area.y, &msg, area.width);
@@ -321,7 +322,7 @@ impl Panel for MermaidPanel {
             } else {
                 note_style
             };
-            let visible: String = line.chars().skip(self.scroll_x).take(text_w).collect();
+            let visible = visible_columns(line, self.scroll_x, text_w);
             let l = ratatui::text::Line::styled(visible, style);
             buf.set_line(area.x, area.y + i as u16, &l, text_w as u16);
         }
@@ -477,9 +478,45 @@ impl Panel for MermaidPanel {
     }
 }
 
+/// The part of `line` from display column `skip` that fits in `width`
+/// columns; a double-width character cut by either edge becomes a space.
+fn visible_columns(line: &str, skip: usize, width: usize) -> String {
+    let end = skip + width;
+    let mut out = String::new();
+    let mut col = 0;
+    for ch in line.chars() {
+        let w = ch.width().unwrap_or(0);
+        let next = col + w;
+        if next > end {
+            if col < end {
+                out.push(' ');
+            }
+            break;
+        }
+        if col >= skip {
+            out.push(ch);
+        } else if next > skip {
+            out.push(' ');
+        }
+        col = next;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn horizontal_scroll_counts_display_columns() {
+        assert_eq!(visible_columns("日本語ab", 2, 4), "本語");
+        assert_eq!(visible_columns("日本語ab", 1, 4), " 本 ");
+        assert_eq!(visible_columns("日本語ab", 6, 4), "ab");
+        // An unrecognised source is shown as is: its widest line is 240
+        // columns of 120 characters.
+        let p = panel_from(&"日本語".repeat(40));
+        assert_eq!(p.canvas_width, 240);
+    }
 
     fn panel_from(src: &str) -> MermaidPanel {
         let mut p = MermaidPanel {

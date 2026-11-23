@@ -30,7 +30,7 @@ pub fn parse_flowchart(src: &str) -> Flowchart {
             first = false;
             let mut parts = line.split_whitespace();
             let head = parts.next().unwrap_or("");
-            if head == "flowchart" || head == "graph" {
+            if matches!(head, "flowchart" | "flowchart-elk" | "graph") {
                 fc.direction = match parts.next().unwrap_or("TD") {
                     "LR" => Direction::Right,
                     "RL" => Direction::Left,

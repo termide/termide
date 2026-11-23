@@ -1,0 +1,1 @@
+- **A comment right after punctuation is highlighted as one.** With a keyword highlighter from `config.toml`, `x=1;// note` or `foo()/* c */` coloured the comment as an operator, since the punctuation before it swallowed its opener.

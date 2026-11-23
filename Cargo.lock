@@ -5762,6 +5762,9 @@ dependencies = [
 [[package]]
 name = "termide-mermaid"
 version = "0.50.0"
+dependencies = [
+ "unicode-width",
+]
 
 [[package]]
 name = "termide-modal"
@@ -6084,6 +6087,7 @@ dependencies = [
  "termide-i18n",
  "termide-mermaid",
  "termide-ui",
+ "unicode-width",
 ]
 
 [[package]]
@@ -6364,9 +6368,11 @@ name = "termide-viewer"
 version = "0.50.0"
 dependencies = [
  "crossterm",
+ "percent-encoding",
  "ratatui",
  "termide-config",
  "termide-core",
+ "termide-i18n",
  "termide-modal",
  "termide-richtext",
  "termide-ui",

@@ -177,6 +177,18 @@ fn same_page_anchor_scrolls() {
 }
 
 #[test]
+fn a_percent_encoded_fragment_finds_its_anchor() {
+    let mut src = String::from("top");
+    for i in 0..40 {
+        src.push_str(&format!("\n\nline {i}"));
+    }
+    src.push_str("\n\n#установка\n\nafter");
+    let mut v = view_from(&src);
+    v.activate_link("#%D1%83%D1%81%D1%82%D0%B0%D0%BD%D0%BE%D0%B2%D0%BA%D0%B0");
+    assert!(v.top > 0, "should scroll down to the anchor");
+}
+
+#[test]
 fn external_open_leaves_a_fetched_page_in_place() {
     // `O`/`Alt+Click` on a link in a fetched page hands the resolved
     // address to the browser instead of replacing the page.
