@@ -97,6 +97,75 @@ fn trim_on_save_reads_the_buffer_back_and_answers_with_edits() {
     let _ = child.wait();
 }
 
+/// Events reach their handlers in the order termide sent them, though the
+/// first ones take longest; a request the plugin has no handler for gets
+/// JSON-RPC's "method not found" rather than a `null` result.
+#[test]
+fn the_library_keeps_events_in_order_and_refuses_unknown_requests() {
+    let Ok(python) = which_python() else {
+        eprintln!("no python3: skipped");
+        return;
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("run.py");
+    std::fs::write(
+        &script,
+        r#"import sys, time
+sys.path.insert(0, sys.argv[1])
+from termide_plugin import Plugin
+
+plugin = Plugin()
+seen = []
+
+@plugin.on("editor/changed")
+def changed(params):
+    time.sleep((5 - params["n"]) * 0.03)
+    seen.append(params["n"])
+
+@plugin.tool("seen", "The events seen so far")
+def report(arguments, progress):
+    for _ in range(200):
+        if len(seen) == 6:
+            break
+        time.sleep(0.025)
+    return ",".join(map(str, seen))
+
+plugin.run()
+"#,
+    )
+    .unwrap();
+    let mut child = Command::new(python)
+        .arg("-B")
+        .arg(&script)
+        .arg(examples().join("sdk"))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+    let stdout = child.stdout.take().unwrap();
+    let stdin = child.stdin.take().unwrap();
+    let peer = Peer::new(stdout, stdin, |_| {}, || {});
+
+    let wait = Duration::from_secs(10);
+    peer.request("initialize", json!({}), wait, &|| false)
+        .unwrap();
+    for n in 0..6 {
+        peer.notify("editor/changed", json!({ "n": n })).unwrap();
+    }
+    let seen = peer
+        .request("tool/call", json!({ "name": "seen" }), wait, &|| false)
+        .unwrap();
+    assert_eq!(seen["text"], "0,1,2,3,4,5");
+
+    let unknown = peer
+        .request("editor/rename", json!({}), wait, &|| false)
+        .unwrap_err();
+    assert!(unknown.contains("code -32601"), "{unknown}");
+    peer.notify("exit", json!({})).unwrap();
+    let _ = child.wait();
+}
+
 fn which_python() -> Result<&'static str, ()> {
     Command::new("python3")
         .arg("--version")

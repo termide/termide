@@ -123,7 +123,17 @@ requests to it fail at once, until it reads again.
 Each message is one line of JSON-RPC 2.0. Anything a plugin writes to stderr
 goes to termide's log. In Python, `examples/plugins/sdk/termide_plugin.py` in
 the repository speaks it for you, and `examples/plugins/` holds plugins built
-with it.
+with it. The library covers the handshake, events, commands, tools with
+progress, completion, hover, fixes, definitions and references,
+`file/will_save`, and the requests to termide as functions: notices, the
+status bar, the editor, marks, terminals, Markdown panels, and confirm,
+choose and input windows. For anything else — `file/will_edit`,
+`contributions/changed`, `window/form`, `window/dialog`, list and diff
+panels, `files/status`, `editor/base` — it hands over `plugin.request()` and
+`plugin.send_notification()`. Events reach their handlers one at a time, in
+the order termide sent them; requests run side by side on a pool of threads,
+and one it has no handler for is answered with JSON-RPC's `method not found`
+(-32601).
 
 **termide → plugin**
 
