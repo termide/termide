@@ -63,6 +63,7 @@ impl Editor {
             vim,
             symbol_lines: Vec::new(),
             breakpoints_synced: 0,
+            breakpoints_on_disk: Default::default(),
             folding: Default::default(),
             is_stale: false,
             hotkeys: HotkeyTable::default(),
@@ -153,6 +154,7 @@ impl Editor {
             vim,
             symbol_lines: Vec::new(),
             breakpoints_synced: 0,
+            breakpoints_on_disk: Default::default(),
             folding: Default::default(),
             is_stale: false,
             hotkeys: HotkeyTable::default(),
@@ -204,6 +206,7 @@ impl Editor {
             vim: None, // view_only mode doesn't have vim
             symbol_lines: Vec::new(),
             breakpoints_synced: 0,
+            breakpoints_on_disk: Default::default(),
             folding: Default::default(),
             is_stale: false,
             hotkeys: HotkeyTable::default(),

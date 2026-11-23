@@ -1,0 +1,1 @@
+- **Incomplete completion lists are asked for again.** When a language server says its completion list is incomplete, typing or deleting a character asks it again for the narrower list, instead of filtering only the first answer.

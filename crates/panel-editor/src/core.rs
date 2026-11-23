@@ -164,6 +164,9 @@ pub struct Editor {
     /// `line_marks_version` of the buffer last written to the breakpoint
     /// store, so only a change is written.
     breakpoints_synced: u64,
+    /// The breakpoint lines as of the last load or save, where they sit in
+    /// the text on disk: what discarding the edits puts back.
+    breakpoints_on_disk: std::collections::BTreeSet<usize>,
 
     // === Folding ===
     /// Ranges asked of the language server and a fold waiting on them; the

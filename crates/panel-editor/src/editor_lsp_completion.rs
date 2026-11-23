@@ -72,10 +72,41 @@ impl Editor {
                 popup.set_filter(&prefix);
             }
 
-            if !popup.is_empty() {
-                self.lsp.completion_popup = Some(popup);
-            }
+            // The latest answer stands, an empty one too: under an
+            // incomplete list it replaces the list asked again for.
+            self.lsp.completion_popup = (!popup.is_empty()).then_some(popup);
         }
+    }
+
+    /// Ask the server again for an incomplete list whose prefix changed
+    /// since (LSP `TriggerForIncompleteCompletions`): it may hold items it
+    /// left out. Several keys typed between two ticks make one request.
+    /// Returns whether a request went out.
+    pub fn requery_incomplete_completion(&mut self, lsp_manager: &LspManager) -> bool {
+        if !std::mem::take(&mut self.lsp.completion_requery) {
+            return false;
+        }
+        // Typed back past the start of the word: that completion is over.
+        if self.cursor.column < self.lsp.completion_trigger_column {
+            return false;
+        }
+        let Some(path) = self.buffer.file_path().map(|p| p.to_path_buf()) else {
+            return false;
+        };
+        // The server completes the text it has: the keys typed come first.
+        self.flush_lsp_changes(lsp_manager);
+        let character = self
+            .buffer
+            .utf16_column(self.cursor.line, self.cursor.column);
+        self.lsp.request_completion(
+            &path,
+            self.cursor.line,
+            character,
+            CompletionTriggerKind::TRIGGER_FOR_INCOMPLETE_COMPLETIONS,
+            None,
+            lsp_manager,
+        );
+        true
     }
 
     /// Get the prefix text for completion (from trigger column to cursor).
@@ -133,6 +164,7 @@ impl Editor {
             }
         }
         self.lsp.completion_popup = None;
+        self.lsp.completion_requery = false;
     }
 
     /// Apply a set of LSP `TextEdit`s to the buffer.
@@ -197,6 +229,7 @@ impl Editor {
     /// Cancel completion popup.
     pub fn cancel_completion(&mut self) {
         self.lsp.completion_popup = None;
+        self.lsp.completion_requery = false;
     }
 
     /// Select next completion item.
@@ -223,7 +256,11 @@ impl Editor {
         // Update popup filter
         if let Some(popup) = &mut self.lsp.completion_popup {
             popup.append_filter(ch);
-            // Close popup if no matches
+            if popup.is_incomplete() {
+                self.lsp.completion_requery = true;
+            }
+            // Close popup if no matches; an incomplete list asked again
+            // may bring some back.
             if popup.is_empty() {
                 self.lsp.completion_popup = None;
             }
@@ -240,6 +277,9 @@ impl Editor {
         // Update popup filter
         if let Some(popup) = &mut self.lsp.completion_popup {
             popup.backspace_filter();
+            if popup.is_incomplete() {
+                self.lsp.completion_requery = true;
+            }
         }
     }
 
@@ -484,6 +524,55 @@ fn char_triggers_completion(ch: char, server_triggers: &[String]) -> bool {
         server_triggers
             .iter()
             .any(|trigger| trigger.starts_with(ch))
+    }
+}
+
+#[cfg(test)]
+mod incomplete_tests {
+    use lsp_types::{CompletionItem, CompletionList, CompletionResponse};
+
+    use crate::completion_popup::CompletionPopup;
+    use crate::Editor;
+
+    fn popup(is_incomplete: bool) -> CompletionPopup {
+        CompletionPopup::from_response(CompletionResponse::List(CompletionList {
+            is_incomplete,
+            items: ["foo", "foobar", "fox"]
+                .into_iter()
+                .map(|label| CompletionItem {
+                    label: label.into(),
+                    ..Default::default()
+                })
+                .collect(),
+        }))
+    }
+
+    /// Typing under an incomplete list asks the server again; under a
+    /// complete one it only filters.
+    #[test]
+    fn typing_under_an_incomplete_list_asks_again() {
+        let mut e = Editor::from_text("", "t".into());
+        e.lsp.completion_popup = Some(popup(false));
+        e.filter_completion('f');
+        assert!(!e.lsp.completion_requery);
+
+        e.lsp.completion_popup = Some(popup(true));
+        e.filter_completion('o');
+        assert!(e.lsp.completion_requery);
+        e.lsp.completion_requery = false;
+        e.backspace_completion();
+        assert!(e.lsp.completion_requery);
+
+        // No match left: the popup closes, the question still goes out.
+        e.lsp.completion_requery = false;
+        e.filter_completion('z');
+        e.filter_completion('z');
+        assert!(e.lsp.completion_popup.is_none());
+        assert!(e.lsp.completion_requery);
+
+        // Esc ends it.
+        e.cancel_completion();
+        assert!(!e.lsp.completion_requery);
     }
 }
 

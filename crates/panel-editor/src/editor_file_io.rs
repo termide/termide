@@ -76,6 +76,7 @@ impl Editor {
 
             // Save to local temp file first
             self.buffer.save()?;
+            self.breakpoints_saved();
 
             // Get remote path and temp path
             let remote_path = self
@@ -109,6 +110,7 @@ impl Editor {
                     Ok(new_config) => {
                         // Save and set config update flag
                         self.buffer.save()?;
+                        self.breakpoints_saved();
                         log::info!("Config file saved: {}", path_str);
                         self.saved_paths.push(path.clone());
                         self.config_update = Some(new_config);
@@ -125,6 +127,7 @@ impl Editor {
         }
 
         self.buffer.save()?;
+        self.breakpoints_saved();
 
         if let Some(path) = self.buffer.file_path() {
             log::info!("File saved: {}", path.display());
@@ -149,7 +152,13 @@ impl Editor {
             // The size limit of opening holds here too: a file grown past
             // it stays out, and the buffer keeps what it had.
             file_io::check_file_metadata(&path)?;
-            self.sync_breakpoints();
+            if self.buffer.is_modified() {
+                // The edits that moved them are dropped: back to where they
+                // sit in the text being read.
+                self.discard_breakpoint_edits();
+            } else {
+                self.sync_breakpoints();
+            }
             self.buffer = TextBuffer::from_file(&path)?;
             self.reload_breakpoints();
             // The new buffer has no folds; ranges asked of the old one are stale.
@@ -272,6 +281,7 @@ impl Editor {
     /// would upload the old temp copy over the original remote file.
     pub fn save_file_as(&mut self, path: PathBuf) -> Result<()> {
         self.buffer.save_to(&path)?;
+        self.breakpoints_saved();
         log::info!("File saved as: {}", path.display());
         self.saved_paths.push(path.clone());
 

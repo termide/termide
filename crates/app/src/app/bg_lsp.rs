@@ -111,6 +111,12 @@ impl App {
                 editor.poll_completion();
                 let has_popup_now = editor.has_completion_popup();
 
+                // An incomplete list whose prefix changed is asked again,
+                // whether or not completion opens by itself.
+                if let Some(ref lsp_manager) = self.state.lsp_manager {
+                    editor.requery_incomplete_completion(lsp_manager);
+                }
+
                 // Check auto-completion timer if enabled
                 if self.state.config.lsp.auto_completion {
                     if let Some(ref lsp_manager) = self.state.lsp_manager {
