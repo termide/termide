@@ -4,8 +4,8 @@
 //! `edit`, `write` and `shell`; `skill` joins them when the project or the
 //! user defines skills, `question` when someone watches the run to answer.
 //! `checklist` keeps the steps of the work at hand.
-//! The tools that reach the rest of termide (`terminals`, `debug`, `task`,
-//! `jobs`, `agents`, `send_message`, `fork`, `suggest_*`) live here too, but
+//! The tools that reach the rest of termide (`terminals`, `debug`,
+//! `start_session`, `jobs`, `sessions`, `send_message`, `suggest_*`) live here too, but
 //! the app registers them, since it owns what they reach.
 //! Search is left to the shell (`rg`, `find`), which every model already
 //! knows. Contracts follow the cross-agent
@@ -21,7 +21,6 @@ mod checklist;
 mod clean;
 mod debug;
 mod edit;
-mod fork;
 mod jobs;
 mod lsp;
 mod peers;
@@ -29,8 +28,8 @@ mod question;
 mod read;
 mod shell;
 mod skill;
+mod start_session;
 mod suggest;
-mod task;
 mod terminals;
 mod truncate;
 mod write;
@@ -45,10 +44,9 @@ pub use checklist::ChecklistTool;
 pub use clean::{clean_output, Cleaned};
 pub use debug::{parse_action as parse_debug_action, DebugAction, DebugCheck, DebugRun, DebugTool};
 pub use edit::EditTool;
-pub use fork::{ForkRequest, ForkSession, ForkTool};
 pub use jobs::{JobsTool, OwnTasks};
 pub use lsp::{set_lsp_check, FileError, LspCheck, LspReport};
-pub use peers::{AgentsTool, PeerInfo, PeerList, PeerSend, SendMessageTool};
+pub use peers::{PeerInfo, PeerList, PeerSend, SendMessageTool, SessionsTool};
 pub use question::QuestionTool;
 pub use read::ReadTool;
 pub use shell::{ShellProgram, ShellTool};
@@ -58,7 +56,10 @@ pub use suggest::SuggestCommandTool;
 pub mod jobs_text {
     pub use crate::jobs::{duration, first_line};
 }
-pub use task::{SubagentOutcome, SubagentRun, SubagentTask, TaskTool};
+pub use start_session::{
+    ForkedTask, SessionContext, SessionReply, SessionRequest, SessionShow, StartSession,
+    StartSessionTool, SubagentOutcome, SubagentTask, START_SESSION,
+};
 pub use terminals::TerminalsTool;
 pub use write::WriteTool;
 

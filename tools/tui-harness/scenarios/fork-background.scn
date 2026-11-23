@@ -1,0 +1,27 @@
+# A fork run out of sight (`start_session` with `context` `fork`, the mock
+# model's "fork the stock scan"): the card names the work the fork takes up,
+# the copy runs as a delegate with its row under the conversation, knows the
+# conversation it was copied from, runs on the session's own model rather
+# than the one [ai.subagents] names, and its answer comes back to the agent,
+# which quotes it.
+config side-models.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "fork the stock scan"
+key Enter
+wait "I'll fork the stock scan." 20
+wait "Agent wants to run start_session" 15
+wait "fork: FORKTASK: count the items" 5
+snapshot card
+type "1"
+wait-gone "Agent wants to run start_session" 10
+wait "The fork runs in the background." 20
+wait-re "^│& Delegating to · default +FORKTASK: count the items" 10
+snapshot running
+wait "The fork is back: saw the request, on qwen3-coder-30b-a3b" 30
+snapshot done
+quit

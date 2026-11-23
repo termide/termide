@@ -43,7 +43,8 @@ minute.
   "delegate the stock scan", hands a task to a subagent in the background
   and quotes its report ("… and again" hands it over a second time when the
   first report comes back, "… in a panel" hands it over to show in a panel
-  of its own); asked to "break the count", it makes a number a
+  of its own); asked to "fork the stock scan", hands it to a copy of its
+  session run out of sight and quotes what the copy reports; asked to "break the count", it makes a number a
   string in a Cargo project's `src/main.rs` and repeats what the edit's
   result said of the language server's errors. It logs the model every call asks for. `mock-acp codex`
   (or `claude_code`, `gemini_cli`) makes that ACP agent the connection and
@@ -99,7 +100,11 @@ and with `@term`, as the Claude Code stand-in receives them),
 `agent-lsp-errors` and `agent-lsp-new-errors` (rust-analyzer's errors in
 the mock model's edit result, for a file no editor has, and the new ones
 alone for one an editor has; both need rust-analyzer on `PATH`), `delegate` (a background subagent's row and report, on the model
-`[ai.subagents]` names), `agent-message-limit` (past
+`[ai.subagents]` names), `delegate-panel` (a subagent shown in a panel of
+its own, the focus staying put, its report going back too),
+`fork-background` (a fork run out of sight: the copy knows the
+conversation, runs on the session's own model, and its answer comes back),
+`agent-message-limit` (past
 `max_agent_messages` the card asking whether to allow more, and the task
 going on once allowed), `agent-send-message` (a message to another
 agent asking every time, its card showing whom it goes to and all it says),

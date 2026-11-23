@@ -781,7 +781,7 @@ of a delegate opens by itself.
 
 **Continue** on the carry-on card carries the panel's own work on and, with
 it, every delegate it left behind: each runs again out of sight under the
-`task` call that handed it over, taking its steps back from its own log —
+`start_session` call that handed it over, taking its steps back from its own log —
 what it did before stands there, so it goes on rather than starts over — and
 answering the panel that delegated it when it is over. A delegate run by an
 external agent goes on in the agent's own session, which its log names, or,
@@ -954,7 +954,7 @@ work figures, no wall-clock, and show them only unfolded. A tool call shows
 how long it took (`🕒 6s`) and its status. A call that waited on a permission question shows that
 wait apart, first, as the pause it was: `‖ 12s 🕒 2s`, the `‖` marked and
 ticking while the question is up; the `🕒` counts only the call's own run. A
-`task` call shows before it what the subagent's model calls spent, its
+`start_session` call shows before it what the subagent's model calls spent, its
 reviewer's included, in the form of the session's totals: `↑3k ↻40k ↓800 🕒 1m2s`. When a turn reasons, the reasoning block carries the turn's cost —
 the prefill phase (`⏫ 6s (↑42k, 7k tok/s)`) and the generation phase
 (`✍️ 12s (↓5k, 420 tok/s)`), each with its duration (whole seconds), token count
@@ -1283,9 +1283,10 @@ with **jobs**, which lists and stops what the agent set going (see
 after the list.
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
-`fetch`, `web_search`, `skill`, `agents`, `jobs` listing, `debug` reading the
+`fetch`, `web_search`, `skill`, `sessions`, `jobs` listing, `debug` reading the
 session's state, `terminals` looking at a session, a look-only `shell` command
-such as `rg` or `git log` — and `task` delegations run side by side; each ends in the
+such as `rg` or `git log` — and `start_session` delegations (all but a fork
+into a panel) run side by side; each ends in the
 transcript as it finishes, and the model gets their results in the order it
 asked. Their permission decisions still take turns, before any of them runs.
 Any other call runs alone: those before it have ended when it starts, and
@@ -2024,15 +2025,16 @@ server marks read-only (`readOnlyHint`) runs, one a configured rule or your
 answer for the session allows runs, and any other asks, with "Allow always"
 on offer. A tool switched off for the session in the tools menu stays off,
 and a `deny` rule refuses it even when its server calls it read-only.
-`task` runs too: the subagent is held to plan mode whatever its `AGENT.md`
-says, so it only reads; plan mode switched on while a task runs holds it from
-its next call on. `suggest_command` puts its card up with only **Copy**
+`start_session` runs too: the subagent — a fork run out of sight among
+them — is held to plan mode whatever its `AGENT.md` says, so it only reads;
+plan mode switched on while a task runs holds it from its next call on. `suggest_command` puts its card up with only **Copy**
 and **Don't run**; `suggest_goal` and `suggest_loop` keep **Start**, since
 what they start runs in plan mode too. `send_message` is refused: the panel it reaches is not in
-plan mode, and could make the change this one may not; so is `fork`, whose
-copy is not in plan mode either. `debug` only reads the
+plan mode, and could make the change this one may not; so is a fork into a
+panel (`start_session` with `context` `fork` and `show` `panel`), whose copy
+is not in plan mode either. `debug` only reads the
 session (`state`); starting, stepping or stopping the program is refused.
-`agents`, `checklist`, `jobs` and `terminals` (but its `send`) run — what
+`sessions`, `checklist`, `jobs` and `terminals` (but its `send`) run — what
 the agent set going it may still stop or close; a line `send` types at a
 shell prompt passes when it is look-only, and any other `send` is refused.
 
@@ -2123,7 +2125,7 @@ Some things are never left to the reviewer, and ask as in `configured`:
 A rule's `deny` refuses as in every mode. The broad `allow` rules — a
 whole tool (`"*" = "allow"`), a wildcard after an interpreter, a script
 runner or a wrapper (`python3*`, `npm run *`, `make*`, `env *`), an `allow`
-for `task` — are set aside, since they would let any program run past the
+for `start_session` — are set aside, since they would let any program run past the
 reviewer; narrow ones such as `"cargo test*"` still pass without it. So a
 card in `auto` does not offer "allow always" for what such a rule would
 say: allowing it there lasts for the session.
@@ -2304,7 +2306,7 @@ endpoint; `mode` is the permission mode the agent starts in (`ask`, `plan`,
 `edit`, `configured`, `auto` or `all`); `tools` lists the built-in tools the
 agent keeps, separated by commas (brackets around the list are fine too, and so is a
 YAML list of `- name` lines under `tools:`),
-`task` included; without it the agent has them all, and `tools: []` leaves
+`start_session` included; without it the agent has them all, and `tools: []` leaves
 none. Skills and MCP servers' tools are not governed by
 it: they come with what you configured. `max_turns` is how many model calls
 a task delegated to the agent may take before it is cut off (fifty when
@@ -2332,9 +2334,42 @@ and the session log records the switch, as it does for the **Model** chip.
 A reopened session comes back as the agent it last ran as, and a saved layout
 remembers it too.
 
+### Starting sessions
+
+An agent hands work to another session with **start_session**. Three choices
+say what that session is:
+
+| Argument | Values | What it chooses |
+|---|---|---|
+| `context` | `none` (the default), `fork` | what the session knows: the prompt alone, run by the `agent` the call names, or a copy of this conversation, run by this session's own agent on its model |
+| `reply` | `wait` (the default out of sight), `later` (the default in a panel), `none` | whether its answer is the call's result, comes later as a message of its own, or does not come back |
+| `show` | `background` (the default), `panel` | whether it runs out of sight, followed from this panel, or in an agent panel of its own |
+
+`title` names the session, and `focus`, for a fork, is what its copy keeps in
+full when it is compacted first. What does not hold together is refused with
+what to change: a session in a panel is yours to follow, so no call waits on
+it; a fork in a panel is your session from its start and reports nothing, so
+it takes `reply` `none`; a fresh session needs an `agent`, and has no
+conversation for a `focus` to compact.
+
+| `context` | `show` | What runs |
+|---|---|---|
+| `none` | `background` | a [subagent](#subagents), waited for or [in the background](#in-the-background) |
+| `none` | `panel` | a subagent shown in a panel of its own |
+| `fork` | `background` | a copy of the session run out of sight as a subagent ([forking](#forking-part-of-the-work)) |
+| `fork` | `panel` | a copy of the session in a panel of its own, yours from its start |
+
+The step reads `& Delegating to reviewer · …` for a fresh session and
+`& Forking · …` for a fork. `start_session` acts outside the conversation, so
+it asks in `ask` mode, and an answer for the session trusts that agent's
+jobs, or the forks of this session. Earlier versions had `task` and `fork`
+in its place, and `agents` where `sessions` is now: those names are unknown
+tools now — rename them in an agent's `tools` list and in permission rules —
+while the session logs that used them still show and carry on.
+
 ### Subagents
 
-Each built-in-loop agent gets a `task` tool that hands a self-contained job
+`start_session` with `context` `none` hands a self-contained job
 to another agent — or to a fresh copy of itself, so a lone `default` agent
 delegates too. The delegate runs its
 own loop to the end — its own prompt, its own tools, its own model — and its
@@ -2357,7 +2392,7 @@ one to ask — a `termide --prompt` run — anything that would ask is refused
 with a reason the delegate reads. External agents (those with a `command`)
 are delegates too: one runs its own program for the task, with its own
 tools, as it does in a panel, and its permission requests reach you the same
-way. A subagent gets no `task` tool of its own, so delegation does not nest. An agent whose `tools` list leaves out `task`
+way. A subagent gets no `start_session` of its own, so delegation does not nest. An agent whose `tools` list leaves out `start_session`
 cannot delegate. Besides its own tools, a built-in-loop delegate gets those of the MCP
 servers connected when its task starts — like the panel's agent, whatever
 its `tools` list says; a server still connecting then is left out of that
@@ -2420,7 +2455,7 @@ following the task goes back to the delegating panel: neither stops the task, an
 back to the delegating panel. Once the task is over, the view shows it as it
 ended, to read, with **In a panel** and **Close** alone; in a panel — or once moved into one — its
 session opens as any other, to go on talking to. A task taken over in the
-view moves into a panel at once. `o` on a finished `task` block opens its
+view moves into a panel at once. `o` on a finished `start_session` block opens its
 session in a panel.
 
 A delegate runs on the connection the session's connection names under
@@ -2445,8 +2480,8 @@ to their own connection.
 
 #### In the background
 
-A `task` call with `background` does not wait: the task runs out of sight
-as a delegate the call waits for does, and the call returns at once. The delegating agent carries on, and when the task is
+A `start_session` call with `reply` `later` does not wait: the task runs out
+of sight as a delegate the call waits for does, and the call returns at once. The delegating agent carries on, and when the task is
 over its answer reaches the session that handed it over, wherever it is
 open by then, as a message of the delegate's, a step
 reading `& Receiving reply from <delegate> · …`, the way an answer to
@@ -2454,7 +2489,7 @@ reading `& Receiving reply from <delegate> · …`, the way an answer to
 at its next step. Several background tasks can run at once. With no block
 running for it, each has a row above the delegating panel's input
 (`& Delegating to · agent  task`, what it did last and its time) with a `✕`
-that stops it, after a confirmation, as a waited-for task's row has; a click elsewhere on the row, or `o` on the `task` block,
+that stops it, after a confirmation, as a waited-for task's row has; a click elsewhere on the row, or `o` on the `start_session` block,
 shows a view of it, as for any delegate (above). The delegating agent can
 stop the task itself, without asking you, once it no longer needs it — see
 [What the agent set going](#what-the-agent-set-going). Its permission
@@ -2468,24 +2503,28 @@ run: a new session, another one opened, a switch of model or agent wait for
 them, with a notice saying how many still run. Each answer counts among the messages agents pass one another
 without you, so a chain of background tasks is cut off as such messages
 are. Only an agent in a panel can hand a task over in the background: a
-headless run has nowhere to take the answer.
+headless run has nowhere to take the answer. With `reply` `none` the task
+runs the same way and nothing comes back: no turn is started, and its
+session keeps what it did, carried on as any delegate's if termide closes
+first.
 
-A `task` call with `panel` hands the task over in the background and shows
-it in an agent panel of its own beside the others, as if you had moved its
+A `start_session` call with `show` `panel` hands the task over in the
+background and shows it in an agent panel of its own beside the others, as if you had moved its
 view into one (`F9`): the focus stays where it was, the panel follows the
 task while it runs, and once the task is over it holds the delegate's
-session, to go on talking to. Its answer still reaches the delegating agent.
+session, to go on talking to. Its answer still reaches the delegating agent,
+unless the call said `reply` `none`.
 It is how you start an agent with a clean context and a prompt of the
 agent's writing, then work with it yourself: ask the agent for a fresh
 agent in a panel. A fork does the same with the conversation so far; a
-`panel` task starts from the prompt alone.
+fresh session in a panel starts from the prompt alone.
 
 #### What the agent set going
 
 An agent can set work going that runs on while it does something else: tasks
 it hands over in the background, those of them parked at a limit, and a
 delegate or a command it was waiting for when you wrote to it. A message you
-type while the panel's agent waits on a `task` call does not wait for the
+type while the panel's agent waits on a `start_session` call does not wait for the
 task to end: the task moves to the background — the call returns saying so,
 with the task's id, the task gets a row above the input as one handed over
 in the background has, and its answer comes later as a message — so the
@@ -2505,22 +2544,22 @@ green — rather than leave it running to its cap; stopping it ends it as
 yours and is not listed: its judge ends it. Terminal sessions — a
 `shell` call with `background` among them — are not jobs: `terminals` lists
 and closes them.
-The tool comes with `task`: an agent whose `tools` list leaves `task` out
+The tool comes with `start_session`: an agent whose `tools` list leaves `start_session` out
 gets `jobs` only by naming it. Subagents have neither.
 
 #### What runs beside the conversation
 
 | Work | Set going by | Its row above the input | Stopped by | What comes back | Bounded by |
 |---|---|---|---|---|---|
-| A subagent waited for | the agent's `task` | `& Delegating to · agent` | `✕`, `Esc` | its answer, as the call's result | 50 model calls (`max_turns`) |
-| A task in the background | `task` with `background` or `panel` (shown in a panel of its own), or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message | the messages agents pass without you (`max_agent_messages`) |
+| A subagent waited for | the agent's `start_session`, a fork run out of sight among them | `& Delegating to · agent` | `✕`, `Esc` | its answer, as the call's result | 50 model calls (`max_turns`) |
+| A task in the background | `start_session` with `reply` `later` or `none`, or `show` `panel` (shown in a panel of its own), or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message; nothing with `reply` `none` | the messages agents pass without you (`max_agent_messages`) |
 | A parked task | a limit that passes on its own | `↻ Parked at a limit · agent 21:50` | `✕`, `jobs` (both give it up) | its answer once it goes again and ends | six tries |
 | A task left unfinished | termide closing while it ran | `& Delegating to · agent · left unfinished` | its session's carry-on card | its answer once carried on | — |
 | A call moved to the background | an external agent, to take a message typed while it ran | `$ Running  cargo test` | `✕`, `jobs`, `Esc` | its result, to the agent, which goes on by itself | — |
 | A terminal | `shell` with `session` or `background` | `$ Terminal · name` | `✕`, `terminals close` | what it printed, when the agent reads it | 2 MiB in memory, 256 MiB of log |
 | A `/goal` | you | `◎ Heading for the goal` | `✕`, `/goal stop`, `Esc` | the judge's verdict | the judge; it pauses when the agent only talks |
 | A `/loop` | you | `↺ Repeating every 5m · 3/100` | `✕`, `/loop stop`, `Esc`, `jobs` | each run, in the transcript | 100 runs; with `until:`, the judge |
-| A fork | the agent's `fork` | none: a panel of its own | closing its panel | nothing | the messages agents pass without you (`max_agent_messages`) |
+| A fork in a panel | `start_session` with `context` `fork` and `show` `panel` | none: a panel of its own | closing its panel | nothing | the messages agents pass without you (`max_agent_messages`) |
 | A message to another panel | the agent's `send_message` | none | — | an answer, as a message, when one is asked | the messages agents pass without you (`max_agent_messages`) |
 
 `⏸` in the session lists means only a session left with work to carry on —
@@ -2531,7 +2570,7 @@ pause and `↻` a wait for a limit, the panel's own or a parked task's.
 
 The panel's own agent, and Claude Code on termide's tools, can write to the
 agents of the other agent panels open in the project, on screen or in the
-background. **agents** lists the sessions open in them — each one's id, its
+background. **sessions** lists the sessions open in them — each one's id, its
 agent, what it is doing (free, idle, working, waiting for you, following
 another agent's task), where it works and the panel it is open in — and
 **send_message** sends one of them a message: `info` to tell it something,
@@ -2557,10 +2596,10 @@ work so far and has nothing to answer from. Every exchange with another
 agent opens with `&` in the transcript, the verb saying which way it goes:
 `& Delegating to …` for a task, `& Asking session 1a2b3c4d · …`,
 `& Replying to session 5e6f7a8b · …` and `& Telling session 1a2b3c4d · …`
-for a message sent, `& Listing agent panels` for `agents`. `send_message` acts outside the
+for a message sent, `& Listing agent sessions` for `sessions`. `send_message` acts outside the
 panel, so it asks as such tools do: in `ask` mode you confirm each message,
 seeing whom it goes to and all it says, and no answer outlasts it — what it
-asks for is in its text, which no rule reads; in plan mode none goes; `agents` only reads. Agents may pass ten messages to
+asks for is in its text, which no rule reads; in plan mode none goes; `sessions` only reads. Agents may pass ten messages to
 one another without you — `max_agent_messages` under `[ai]`, also on the
 settings window's AI page, sets how many, `0` for no limit, and open panels
 take a change at once. Before the next, the agent asks you on a card whether
@@ -2582,16 +2621,18 @@ changes count as its parent panel's. Changes made outside the agents' tools
 ### Forking part of the work
 
 A long session sometimes reaches work that should go on apart from it — a
-side task to finish with you, a second line of work beside the first.
-**fork** hands it over: the agent's session is copied into a new agent panel,
-as `F5` would, and the copy takes the part of the work the agent wrote for it
-as its first request (`& Forking · …` in this panel, `& Taking over from …`
-in the new one). With a `focus`, the copy is compacted on it first, as
+side task to finish with you, a second line of work beside the first, a
+question best answered by something that knows the whole story.
+`start_session` with `context` `fork` hands it over to a copy of the agent's
+session, which takes the part of the work the agent wrote for it as its
+first request. With `show` `panel` the copy opens in a new agent panel, as
+`F5` would (`& Forking · …` in this panel, `& Taking over from …` in the new
+one); out of sight, it runs as a [subagent](#subagents) does. With a `focus`, the copy is compacted on it first, as
 `/fork <focus>` does, so that it starts with what bears on its part rather
 than the whole history; without one it keeps the whole conversation. The
 copy is a session of the same agent, on the same model. An external agent's
 copy branches off the agent's session when it can (see `/fork` in
-[Using the panel](#using-the-panel)); the `fork` call then returns once it
+[Using the panel](#using-the-panel)); the call then returns once it
 has, so the
 copy holds the conversation up to that call. It is named after its
 own part of the work rather than after the session it came from: the `title`
@@ -2599,21 +2640,33 @@ the agent gave it, or else the first line of that request, cut short — with a
 counter only when another session already has the name — and that name is
 its panel's title, so several forks of one session are told apart at a glance.
 
-Unlike a [subagent](#subagents), the fork is yours from the start: a session
-like any other, on the panel's usual rules, with its own `task`, and with no
+Unlike a [subagent](#subagents), a fork in a panel is yours from the start: a session
+like any other, on the panel's usual rules, with its own `start_session`, and with no
 limit on its model calls. It reports nothing back — the agent that forked is
 told the new session's id and goes on with the rest — and its panel stays
 until you close it; closing the panel that forked does not touch it. The
 agents can still reach one another with `send_message`. The copy is made in
-the middle of the run that forked it: in it, the `fork` call is answered as
+the middle of the run that forked it: in it, the call is answered as
 the one that made the copy, and any other call of the same reply as not run
 there, so the copy opens at rest rather than as a run to carry on. The new
 panel takes its place in the layout as any new panel does.
 
-`fork` changes the layout and starts work, so it asks in `ask` mode and is
-refused in plan mode. Its first request counts among the messages agents
-pass one another without you, so a chain of forks is cut off as a chain of
-messages is.
+A fork into a panel changes the layout and starts work, so it asks in `ask`
+mode and is refused in plan mode. Its first request counts among the
+messages agents pass one another without you, so a chain of forks is cut off
+as a chain of messages is.
+
+A fork run out of sight is a subagent that starts from the conversation
+rather than a prompt alone: it runs termide's loop on the session's own
+model, whatever **Subagents** names for its connection, so what the provider
+cached of the conversation serves it too, and with a `focus` it is compacted
+on it before it starts. Its answer comes as `reply` says — the call's
+result, a message later, or nothing — and it is followed, paused, stopped,
+held to plan mode and carried on as any delegate is, from its row above the
+input and with `jobs`. Its session is the copy, listed with `&` among the
+delegates' sessions. A session on an external agent or a CLI connection
+runs on a program of its own that termide cannot run out of sight, so it
+forks into a panel only.
 
 ### External agents
 
@@ -2920,15 +2973,15 @@ to change how the answer is drawn or cited.
 
 What the model is told about each built-in tool is a file too:
 `tools/<name>.md` for `read`, `edit`, `write`, `shell`, `question`,
-`suggest_command`, `suggest_goal`, `suggest_loop`, `task`, `skill`, `fetch`,
-`web_search`, `recall`, `agents`, `send_message`, `fork`, `debug`, `jobs`,
+`suggest_command`, `suggest_goal`, `suggest_loop`, `start_session`, `skill`,
+`fetch`, `web_search`, `recall`, `sessions`, `send_message`, `debug`, `jobs`,
 `checklist` and `terminals`, seeded
 and kept current like the `system/` files, and read from the configuration
 level only. The body is the description the model sees with the tool;
 `snippet:` in the front matter is its line in the system prompt's tool list
 (leave it out to keep the tool off the list, still callable), and
 `guideline.1:`, `guideline.2:`, … are rules added to the prompt's guidelines,
-in their order. In `task.md`, `{{agents}}` is where the agents it can delegate
+in their order. In `start_session.md`, `{{agents}}` is where the agents it can delegate
 to are listed. Reword a file to change how the agent uses that tool; the tool
 itself, its arguments and what it returns stay the same. An edit reaches a
 panel the next time it takes up its agent (a new panel, a switch of agent or of

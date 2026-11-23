@@ -1378,6 +1378,31 @@ fn a_fork_copies_the_branch_under_a_new_id_and_leaves_the_source_alone() {
 }
 
 #[test]
+fn a_fork_run_out_of_sight_names_the_session_that_started_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut session = Session::create_exclusive(dir.path(), Path::new("/work")).unwrap();
+    session
+        .append_message(&Message::User(UserMessage::text("one")))
+        .unwrap();
+    let parent = SessionParent {
+        session: Some(session.id().to_string()),
+        agent: "default".into(),
+        call: "s1".into(),
+        silent: false,
+    };
+    let copy = session
+        .fork_delegate(Path::new("/work"), None, parent.clone())
+        .unwrap();
+    let forked = Session::open(&copy).unwrap();
+    assert_eq!(forked.header().parent.as_ref(), Some(&parent));
+    // A copy, so its delegate runs it on the session's own model.
+    assert!(forked.header().copied.is_some());
+    // A fork made in a panel keeps what its source says of its own parent.
+    let plain = Session::open(&session.fork(Path::new("/work"), None).unwrap()).unwrap();
+    assert_eq!(plain.header().parent, None);
+}
+
+#[test]
 fn a_fork_takes_the_current_branch_only() {
     let dir = tempfile::tempdir().unwrap();
     let mut session = Session::create(dir.path(), Path::new("/w")).unwrap();

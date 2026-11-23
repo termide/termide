@@ -1,13 +1,13 @@
-//! `agents` and `send_message`: agents in different panels talking to one
+//! `sessions` and `send_message`: agents in different panels talking to one
 //! another.
 //!
-//! `agents` lists the sessions open in the agent panels of the project;
+//! `sessions` lists the sessions open in the agent panels of the project;
 //! `send_message` hands one of them a message, which reaches its agent as
 //! another agent's words — never the user's — and starts a turn there or
 //! joins the one under way. A message goes to a session, not a panel: the
 //! panel it is open in may show another one by then, and the session may be
 //! open in another panel or in none. An answer comes back the same way, as a
-//! message of its own. Like `task`, the tools hold no panel machinery: the
+//! message of its own. Like `start_session`, the tools hold no panel machinery: the
 //! app supplies closures that reach the panels.
 
 use std::path::PathBuf;
@@ -20,7 +20,7 @@ use termide_agent_core::{
 
 use crate::args::required_str;
 
-/// A session open in an agent panel, as `agents` lists it.
+/// A session open in an agent panel, as `sessions` lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PeerInfo {
     /// The session's id, which `send_message` takes.
@@ -44,25 +44,25 @@ pub type PeerList = Arc<dyn Fn(&ToolContext) -> Result<Vec<PeerInfo>, String> + 
 pub type PeerSend =
     Arc<dyn Fn(&ToolContext, &str, OriginKind, &str) -> Result<String, String> + Send + Sync>;
 
-/// `agents`: the sessions open in the agent panels of the project.
-pub struct AgentsTool {
+/// `sessions`: the sessions open in the agent panels of the project.
+pub struct SessionsTool {
     list: PeerList,
 }
 
-impl AgentsTool {
+impl SessionsTool {
     #[must_use]
     pub fn new(list: PeerList) -> Self {
         Self { list }
     }
 }
 
-impl Tool for AgentsTool {
+impl Tool for SessionsTool {
     fn name(&self) -> &str {
-        "agents"
+        "sessions"
     }
 
     fn description(&self) -> &str {
-        &ToolText::seed("agents").description
+        &ToolText::seed("sessions").description
     }
 
     fn parameters(&self) -> Value {
@@ -70,7 +70,7 @@ impl Tool for AgentsTool {
     }
 
     fn prompt_snippet(&self) -> Option<&str> {
-        ToolText::seed("agents").snippet.as_deref()
+        ToolText::seed("sessions").snippet.as_deref()
     }
 
     fn execute(
@@ -137,7 +137,7 @@ impl Tool for SendMessageTool {
             "properties": {
                 "to": {
                     "type": "string",
-                    "description": "The id of the session to write to: from `agents`, or the `session` of the message you answer"
+                    "description": "The id of the session to write to: from `sessions`, or the `session` of the message you answer"
                 },
                 "kind": {
                     "type": "string",
@@ -171,7 +171,7 @@ impl Tool for SendMessageTool {
         let Some(to) = call.arguments.get("to").and_then(session_id) else {
             return ToolResultMessage::error(
                 call,
-                "missing required argument `to`: a session id from `agents`, or the `session` \
+                "missing required argument `to`: a session id from `sessions`, or the `session` \
                  of the message you answer",
             );
         };
@@ -245,8 +245,8 @@ mod tests {
     }
 
     #[test]
-    fn agents_lists_the_sessions_this_one_marked() {
-        let tool = AgentsTool::new(Arc::new(|_| {
+    fn sessions_lists_the_sessions_this_one_marked() {
+        let tool = SessionsTool::new(Arc::new(|_| {
             Ok(vec![peer(1, "default", true), peer(2, "reviewer", false)])
         }));
         assert_eq!(
@@ -254,7 +254,7 @@ mod tests {
             "s1 · default · idle · /work · panel 1 (this session)\n\
              s2 · reviewer · idle · /work · panel 2"
         );
-        let alone = AgentsTool::new(Arc::new(|_| Ok(vec![peer(1, "default", true)])));
+        let alone = SessionsTool::new(Arc::new(|_| Ok(vec![peer(1, "default", true)])));
         assert!(run(&alone, json!({})).plain_text().contains("No other"));
     }
 

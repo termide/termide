@@ -131,7 +131,7 @@ DELEGATE_SCRIPT = [
     {
         "reasoning": "",
         "text": "I'll hand the stock scan to a subagent.",
-        "tool": ("task", {"agent": "default", "prompt": SUBTASK, "background": True}),
+        "tool": ("start_session", {"agent": "default", "prompt": SUBTASK, "reply": "later"}),
     },
     {"reasoning": "", "text": "The scan runs in the background.", "tool": None},
 ]
@@ -143,7 +143,7 @@ AGAIN = "and again"
 AGAIN_STEP = {
     "reasoning": "",
     "text": "Once more, in the background.",
-    "tool": ("task", {"agent": "default", "prompt": SUBTASK, "background": True}),
+    "tool": ("start_session", {"agent": "default", "prompt": SUBTASK, "reply": "later"}),
 }
 # Asked to delegate it "in a panel" (the TUI harness's delegate-panel), the
 # agent hands the scan over to be shown in an agent panel of its own.
@@ -151,8 +151,41 @@ IN_PANEL = "in a panel"
 IN_PANEL_STEP = {
     "reasoning": "",
     "text": "I'll hand the stock scan to a subagent in a panel.",
-    "tool": ("task", {"agent": "default", "prompt": SUBTASK, "panel": True}),
+    "tool": ("start_session", {"agent": "default", "prompt": SUBTASK, "show": "panel"}),
 }
+
+
+# Asked to "fork the stock scan" (the TUI harness's fork-background), the
+# agent hands the scan over to a copy of its session run out of sight, whose
+# answer comes back later. The copy knows the conversation: its report says
+# whether it saw the user's request, and on which model it ran.
+FORK = "fork the stock scan"
+FORKTASK = "FORKTASK: count the items under their reorder point"
+FORKREPORT = "FORKREPORT: "
+FORK_SCRIPT = [
+    {
+        "reasoning": "",
+        "text": "I'll fork the stock scan.",
+        "tool": (
+            "start_session",
+            {"context": "fork", "prompt": FORKTASK, "reply": "later", "title": "Stock scan"},
+        ),
+    },
+    {"reasoning": "", "text": "The fork runs in the background.", "tool": None},
+]
+
+
+def fork_step(done, users, model):
+    last = users[-1] if users else ""
+    if FORKREPORT in last:
+        found = last[last.index(FORKREPORT) + len(FORKREPORT) :].split(".")[0]
+        return {"reasoning": "", "text": "The fork is back: " + found + ".", "tool": None}
+    if FORKTASK in last:
+        time.sleep(SUBAGENT_DELAY)
+        seen = "saw" if any(FORK in u for u in users[:-1]) else "missed"
+        text = FORKREPORT + seen + " the request, on " + model + "."
+        return {"reasoning": "", "text": text, "tool": None}
+    return FORK_SCRIPT[min(done, len(FORK_SCRIPT) - 1)]
 
 
 # A third, played when the user asks to "break the count" in a Cargo project
@@ -342,7 +375,9 @@ class Handler(BaseHTTPRequestHandler):
             # Only the user's request says DELEGATE: the subagent's task does
             # not, though the report back may repeat the task.
             main = any(DELEGATE in u for u in users)
-            if any(BREAK in u for u in users):
+            if any(FORK in u for u in users):
+                step = fork_step(done, users, model)
+            elif any(BREAK in u for u in users):
                 step = BREAK_SCRIPT[done] if done < len(BREAK_SCRIPT) else lsp_echo(messages)
             elif any(DEBUG in u for u in users):
                 step = debug_step(done, messages)

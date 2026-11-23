@@ -1451,8 +1451,8 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: the action words for a `send_message` call, before
     /// the panel number.
     fn agent_tool_send_message(&self) -> &str;
-    /// Agent transcript: the action words for an `agents` call.
-    fn agent_tool_agents(&self) -> &str;
+    /// Agent transcript: the action words for a `sessions` call.
+    fn agent_tool_sessions(&self) -> &str;
     /// Agent transcript: the action words for a `send_message` question,
     /// before the panel number.
     fn agent_tool_send_question(&self) -> &str;

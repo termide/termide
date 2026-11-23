@@ -921,7 +921,7 @@ impl Translation for RuntimeTranslation {
         agent_tool_suggest_goal,
         agent_tool_suggest_loop,
         agent_tool_send_message,
-        agent_tool_agents,
+        agent_tool_sessions,
         agent_tool_send_question,
         agent_tool_send_reply,
         agent_tool_send_info,

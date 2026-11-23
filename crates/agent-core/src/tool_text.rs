@@ -14,7 +14,7 @@
 //! ```
 //!
 //! The body is the description; a tool may fill placeholders of its own in
-//! it (`task` lists the agents in `{{agents}}`, see
+//! it (`start_session` lists the agents in `{{agents}}`, see
 //! [`Tool::render_description`]). Without `snippet` the tool stays out of the
 //! system prompt's list; guidelines are numbered so they keep their order.
 //! A tool reads its seed ([`ToolText::seed`]); the user's file, when it says
@@ -36,7 +36,7 @@ use crate::tool::{Tool, ToolContext, ToolRegistry, ToolUpdate};
 pub const TOOLS_DIR: &str = "tools";
 
 /// The shipped texts of every built-in tool, by name.
-pub const SEED_TOOLS: [(&str, &str); 20] = [
+pub const SEED_TOOLS: [(&str, &str); 19] = [
     ("read", include_str!("../assets/tools/read.md")),
     ("edit", include_str!("../assets/tools/edit.md")),
     ("write", include_str!("../assets/tools/write.md")),
@@ -54,16 +54,18 @@ pub const SEED_TOOLS: [(&str, &str); 20] = [
         "suggest_loop",
         include_str!("../assets/tools/suggest_loop.md"),
     ),
-    ("task", include_str!("../assets/tools/task.md")),
+    (
+        "start_session",
+        include_str!("../assets/tools/start_session.md"),
+    ),
     ("checklist", include_str!("../assets/tools/checklist.md")),
     ("jobs", include_str!("../assets/tools/jobs.md")),
-    ("fork", include_str!("../assets/tools/fork.md")),
     ("terminals", include_str!("../assets/tools/terminals.md")),
     ("skill", include_str!("../assets/tools/skill.md")),
     ("fetch", include_str!("../assets/tools/fetch.md")),
     ("web_search", include_str!("../assets/tools/web_search.md")),
     ("recall", include_str!("../assets/tools/recall.md")),
-    ("agents", include_str!("../assets/tools/agents.md")),
+    ("sessions", include_str!("../assets/tools/sessions.md")),
     (
         "send_message",
         include_str!("../assets/tools/send_message.md"),
@@ -297,7 +299,9 @@ mod tests {
         let recall = ToolText::seed("recall");
         assert_eq!(recall.guidelines.len(), 2);
         assert!(recall.guidelines[0].starts_with("Use `recall` before"));
-        assert!(ToolText::seed("task").description.contains("{{agents}}"));
+        assert!(ToolText::seed("start_session")
+            .description
+            .contains("{{agents}}"));
         assert!(ToolText::seed("shell").description.contains("{{shell}}"));
         assert!(ToolText::seed("nothing").description.is_empty());
     }

@@ -14,7 +14,7 @@ use termide_agent_core::{OriginKind, UserMessage};
 
 use crate::AgentPanel;
 
-/// What a panel is doing, as the `agents` tool lists it.
+/// What a panel is doing, as the `sessions` tool lists it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PeerState {
     /// Nothing in its session yet.

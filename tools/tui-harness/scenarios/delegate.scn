@@ -13,12 +13,12 @@ type "delegate the stock scan"
 key Enter
 wait "I'll hand the stock scan to a subagent." 20
 # Delegating asks first under the configured permissions.
-wait "Agent wants to run task" 15
+wait "Agent wants to run start_session" 15
 # The card shows the job and whom it goes to, not the agent's name alone.
 wait "default: SUBTASK: list the items" 5
 snapshot card
 type "1"
-wait-gone "Agent wants to run task" 10
+wait-gone "Agent wants to run start_session" 10
 # The subagent's row in the strip: the agent it went to and the task's first
 # line, while it works.
 wait-re "^│& Delegating to · default +SUBTASK: list the items" 10

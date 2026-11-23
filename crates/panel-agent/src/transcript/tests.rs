@@ -53,6 +53,25 @@ fn skill_task_and_mcp_calls_open_with_a_glyph_and_an_action() {
         ),
         "& Delegating to reviewer · check the diff"
     );
+    assert_eq!(
+        headline(
+            "start_session",
+            json!({ "agent": "reviewer", "prompt": "\ncheck the diff\nthen report" })
+        ),
+        "& Delegating to reviewer · check the diff"
+    );
+    assert_eq!(
+        headline(
+            "start_session",
+            json!({ "context": "fork", "prompt": "port the tests\nthen run them" })
+        ),
+        "& Forking port the tests"
+    );
+    // As an older log names a fork.
+    assert_eq!(
+        headline("fork", json!({ "prompt": "port the tests" })),
+        "& Forking port the tests"
+    );
     // Another agent's session: addressed by its id (a number, from an
     // older log, as it was written), the verb saying
     // what the message is, or listed — all with the `&` of a task.
@@ -77,7 +96,9 @@ fn skill_task_and_mcp_calls_open_with_a_glyph_and_an_action() {
         ),
         "& Replying to session 1 · Done"
     );
-    assert_eq!(headline("agents", json!({})), "& Listing agent panels ");
+    assert_eq!(headline("sessions", json!({})), "& Listing agent sessions ");
+    // As an older log names it.
+    assert_eq!(headline("agents", json!({})), "& Listing agent sessions ");
     // What the agent set going, listed or stopped by its id.
     assert_eq!(headline("jobs", json!({})), "& Listing background work ");
     assert_eq!(
@@ -1964,13 +1985,16 @@ fn call_summaries_truncate_and_flatten() {
     );
 }
 
-/// A finished `task` shows under its fold what the subagent spent, as
+/// A finished `start_session` shows under its fold what the subagent spent, as
 /// the session's totals show tokens, beside how long it took.
 #[test]
 fn a_subagents_block_shows_what_it_spent() {
     let colors = ThemeColors::default();
     let mut transcript = Transcript::default();
-    let task = call("task", json!({ "agent": "search", "prompt": "find it" }));
+    let task = call(
+        "start_session",
+        json!({ "agent": "search", "prompt": "find it" }),
+    );
     let spent = termide_agent_core::Usage {
         input: 1200,
         output: 300,

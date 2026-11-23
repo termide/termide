@@ -227,7 +227,7 @@ pub(crate) fn spawn_runtime(
     // permission requests get the built-in agent's treatment (read-only
     // commands and matching rules pass without a prompt).
     let backend_rules = rules.clone();
-    // The delegates of the panel's `task` calls ask its user on the same
+    // The delegates of the panel's `start_session` calls ask its user on the same
     // channel, on cards headed with their names.
     let delegate_prompter = prompter.clone();
     let mut hooks = PermissionHooks::new(rules, Box::new(prompter))

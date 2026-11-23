@@ -721,7 +721,7 @@ impl AgentPanel {
         (lines, at)
     }
 
-    /// Ask before stopping the subagent the `task` call `call` handed over.
+    /// Ask before stopping the subagent the `start_session` call `call` handed over.
     fn ask_stop_task(&self, call: &str) -> PanelEvent {
         crate::live::ask_stop(
             self.panel_id,

@@ -557,7 +557,7 @@ pub enum DefinitionProblem {
 /// the default.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AgentSpec {
-    /// One line for the agent picker and the `task` tool: `description`.
+    /// One line for the agent picker and the `start_session` tool: `description`.
     pub description: String,
     /// What the panel's header shows in place of `🤖`: `icon`.
     pub icon: Option<String>,

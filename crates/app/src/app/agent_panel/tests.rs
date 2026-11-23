@@ -234,16 +234,15 @@ fn every_built_in_tool_has_its_shipped_text() {
     tools.insert(Arc::new(SuggestCommandTool));
     tools.insert(Arc::new(SuggestGoalTool));
     tools.insert(Arc::new(SuggestLoopTool));
-    let run: SubagentRun = Arc::new(|_, _, _, _| unreachable!());
-    tools.insert(Arc::new(TaskTool::new(
+    let start: StartSession = Arc::new(|_, _, _, _| unreachable!());
+    tools.insert(Arc::new(StartSessionTool::new(
         vec![("review".into(), "Reviews".into())],
-        run,
+        start,
     )));
     tools.insert(Arc::new(SkillTool::new(Vec::new())));
     for tool in peers::peer_tools(DEFAULT_AGENT, tmp.path()) {
         tools.insert(tool);
     }
-    tools.insert(peers::fork_tool(DEFAULT_AGENT, tmp.path()));
     tools.insert(debug_tool::debug_tool(tmp.path()));
     tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
 
@@ -644,6 +643,7 @@ fn a_tasks_reviews_are_logged_with_the_task() {
             session: Some("p1".into()),
             agent: "lead".into(),
             call: "call-7".into(),
+            silent: false,
         },
         &DelegateRun {
             connection: "claude",
@@ -694,6 +694,7 @@ fn a_subagent_on_a_cli_agent_runs_its_task_to_the_end() {
         session: Some("p1".into()),
         agent: "lead".into(),
         call: "call-7".into(),
+        silent: false,
     };
     let mut log = DelegateLog::start(
         Some(logs.path()),
@@ -800,6 +801,7 @@ fn a_paused_subagent_on_a_cli_agent_carries_on_in_its_session() {
             session: Some("p1".into()),
             agent: "lead".into(),
             call: "call-8".into(),
+            silent: false,
         },
         &DelegateRun {
             connection: "claude",
@@ -978,7 +980,7 @@ fn a_fork_the_agent_asked_for_answers_its_call_in_the_copy_alone() {
     source.append_message(&Message::Assistant(reply)).unwrap();
     let copy = source.fork(dir.path(), None).unwrap();
 
-    settle_fork(&copy, "f1").unwrap();
+    settle_fork(&copy, "f1", FORKED_RESULT).unwrap();
     let forked = Session::open(&copy).unwrap();
     let results: Vec<(String, bool, String)> = forked
         .context_messages()
@@ -1462,6 +1464,8 @@ fn a_stopped_parent_stops_its_subagent_at_once() {
             call: "c1",
             background: false,
             panel: false,
+            report: true,
+            fork: None,
         },
         &ToolContext::new(tmp.path().to_path_buf()),
         &cancel,
@@ -1655,6 +1659,8 @@ fn plan_mode_switched_on_mid_task_holds_the_subagent() {
             call: "c1",
             background: false,
             panel: false,
+            report: true,
+            fork: None,
         },
         &ToolContext::new(tmp.path().to_path_buf()),
         &CancelToken::new(),
@@ -1719,6 +1725,8 @@ fn a_subagents_calls_go_through_the_command_hooks() {
             call: "c1",
             background: false,
             panel: false,
+            report: true,
+            fork: None,
         },
         &ToolContext::new(tmp.path().to_path_buf()),
         &CancelToken::new(),
@@ -1757,6 +1765,8 @@ fn a_subagents_calls_go_through_the_command_hooks() {
             call: "c2",
             background: false,
             panel: false,
+            report: true,
+            fork: None,
         },
         &ctx,
         &CancelToken::new(),
@@ -1768,6 +1778,224 @@ fn a_subagents_calls_go_through_the_command_hooks() {
         seen.iter().any(|text| text.contains("held by a hook")),
         "{seen:?}"
     );
+}
+
+/// A provider that answers `done` at once, noting the model it was asked
+/// for and the conversation it was told, each message as its JSON.
+struct Notes(std::sync::Mutex<Vec<(String, Vec<String>)>>);
+
+impl Provider for Notes {
+    fn name(&self) -> &str {
+        "notes"
+    }
+
+    fn stream(
+        &self,
+        request: &termide_agent_core::Request<'_>,
+        _: &mut dyn FnMut(termide_agent_core::StreamEvent),
+        _: &CancelToken,
+    ) -> AssistantMessage {
+        let told = request
+            .messages
+            .iter()
+            .map(|message| serde_json::to_string(message).unwrap())
+            .collect();
+        self.0
+            .lock()
+            .unwrap()
+            .push((request.model.id.clone(), told));
+        AssistantMessage {
+            content: vec![termide_agent_core::AssistantContent::Text {
+                text: "done".into(),
+            }],
+            stop_reason: termide_agent_core::StopReason::Stop,
+            usage: Usage::default(),
+            provider: "notes".into(),
+            model: request.model.id.clone(),
+            error_message: None,
+            failure: None,
+            timestamp: 0,
+        }
+    }
+}
+
+/// Subagents on `provider`, keeping their logs under `root`.
+fn subagents_on(root: &Path, provider: Arc<dyn Provider>) -> Arc<Subagents> {
+    let dirs = AgentDirs::new(root, Some(root), None);
+    let settings = with_cloud();
+    let mut active = active_on(&settings, "local");
+    active.provider = provider;
+    Arc::new(Subagents {
+        active: Arc::new(std::sync::RwLock::new(active)),
+        settings: settings.clone(),
+        recall: recall_tool(&settings, &dirs, root, root),
+        web: shared_web(&settings.web, &dirs),
+        dirs,
+        mcp: Connections::new(std::collections::BTreeMap::new()),
+        cwd: root.to_path_buf(),
+        project_root: root.to_path_buf(),
+        session_dir: Some(root.join("sessions")),
+        rules: settings.permissions.clone(),
+        mode: termide_agent_core::ModeHandle::new(settings.permissions.mode),
+        max_tokens: settings.output_limit(),
+        reasoning: ThinkingLevel::Off,
+        compaction: settings.compaction,
+        refusals: Refusals::default(),
+        hooks: None,
+    })
+}
+
+/// A fork run out of sight goes on from its copy of the conversation, on
+/// the session's own model, and its log is the copy, naming the session
+/// that started it.
+#[test]
+fn a_fork_out_of_sight_runs_its_copy_on_the_sessions_model() {
+    let tmp = tempfile::tempdir().unwrap();
+    let provider = Arc::new(Notes(std::sync::Mutex::new(Vec::new())));
+    let subagents = subagents_on(tmp.path(), provider.clone());
+    let sessions = tmp.path().join("sessions");
+    std::fs::create_dir_all(&sessions).unwrap();
+    let mut source = Session::create(&sessions, tmp.path()).unwrap();
+    source
+        .append_message(&Message::User(UserMessage::text(
+            "the parser lives in lex.rs",
+        )))
+        .unwrap();
+    let call = ToolCall {
+        id: "s1".into(),
+        name: "start_session".into(),
+        arguments: serde_json::json!({ "context": "fork", "prompt": "port the tests" }),
+        extra_content: None,
+    };
+    source
+        .append_message(&Message::Assistant(AssistantMessage {
+            content: vec![termide_agent_core::AssistantContent::ToolCall(call)],
+            stop_reason: termide_agent_core::StopReason::ToolUse,
+            usage: Usage::default(),
+            provider: "notes".into(),
+            model: "local-model".into(),
+            error_message: None,
+            failure: None,
+            timestamp: 0,
+        }))
+        .unwrap();
+    let parent = SessionParent {
+        session: Some(source.id().to_string()),
+        agent: "lead".into(),
+        call: "s1".into(),
+        silent: false,
+    };
+    let copy = source
+        .fork_delegate(tmp.path(), Some("Tests"), parent.clone())
+        .unwrap();
+    settle_fork(&copy, "s1", FORKED_REPORTING).unwrap();
+
+    let ctx = ToolContext {
+        resume: Some(copy.clone()),
+        ..ToolContext::new(tmp.path().to_path_buf())
+    };
+    let outcome = subagents.run(
+        "lead",
+        &SubagentTask {
+            agent: "lead",
+            prompt: "port the tests",
+            call: "s1",
+            background: false,
+            panel: false,
+            report: true,
+            fork: Some(ForkedTask { focus: None }),
+        },
+        &ctx,
+        &CancelToken::new(),
+        &mut |_| {},
+    );
+    assert_eq!(outcome.answer, Ok("done".to_string()));
+    assert_eq!(outcome.session.as_deref(), Some(copy.as_path()));
+    let seen = provider.0.lock().unwrap();
+    let (model, told) = &seen[0];
+    assert_eq!(model, "local-model");
+    assert!(told[0].contains("the parser lives in lex.rs"), "{told:?}");
+    assert!(
+        told.iter().any(|m| m.contains("run out of sight")),
+        "{told:?}"
+    );
+    assert!(told.last().unwrap().contains("port the tests"), "{told:?}");
+    let log = Session::open(&copy).unwrap();
+    assert_eq!(log.header().parent.as_ref(), Some(&parent));
+    assert!(log.header().copied.is_some());
+    // The session it was copied from is left as it was.
+    assert_eq!(
+        Session::open(source.path())
+            .unwrap()
+            .context_messages()
+            .len(),
+        2
+    );
+}
+
+/// A fork runs on termide's loop, so a session that does not run on it is
+/// not forked out of sight, nor is a fork asked of another agent.
+#[test]
+fn a_fork_out_of_sight_is_refused_where_the_loop_cannot_run_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let subagents = subagents_on(tmp.path(), Arc::new(Silent));
+    assert!(subagents.can_fork(false).is_ok());
+    assert!(subagents
+        .can_fork(true)
+        .unwrap_err()
+        .contains("external agent"));
+    subagents.active.write().unwrap().kind = "claude_code".into();
+    assert!(subagents.can_fork(false).unwrap_err().contains("CLI agent"));
+
+    let starter = SessionStarter {
+        runner: Some(subagents),
+        project_root: tmp.path().to_path_buf(),
+        caller: "lead".into(),
+        external: false,
+    };
+    let request = SessionRequest {
+        agent: Some("review"),
+        prompt: "go on",
+        title: None,
+        context: SessionContext::Fork,
+        focus: None,
+        reply: SessionReply::Wait,
+        show: SessionShow::Background,
+        call: "s1",
+    };
+    let outcome = starter.start(
+        &request,
+        &ToolContext::new(tmp.path().to_path_buf()),
+        &CancelToken::new(),
+        &mut |_| {},
+    );
+    assert!(outcome.answer.unwrap_err().contains("own agent, lead"));
+}
+
+/// A session started with `reply` `none` answers no one: its log says so,
+/// so carried on it answers no one either.
+#[test]
+fn a_session_asked_for_no_answer_says_so_in_its_log() {
+    let tmp = tempfile::tempdir().unwrap();
+    let provider = Arc::new(Notes(std::sync::Mutex::new(Vec::new())));
+    let subagents = subagents_on(tmp.path(), provider);
+    let outcome = subagents.run(
+        "lead",
+        &SubagentTask {
+            agent: DEFAULT_AGENT,
+            prompt: "tidy up",
+            call: "s2",
+            background: false,
+            panel: false,
+            report: false,
+            fork: None,
+        },
+        &ToolContext::new(tmp.path().to_path_buf()),
+        &CancelToken::new(),
+        &mut |_| {},
+    );
+    let log = Session::open(outcome.session.as_deref().unwrap()).unwrap();
+    assert!(log.header().parent.as_ref().unwrap().silent);
 }
 
 /// Subagents whose model says nothing until stopped.
@@ -1820,6 +2048,8 @@ fn a_waited_task_moves_to_the_background_when_the_user_writes() {
                     call,
                     background: false,
                     panel: false,
+                    report: true,
+                    fork: None,
                 },
                 &ctx,
                 &cancel,
@@ -1890,6 +2120,8 @@ fn a_delegate_stopped_by_a_limit_is_parked_rather_than_answered() {
         call: "call-1",
         background: false,
         panel: false,
+        report: true,
+        fork: None,
     };
     let quota = Failure::from_text("You've hit your session limit · resets 9:50pm");
     let outcome = park_or_answer(
@@ -1955,6 +2187,8 @@ fn a_stopped_policy_ends_a_parked_task_with_words_that_point_forward() {
         call: "call-2",
         background: false,
         panel: false,
+        report: true,
+        fork: None,
     };
     let report = {
         let mut report = SubagentReport::new(4, "claude-code");
@@ -1998,6 +2232,8 @@ fn a_failure_that_waits_for_nothing_is_not_parked() {
         call: "call-3",
         background: false,
         panel: false,
+        report: true,
+        fork: None,
     };
     for kind in [FailureKind::Auth, FailureKind::BadRequest] {
         let outcome = park_or_answer(
@@ -2046,6 +2282,8 @@ fn a_task_parked_past_its_tries_is_given_up() {
         call: "call-4",
         background: false,
         panel: false,
+        report: true,
+        fork: None,
     };
     let quota = Failure::new(FailureKind::QuotaExhausted);
     // Each try of a parked task is its own run, and each ends the same way.
@@ -2095,6 +2333,7 @@ fn a_held_task_is_left_paused_in_its_log() {
             session: Some("p1".into()),
             agent: "lead".into(),
             call: "c1".into(),
+            silent: false,
         },
         &DelegateRun {
             connection: "default",
@@ -2281,10 +2520,10 @@ done"#;
 }
 
 #[test]
-fn an_agent_tools_list_governs_the_task_tool() {
+fn an_agent_tools_list_governs_the_start_session_tool() {
     let tmp = tempfile::tempdir().unwrap();
     let global = tmp.path().join("ai");
-    for (agent, tools) in [("search", "read"), ("lead", "read, task")] {
+    for (agent, tools) in [("search", "read"), ("lead", "read, start_session")] {
         let dir = global.join("agents").join(agent);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join(AGENT_FILE), format!("---\ntools: {tools}\n---\n")).unwrap();
@@ -2319,13 +2558,13 @@ fn an_agent_tools_list_governs_the_task_tool() {
     assert_eq!(catalog.resolve("search").unwrap().tools.names(), ["read"]);
     assert_eq!(
         catalog.resolve("lead").unwrap().tools.names(),
-        ["read", "task", "jobs"]
+        ["read", "start_session", "jobs"]
     );
     assert!(catalog
         .resolve(DEFAULT_AGENT)
         .unwrap()
         .tools
-        .get("task")
+        .get("start_session")
         .is_some());
 }
 
@@ -2442,8 +2681,8 @@ fn the_catalog_turns_definitions_into_profiles() {
     let default = catalog.resolve(DEFAULT_AGENT).unwrap();
     // The built-in four, `checklist` and `terminals`, plus the two that speak to the
     // user watching the panel, `question` and the `suggest_*` cards, and
-    // the two that speak to the agents of the other panels, `fork`, and
-    // the debugger.
+    // the two that speak to the agents of the other panels, the debugger,
+    // and `start_session` with `jobs` to follow what it set going.
     assert_eq!(
         default.tools.names(),
         [
@@ -2457,10 +2696,10 @@ fn the_catalog_turns_definitions_into_profiles() {
             "suggest_command",
             "suggest_goal",
             "suggest_loop",
-            "agents",
+            "sessions",
             "send_message",
-            "fork",
             "debug",
+            "start_session",
             "jobs"
         ]
     );

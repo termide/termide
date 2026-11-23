@@ -67,6 +67,13 @@ fn is_live(item: &Item) -> bool {
     }
 }
 
+/// Whether `call` hands work to a delegate, followed from the panel while it
+/// runs: a `start_session` that runs one, or a `task` in a log written before
+/// `start_session` took its place.
+pub(crate) fn is_delegation(call: &ToolCall) -> bool {
+    call.name == "task" || termide_agent_core::starts_delegate(call)
+}
+
 /// Whether `item` has detail worth folding away. A live block never folds. A
 /// finished tool call or reasoning folds to its one-line headline, so any
 /// output, a multi-line command or any reasoning is worth hiding; other blocks
@@ -547,14 +554,15 @@ impl Transcript {
         }
     }
 
-    /// The `task` calls still running: each one's index, call and the
-    /// subagent's progress so far.
+    /// The delegates still running — `start_session` calls, or `task` ones
+    /// in a log carried on from before it took their place: each one's
+    /// index, call and the delegate's progress so far.
     pub(crate) fn running_tasks(&self) -> Vec<(usize, &ToolCall, Option<&str>)> {
         self.items
             .iter()
             .enumerate()
             .filter_map(|(index, item)| match item {
-                Item::Tool { call, live, .. } if call.name == "task" && is_live(item) => {
+                Item::Tool { call, live, .. } if is_delegation(call) && is_live(item) => {
                     Some((index, call, live.as_deref()))
                 }
                 _ => None,
@@ -2180,16 +2188,25 @@ fn tool_headline(
             t.agent_tool_skill(),
             with_args(arg("name"), arg("args").trim()),
         ),
-        "task" => {
+        // A fresh session: whom the work goes to and its first line; a fork
+        // (and `fork` in logs written before `start_session` took its place):
+        // the first line of the part of the work it takes over. `task` is
+        // how such logs name a fresh one.
+        "start_session" | "task" | "fork" => {
             let prompt = arg("prompt");
             let first = prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-            action(
-                "&",
-                t.agent_tool_task(),
-                // A middle dot, not a colon: `default:` alone on a row read as
-                // a cut-off phrase.
-                format!("{} · {}", arg("agent"), first.trim()),
-            )
+            let forked = call.name == "fork" || arg("context") == "fork";
+            if forked {
+                action("&", t.agent_tool_fork(), first.trim().to_string())
+            } else {
+                action(
+                    "&",
+                    t.agent_tool_task(),
+                    // A middle dot, not a colon: `default:` alone on a row read
+                    // as a cut-off phrase.
+                    format!("{} · {}", arg("agent"), first.trim()),
+                )
+            }
         }
         "question" => {
             // The first question, and how many more follow it.
@@ -2244,13 +2261,8 @@ fn tool_headline(
             };
             action("&", verb, format!("{to} · {}", first.trim()))
         }
-        "agents" => action("&", t.agent_tool_agents(), String::new()),
-        // A fork: the first line of the part of the work it hands over.
-        "fork" => {
-            let prompt = arg("prompt");
-            let first = prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
-            action("&", t.agent_tool_fork(), first.trim().to_string())
-        }
+        // `agents` in logs written before the tool was renamed.
+        "sessions" | "agents" => action("&", t.agent_tool_sessions(), String::new()),
         // The checklist written: how far it stands and the step at hand, as
         // its rule in the state strip counts; cleared, nothing.
         "checklist" => {

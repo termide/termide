@@ -307,7 +307,7 @@ fn a_subagents_tokens_join_the_session_totals() {
     panel.context_tokens = 500;
     let call = ToolCall {
         id: "t1".into(),
-        name: "task".into(),
+        name: "start_session".into(),
         arguments: serde_json::json!({ "agent": "search", "prompt": "find it" }),
         extra_content: None,
     };

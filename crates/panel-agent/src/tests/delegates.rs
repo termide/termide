@@ -61,7 +61,7 @@ fn clicking_a_running_tasks_row_asks_for_its_panel() {
     panel.transcript.push(Item::Tool {
         call: ToolCall {
             id: "call-9".into(),
-            name: "task".into(),
+            name: "start_session".into(),
             arguments: serde_json::json!({ "agent": "search", "prompt": "find the loader" }),
             extra_content: None,
         },
@@ -211,7 +211,7 @@ fn a_running_task_is_stopped_from_its_row() {
     let id = panel.panel_id();
     let call = ToolCall {
         id: "call-5".into(),
-        name: "task".into(),
+        name: "start_session".into(),
         arguments: serde_json::json!({ "agent": "search", "prompt": "find the loader" }),
         extra_content: None,
     };
@@ -305,6 +305,7 @@ fn a_followed_task_shows_its_log_and_opens_when_over() {
         session: Some("p1".into()),
         agent: "lead".into(),
         call: "call-1".into(),
+        silent: false,
     };
     let mut log = Session::create_delegate(dir.path(), dir.path(), parent).unwrap();
     log.append_message(&Message::User(UserMessage::text("find the loader")))
@@ -676,6 +677,7 @@ fn a_view_over_the_layout_docks_and_keeps_an_ended_task() {
         session: Some("p1".into()),
         agent: "lead".into(),
         call: "call-ov".into(),
+        silent: false,
     };
     let mut log = Session::create_delegate(dir.path(), dir.path(), parent).unwrap();
     log.append_message(&Message::User(UserMessage::text("find the loader")))
@@ -776,6 +778,7 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
                 session: Some(id.clone()),
                 agent: "default".into(),
                 call: "call-1".into(),
+                silent: false,
             },
         )
         .unwrap();
@@ -793,6 +796,7 @@ fn the_carry_on_card_names_the_delegates_left_behind() {
                 session: Some("elsewhere".into()),
                 agent: "default".into(),
                 call: "call-9".into(),
+                silent: false,
             },
         )
         .unwrap();
@@ -850,6 +854,7 @@ fn a_finished_panel_opens_the_sessions_of_its_unfinished_delegates() {
                 session: Some(id.clone()),
                 agent: "default".into(),
                 call: "call-1".into(),
+                silent: false,
             },
         )
         .unwrap();
@@ -929,6 +934,7 @@ fn a_row_of_an_unfinished_delegate_opens_its_session_and_later_keeps_it() {
                 ),
                 agent: "default".into(),
                 call: "call-1".into(),
+                silent: false,
             },
         )
         .unwrap();
@@ -994,6 +1000,7 @@ fn a_carried_on_delegate_answers_the_panel_that_delegated_it() {
                 // The parent names the agent that delegated, not the delegate.
                 agent: "default".into(),
                 call: "call-1".into(),
+                silent: false,
             },
         )
         .unwrap();
@@ -1143,6 +1150,7 @@ fn a_held_delegate_says_it_stands_still() {
         session: Some("p1".into()),
         agent: "lead".into(),
         call: "call-hold".into(),
+        silent: false,
     };
     let mut log = Session::create_delegate(dir.path(), dir.path(), parent).unwrap();
     log.append_message(&Message::User(UserMessage::text("find the loader")))

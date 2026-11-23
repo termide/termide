@@ -140,7 +140,7 @@ pub struct AiSettings {
     #[serde(default)]
     pub auto_reviewer: SideModel,
 
-    /// `[ai.subagents]`: where the agents a session delegates to with `task`
+    /// `[ai.subagents]`: where the agents a session delegates to with `start_session`
     /// run, unless its connection names its own. Left empty, on the session's
     /// connection.
     #[serde(default)]
@@ -193,7 +193,7 @@ pub struct AiSettings {
     pub max_terminal_sessions: usize,
 
     /// How many messages the agents of the panels may pass one another —
-    /// `send_message`, a `fork`, a background task's answer — before the
+    /// `send_message`, a fork, a background task's answer — before the
     /// user writes again. Past it the agent asks the user whether to allow
     /// as many more; zero sets no limit. Open panels take a change at once.
     #[serde(default = "agent_defaults::max_agent_messages")]
@@ -247,7 +247,7 @@ pub struct Connection {
     /// Gemini CLI has no such setting. Unset leaves the agent's own.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_window_limit: Option<u64>,
-    /// Where the agents this one delegates to with `task` run, over
+    /// Where the agents this one delegates to with `start_session` run, over
     /// `[ai.subagents]`: a connection and a model of it, or a connection's
     /// bare name. Unset leaves it to `[ai.subagents]`. A subagent runs the
     /// built-in loop or a copy of Claude Code, so not Codex or Gemini CLI.

@@ -26,8 +26,9 @@ use termide_agent_providers::{
 };
 use termide_agent_recall::{PanelDir, RecallSetup, RecallTool, RepoFinder, Solver, TimeLimits};
 use termide_agent_tools::{
-    builtin_tools, JobsTool, OwnTasks, QuestionTool, ShellTool, SkillTool, SubagentOutcome,
-    SubagentRun, SubagentTask, SuggestCommandTool, SuggestGoalTool, SuggestLoopTool, TaskTool,
+    builtin_tools, ForkedTask, JobsTool, OwnTasks, QuestionTool, SessionContext, SessionReply,
+    SessionRequest, SessionShow, ShellTool, SkillTool, StartSession, StartSessionTool,
+    SubagentOutcome, SubagentTask, SuggestCommandTool, SuggestGoalTool, SuggestLoopTool,
     TerminalsTool,
 };
 use termide_agent_web::{web_tools, Web, WebConfig};
@@ -115,7 +116,7 @@ impl App {
     /// Copy the log at `source` and open the copy in a new panel working in
     /// `cwd`, compacted on `focus` when given: the new session's id and its
     /// panel's number, or why it was not opened. `handover` is a fork the
-    /// agent asked for with its `fork` call: the copy, made in the middle of
+    /// agent asked for with its `start_session` call: the copy, made in the middle of
     /// the run that call is part of, is brought to rest first — the call
     /// answered as the one that made the fork — and then takes the part of
     /// the work handed over as its first request.
@@ -162,7 +163,7 @@ impl App {
         };
         let first = match handover {
             Some(Handover { call, first, .. }) => {
-                settle_fork(&copy, &call)
+                settle_fork(&copy, &call, FORKED_RESULT)
                     .map_err(|error| discard_copy(t.agent_notice_cannot_fork_fmt(&error)))?;
                 Some(first)
             }
@@ -205,7 +206,7 @@ fn fork_source(
         .map(|session| ForkSource { session, opened })
 }
 
-/// A fork the agent asked for: the id of its `fork` call, the part of the
+/// A fork the agent asked for: the id of its `start_session` call, the part of the
 /// work the fork takes over, as the agent's message, and the name the copy
 /// takes for it.
 pub(in crate::app) struct Handover {
@@ -214,22 +215,34 @@ pub(in crate::app) struct Handover {
     pub title: String,
 }
 
-/// What the copy's log answers the `fork` call with, in place of the result
-/// the session it was copied from gets.
+/// What the copy's log answers the `start_session` call with, in place of
+/// the result the session it was copied from gets.
 const FORKED_RESULT: &str = "This session is the fork this call made: a copy of the \
      conversation in a panel of its own. The part of the work it takes over comes next. \
      Nothing goes back to the session it was copied from, which carries on with the rest; \
      you work on with the user here.";
 
+/// [`FORKED_RESULT`] for a fork run out of sight whose answer goes back to
+/// the session it was copied from.
+const FORKED_REPORTING: &str = "This session is the fork this call made: a copy of the \
+     conversation, run out of sight. The part of the work it takes over comes next; your \
+     final message is its answer, and goes back to the session it was copied from, which \
+     carries on with the rest.";
+
+/// [`FORKED_RESULT`] for a fork run out of sight whose answer goes nowhere.
+const FORKED_SILENT: &str = "This session is the fork this call made: a copy of the \
+     conversation, run out of sight. The part of the work it takes over comes next. Nothing \
+     goes back to the session it was copied from, which carries on with the rest.";
+
 /// Bring the copy at `copy` to rest where the run that forked it stood: the
-/// `fork` call `call` answered as the one that made the fork, any other call
-/// of that reply as one the fork does not run, and the run ended.
-fn settle_fork(copy: &Path, call: &str) -> Result<(), String> {
+/// call `call` answered with `result` as the one that made the fork, any
+/// other call of that reply as one the fork does not run, and the run ended.
+fn settle_fork(copy: &Path, call: &str, result: &str) -> Result<(), String> {
     let mut session = Session::open_exclusive(copy).map_err(|error| error.to_string())?;
     session
         .settle(|open| {
             if open.id == call {
-                termide_agent_core::ToolResultMessage::text(open, FORKED_RESULT)
+                termide_agent_core::ToolResultMessage::text(open, result)
             } else {
                 termide_agent_core::ToolResultMessage::error(
                     open,
@@ -241,6 +254,49 @@ fn settle_fork(copy: &Path, call: &str) -> Result<(), String> {
 }
 
 impl App {
+    /// Copy the session of panel `from` into a log of its own for a fork run
+    /// out of sight, named after `title` and naming `parent` as the session
+    /// that started it: the copy's path, brought to rest with the call
+    /// answered as the one that made the fork. `report`: its answer goes back.
+    pub(in crate::app) fn copy_for_agent(
+        &mut self,
+        from: Option<u64>,
+        parent: SessionParent,
+        title: &str,
+        report: bool,
+    ) -> Result<PathBuf, String> {
+        let source = self
+            .layout_manager
+            .iter_all_panels_mut()
+            .filter_map(|panel| panel.downcast_mut::<AgentPanel>())
+            .find(|panel| Some(panel.panel_id()) == from)
+            .ok_or("the panel this call comes from is gone")?;
+        // The reply that made this call may still wait among the runtime's
+        // events: applied now, the copy holds it.
+        source.flush_runtime();
+        let path = source
+            .session_path()
+            .ok_or("this session keeps no log to copy")?
+            .to_path_buf();
+        let cwd = source.cwd().to_path_buf();
+        let source = Session::open(&path).map_err(|error| error.to_string())?;
+        let name = fork_name(&source, Some(title));
+        let call = parent.call.clone();
+        let copy = source
+            .fork_delegate(&cwd, name.as_deref(), parent)
+            .map_err(|error| format!("cannot copy this session: {error}"))?;
+        let result = if report {
+            FORKED_REPORTING
+        } else {
+            FORKED_SILENT
+        };
+        settle_fork(&copy, &call, result).map_err(|error| {
+            let _ = std::fs::remove_file(&copy);
+            format!("cannot copy this session: {error}")
+        })?;
+        Ok(copy)
+    }
+
     /// The banner of a fresh agent panel asked to work elsewhere: let the
     /// user pick the directory, starting from the one it works in.
     pub(in crate::app) fn ask_agent_cwd(&mut self, session: Option<PathBuf>, cwd: PathBuf) {
@@ -570,7 +626,7 @@ struct FsCatalog {
     /// The project's approved launches: its servers and hooks start only
     /// once approved.
     approvals: termide_agent_core::approvals::Approvals,
-    /// Builds and runs a named agent as a subagent for the `task` tool;
+    /// Builds and runs a named agent as a subagent for the `start_session` tool;
     /// set once the provider and settings are known.
     subagents: Option<Arc<Subagents>>,
     /// The web tools' service; set once the settings are known.
@@ -803,28 +859,28 @@ impl AgentCatalog for FsCatalog {
         for tool in peers::peer_tools(name, &self.project_root) {
             tools.insert(tool);
         }
-        // Part of the work handed over to a copy of the session.
-        tools.insert(peers::fork_tool(name, &self.project_root));
         // The debugger, driven as the user drives it in the debug panel.
         tools.insert(debug_tool::debug_tool(&self.project_root));
-        // The `task` tool lets this agent hand work to the others, and its
-        // `tools` list can leave it out like any other capability; a lone
-        // agent delegates to a copy of itself. Never for a subagent (no
-        // nesting: the subagent build path adds no task tool).
-        if let Some(subagents) = &self.subagents {
-            let delegates = self.delegatable();
-            if !delegates.is_empty() {
-                let runner = Arc::clone(subagents);
-                let caller = name.to_string();
-                let run: SubagentRun = Arc::new(move |task, ctx, cancel, on_update| {
-                    if task.background {
-                        return runner.start_background(&caller, task, ctx).into();
-                    }
-                    runner.run_detachable(&caller, task, ctx, cancel, on_update)
-                });
-                tools.insert(Arc::new(TaskTool::new(delegates, run)));
-            }
-        }
+        // `start_session` lets this agent hand work to the others or to a
+        // copy of its session, and its `tools` list can leave it out like
+        // any other capability; a lone agent delegates to a copy of itself.
+        // Never for a subagent (no nesting: the subagent build path adds no
+        // `start_session`).
+        let start = SessionStarter {
+            runner: self.subagents.clone(),
+            project_root: self.project_root.clone(),
+            caller: name.to_string(),
+            external: backend.is_some(),
+        };
+        let start: StartSession = Arc::new(move |request, ctx, cancel, on_update| {
+            start.start(request, ctx, cancel, on_update)
+        });
+        let delegates = if self.subagents.is_some() {
+            self.delegatable()
+        } else {
+            Vec::new()
+        };
+        tools.insert(Arc::new(StartSessionTool::new(delegates, start)));
         // What the agent set going is its own to see and stop.
         tools.insert(Arc::new(JobsTool::new(Arc::new(PanelTasks))));
         // An external agent's `tools` list is ignored, with a warning.
@@ -880,7 +936,7 @@ impl AgentCatalog for FsCatalog {
 }
 
 impl FsCatalog {
-    /// The agents an agent can delegate to with the `task` tool: every
+    /// The agents an agent can delegate to with the `start_session` tool: every
     /// agent, the default one, the caller itself and the external ones
     /// included.
     fn delegatable(&self) -> Vec<(String, String)> {
@@ -1015,16 +1071,16 @@ fn restrict_tools(tools: &mut ToolRegistry, allowed: &Option<Vec<String>>, agent
         .map(str::to_string)
         .collect::<Vec<_>>()
     {
-        // `jobs` stops what `task` hands over, so it comes with it.
-        let with_task = tool == "jobs" && allowed.iter().any(|name| name == "task");
-        if !allowed.contains(&tool) && !with_task {
+        // `jobs` stops what `start_session` hands over, so it comes with it.
+        let with_start = tool == "jobs" && allowed.iter().any(|name| name == "start_session");
+        if !allowed.contains(&tool) && !with_start {
             tools.remove(&tool);
         }
     }
 }
 
 /// Builds a named agent and runs it to completion as a subagent: the engine
-/// behind the `task` tool. It shares the provider and the permission rules
+/// behind the `start_session` tool. It shares the provider and the permission rules
 /// with the panel, but has no one to prompt, so anything the rules and mode
 /// do not already allow is refused.
 /// The provider the panel runs on right now, with its model and context
@@ -1434,6 +1490,109 @@ fn recall_tool(
             files: seconds(settings.recall.files_timeout_secs),
         },
     }))
+}
+
+/// What a panel's agent starts sessions with: where each kind of session
+/// `start_session` asks for is made.
+struct SessionStarter {
+    /// The panel's delegates; none where nothing runs out of sight.
+    runner: Option<Arc<Subagents>>,
+    project_root: PathBuf,
+    /// The agent that calls.
+    caller: String,
+    /// Whether it is an external agent, whose session termide's loop does
+    /// not run.
+    external: bool,
+}
+
+impl SessionStarter {
+    fn start(
+        &self,
+        request: &SessionRequest,
+        ctx: &ToolContext,
+        cancel: &CancelToken,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> SubagentOutcome {
+        let caller = self.caller.as_str();
+        if request.context == SessionContext::Fork {
+            if let Some(agent) = request.agent.filter(|agent| *agent != caller) {
+                return Err(format!(
+                    "a fork runs on this session's own agent, {caller}, not {agent}: leave \
+                     `agent` out, or start a fresh session of {agent} with `context` `none`"
+                ))
+                .into();
+            }
+        }
+        if !request.delegated() {
+            return peers::fork_in_panel(ctx, &self.project_root, caller, request).into();
+        }
+        let Some(runner) = &self.runner else {
+            return Err("no session can run out of sight here".to_string()).into();
+        };
+        let background = request.reply != SessionReply::Wait;
+        let report = request.reply != SessionReply::None;
+        if request.context == SessionContext::Fresh {
+            let Some(agent) = request.agent else {
+                return Err("a fresh session needs `agent`".to_string()).into();
+            };
+            let task = SubagentTask {
+                agent,
+                prompt: request.prompt,
+                call: request.call,
+                background,
+                panel: request.show == SessionShow::Panel,
+                report,
+                fork: None,
+            };
+            return runner.run_task(caller, &task, ctx, cancel, on_update);
+        }
+        if let Err(error) = runner.can_fork(self.external) {
+            return Err(error).into();
+        }
+        if background && ctx.panel.is_none() {
+            return Err(
+                "a fork that does not wait reports to an agent panel, and this agent runs in \
+                 none; use `reply` `wait`"
+                    .to_string(),
+            )
+            .into();
+        }
+        let copy = match peers::copy_for_delegate(ctx, &self.project_root, caller, request) {
+            Ok(copy) => copy,
+            Err(error) => return Err(error).into(),
+        };
+        let ctx = ToolContext {
+            resume: Some(copy.clone()),
+            ..ctx.clone()
+        };
+        let task = SubagentTask {
+            agent: caller,
+            prompt: request.prompt,
+            call: request.call,
+            background,
+            panel: false,
+            report,
+            fork: Some(ForkedTask {
+                focus: request.focus,
+            }),
+        };
+        let outcome = runner.run_task(caller, &task, &ctx, cancel, on_update);
+        // Refused before it ran: the copy no one runs goes.
+        if outcome.answer.is_err() && outcome.session.is_none() && copy.exists() {
+            discard_copy(&copy);
+        }
+        outcome
+    }
+}
+
+/// Remove the copy at `copy` made for a fork that did not run.
+fn discard_copy(copy: &Path) {
+    if let Err(error) = std::fs::remove_file(copy) {
+        log::warn!(
+            "cannot remove the unused session copy {}: {error}",
+            copy.display()
+        );
+    }
 }
 
 struct Subagents {
@@ -1919,6 +2078,29 @@ impl DelegateLog {
         total
     }
 
+    /// Record that the task's context was compacted, as a panel's log does,
+    /// so the task carried on from the log goes on from the summary.
+    fn note_compaction(
+        &mut self,
+        summary: &str,
+        tokens_before: u64,
+        kept: usize,
+        tokens_after: u64,
+        call: &termide_agent_core::CompactionCall,
+    ) {
+        if let Some(session) = self.0.as_mut().filter(|_| !summary.is_empty()) {
+            if let Err(error) = session.append_compaction_with(
+                summary,
+                tokens_before,
+                kept,
+                Some(tokens_after),
+                Some(call.clone()),
+            ) {
+                log::warn!("delegate session write failed: {error}");
+            }
+        }
+    }
+
     /// Write a finished message of the task's.
     fn note(&mut self, message: &Message) {
         if let Some(session) = &mut self.0 {
@@ -1997,8 +2179,49 @@ struct DelegateRun<'a> {
 }
 
 impl Subagents {
+    /// Run `task`, which the agent `caller` handed over: in the background
+    /// when it does not wait, else waited for until the user moves it aside.
+    fn run_task(
+        self: &Arc<Self>,
+        caller: &str,
+        task: &SubagentTask,
+        ctx: &ToolContext,
+        cancel: &CancelToken,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> SubagentOutcome {
+        if task.background {
+            return self.start_background(caller, task, ctx).into();
+        }
+        self.run_detachable(caller, task, ctx, cancel, on_update)
+    }
+
+    /// Why the session cannot be forked to run out of sight, if it cannot:
+    /// the copy runs on termide's loop, which runs neither an external
+    /// agent's session (`external`) nor a CLI connection's.
+    fn can_fork(&self, external: bool) -> Result<(), String> {
+        let refused = |what: &str| {
+            Err(format!(
+                "this session runs on {what}, whose conversation termide cannot run out of \
+                 sight: open the fork in a panel instead (`show` `panel`, `reply` `none`)"
+            ))
+        };
+        if external {
+            return refused("an external agent");
+        }
+        let kind = self
+            .active
+            .read()
+            .unwrap_or_else(PoisonError::into_inner)
+            .kind
+            .clone();
+        if termide_config::is_cli_provider(&kind) {
+            return refused("a CLI agent");
+        }
+        Ok(())
+    }
+
     /// The tools, the skills and the system prompt the agent `name` runs
-    /// with as a subagent: no `task` (delegation does not nest), no
+    /// with as a subagent: no `start_session` (delegation does not nest), no
     /// `suggest_command` (nobody watches it run), and `question` only when
     /// its parent has a user to put the questions to (`asks`).
     fn toolset(
@@ -2072,7 +2295,8 @@ impl Subagents {
             task.call.to_string(),
         );
         let thread_agent = agent.clone();
-        let in_panel = task.panel;
+        let (in_panel, report) = (task.panel, task.report);
+        let focus = task.fork.map(|fork| fork.focus.map(str::to_string));
         std::thread::Builder::new()
             .name(format!("background-{agent}"))
             .spawn(move || {
@@ -2082,6 +2306,10 @@ impl Subagents {
                     call: &call,
                     background: true,
                     panel: in_panel,
+                    report,
+                    fork: focus.as_ref().map(|focus| ForkedTask {
+                        focus: focus.as_deref(),
+                    }),
                 };
                 // Nobody waits on the call: the user stops the task, from its
                 // row or a panel following it, or by closing its panel.
@@ -2094,8 +2322,9 @@ impl Subagents {
                     return;
                 }
                 let held = termide_panel_agent::live::take_quiet(parent, &call);
-                // Stopped by the agent that handed it over: it knows.
-                if termide_panel_agent::live::take_withdrawn(parent, &call) {
+                // Stopped by the agent that handed it over: it knows. Asked
+                // for no answer: none goes.
+                if termide_panel_agent::live::take_withdrawn(parent, &call) || !report {
                     return;
                 }
                 let text = background_report(&prompt, &thread_agent, &outcome);
@@ -2109,26 +2338,38 @@ impl Subagents {
                 );
             })
             .map_err(|error| format!("cannot start the task: {error}"))?;
+        let answer = if report {
+            "Carry on: its answer comes to you later as a message of its own. Do not wait for \
+             it with tools"
+        } else {
+            "Carry on: nothing comes back from it. Do not wait for it"
+        };
+        if task.fork.is_some() {
+            return Ok(format!(
+                "A copy of this session took the part of the work you handed over and works on \
+                 it out of sight; its id is {}. {answer}, and do not do that part yourself. \
+                 Should you no longer need it, stop it with `jobs`.",
+                task.call
+            ));
+        }
         if in_panel {
             return Ok(format!(
                 "{agent} took the task in a panel of its own beside yours; its id is {}. The \
-                 user follows it there and goes on with its session once it is over. Carry on: \
-                 its answer comes to you later as a message of its own. Do not wait for it with \
-                 tools, and do not hand the same task over again.",
+                 user follows it there and goes on with its session once it is over. {answer}, \
+                 and do not hand the same task over again.",
                 task.call
             ));
         }
         Ok(format!(
-            "{agent} took the task and works on it out of sight; its id is {}. Carry on: its \
-             answer comes to you later as a message of its own. Do not wait for it with tools, \
-             and do not hand the same task over again. Should you no longer need it, stop it \
-             with `jobs`.",
+            "{agent} took the task and works on it out of sight; its id is {}. {answer}, and do \
+             not hand the same task over again. Should you no longer need it, stop it with \
+             `jobs`.",
             task.call
         ))
     }
 
     /// Carry an unfinished delegated task on: run `agent` again out of its
-    /// own session log, out of sight, under the `task` call `call`, asking
+    /// own session log, out of sight, under the `start_session` call `call`, asking
     /// through the panel `parent` and answering it when done. False when the
     /// log cannot be read: the task then stays where it is, in the lists.
     fn restart_background(
@@ -2168,6 +2409,12 @@ impl Subagents {
             .parent
             .as_ref()
             .and_then(|parent| parent.session.clone());
+        // Started with `reply` `none`: it answers no one carried on either.
+        let report = !log
+            .header()
+            .parent
+            .as_ref()
+            .is_some_and(|parent| parent.silent);
         let this = Arc::clone(self);
         let cwd = log.header().cwd.clone();
         let (caller, agent, carried, call, session, original) = (
@@ -2203,6 +2450,8 @@ impl Subagents {
                     call: &call,
                     background: true,
                     panel: false,
+                    report,
+                    fork: None,
                 };
                 let outcome = this
                     .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
@@ -2215,7 +2464,7 @@ impl Subagents {
                 // The report names the task as it was handed over, not the
                 // words that carried it on.
                 let held = termide_panel_agent::live::take_quiet(parent, &call);
-                if termide_panel_agent::live::take_withdrawn(parent, &call) {
+                if termide_panel_agent::live::take_withdrawn(parent, &call) || !report {
                     return;
                 }
                 let text = background_report(&original, &thread_agent, &outcome);
@@ -2280,6 +2529,7 @@ impl Subagents {
             task.prompt.to_string(),
             task.call.to_string(),
         );
+        let focus = task.fork.map(|fork| fork.focus.map(str::to_string));
         let spawned = std::thread::Builder::new()
             .name(format!("task-{agent}"))
             .spawn(move || {
@@ -2289,6 +2539,10 @@ impl Subagents {
                     call: &call,
                     background: false,
                     panel: false,
+                    report: true,
+                    fork: focus.as_ref().map(|focus| ForkedTask {
+                        focus: focus.as_deref(),
+                    }),
                 };
                 let outcome = this
                     .delegate(
@@ -2380,12 +2634,17 @@ impl Subagents {
                 return outcome;
             }
             attached.store(false, std::sync::atomic::Ordering::Release);
+            let who = if task.fork.is_some() {
+                "the copy of this session"
+            } else {
+                task.agent
+            };
             return Ok(format!(
-                "The user wrote while {} worked on the task, so it goes on out of sight and you \
-                 can read what they wrote; its id is {}. Its answer comes to you later as a \
+                "The user wrote while {who} worked on the task, so it goes on out of sight and \
+                 you can read what they wrote; its id is {}. Its answer comes to you later as a \
                  message of its own: do not wait for it with tools, and do not hand the same \
                  task over again. Should you no longer need it, stop it with `jobs`.",
-                task.agent, task.call
+                task.call
             ))
             .into();
         }
@@ -2471,8 +2730,26 @@ fn park_or_answer(
 }
 
 impl Subagents {
-    /// Run the task; an error is one that came before anything was spent.
+    /// Run the task; an error is one that came before anything was spent. A
+    /// fork's copy that never ran goes with it.
     fn delegate(
+        &self,
+        caller: &str,
+        task: &SubagentTask,
+        ctx: &ToolContext,
+        cancel: &CancelToken,
+        on_update: &mut dyn FnMut(ToolUpdate),
+    ) -> Result<SubagentOutcome, String> {
+        let ran = self.run_delegate(caller, task, ctx, cancel, on_update);
+        if ran.is_err() && task.fork.is_some() {
+            if let Some(copy) = ctx.resume.as_deref().filter(|copy| copy.exists()) {
+                discard_copy(copy);
+            }
+        }
+        ran
+    }
+
+    fn run_delegate(
         &self,
         caller: &str,
         task: &SubagentTask,
@@ -2497,7 +2774,6 @@ impl Subagents {
             .unwrap_or_else(PoisonError::into_inner)
             .clone();
         let settings = applied_ai_settings(&self.settings);
-        let target = subagent_target(&settings, &active)?;
         // The session's connection says who reviews, wherever the task runs.
         let reviewer = reviewer_setup(&settings, &self.dirs, &active.connection);
         // A meter of its own: what its reviewer spends counts in the task,
@@ -2561,10 +2837,15 @@ impl Subagents {
         // The task reaches the delegate as its parent's words, never the
         // user's, and its log names where it came from.
         let parent_session = ctx.session.as_ref().and_then(|session| session.id.clone());
+        let kind = if task.fork.is_some() {
+            OriginKind::Fork
+        } else {
+            OriginKind::Task
+        };
         let message = UserMessage::text(task.prompt).with_origin(MessageOrigin {
             session: parent_session.clone().unwrap_or_default(),
             agent: caller.to_string(),
-            kind: OriginKind::Task,
+            kind,
             panel: ctx.panel,
             hops: 0,
         });
@@ -2572,6 +2853,7 @@ impl Subagents {
             session: parent_session,
             agent: caller.to_string(),
             call: task.call.to_string(),
+            silent: !task.report,
         };
 
         let intent = ctx
@@ -2588,6 +2870,24 @@ impl Subagents {
                 format!("cannot carry the task on from {}: {error}", path.display())
             })?),
             None => None,
+        };
+        // A copy of the delegating session — just made, or carried on — runs
+        // on that session's model: the conversation it holds is that model's,
+        // and what the provider cached of it serves the copy too.
+        let forked = task.fork.is_some()
+            || resumed
+                .as_ref()
+                .is_some_and(|session| session.header().copied.is_some());
+        let target = if forked {
+            if definition.spec.acp.is_some() {
+                return Err("an external agent's session cannot run out of sight".into());
+            }
+            if termide_config::is_cli_provider(&active.kind) {
+                return Err("a CLI agent's session cannot run out of sight".into());
+            }
+            SubagentTarget::Session(Some(active.model.clone()))
+        } else {
+            subagent_target(&settings, &active)?
         };
         // An external agent runs its own program, whatever the session's
         // connection: out of sight as a Claude Code copy does, asking the
@@ -2687,6 +2987,7 @@ impl Subagents {
                         .spec
                         .model
                         .clone()
+                        .filter(|_| !forked)
                         .or(model)
                         .unwrap_or_else(|| active.model.clone()),
                     active.context_window,
@@ -2735,6 +3036,7 @@ impl Subagents {
         let mut agent = Agent::new(provider, tools, model, cwd)
             .with_system_prompt(system_prompt)
             .with_compaction(self.compaction)
+            .with_compaction_prompts(self.dirs.compaction_prompts())
             .with_delegated_intent(intent);
         if !carried.is_empty() {
             agent = agent.with_messages(carried);
@@ -2811,8 +3113,27 @@ impl Subagents {
                 AgentEvent::ToolExecutionEnd { result } => {
                     report.call_ended(result, on_update);
                 }
+                AgentEvent::Compacted {
+                    summary,
+                    kept,
+                    tokens_before,
+                    tokens_after,
+                    call,
+                } => log.note_compaction(summary, *tokens_before, *kept, *tokens_after, call),
                 _ => {}
             };
+            // A fork kept in full only what bears on its focus: its copy is
+            // compacted on that before it takes the work up.
+            if let Some(focus) = task.fork.and_then(|fork| fork.focus) {
+                if let Err(error) = agent.compact(
+                    termide_agent_core::CompactionReason::Manual,
+                    Some(focus),
+                    &budget,
+                    &mut emit,
+                ) {
+                    log::warn!("the fork was not compacted on its focus: {error}");
+                }
+            }
             agent.run(message, &mut hooks, &budget, &mut emit);
             finished.store(true, std::sync::atomic::Ordering::Release);
         });

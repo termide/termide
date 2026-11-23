@@ -133,7 +133,11 @@ fn summary(name: &str, arguments: &Value) -> String {
     let arg = |key: &str| arguments.get(key).and_then(Value::as_str).unwrap_or("");
     let about = match name {
         "shell" => arg("command").to_string(),
-        "task" => format!("{}: {}", arg("agent"), arg("prompt")),
+        // A fork names no agent: it runs the session's own.
+        "start_session" => match arg("agent") {
+            "" => format!("fork: {}", arg("prompt")),
+            agent => format!("{agent}: {}", arg("prompt")),
+        },
         _ => match arguments {
             Value::Object(map) if map.is_empty() => String::new(),
             _ => arguments.to_string(),

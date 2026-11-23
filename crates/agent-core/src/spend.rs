@@ -25,7 +25,7 @@ const SUBAGENT_DEPTH: usize = 4;
 pub enum Spender {
     /// The conversation's own turns.
     Main,
-    /// Agents a `task` handed work to.
+    /// Agents a `start_session` handed work to.
     Subagent,
     /// The `auto` mode reviewer judging tool calls.
     Reviewer,
@@ -50,7 +50,8 @@ impl Spender {
     #[must_use]
     pub fn of_tool(name: &str) -> Self {
         match name {
-            "task" => Self::Subagent,
+            // `task` in logs written before `start_session` took its place.
+            "start_session" | "task" => Self::Subagent,
             "recall" => Self::Recall,
             _ => Self::Tool,
         }

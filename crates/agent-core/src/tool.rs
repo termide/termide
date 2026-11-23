@@ -231,7 +231,7 @@ pub trait Tool: Send + Sync {
 
     /// The description from `template` (a tool's text, see
     /// [`crate::tool_text`]) with the tool's own placeholders filled, such as
-    /// the agents `task` can delegate to. Nothing to fill by default.
+    /// the agents `start_session` can run. Nothing to fill by default.
     fn render_description(&self, template: &str) -> String {
         template.to_string()
     }

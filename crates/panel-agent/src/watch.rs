@@ -130,7 +130,7 @@ pub struct Watch {
     control: DelegateControl,
     /// The panel the task came from.
     by_panel: u64,
-    /// The id of the `task` call that handed it over.
+    /// The id of the `start_session` call that handed it over.
     call: String,
     /// How long the log was when last read.
     seen: Option<u64>,
@@ -143,7 +143,7 @@ pub struct Watch {
 const LOOK_EVERY: Duration = Duration::from_millis(250);
 
 impl Watch {
-    /// The task the `task` call `call` of panel `by_panel`, an agent
+    /// The task the `start_session` call `call` of panel `by_panel`, an agent
     /// `from`'s, handed over, logged at `session`.
     #[must_use]
     pub fn new(
@@ -334,7 +334,7 @@ impl AgentPanel {
         self.watch.as_ref().map(|watch| watch.by_panel)
     }
 
-    /// Whether the panel follows the task the `task` call `call` of the
+    /// Whether the panel follows the task the `start_session` call `call` of the
     /// panel `by` handed over.
     #[must_use]
     pub fn runs_task(&self, by: u64, call: &str) -> bool {

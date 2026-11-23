@@ -88,6 +88,27 @@ token), and the parent's cancel aborts the sub-run. Not done yet: parallel
 delegation (the loop runs one tool at a time) and streaming the sub-run as a
 foldable sub-transcript rather than the plain text it reports.
 
+Later: `task` and `fork` became one tool, `start_session`. They were two
+points of one space — what the new session knows (`context`: the prompt
+alone, or a copy of the conversation), whether its answer comes back
+(`reply`: `wait`, `later`, `none`) and where the user sees it (`show`:
+`background`, `panel`) — and each new need (a fresh agent in a panel, a fork
+that reports) was another flag on one of them. The tool validates the
+combinations (a panel is not waited on; a fork in a panel is the user's
+session and reports nothing) and the app dispatches: a fork into a panel
+goes through the peers channel to `open_fork`, everything else runs as a
+delegate. A fork out of sight is a delegate whose log is a copy of the
+session (`Session::fork_delegate`, made on the UI thread after the runtime's
+events are flushed, the call settled in it) run with `ctx.resume`, always on
+the session's own model so the provider's cache serves it, refused for an
+external agent or a CLI connection, whose loop termide does not run.
+`reply` `none` is kept in the copy's or delegate's `SessionParent`
+(`silent`), so a task carried on after a restart stays silent too. `agents`
+became `sessions`, what it lists. The old names are unknown tools, as `bash`
+is; their calls in old logs still render and count. A message to a session
+and a delegate's answer reach it through one function, to the panel it is
+open in or else its log.
+
 ### Linked panels (planned)
 
 Considered: two shapes of agents working together across panels — a

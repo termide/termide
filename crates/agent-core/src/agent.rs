@@ -368,7 +368,9 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
 #[must_use]
 pub fn runs_alongside(call: &ToolCall, tools: &ToolRegistry) -> bool {
     match call.name.as_str() {
-        "task" => true,
+        // A delegate runs on a thread of its own; a fork opened in a panel
+        // copies the log the calls beside it are still to be answered in.
+        "start_session" => crate::permissions::starts_delegate(call),
         // A checklist written twice in one reply keeps the later list.
         "question" | "suggest_command" | "suggest_goal" | "suggest_loop" | "checklist" => false,
         _ => {
@@ -757,7 +759,7 @@ pub struct Agent {
     /// Whom a delegate's permission requests go to; `None` when no one is
     /// watching.
     prompter: Option<ChannelPrompter>,
-    /// The guards a delegate of this loop's `task` calls takes over.
+    /// The guards a delegate of this loop's `start_session` calls takes over.
     inherited: Option<InheritedHooks>,
     /// Whom the `suggest_command` tool offers commands to; `None` when no one
     /// is watching to confirm one.
@@ -886,7 +888,7 @@ impl Agent {
         self
     }
 
-    /// Let the delegates of this loop's `task` calls ask the user through
+    /// Let the delegates of this loop's `start_session` calls ask the user through
     /// `prompter` what the rules do not settle.
     #[must_use]
     pub fn with_prompter(mut self, prompter: ChannelPrompter) -> Self {
@@ -894,7 +896,7 @@ impl Agent {
         self
     }
 
-    /// Hold the delegates of this loop's `task` calls to `hooks` too: the
+    /// Hold the delegates of this loop's `start_session` calls to `hooks` too: the
     /// guards of the panel that delegates.
     #[must_use]
     pub fn with_inherited_hooks(mut self, hooks: InheritedHooks) -> Self {

@@ -50,7 +50,7 @@ pub struct RestoredDelegate {
     pub agent: String,
     /// Its session log, which holds the task's transcript.
     pub session: std::path::PathBuf,
-    /// The `task` call that handed it over.
+    /// The `start_session` call that handed it over.
     pub call: String,
     /// The task's first line, for the card.
     pub task: String,
@@ -459,7 +459,7 @@ impl AgentPanel {
     }
 
     /// Carry the unfinished delegated tasks on: each runs again out of sight
-    /// under the `task` call that handed it over, asking through this panel's
+    /// under the `start_session` call that handed it over, asking through this panel's
     /// prompter and answering back here, as any background task does. The
     /// rows they held go.
     pub(crate) fn restart_delegates(&mut self) -> Vec<PanelEvent> {
