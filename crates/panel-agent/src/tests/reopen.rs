@@ -13,7 +13,7 @@ fn running_subagents_show_in_the_state_strip() {
         panel.transcript.push(Item::Tool {
             call: ToolCall {
                 id: format!("call-{n}"),
-                name: "task".into(),
+                name: "start_session".into(),
                 arguments: serde_json::json!({ "agent": "search", "prompt": format!("find thing {n}") }),
                 extra_content: None,
             },

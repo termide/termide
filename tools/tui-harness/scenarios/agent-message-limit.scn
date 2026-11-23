@@ -13,13 +13,13 @@ key Alt+Home Alt+F11
 type "delegate the stock scan and again"
 key Enter
 wait "I'll hand the stock scan to a subagent." 20
-wait "Agent wants to run task" 15
+wait "Agent wants to run start_session" 15
 type "1"
-wait-gone "Agent wants to run task" 10
+wait-gone "Agent wants to run start_session" 10
 # The first report starts the agent anew, one message without the user: the
 # second hand-over meets the limit.
 wait "Once more, in the background." 30
-wait "Agent wants to run task" 15
+wait "Agent wants to run start_session" 15
 type "1"
 wait "The agents have used up their messages without you (1)" 10
 expect "Allow 1 more"

@@ -97,7 +97,7 @@ pub(crate) enum Pending {
     /// again now, keep waiting for the reset its row names, or give it up.
     DelegateLimit {
         form: ChoiceForm,
-        /// The `task` call the parked task was handed over under.
+        /// The `start_session` call the parked task was handed over under.
         call: String,
     },
 }
@@ -311,7 +311,7 @@ pub enum Card {
 
 impl AgentPanel {
     /// The cards set aside for the panels following the tasks they come
-    /// from, each with its `task` call's id; taking them clears the list.
+    /// from, each with its `start_session` call's id; taking them clears the list.
     pub fn take_cards_out(&mut self) -> Vec<(String, Card)> {
         std::mem::take(&mut self.cards_out)
     }

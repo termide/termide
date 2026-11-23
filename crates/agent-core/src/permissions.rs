@@ -156,12 +156,24 @@ pub enum Lasting {
 }
 
 /// Whether a call can change nothing: a read, a skill, a web read, a
-/// question, `recall`, `agents`, `checklist`, a look at what the agent set
+/// question, `recall`, `sessions`, `checklist`, a look at what the agent set
 /// going, at its debug session or at its terminals, or a shell command made
 /// only of read-only parts without substitution, read as `shell` reads it.
 #[must_use]
 pub fn is_read_only_call(call: &ToolCall, shell: ShellSyntax) -> bool {
     not_read_only(call, shell).is_none()
+}
+
+/// The tool that starts agent sessions.
+const START_SESSION_TOOL: &str = "start_session";
+
+/// Whether `call` starts a session that runs as a delegate — a fresh one, or
+/// a fork run out of sight — held to the panel's mode while it runs, rather
+/// than a fork opened in a panel, which is the user's session from its start.
+#[must_use]
+pub fn starts_delegate(call: &ToolCall) -> bool {
+    call.name == START_SESSION_TOOL
+        && !(text_arg(call, "context") == "fork" && text_arg(call, "show") == "panel")
 }
 
 /// Why a call could change something, or `None` when it cannot: for a shell
@@ -171,9 +183,9 @@ fn not_read_only(call: &ToolCall, shell: ShellSyntax) -> Option<String> {
     match call.name.as_str() {
         // The web tools read the web; nothing on this machine changes. A
         // question to the user changes nothing either, nor does `recall`,
-        // which only reads the project's history and code, or `agents`,
+        // which only reads the project's history and code, or `sessions`,
         // which lists the panels, nor `checklist`, the agent's own notes.
-        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "agents"
+        "read" | "skill" | "fetch" | "web_search" | "question" | "recall" | "sessions"
         | "checklist" => None,
         // Listing what the agent set going changes nothing; stopping it does.
         "jobs" if call.arguments.get("stop").is_none() => None,
@@ -244,9 +256,10 @@ fn runs_command_line(call: &ToolCall, ctx: &ToolContext) -> bool {
 fn asks_no_one(call: &ToolCall) -> bool {
     match call.name.as_str() {
         // `recall` reads the project's own session logs (under the
-        // configuration directory), its git history and its code; `agents`
-        // lists the panels; a skill's text may live outside the project.
-        "skill" | "question" | "recall" | "agents" | "jobs" | "checklist" | "suggest_command"
+        // configuration directory), its git history and its code;
+        // `sessions` lists the panels; a skill's text may live outside the
+        // project.
+        "skill" | "question" | "recall" | "sessions" | "jobs" | "checklist" | "suggest_command"
         | "suggest_goal" | "suggest_loop" => true,
         // Typing into a terminal is judged by what it types.
         "terminals" => call.arguments["action"].as_str() != Some("send"),
@@ -277,8 +290,10 @@ fn debug_moves_only(call: &ToolCall) -> bool {
 /// Refuses every call that could change something while the shared mode is
 /// [`Mode::Plan`]. It sits first in the hook chain, ahead of command hooks,
 /// so nothing — not even a hook's approval — lets a change through in plan
-/// mode; in every other mode it does nothing. A delegation to another agent
-/// goes through: the subagent runs in plan mode under a guard of its own. So
+/// mode; in every other mode it does nothing. A session started as a
+/// delegate goes through — a fresh one, or a fork run out of sight: it runs
+/// in plan mode under a guard of its own; a fork opened in a panel is the
+/// user's session from its start, in its own mode, and is refused. So
 /// does an MCP tool: only its server and the user know what it changes, so
 /// the permission rules decide it, and ask when they do not. And so does
 /// `suggest_command`, which runs nothing itself: the panel shows its card
@@ -317,7 +332,10 @@ impl PlanGuard {
 
 impl Hooks for PlanGuard {
     fn before_tool_call(&mut self, call: &ToolCall, ctx: &ToolContext) -> ToolDecision {
-        if self.mode.get() != Mode::Plan || call.name == "task" || asks_no_one(call) || ctx.tool.mcp
+        if self.mode.get() != Mode::Plan
+            || starts_delegate(call)
+            || asks_no_one(call)
+            || ctx.tool.mcp
         {
             return ToolDecision::Allow;
         }
@@ -488,7 +506,7 @@ impl PermissionRules {
 /// one command and stays.
 #[must_use]
 fn broad_allow(tool: &str, pattern: &str) -> bool {
-    if tool == "task" {
+    if tool == START_SESSION_TOOL {
         return true;
     }
     if !pattern.contains('*') {
@@ -795,7 +813,7 @@ pub struct PermissionEnvelope {
     /// The delegate that asks, when it is not the panel's own agent: its
     /// card is headed with its name, and what it grants stays with its task.
     pub delegate: Option<String>,
-    /// The id of the `task` call that handed the delegate its task, so a
+    /// The id of the `start_session` call that handed the delegate its task, so a
     /// panel following that task can take the card.
     pub task: Option<String>,
 }
@@ -809,7 +827,7 @@ pub struct ChannelPrompter {
     next_id: u64,
     /// Who asks, when it is not the panel's own agent.
     delegate: Option<String>,
-    /// The `task` call that handed it its task.
+    /// The `start_session` call that handed it its task.
     task: Option<String>,
     /// Ends the wait besides `cancel`: a delegate's own stop, which the
     /// panel's run does not see.
@@ -834,7 +852,7 @@ impl ChannelPrompter {
         }
     }
 
-    /// This prompter for the task the `task` call `call` handed over: its
+    /// This prompter for the task the `start_session` call `call` handed over: its
     /// cards say so, for a panel following the task to take them.
     #[must_use]
     pub fn for_task(&self, call: &str) -> Self {
@@ -1095,8 +1113,8 @@ impl PermissionHooks {
             // it first.
             (Mode::Plan | Mode::Edit, "fetch") if reaches_this_network(&subject) => Decision::Ask,
             (Mode::Plan | Mode::Edit, "fetch" | "web_search") => Decision::Allow,
-            // The subagent is held to plan mode too, so it only reads.
-            (Mode::Plan, "task") => Decision::Allow,
+            // The delegate is held to plan mode too, so it only reads.
+            (Mode::Plan, START_SESSION_TOOL) if starts_delegate(call) => Decision::Allow,
             (Mode::Edit | Mode::Auto, "edit" | "write") if inside => Decision::Allow,
             // A query reads the web; a fetched URL can carry data out, so the
             // reviewer sees it.
@@ -1717,18 +1735,18 @@ pub fn subject_of(call: &ToolCall, ctx: &ToolContext) -> String {
                 format!("{action} {what}")
             }
         }
-        // Whom the job goes to and all it asks: `explorer: find the parser`.
-        "task" => format!(
-            "{}: {}",
-            text_arg(call, "agent"),
-            text_arg(call, "prompt").escape_debug()
-        ),
-        // The work the new panel takes up, and what its copy keeps in full.
-        "fork" => {
+        // Whom the work goes to and all it asks: `explorer: find the
+        // parser`; a fork, which runs this session's own agent, as `fork:`,
+        // with what its copy keeps in full.
+        START_SESSION_TOOL => {
             let prompt = text_arg(call, "prompt").escape_debug().to_string();
-            match text_arg(call, "focus") {
-                focus if focus.is_empty() => prompt,
-                focus => format!("{prompt} (focus: {})", focus.escape_debug()),
+            if text_arg(call, "context") == "fork" {
+                match text_arg(call, "focus") {
+                    focus if focus.is_empty() => format!("fork: {prompt}"),
+                    focus => format!("fork: {prompt} (focus: {})", focus.escape_debug()),
+                }
+            } else {
+                format!("{}: {prompt}", text_arg(call, "agent"))
             }
         }
         "skill" => text_arg(call, "name"),
@@ -2048,15 +2066,15 @@ pub fn suggested_pattern(tool: &str, subject: &str) -> String {
         }
         // A query is never repeated word for word.
         "web_search" => return "*".to_string(),
-        // Trust an agent with the jobs handed to it, not one job; nor is a
-        // fork's request ever repeated word for word.
-        "task" => {
+        // Trust an agent — or forks of this session — with the work handed
+        // to it, not one piece of work: a request is never repeated word for
+        // word.
+        START_SESSION_TOOL => {
             return match subject.split_once(": ") {
                 Some((agent, _)) if !agent.is_empty() => format!("{agent}: *"),
                 _ => "*".to_string(),
             };
         }
-        "fork" => return "*".to_string(),
         _ => {}
     }
     if tool != SHELL_TOOL {

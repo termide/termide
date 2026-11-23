@@ -1762,7 +1762,8 @@ fn what_runs_alongside_is_what_changes_nothing_and_asks_nothing() {
     for together in [
         call("read", json!({ "path": "a" })),
         call("fetch", json!({ "url": "https://x" })),
-        call("task", json!({ "agent": "a", "prompt": "p" })),
+        call("start_session", json!({ "agent": "a", "prompt": "p" })),
+        call("start_session", json!({ "context": "fork", "prompt": "p" })),
         call("shell", json!({ "command": "rg foo src" })),
     ] {
         assert!(runs_alongside(&together, &tools), "{}", together.name);
@@ -1773,6 +1774,11 @@ fn what_runs_alongside_is_what_changes_nothing_and_asks_nothing() {
         call("question", json!({})),
         call("shell", json!({ "command": "cargo build" })),
         call("mcp_tool", json!({})),
+        // A fork in a panel is the user's session from its start.
+        call(
+            "start_session",
+            json!({ "context": "fork", "show": "panel", "reply": "none", "prompt": "p" }),
+        ),
     ] {
         assert!(!runs_alongside(&alone, &tools), "{}", alone.name);
     }

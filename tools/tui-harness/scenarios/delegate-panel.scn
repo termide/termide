@@ -13,9 +13,9 @@ key Alt+Home Alt+F11
 type "delegate the stock scan in a panel"
 key Enter
 wait "I'll hand the stock scan to a subagent in a panel." 20
-wait "Agent wants to run task" 15
+wait "Agent wants to run start_session" 15
 type "1"
-wait-gone "Agent wants to run task" 10
+wait-gone "Agent wants to run start_session" 10
 # The panel following it: its input names whose delegate it is.
 wait "Agent: SUBTASK: list the items" 10
 wait "Delegate of default" 5

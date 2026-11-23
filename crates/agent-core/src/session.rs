@@ -75,8 +75,12 @@ pub struct SessionParent {
     pub session: Option<String>,
     /// The delegating agent's name.
     pub agent: String,
-    /// The id of the `task` call that handed the task over.
+    /// The id of the `start_session` call (`task` in older logs) that
+    /// handed the task over.
     pub call: String,
+    /// Its answer goes back to no one: the call said `reply` `none`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub silent: bool,
 }
 
 /// How long a logged message took to produce, recorded by the UI so a
@@ -885,6 +889,27 @@ impl Session {
     /// discardable. The copy is not claimed, so the caller opens it as it
     /// would any other session.
     pub fn fork(&self, cwd: &Path, name: Option<&str>) -> std::io::Result<PathBuf> {
+        self.fork_with(cwd, name, self.header.parent.clone())
+    }
+
+    /// [`Session::fork`] for a delegate that runs out of sight: the copy names
+    /// the session and the call that started it, as a delegate's own log does,
+    /// so it lists among that session's delegates and is carried on as one.
+    pub fn fork_delegate(
+        &self,
+        cwd: &Path,
+        name: Option<&str>,
+        parent: SessionParent,
+    ) -> std::io::Result<PathBuf> {
+        self.fork_with(cwd, name, Some(parent))
+    }
+
+    fn fork_with(
+        &self,
+        cwd: &Path,
+        name: Option<&str>,
+        parent: Option<SessionParent>,
+    ) -> std::io::Result<PathBuf> {
         let dir = self.path.parent().ok_or_else(|| {
             std::io::Error::new(
                 std::io::ErrorKind::InvalidInput,
@@ -899,6 +924,7 @@ impl Session {
         header.created = created;
         header.cwd = cwd.to_path_buf();
         header.name = name.map(str::to_string);
+        header.parent = parent;
         let branch = self.branch();
         header.copied = Some(branch.len());
         // `create_new` first: the file is removed on a failed copy only once

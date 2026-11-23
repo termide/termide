@@ -95,7 +95,7 @@ const DELETE_SESSION_ACTION: &str = "agent_delete_session";
 const TAKE_OVER_ACTION: &str = "agent_take_over";
 /// Stop the task this panel follows, once confirmed.
 const STOP_WATCHED_ACTION: &str = "agent_stop_watched";
-/// Stop a task this panel handed over, once confirmed; the `task` call's id
+/// Stop a task this panel handed over, once confirmed; the `start_session` call's id
 /// follows the colon.
 const STOP_TASK_ACTION: &str = "agent_stop_task:";
 /// Stop a call the agent moved to the background, once confirmed; its id
@@ -104,7 +104,7 @@ const STOP_CALL_ACTION: &str = "agent_stop_call:";
 /// Close one of the session's terminals, once confirmed; its name follows
 /// the colon.
 const CLOSE_TERMINAL_ACTION: &str = "agent_close_terminal:";
-/// Give up a delegate's task parked at a limit, once confirmed; the `task`
+/// Give up a delegate's task parked at a limit, once confirmed; the `start_session`
 /// call's id follows the colon.
 const GIVE_UP_PARKED_ACTION: &str = "agent_give_up_parked:";
 /// Confirmation action that forks the session into a new panel (also `F5`).
@@ -577,7 +577,7 @@ pub trait AgentCatalog: Send + Sync {
         Some(profile)
     }
     /// Carry an unfinished delegated task on: run its delegate again out of
-    /// its own session log, out of sight, under the `task` call that handed
+    /// its own session log, out of sight, under the `start_session` call that handed
     /// it over, answering the panel `parent` when it is done. Its permission
     /// requests come to that panel as cards, since it has none of its own.
     /// False when this catalog runs no subagents or the log is gone.
@@ -1220,7 +1220,7 @@ pub struct AgentPanel {
     restored_delegates: Vec<unfinished::RestoredDelegate>,
     /// Set while the panel carries on a task another session delegated: its
     /// run's answer goes back to the panel holding that session, which is
-    /// what the `task` call was made for.
+    /// what the `start_session` call was made for.
     carry_back: Option<unfinished::CarryBack>,
     /// The session is another termide's, shown read-only until it lets it
     /// go; see [`held`].
@@ -1240,7 +1240,7 @@ pub struct AgentPanel {
     /// running call had already waited before it: the wait is a pause of
     /// its own, shown on the call and kept out of its duration.
     permission_wait: Option<(Instant, u32)>,
-    /// When each running subagent (by its `task` call's id) was first seen,
+    /// When each running subagent (by its `start_session` call's id) was first seen,
     /// for the state strip's clock.
     task_clocks: HashMap<String, Instant>,
     /// The state strip's rows as last drawn: each one's screen row, what it
@@ -1256,7 +1256,7 @@ pub struct AgentPanel {
     /// status bar, and when that was: they are looked at once a second.
     terminal_list: Vec<termide_agent_core::TerminalEntry>,
     terminals_polled: Option<Instant>,
-    /// Which parked tasks have had their card raised, by `task` call and the
+    /// Which parked tasks have had their card raised, by `start_session` call and the
     /// try it was parked at: a later park asks again.
     parked_asked: Vec<(String, u32)>,
     /// The parked delegates' strip text as last drawn, so a redraw happens
@@ -1285,7 +1285,7 @@ pub struct AgentPanel {
     /// Delegates' cards handed here by another panel, shown in their turn.
     cards_in: VecDeque<pending::Card>,
     /// Delegates' cards set aside for the panels following their tasks,
-    /// each with its `task` call's id, until the app hands them over.
+    /// each with its `start_session` call's id, until the app hands them over.
     cards_out: Vec<(String, pending::Card)>,
     /// The panel's number, which other agents address it by.
     panel_id: u64,
@@ -1354,7 +1354,7 @@ pub struct AgentPanel {
 
 impl AgentPanel {
     #[must_use]
-    /// The agent this panel runs as, the name its `task` calls were made by.
+    /// The agent this panel runs as, the name its `start_session` calls were made by.
     pub fn agent(&self) -> &str {
         &self.agent
     }

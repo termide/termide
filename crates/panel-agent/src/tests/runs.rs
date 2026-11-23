@@ -289,7 +289,7 @@ fn a_call_update_fills_in_the_shown_calls_arguments() {
     let mut panel = panel(vec![]);
     let call = |arguments: serde_json::Value| termide_agent_core::ToolCall {
         id: "t1".into(),
-        name: "task".into(),
+        name: "start_session".into(),
         arguments,
         extra_content: None,
     };

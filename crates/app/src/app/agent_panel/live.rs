@@ -91,7 +91,7 @@ use super::{agent_setup, DEFAULT_AGENT};
 use crate::app::App;
 
 impl App {
-    /// Show a view of the task the `task` call `call` of panel `panel`
+    /// Show a view of the task the `start_session` call `call` of panel `panel`
     /// handed over, while it runs out of sight, over the layout. `false`
     /// when no such task runs.
     pub(in crate::app) fn watch_delegate(&mut self, panel: u64, call: &str) -> bool {
@@ -131,7 +131,7 @@ impl App {
     }
 
     /// Open a panel beside the others, leaving the focus where it is, on
-    /// the task the `task` call `call` of panel `panel` asked to show in one:
+    /// the task the `start_session` call `call` of panel `panel` asked to show in one:
     /// following it while it runs, as a view moved into a panel does, else
     /// on its `session` log, which holds it as it ended. A panel already on
     /// the task, or on its log, is left as it is.

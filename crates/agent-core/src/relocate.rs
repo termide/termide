@@ -598,6 +598,7 @@ mod tests {
                 session: Some(parent_id.clone()),
                 agent: "default".into(),
                 call: "c1".into(),
+                silent: false,
             },
         )
         .unwrap();

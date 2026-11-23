@@ -2681,7 +2681,10 @@ fn recall_never_asks_and_passes_plan_mode() {
 /// subagent is held to plan mode in turn.
 #[test]
 fn plan_mode_lets_a_task_through() {
-    let task = call("task", json!({ "agent": "explore", "prompt": "find it" }));
+    let task = call(
+        "start_session",
+        json!({ "agent": "explore", "prompt": "find it" }),
+    );
     let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
     assert!(matches!(
         guard.before_tool_call(&task, &ctx()),
@@ -2702,6 +2705,30 @@ fn plan_mode_lets_a_task_through() {
     };
     assert_eq!(decide(Mode::Plan), Decision::Allow);
     assert_eq!(decide(Mode::Ask), Decision::Ask);
+    // So does a fork run out of sight, held to plan mode as any delegate.
+    let fork = call(
+        "start_session",
+        json!({ "context": "fork", "prompt": "look into it" }),
+    );
+    assert!(matches!(
+        guard.before_tool_call(&fork, &ctx()),
+        ToolDecision::Allow
+    ));
+}
+
+/// A fork opened in a panel is the user's session from its start, held to
+/// no mode of this one: plan mode refuses it.
+#[test]
+fn plan_mode_refuses_a_fork_in_a_panel() {
+    let fork = call(
+        "start_session",
+        json!({ "context": "fork", "show": "panel", "reply": "none", "prompt": "go on" }),
+    );
+    let mut guard = PlanGuard::new(ModeHandle::new(Mode::Plan));
+    assert!(matches!(
+        guard.before_tool_call(&fork, &ctx()),
+        ToolDecision::Block { .. }
+    ));
 }
 
 /// The plan guard and the mode read one list of the calls that ask no
@@ -2712,7 +2739,7 @@ fn the_calls_that_ask_no_one_pass_every_mode_and_the_plan_guard() {
         call("skill", json!({ "name": "deploy" })),
         call("question", json!({ "questions": [] })),
         call("recall", json!({ "queries": ["why"] })),
-        call("agents", json!({})),
+        call("sessions", json!({})),
         call("jobs", json!({})),
         call("jobs", json!({ "stop": "t1" })),
         call("checklist", json!({ "items": [] })),
@@ -3008,12 +3035,12 @@ fn an_mcp_tool_is_asked_about_with_all_its_arguments() {
     assert_eq!(hooks_.decide(&other, &mcp_ctx(false)), Decision::Allow);
 }
 
-/// `task`, `fork` and `skill` are judged on what they do: the job and the
+/// `start_session` and `skill` are judged on what they do: the job and the
 /// agent it goes to, the work a fork takes up, the skill by its name.
 #[test]
 fn delegations_and_skills_are_judged_on_what_they_do() {
     let task = call(
-        "task",
+        "start_session",
         json!({ "agent": "explorer", "prompt": "find the parser\nand its tests" }),
     );
     assert_eq!(
@@ -3021,23 +3048,32 @@ fn delegations_and_skills_are_judged_on_what_they_do() {
         "explorer: find the parser\\nand its tests"
     );
     assert_eq!(
-        suggested_pattern("task", &subject_of(&task, &ctx())),
+        suggested_pattern("start_session", &subject_of(&task, &ctx())),
         "explorer: *"
     );
 
     let fork = call(
-        "fork",
-        json!({ "prompt": "port the tests", "focus": "the test layout", "title": "Tests" }),
+        "start_session",
+        json!({
+            "context": "fork",
+            "prompt": "port the tests",
+            "focus": "the test layout",
+            "title": "Tests",
+        }),
     );
     assert_eq!(
         subject_of(&fork, &ctx()),
-        "port the tests (focus: the test layout)"
+        "fork: port the tests (focus: the test layout)"
     );
+    let plain = call(
+        "start_session",
+        json!({ "context": "fork", "prompt": "port the tests" }),
+    );
+    assert_eq!(subject_of(&plain, &ctx()), "fork: port the tests");
     assert_eq!(
-        subject_of(&call("fork", json!({ "prompt": "port the tests" })), &ctx()),
-        "port the tests"
+        suggested_pattern("start_session", "fork: port the tests"),
+        "fork: *"
     );
-    assert_eq!(suggested_pattern("fork", "port the tests"), "*");
 
     // A rule on a skill's name refuses it, arguments or not.
     let (hooks_, _) = hooks(rules("[skill]\n\"deploy\" = \"deny\""), vec![]);
@@ -3049,11 +3085,15 @@ fn delegations_and_skills_are_judged_on_what_they_do() {
     }
 }
 
-/// `auto` sets a configured `allow` for `task` aside, so "allow always"
-/// is not offered there: the answer lasts for the session, which counts.
+/// `auto` sets a configured `allow` for `start_session` aside, so "allow
+/// always" is not offered there: the answer lasts for the session, which
+/// counts.
 #[test]
 fn auto_mode_offers_no_lasting_allow_it_would_set_aside() {
-    let task = call("task", json!({ "agent": "explorer", "prompt": "look" }));
+    let task = call(
+        "start_session",
+        json!({ "agent": "explorer", "prompt": "look" }),
+    );
     let (hooks_, asked) = hooks(
         PermissionRules {
             mode: Mode::Auto,
@@ -3412,7 +3452,7 @@ fn broad_allows_are_those_that_run_any_program() {
         ("shell", "env *"),
         ("shell", "sh -c*"),
         ("shell", "make*"),
-        ("task", "reviewer"),
+        ("start_session", "reviewer: *"),
         ("mcp__db__query", "*"),
     ] {
         assert!(broad_allow(tool, pattern), "{tool} {pattern}");

@@ -31,7 +31,7 @@ pub(crate) fn full_log_path(result: &ToolResultMessage) -> Option<std::path::Pat
         .map(std::path::PathBuf::from)
 }
 
-/// The log of the delegate's session a `task` result names.
+/// The log of the delegate's session a `start_session` result names.
 pub(crate) fn delegate_session(result: &ToolResultMessage) -> Option<std::path::PathBuf> {
     result
         .details
@@ -759,7 +759,7 @@ impl AgentPanel {
                 // A delegated task still running — the call waiting for it,
                 // or handed over in the background — is followed in a panel
                 // of its own, or the panel running it comes forward.
-                if call.name == "task"
+                if crate::transcript::is_delegation(call)
                     && (result.is_none() || crate::live::is_running(self.panel_id, &call.id))
                 {
                     return vec![PanelEvent::FocusDelegate {

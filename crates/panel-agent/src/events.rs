@@ -199,7 +199,7 @@ impl AgentPanel {
                 };
                 // A delegated task this session carried on is over: its answer
                 // goes back to the panel that delegated it, which is what the
-                // `task` call was made for. A run that stops at a pause, or on
+                // `start_session` call was made for. A run that stops at a pause, or on
                 // a failure that is retried, waited on or asked about, is not
                 // over: the answer is owed at its real end.
                 if !self.run_paused && !held {

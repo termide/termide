@@ -109,11 +109,11 @@ pub use message::{
     SUBAGENT_SESSION_KEY,
 };
 pub use permissions::{
-    is_read_only_call, permission_channel, shell_parts, shell_parts_in, subject_of, AskedPart,
-    AutoDenyPrompter, ChannelPrompter, DecidedBy, Decision, Lasting, Mode, ModeHandle,
-    PermissionAnswer, PermissionEnvelope, PermissionHooks, PermissionNote, PermissionPrompter,
-    PermissionReply, PermissionRequest, PermissionRules, PersistRule, PersistScope, PlanGuard,
-    RuleTables, ShellPart,
+    is_read_only_call, permission_channel, shell_parts, shell_parts_in, starts_delegate,
+    subject_of, AskedPart, AutoDenyPrompter, ChannelPrompter, DecidedBy, Decision, Lasting, Mode,
+    ModeHandle, PermissionAnswer, PermissionEnvelope, PermissionHooks, PermissionNote,
+    PermissionPrompter, PermissionReply, PermissionRequest, PermissionRules, PersistRule,
+    PersistScope, PlanGuard, RuleTables, ShellPart,
 };
 pub use plan::{PlanPrompt, SEED_PLAN};
 pub use provider::{

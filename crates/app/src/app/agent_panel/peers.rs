@@ -1,6 +1,7 @@
-//! `agents` and `send_message` for the agents in the panels: the calls run on
-//! the agents' threads, the panels live on the UI thread, so a call sends its
-//! request down a process-wide channel and the app answers it on its tick.
+//! `sessions`, `send_message` and the forks `start_session` makes, for the
+//! agents in the panels: the calls run on the agents' threads, the panels
+//! live on the UI thread, so a call sends its request down a process-wide
+//! channel and the app answers it on its tick.
 //!
 //! A message goes to a session, not a panel: to the panel the session is
 //! open in when it arrives, or, when it is open in none, into its log, to go
@@ -20,7 +21,7 @@ use termide_agent_core::{
     MessageOrigin, OriginKind, Question, QuestionOption, QuestionReply, Session, Tool, ToolContext,
     UserMessage,
 };
-use termide_agent_tools::{AgentsTool, ForkRequest, ForkTool, PeerInfo, SendMessageTool};
+use termide_agent_tools::{PeerInfo, SendMessageTool, SessionReply, SessionRequest, SessionsTool};
 use termide_panel_agent::AgentPanel;
 
 use super::Handover;
@@ -86,15 +87,16 @@ enum Request {
         /// the panel's next request rather than start one.
         held: bool,
     },
-    /// A `fork` call: copy the session of panel `from` into a panel of its
-    /// own, which takes `prompt` up as the sending agent's message.
+    /// A fork opened in a panel: copy the session of panel `from` into a
+    /// panel of its own, which takes `prompt` up as the sending agent's
+    /// message.
     Fork {
         from: Option<u64>,
         /// The forking session.
         session: Option<String>,
         agent: String,
         project_root: PathBuf,
-        /// The `fork` call's id.
+        /// The `start_session` call's id.
         call: String,
         prompt: String,
         focus: Option<String>,
@@ -103,6 +105,22 @@ enum Request {
         /// What the call answers, and — when the copy branches off the
         /// agent's session — what is dropped once it has.
         reply: Sender<Result<Forked, String>>,
+    },
+    /// A fork run out of sight: copy the session of panel `from` into a log
+    /// of its own, for the delegate that runs it.
+    Copy {
+        from: Option<u64>,
+        /// The forking session.
+        session: Option<String>,
+        agent: String,
+        project_root: PathBuf,
+        /// The `start_session` call's id.
+        call: String,
+        /// The name the copy takes.
+        title: String,
+        /// Its answer goes back to the forking session.
+        report: bool,
+        reply: Sender<Result<PathBuf, String>>,
     },
     /// How many messages agents passed one another to get the run of a
     /// panel going.
@@ -158,7 +176,7 @@ fn ask_if_served<T>(
     }
 }
 
-/// `agents` and `send_message` for the agent `caller` of a panel in the
+/// `sessions` and `send_message` for the agent `caller` of a panel in the
 /// project at `project_root`.
 pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2] {
     let root = project_root.to_path_buf();
@@ -195,50 +213,76 @@ pub(super) fn peer_tools(caller: &str, project_root: &Path) -> [Arc<dyn Tool>; 2
         },
     );
     [
-        Arc::new(AgentsTool::new(list)),
+        Arc::new(SessionsTool::new(list)),
         Arc::new(SendMessageTool::new(send)),
     ]
 }
 
-/// A `fork` call's answer, and what is dropped once its copy has branched
-/// off the agent's session.
+/// A fork's answer, and what is dropped once its copy has branched off the
+/// agent's session.
 type Forked = (String, Option<Receiver<()>>);
 
-/// How long a `fork` call waits, at most, for its copy to branch off the
-/// agent's session: the agent's start and one request.
+/// How long a fork waits, at most, for its copy to branch off the agent's
+/// session: the agent's start and one request.
 const FORK_BRANCH_WAIT: Duration = Duration::from_secs(60);
 
-/// `fork` for the agent `caller` of a panel in the project at
-/// `project_root`.
-pub(super) fn fork_tool(caller: &str, project_root: &Path) -> Arc<dyn Tool> {
-    let root = project_root.to_path_buf();
-    let agent = caller.to_string();
-    let fork = Arc::new(move |ctx: &ToolContext, request: &ForkRequest| {
-        clear_to_pass(ctx, &root, "fork no more")?;
-        let (reply, answer) = mpsc::channel();
-        let (text, branched) = ask(
-            Request::Fork {
-                from: ctx.panel,
-                session: ctx.session.as_ref().and_then(|session| session.id.clone()),
-                agent: agent.clone(),
-                project_root: root.clone(),
-                call: request.call.to_string(),
-                prompt: request.prompt.to_string(),
-                focus: request.focus.map(str::to_string),
-                title: request.title.map(str::to_string),
-                reply,
-            },
-            &answer,
-        )?;
-        // The agent branches its session at its last message, which this
-        // call is part of: its run goes on, past this answer, only once the
-        // copy has branched off. A copy that cannot branch drops it at once.
-        if let Some(branched) = branched {
-            let _ = branched.recv_timeout(FORK_BRANCH_WAIT);
-        }
-        Ok(text)
-    });
-    Arc::new(ForkTool::new(fork))
+/// Open the fork `request` asks the agent `caller` of the panel `ctx` comes
+/// from for, in the project at `project_root`, in a panel of its own: what to
+/// tell the model once it is open, or why it was not.
+pub(super) fn fork_in_panel(
+    ctx: &ToolContext,
+    project_root: &Path,
+    caller: &str,
+    request: &SessionRequest,
+) -> Result<String, String> {
+    clear_to_pass(ctx, project_root, "fork no more")?;
+    let (reply, answer) = mpsc::channel();
+    let (text, branched) = ask(
+        Request::Fork {
+            from: ctx.panel,
+            session: ctx.session.as_ref().and_then(|session| session.id.clone()),
+            agent: caller.to_string(),
+            project_root: project_root.to_path_buf(),
+            call: request.call.to_string(),
+            prompt: request.prompt.to_string(),
+            focus: request.focus.map(str::to_string),
+            title: request.title.map(str::to_string),
+            reply,
+        },
+        &answer,
+    )?;
+    // The agent branches its session at its last message, which this call
+    // is part of: its run goes on, past this answer, only once the copy has
+    // branched off. A copy that cannot branch drops it at once.
+    if let Some(branched) = branched {
+        let _ = branched.recv_timeout(FORK_BRANCH_WAIT);
+    }
+    Ok(text)
+}
+
+/// Copy the session of the panel `ctx` comes from into a log of its own, for
+/// the delegate that runs the fork `request` of the agent `caller` asks for
+/// out of sight: the copy's path, or why there is none.
+pub(super) fn copy_for_delegate(
+    ctx: &ToolContext,
+    project_root: &Path,
+    caller: &str,
+    request: &SessionRequest,
+) -> Result<PathBuf, String> {
+    let (reply, answer) = mpsc::channel();
+    ask(
+        Request::Copy {
+            from: ctx.panel,
+            session: ctx.session.as_ref().and_then(|session| session.id.clone()),
+            agent: caller.to_string(),
+            project_root: project_root.to_path_buf(),
+            call: request.call.to_string(),
+            title: super::fork_title(request.title, request.prompt),
+            report: request.reply != SessionReply::None,
+            reply,
+        },
+        &answer,
+    )
 }
 
 /// How many messages agents passed one another to get the run of panel
@@ -442,6 +486,29 @@ impl App {
                     }
                     let _ = reply.send(result);
                 }
+                Request::Copy {
+                    from,
+                    session,
+                    agent,
+                    project_root,
+                    call,
+                    title,
+                    report,
+                    reply,
+                } => {
+                    let parent = termide_agent_core::SessionParent {
+                        session,
+                        agent,
+                        call,
+                        silent: !report,
+                    };
+                    let copied = self
+                        .in_project(&project_root, |app| {
+                            app.copy_for_agent(from, parent, &title, report)
+                        })
+                        .and_then(|copied| copied);
+                    let _ = reply.send(copied);
+                }
                 Request::Hops {
                     project_root,
                     panel,
@@ -536,6 +603,41 @@ impl App {
             .ok_or_else(|| "the panel this call comes from is gone".to_string())
     }
 
+    /// Deliver to the session `id` the message `message` makes from the
+    /// count of messages the run of the panel it is open in got going on —
+    /// `None` when no panel has it open, and it waits in its log for the
+    /// session's next request. `refuse` says why the panel it is open in may
+    /// not take it, if it may not. `held`: it waits in the panel for the
+    /// next request too, rather than starting a run. The one way a message
+    /// reaches a session, whether an agent sent it or a delegate's answer
+    /// goes back.
+    fn deliver_to_session(
+        &mut self,
+        id: &str,
+        message: impl FnOnce(Option<u32>) -> UserMessage,
+        held: bool,
+        refuse: impl FnOnce(&AgentPanel) -> Result<(), String>,
+    ) -> Result<Delivered, String> {
+        let Some(target) = self.panel_of_session(id) else {
+            // The user left the session: it is not the one any panel shows
+            // now, so the message waits in the session's log.
+            self.leave_in_log(id, message(None))?;
+            return Ok(Delivered::Log);
+        };
+        refuse(target)?;
+        let message = message(Some(target.agent_hops()));
+        if held {
+            target.deliver_held(message)?;
+        } else {
+            target.deliver(message)?;
+        }
+        Ok(Delivered::Panel {
+            panel: target.panel_id(),
+            agent: target.agent_name().to_string(),
+            state: target.peer_state().label(),
+        })
+    }
+
     /// Deliver a background task's answer to the session `parent` that
     /// handed it over from panel `to`, as the delegate's reply: one more
     /// message passed without the user. The session may show in another
@@ -549,28 +651,26 @@ impl App {
         text: String,
         held: bool,
     ) -> Result<(), String> {
-        let origin = |hops| MessageOrigin {
-            session: String::new(),
-            agent,
-            kind: OriginKind::Reply,
-            panel: None,
-            hops,
+        // In a log, the count it started on is gone with the panel's run.
+        let message = |hops: Option<u32>| {
+            UserMessage::text(text).with_origin(MessageOrigin {
+                session: String::new(),
+                agent,
+                kind: OriginKind::Reply,
+                panel: None,
+                hops: hops.map_or(1, |hops| hops + 1),
+            })
         };
-        let target = match parent {
-            Some(id) => self.panel_of_session(id),
-            None => self.agent_panels().find(|p| p.panel_id() == to),
-        };
-        let Some(target) = target else {
-            return match parent {
-                Some(id) => {
-                    // The count it started on is gone with the panel's run.
-                    let message = UserMessage::text(text).with_origin(origin(1));
-                    self.leave_in_log(id, message)
-                }
-                None => Err(format!("panel {to} that handed it over is closed")),
-            };
-        };
-        let message = UserMessage::text(text).with_origin(origin(target.agent_hops() + 1));
+        if let Some(id) = parent {
+            return self
+                .deliver_to_session(id, message, held, |_| Ok(()))
+                .map(drop);
+        }
+        let target = self
+            .agent_panels()
+            .find(|p| p.panel_id() == to)
+            .ok_or_else(|| format!("panel {to} that handed it over is closed"))?;
+        let message = message(Some(target.agent_hops()));
         if held {
             target.deliver_held(message)
         } else {
@@ -580,7 +680,7 @@ impl App {
 
     /// A delegated task carried on in a panel of its own after termide closed
     /// is over: its answer goes back to the panel that delegated it, which is
-    /// what the `task` call was made for. Panel numbers are born anew each
+    /// what the `start_session` call was made for. Panel numbers are born anew each
     /// start of termide, so the delegating session names its panel here; with
     /// no panel holding that session, the delegate's own panel says the
     /// answer has nowhere to go, and it stays in its log.
@@ -613,7 +713,7 @@ impl App {
         self.state.needs_redraw = true;
     }
 
-    /// Fork the session of the panel a `fork` call came from into a panel of
+    /// Fork the session of the panel a `start_session` call came from into a panel of
     /// its own, which takes the part of the work handed over as the agent's
     /// message: one more passed without the user, so a chain of forks is cut
     /// off as one of messages is.
@@ -687,37 +787,50 @@ impl App {
             panel: from,
             hops,
         });
-        let Some(target) = self.panel_of_session(&to) else {
-            // The user left the session the message is for: it is not the
-            // one the panel shows now, so it waits in the session's log.
-            self.leave_in_log(&to, delivered)?;
-            return Ok(format!(
+        let refuse = |target: &AgentPanel| {
+            let panel = target.panel_id();
+            if Some(panel) == from {
+                return Err(format!("session {to} is this one"));
+            }
+            // A task's answer goes back as the delegate's last message; one
+            // sent as well would reach the delegating agent twice.
+            if let Some((_, Some(by))) = sender {
+                if by == panel {
+                    return Err(format!(
+                        "you run a task session {to} handed you: your answer goes back to it \
+                         as your final message, so do not message it"
+                    ));
+                }
+            }
+            Ok(())
+        };
+        match self.deliver_to_session(&to, |_| delivered, false, refuse)? {
+            Delivered::Log => Ok(format!(
                 "Session {to} is open in no panel: the message waits in its log, and its agent \
                  reads it when the user opens the session again. Do not wait for an answer."
-            ));
-        };
-        let panel = target.panel_id();
-        if Some(panel) == from {
-            return Err(format!("session {to} is this one"));
+            )),
+            Delivered::Panel {
+                panel,
+                agent,
+                state,
+            } => Ok(format!(
+                "Delivered to session {to} ({agent}, {state}, panel {panel}). An answer, if any, \
+                 comes as a message of its own."
+            )),
         }
-        // A task's answer goes back as the delegate's last message; one sent
-        // as well would reach the delegating agent twice.
-        if let Some((_, Some(by))) = sender {
-            if by == panel {
-                return Err(format!(
-                    "you run a task session {to} handed you: your answer goes back to it as \
-                     your final message, so do not message it"
-                ));
-            }
-        }
-        let state = target.peer_state().label();
-        let agent = target.agent_name().to_string();
-        target.deliver(delivered)?;
-        Ok(format!(
-            "Delivered to session {to} ({agent}, {state}, panel {panel}). An answer, if any, \
-             comes as a message of its own."
-        ))
     }
+}
+
+/// Where [`App::deliver_to_session`] put a message.
+enum Delivered {
+    /// To the panel the session is open in.
+    Panel {
+        panel: u64,
+        agent: String,
+        state: &'static str,
+    },
+    /// In the session's log, for its next request.
+    Log,
 }
 
 /// Leave `message` in the log of the session `id`, found in the first of
@@ -733,7 +846,7 @@ fn leave_in_log(
         .into_iter()
         .find_map(|dir| termide_agent_recall::find_log(&dir, id))
         .ok_or_else(|| {
-            format!("no session {id} is open in a panel or kept; `agents` lists the open ones")
+            format!("no session {id} is open in a panel or kept; `sessions` lists the open ones")
         })?;
     let mut session = Session::open_exclusive(&path)
         .map_err(|error| format!("session {id} cannot take the message: {error}"))?;
@@ -760,7 +873,7 @@ fn next_hops_within(sent: u32, limit: Option<u32>) -> Result<u32, String> {
     }
 }
 
-/// A `fork` call on its way to the app.
+/// A fork opened in a panel, on its way to the app.
 struct Fork {
     from: Option<u64>,
     session: Option<String>,

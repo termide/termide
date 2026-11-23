@@ -1,6 +1,6 @@
 //! Delegated tasks running out of sight, for the panels to show and follow.
 //!
-//! A delegate registers here while it runs, under the panel and the `task`
+//! A delegate registers here while it runs, under the panel and the `start_session`
 //! call that handed it over. The panel that delegated it lists the ones it
 //! handed over in the background in its state strip, since their calls have
 //! returned and no running block stands for them; a click on a row, or `o`
@@ -42,7 +42,7 @@ struct Live {
     viewed: bool,
 }
 
-/// The tasks running out of sight, by the panel and the `task` call that
+/// The tasks running out of sight, by the panel and the `start_session` call that
 /// handed each over.
 fn registry() -> &'static Mutex<HashMap<(u64, String), Live>> {
     static LIVE: OnceLock<Mutex<HashMap<(u64, String), Live>>> = OnceLock::new();
@@ -57,7 +57,7 @@ fn lock() -> std::sync::MutexGuard<'static, HashMap<(u64, String), Live>> {
 pub struct LiveTask<'a> {
     /// The panel that handed it over; a task from no panel is not listed.
     pub panel: Option<u64>,
-    /// The id of the `task` call.
+    /// The id of the `start_session` call.
     pub call: &'a str,
     /// The delegating agent.
     pub from: &'a str,
@@ -140,7 +140,7 @@ pub fn register(task: LiveTask<'_>) -> Registration {
     }
 }
 
-/// What a panel needs to follow the task the `task` call `call` of panel
+/// What a panel needs to follow the task the `start_session` call `call` of panel
 /// `panel` handed over, while it runs and has a log.
 #[must_use]
 pub fn watch(panel: u64, call: &str) -> Option<Watch> {
@@ -156,7 +156,7 @@ pub fn watch(panel: u64, call: &str) -> Option<Watch> {
     ))
 }
 
-/// Whether the task the `task` call `call` of panel `panel` handed over
+/// Whether the task the `start_session` call `call` of panel `panel` handed over
 /// still runs out of sight.
 #[must_use]
 pub fn is_running(panel: u64, call: &str) -> bool {
@@ -198,7 +198,7 @@ pub fn background_of(panel: u64) -> Vec<BackgroundTask> {
     tasks
 }
 
-/// Note whether a panel follows the task the `task` call `call` of panel
+/// Note whether a panel follows the task the `start_session` call `call` of panel
 /// `panel` handed over: while one does, the task's cards go there.
 pub(crate) fn set_viewed(panel: u64, call: &str, viewed: bool) {
     if let Some(live) = lock().get_mut(&(panel, call.to_string())) {
@@ -206,7 +206,7 @@ pub(crate) fn set_viewed(panel: u64, call: &str, viewed: bool) {
     }
 }
 
-/// A task its `task` call asked to show in an agent panel of its own, not
+/// A task its `start_session` call asked to show in an agent panel of its own, not
 /// yet shown.
 struct Wanted {
     panel: u64,
@@ -236,7 +236,7 @@ pub fn take_wanted(panel: u64) -> Vec<(String, Option<PathBuf>)> {
     taken
 }
 
-/// Whether a panel follows the task the `task` call `call` of panel
+/// Whether a panel follows the task the `start_session` call `call` of panel
 /// `panel` handed over.
 pub(crate) fn is_viewed(panel: u64, call: &str) -> bool {
     lock()
@@ -244,7 +244,7 @@ pub(crate) fn is_viewed(panel: u64, call: &str) -> bool {
         .is_some_and(|live| live.viewed)
 }
 
-/// Ask before stopping the task the `task` call `call` of panel `panel`
+/// Ask before stopping the task the `start_session` call `call` of panel `panel`
 /// handed over, naming its delegate; `action` stops it once confirmed. Its
 /// row, the view following it and any other place ask alike.
 pub(crate) fn ask_stop(panel: u64, call: &str, action: String) -> termide_core::PanelEvent {
@@ -258,7 +258,7 @@ pub(crate) fn ask_stop(panel: u64, call: &str, action: String) -> termide_core::
     }
 }
 
-/// Stop the task the `task` call `call` of panel `panel` handed over.
+/// Stop the task the `start_session` call `call` of panel `panel` handed over.
 pub(crate) fn stop(panel: u64, call: &str) {
     if let Some(live) = lock().get(&(panel, call.to_string())) {
         live.control.stop();
@@ -277,7 +277,7 @@ pub enum Withdrawn {
 }
 
 /// The delegating agent no longer needs the task it handed over in the
-/// background under the `task` call `call` of panel `panel`: stop it, or
+/// background under the `start_session` call `call` of panel `panel`: stop it, or
 /// give it up where it is parked, without asking — the task is the agent's
 /// own. Its answer is not delivered (see [`take_withdrawn`]): the agent
 /// already knows. A task the run waits on is not the agent's to stop: the
@@ -332,13 +332,13 @@ fn aside_lock() -> std::sync::MutexGuard<'static, HashSet<(u64, String)>> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Whether the task the `task` call `call` of panel `panel` waits on was
+/// Whether the task the `start_session` call `call` of panel `panel` waits on was
 /// asked to move to the background. Asked once.
 pub fn take_aside(panel: u64, call: &str) -> bool {
     aside_lock().remove(&(panel, call.to_string()))
 }
 
-/// The task the `task` call `call` of panel `panel` handed over runs on in
+/// The task the `start_session` call `call` of panel `panel` handed over runs on in
 /// the background from now: no call waits for it any more, so it is listed,
 /// stopped and answered as one handed over so.
 pub fn move_to_background(panel: u64, call: &str) {
@@ -357,7 +357,7 @@ fn withdrawn_lock() -> std::sync::MutexGuard<'static, HashSet<(u64, String)>> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Whether the delegating agent stopped the task the `task` call `call` of
+/// Whether the delegating agent stopped the task the `start_session` call `call` of
 /// panel `panel` handed over in the background, so its answer is dropped.
 /// Asked once, as the answer would go.
 pub fn take_withdrawn(panel: u64, call: &str) -> bool {
@@ -410,7 +410,7 @@ fn quiet_lock() -> std::sync::MutexGuard<'static, HashSet<(u64, String)>> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-/// Whether the answer of the task the `task` call `call` of panel `panel`
+/// Whether the answer of the task the `start_session` call `call` of panel `panel`
 /// handed over in the background is to wait for the panel's next request,
 /// the task having been stopped with the panel's run. Asked once, as the
 /// answer goes.
@@ -448,7 +448,7 @@ pub fn held_of(panel: u64) -> usize {
         .count()
 }
 
-/// Whether the task the `task` call `call` of panel `panel` handed over is
+/// Whether the task the `start_session` call `call` of panel `panel` handed over is
 /// held at a pause.
 pub fn is_paused(panel: u64, call: &str) -> bool {
     lock()
@@ -462,7 +462,7 @@ pub fn is_paused(panel: u64, call: &str) -> bool {
 /// connection, or when the user says so from its row or its card.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Parked {
-    /// The `task` call that handed the task over.
+    /// The `start_session` call that handed the task over.
     pub call: String,
     /// The delegate that ran it.
     pub agent: String,
@@ -487,7 +487,7 @@ pub struct Parked {
     pub launching: bool,
 }
 
-/// The tasks parked at a limit, by the panel and the `task` call that handed
+/// The tasks parked at a limit, by the panel and the `start_session` call that handed
 /// each over.
 fn parked_registry() -> &'static Mutex<HashMap<(u64, String), Parked>> {
     static PARKED: OnceLock<Mutex<HashMap<(u64, String), Parked>>> = OnceLock::new();

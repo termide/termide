@@ -177,7 +177,7 @@ pub struct ForkSource {
     pub session: ExternalSessionRef,
     /// Dropped once the copy has its session — branched off, or opened anew
     /// when it could not branch — or never will: whoever holds the receiver
-    /// (the `fork` call, so that its source goes on only after the branch)
+    /// (the `start_session` call that forks, so that its source goes on only after the branch)
     /// waits for that.
     pub opened: Option<std::sync::mpsc::Sender<()>>,
 }
