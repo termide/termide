@@ -190,7 +190,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 ### Format
 
 ```
-<type>: <description>
+<type>(<scope>): <description>
 
 [optional body]
 
@@ -207,10 +207,14 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/) speci
 - `test:` - Adding or updating tests
 - `perf:` - Performance improvements
 - `style:` - Code style changes (formatting, whitespace)
+- `revert:` - Reverting an earlier commit
+
+The scope names the area changed (`fix(fm): …`, `feat(agent): …`); leave it
+out when no single area fits.
 
 ### Rules
 
-- First line: ≤ 50 characters
+- Keep the first line short (about 50 characters, 72 at most)
 - Use lowercase after the colon
 - Use imperative mood ("add" not "added")
 - No period at the end of the first line
@@ -285,6 +289,7 @@ All pull requests are automatically checked by our CI pipeline:
 - ✅ **Clippy** - `cargo clippy --workspace --all-targets -- -D warnings` (strict mode; it covers compilation)
 - ✅ **Tests** - `cargo nextest run --workspace --profile ci` on Linux and macOS, plus
   `cargo test --release -p termide-highlight` on Linux (the grammars' C code optimised as released)
+- ✅ **Doctests** - `cargo test --workspace --doc` (nextest does not run them)
 - ✅ **Unused dependencies** - `cargo machete`
 - ✅ **Version** - `tools/release/version.sh --check` (the release version agrees in every copy)
 - ✅ **Translated docs** - `tools/docs/headings.sh` (`doc/ru/` keeps the headings of `doc/en/`)
@@ -330,7 +335,8 @@ Use the [Bug Report template](.github/ISSUE_TEMPLATE/bug_report.md) when reporti
 
 **Log locations:**
 
-Each run writes its own `logs/YYYYMMDD-HHMMSS-MSC.log` into the directory of
+Each run writes its own `logs/YYYYMMDD-HHMMSS-mmm.log` (`mmm` being
+milliseconds) into the directory of
 the project you opened, `projects/<name>-<hash>/` under the data directory:
 
 - Linux: `~/.local/share/termide/projects/<name>-<hash>/logs/`
@@ -398,7 +404,9 @@ Termide has a flexible theming system. You can create and contribute new themes.
 ### Creating a New Theme
 
 1. Create `crates/theme/themes/your-theme-name.toml`, using an existing theme
-   such as `dracula.toml` or `nord.toml` as a starting point
+   such as `dracula.toml` or `nord.toml` as a starting point, and register it
+   in `crates/theme/src/lib.rs`: an `include_str!` constant, a `OnceLock`
+   static and a `BuiltinThemeEntry` in `BUILTIN_THEMES`, alongside the others
 2. Test your theme with different panels:
    - File Manager
    - Text Editor
@@ -416,7 +424,9 @@ The theme file format and its color keys are described in
 
 1. (Optional) Render its preview with `tools/screenshots/run.sh themes`; the
    website repository's `sync-shots.sh` takes it into the theme gallery
-2. Update the theme list in `README.md`
+2. Add it to the theme table in `doc/en/themes.md`, `doc/ru/themes.md` and
+   `doc/zh/themes.md`, and update the theme count there and in `README.md`,
+   `README.ru.md` and `README.zh.md`
 3. Submit a pull request with the title: `feat: add [theme name] theme`
 
 ## File Locations
@@ -444,7 +454,8 @@ Contains:
 
 Logs live in the project directory, not in a cache directory — see
 [Log locations](#bug-reports) above. One file per run,
-`projects/<name>-<hash>/logs/YYYYMMDD-HHMMSS-MSC.log`, pruned after 24 hours.
+`projects/<name>-<hash>/logs/YYYYMMDD-HHMMSS-mmm.log`, pruned after 24 hours;
+a log past 10 MB is set aside as `<name>.1` and begun afresh.
 
 ## Development Resources
 

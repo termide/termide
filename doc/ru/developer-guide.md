@@ -387,7 +387,7 @@ WARN Missing translation key: my_key (using English fallback)
 
 ### Логирование
 
-Каждый запуск пишет свой лог в `logs/<дата>-<время>.log` в каталоге
+Каждый запуск пишет свой лог в `logs/YYYYMMDD-HHMMSS-mmm.log` в каталоге
 данных проекта (`~/.local/share/termide/projects/<имя>-<хеш>/` в Linux,
 `~/Library/Application Support/termide/projects/<имя>-<хеш>/` в macOS); логи
 старше 24 часов удаляются при запуске, а журнал больше 10 МБ откладывается
