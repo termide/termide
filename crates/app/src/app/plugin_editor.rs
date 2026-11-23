@@ -153,6 +153,206 @@ fn not_open(path: &Path) -> RpcError {
     )
 }
 
+/// Where a job stands after a step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JobStep {
+    /// A plugin is being asked, or is about to be: again next tick.
+    Pending,
+    /// Every plugin was asked: the job's ending is up.
+    Ready,
+    /// Over with nothing more to do: a plugin dealt with it, or the editor
+    /// closed.
+    Dropped,
+}
+
+/// What ends a `Ctrl+E` once the plugins had their say.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EditEnding {
+    /// The editor closed: nothing to do.
+    Dropped,
+    /// Write the file through the plugins that see saves, then view it.
+    SaveThenView,
+    /// Ask about the unsaved work, as `Ctrl+E` does.
+    AskStopEditing,
+    /// Turn editing on or off; `reload` first takes the file from disk.
+    SetEditable { edit: bool, reload: bool },
+}
+
+/// What a job reaches: the editor of its file and the plugins. The jobs
+/// decide; [`JobPlace`] carries it out in the app, the tests watch.
+trait JobWorld {
+    /// The editor's edit version and whether it holds unsaved work; `None`
+    /// once it is closed.
+    fn editor_state(&mut self) -> Option<(u64, bool)>;
+    /// Apply a plugin's edits to the editor.
+    fn apply(&mut self, edits: &[lsp_types::TextEdit]);
+    /// Ask the plugin `key` on a thread of its own; `None` when it is not
+    /// running.
+    fn ask(
+        &mut self,
+        key: &PluginKey,
+        method: &'static str,
+        params: Value,
+        timeout: Duration,
+    ) -> Option<Answer>;
+}
+
+/// A plugin's answer, when it came: `Err(())` while it is still awaited,
+/// a failure for a plugin that went away.
+fn take_answer(rx: &Answer) -> Result<Result<Value, String>, ()> {
+    match rx.try_recv() {
+        Ok(outcome) => Ok(outcome),
+        Err(std::sync::mpsc::TryRecvError::Empty) => Err(()),
+        Err(std::sync::mpsc::TryRecvError::Disconnected) => Ok(Err("no answer".to_string())),
+    }
+}
+
+impl SaveJob {
+    /// Take the awaited answer and apply its edits, then ask the next
+    /// plugin that is running; `Ready` once all were asked.
+    fn step(&mut self, world: &mut impl JobWorld) -> JobStep {
+        if let Some((key, version, rx)) = &self.waiting {
+            let Ok(outcome) = take_answer(rx) else {
+                return JobStep::Pending;
+            };
+            let (key, version) = (key.clone(), *version);
+            self.waiting = None;
+            match outcome.and_then(|result| match result.get("edits") {
+                Some(edits) => text_edits(edits),
+                None => Ok(Vec::new()),
+            }) {
+                Ok(edits) if !edits.is_empty() => match world.editor_state() {
+                    None => return JobStep::Dropped,
+                    Some((now, _)) if now == version => world.apply(&edits),
+                    Some(_) => log::info!(
+                        "plugin {}: its edits before saving came after the buffer changed",
+                        key.name
+                    ),
+                },
+                Ok(_) => {}
+                Err(e) => log::warn!("plugin {}: before saving: {e}", key.name),
+            }
+        }
+        while let Some(key) = self.queue.pop_front() {
+            let Some((version, _)) = world.editor_state() else {
+                return JobStep::Dropped;
+            };
+            let params = json!({ "path": self.path, "version": version });
+            if let Some(rx) = world.ask(&key, events::FILE_WILL_SAVE, params, WILL_SAVE_TIMEOUT) {
+                self.waiting = Some((key, version, rx));
+                return JobStep::Pending;
+            }
+        }
+        JobStep::Ready
+    }
+}
+
+impl EditJob {
+    /// Take the awaited answer, then ask the next plugin; `Dropped` once
+    /// one dealt with it, `Ready` once all were asked.
+    fn step(&mut self, world: &mut impl JobWorld) -> JobStep {
+        if let Some((key, rx)) = &self.waiting {
+            let Ok(outcome) = take_answer(rx) else {
+                return JobStep::Pending;
+            };
+            match outcome {
+                Ok(answer) if answer["handled"] == json!(true) => return JobStep::Dropped,
+                // The plugin settled what becomes of unsaved work: the
+                // others are not asked again.
+                Ok(answer) => {
+                    self.buffer = match answer["buffer"].as_str() {
+                        Some("save") => Some(UnsavedWork::Save),
+                        Some("discard") => Some(UnsavedWork::Discard),
+                        _ => None,
+                    };
+                    if self.buffer.is_some() {
+                        self.queue.clear();
+                    }
+                }
+                Err(e) => log::warn!("plugin {}: {}: {e}", key.name, events::FILE_WILL_EDIT),
+            }
+            self.waiting = None;
+        }
+        if let Some(key) = self.queue.pop_front() {
+            let Some((_, modified)) = world.editor_state() else {
+                return JobStep::Dropped;
+            };
+            let params = json!({ "path": self.path, "edit": self.edit, "modified": modified });
+            // One not running is passed over; the next is asked next tick.
+            self.waiting = world
+                .ask(&key, events::FILE_WILL_EDIT, params, WILL_EDIT_TIMEOUT)
+                .map(|rx| (key, rx));
+            return JobStep::Pending;
+        }
+        JobStep::Ready
+    }
+
+    /// What ends the job once every plugin was asked and none dealt with
+    /// it: the unsaved work as a plugin asked, else editing on or off as
+    /// `Ctrl+E` would have done, asking about unsaved work as it does.
+    fn ending(&self, world: &mut impl JobWorld) -> EditEnding {
+        if self.buffer == Some(UnsavedWork::Save) {
+            return EditEnding::SaveThenView;
+        }
+        let Some((_, modified)) = world.editor_state() else {
+            return EditEnding::Dropped;
+        };
+        if !self.edit && self.buffer.is_none() && modified {
+            return EditEnding::AskStopEditing;
+        }
+        EditEnding::SetEditable {
+            edit: self.edit,
+            reload: self.buffer == Some(UnsavedWork::Discard),
+        }
+    }
+}
+
+/// A job's file in the app: its project's editor and plugins.
+struct JobPlace<'a> {
+    app: &'a mut App,
+    project: PathBuf,
+    path: PathBuf,
+}
+
+impl<'a> JobPlace<'a> {
+    fn of(app: &'a mut App, project: &Path, path: &Path) -> Self {
+        Self {
+            app,
+            project: project.to_path_buf(),
+            path: path.to_path_buf(),
+        }
+    }
+}
+
+impl JobWorld for JobPlace<'_> {
+    fn editor_state(&mut self) -> Option<(u64, bool)> {
+        self.app
+            .project_editor_mut(&self.project, &self.path)
+            .map(|editor| (editor.edit_version(), editor.buffer().is_modified()))
+    }
+
+    fn apply(&mut self, edits: &[lsp_types::TextEdit]) {
+        if let Some(editor) = self.app.project_editor_mut(&self.project, &self.path) {
+            editor.apply_plugin_edits(edits);
+        }
+    }
+
+    fn ask(
+        &mut self,
+        key: &PluginKey,
+        method: &'static str,
+        params: Value,
+        timeout: Duration,
+    ) -> Option<Answer> {
+        let peer = self.app.plugins.host.peer(key)?;
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(peer.request(method, params, timeout, &|| false));
+        });
+        Some(rx)
+    }
+}
+
 impl App {
     /// `editor/*` requests; `None` for any other method.
     pub(super) fn serve_editor_request(
@@ -322,55 +522,11 @@ impl App {
 
     /// One step of `job`; `false` once it is done.
     fn advance_save(&mut self, job: &mut SaveJob) -> bool {
-        if let Some((key, version, rx)) = &job.waiting {
-            let outcome = match rx.try_recv() {
-                Ok(outcome) => outcome,
-                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("no answer".to_string()),
-            };
-            let (key, version) = (key.clone(), *version);
-            job.waiting = None;
-            match outcome.and_then(|result| match result.get("edits") {
-                Some(edits) => text_edits(edits),
-                None => Ok(Vec::new()),
-            }) {
-                Ok(edits) if !edits.is_empty() => {
-                    let Some(editor) = self.project_editor_mut(&job.project, &job.path) else {
-                        return false;
-                    };
-                    if editor.edit_version() == version {
-                        editor.apply_plugin_edits(&edits);
-                    } else {
-                        log::info!(
-                            "plugin {}: its edits before saving came after the buffer changed",
-                            key.name
-                        );
-                    }
-                }
-                Ok(_) => {}
-                Err(e) => log::warn!("plugin {}: before saving: {e}", key.name),
-            }
-        }
-        while let Some(key) = job.queue.pop_front() {
-            let Some(peer) = self.plugins.host.peer(&key) else {
-                continue;
-            };
-            let Some(editor) = self.project_editor_mut(&job.project, &job.path) else {
-                return false;
-            };
-            let version = editor.edit_version();
-            let params = json!({ "path": job.path, "version": version });
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let _ = tx.send(peer.request(
-                    events::FILE_WILL_SAVE,
-                    params,
-                    WILL_SAVE_TIMEOUT,
-                    &|| false,
-                ));
-            });
-            job.waiting = Some((key, version, rx));
-            return true;
+        let mut place = JobPlace::of(self, &job.project, &job.path);
+        match job.step(&mut place) {
+            JobStep::Pending => return true,
+            JobStep::Dropped => return false,
+            JobStep::Ready => {}
         }
         // Everyone was asked: write the file, as Ctrl+S would have.
         // Held apart while the editor is borrowed, and put back below.
@@ -488,72 +644,30 @@ impl App {
 
     /// One step of `job`; `false` once it is done.
     fn advance_edit(&mut self, job: &mut EditJob) -> bool {
-        if let Some((key, rx)) = &job.waiting {
-            let outcome = match rx.try_recv() {
-                Ok(outcome) => outcome,
-                Err(std::sync::mpsc::TryRecvError::Empty) => return true,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => Err("no answer".to_string()),
-            };
-            match outcome {
-                Ok(answer) if answer["handled"] == json!(true) => return false,
-                // The plugin settled what becomes of unsaved work: the
-                // others are not asked again.
-                Ok(answer) => {
-                    job.buffer = match answer["buffer"].as_str() {
-                        Some("save") => Some(UnsavedWork::Save),
-                        Some("discard") => Some(UnsavedWork::Discard),
-                        _ => None,
-                    };
-                    if job.buffer.is_some() {
-                        job.queue.clear();
+        let mut place = JobPlace::of(self, &job.project, &job.path);
+        let ending = match job.step(&mut place) {
+            JobStep::Pending => return true,
+            JobStep::Dropped => return false,
+            JobStep::Ready => job.ending(&mut place),
+        };
+        match ending {
+            EditEnding::Dropped => {}
+            EditEnding::SaveThenView => self.save_then_view(&job.project, &job.path),
+            EditEnding::AskStopEditing => self.ask_stop_editing(job.path.clone()),
+            EditEnding::SetEditable { edit, reload } => {
+                let Some(editor) = self.project_editor_mut(&job.project, &job.path) else {
+                    return false;
+                };
+                if reload {
+                    if let Err(e) = editor.reload_from_disk() {
+                        self.state
+                            .set_error(termide_i18n::t().status_error_reload(&e.to_string()));
+                        return false;
                     }
                 }
-                Err(e) => log::warn!("plugin {}: {}: {e}", key.name, events::FILE_WILL_EDIT),
+                editor.set_editable(edit);
+                self.state.needs_redraw = true;
             }
-            job.waiting = None;
-        }
-        if let Some(key) = job.queue.pop_front() {
-            let Some(modified) = self
-                .project_editor_mut(&job.project, &job.path)
-                .map(|editor| editor.buffer().is_modified())
-            else {
-                return false;
-            };
-            if let Some(peer) = self.plugins.host.peer(&key) {
-                let params = json!({ "path": job.path, "edit": job.edit, "modified": modified });
-                let (tx, rx) = std::sync::mpsc::channel();
-                std::thread::spawn(move || {
-                    let _ = tx.send(peer.request(
-                        events::FILE_WILL_EDIT,
-                        params,
-                        WILL_EDIT_TIMEOUT,
-                        &|| false,
-                    ));
-                });
-                job.waiting = Some((key, rx));
-            }
-            return true;
-        }
-        if job.buffer == Some(UnsavedWork::Save) {
-            self.save_then_view(&job.project, &job.path);
-            return false;
-        }
-        // No plugin took it: editing goes on or off as `Ctrl+E` would have,
-        // asking about unsaved work as it does.
-        if let Some(editor) = self.project_editor_mut(&job.project, &job.path) {
-            if !job.edit && job.buffer.is_none() && editor.buffer().is_modified() {
-                self.ask_stop_editing(job.path.clone());
-                return false;
-            }
-            if job.buffer == Some(UnsavedWork::Discard) {
-                if let Err(e) = editor.reload_from_disk() {
-                    self.state
-                        .set_error(termide_i18n::t().status_error_reload(&e.to_string()));
-                    return false;
-                }
-            }
-            editor.set_editable(job.edit);
-            self.state.needs_redraw = true;
         }
         false
     }
@@ -659,5 +773,283 @@ mod tests {
         assert_eq!(watch.project.as_deref(), Some(Path::new("/b")));
         assert_eq!(watch.focused, None, "what was told of /a is forgotten");
         assert_eq!(watch.saves.len(), 1, "the Ctrl+S held for /a still goes");
+    }
+
+    type Reply = std::sync::mpsc::Sender<Result<Value, String>>;
+
+    /// An editor and plugins as a job sees them.
+    struct Fake {
+        /// The editor's version and unsaved work; `None` once it closed.
+        editor: Option<(u64, bool)>,
+        /// The plugins running.
+        running: BTreeSet<&'static str>,
+        /// Each question asked: the plugin, the method, the params, and
+        /// where its answer goes.
+        asked: Vec<(String, &'static str, Value, Reply)>,
+        applied: Vec<Vec<lsp_types::TextEdit>>,
+    }
+
+    impl Fake {
+        fn new(running: &[&'static str]) -> Self {
+            Self {
+                editor: Some((7, true)),
+                running: running.iter().copied().collect(),
+                asked: Vec::new(),
+                applied: Vec::new(),
+            }
+        }
+
+        /// The plugin asked last answers.
+        fn answer(&self, outcome: Result<Value, String>) {
+            self.asked.last().unwrap().3.send(outcome).unwrap();
+        }
+
+        fn asked(&self) -> Vec<&str> {
+            self.asked.iter().map(|(name, ..)| name.as_str()).collect()
+        }
+    }
+
+    impl JobWorld for Fake {
+        fn editor_state(&mut self) -> Option<(u64, bool)> {
+            self.editor
+        }
+
+        fn apply(&mut self, edits: &[lsp_types::TextEdit]) {
+            self.applied.push(edits.to_vec());
+        }
+
+        fn ask(
+            &mut self,
+            key: &PluginKey,
+            method: &'static str,
+            params: Value,
+            _timeout: Duration,
+        ) -> Option<Answer> {
+            if !self.running.contains(key.name.as_str()) {
+                return None;
+            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.asked.push((key.name.clone(), method, params, tx));
+            Some(rx)
+        }
+    }
+
+    fn keys(names: &[&str]) -> VecDeque<PluginKey> {
+        names
+            .iter()
+            .map(|name| PluginKey {
+                project: PathBuf::from("/p"),
+                name: (*name).to_string(),
+            })
+            .collect()
+    }
+
+    fn save_job(names: &[&str]) -> SaveJob {
+        SaveJob {
+            project: PathBuf::from("/p"),
+            path: PathBuf::from("/p/a.txt"),
+            queue: keys(names),
+            waiting: None,
+            then_view: false,
+        }
+    }
+
+    fn edit_job(names: &[&str], edit: bool) -> EditJob {
+        EditJob {
+            project: PathBuf::from("/p"),
+            path: PathBuf::from("/p/a.txt"),
+            edit,
+            queue: keys(names),
+            waiting: None,
+            buffer: None,
+        }
+    }
+
+    fn trim() -> Value {
+        json!({ "edits": [{ "line": 0, "col": 3, "end_col": 5, "text": "" }] })
+    }
+
+    /// A plugin's edits land when the buffer is as it was asked about; one
+    /// not running is passed over; the file is written once all answered.
+    #[test]
+    fn a_save_applies_the_edits_of_each_running_plugin_then_writes() {
+        let mut world = Fake::new(&["trim", "fmt"]);
+        let mut job = save_job(&["gone", "trim", "fmt"]);
+        assert_eq!(job.step(&mut world), JobStep::Pending);
+        assert_eq!(
+            world.asked(),
+            ["trim"],
+            "the one not running is passed over"
+        );
+        assert_eq!(world.asked[0].1, events::FILE_WILL_SAVE);
+        assert_eq!(world.asked[0].2["version"], 7);
+        assert_eq!(job.step(&mut world), JobStep::Pending, "no answer yet");
+
+        world.answer(Ok(trim()));
+        assert_eq!(job.step(&mut world), JobStep::Pending);
+        assert_eq!(world.applied.len(), 1);
+        assert_eq!(world.asked(), ["trim", "fmt"]);
+
+        world.answer(Ok(Value::Null));
+        assert_eq!(
+            job.step(&mut world),
+            JobStep::Ready,
+            "now the file is written"
+        );
+        assert_eq!(
+            world.applied.len(),
+            1,
+            "an answer with no edits changes nothing"
+        );
+    }
+
+    /// Edits for a buffer that changed while the plugin worked would land
+    /// in the wrong places: they are dropped, and the save goes on.
+    #[test]
+    fn a_saves_edits_for_a_changed_buffer_are_dropped() {
+        let mut world = Fake::new(&["trim"]);
+        let mut job = save_job(&["trim"]);
+        job.step(&mut world);
+        world.editor = Some((8, true));
+        world.answer(Ok(trim()));
+        assert_eq!(job.step(&mut world), JobStep::Ready);
+        assert!(world.applied.is_empty());
+    }
+
+    /// A plugin that fails or goes away does not hold the save up.
+    #[test]
+    fn a_save_goes_on_past_a_failed_or_vanished_plugin() {
+        let mut world = Fake::new(&["a", "b"]);
+        let mut job = save_job(&["a", "b"]);
+        job.step(&mut world);
+        world.answer(Err("timed out".into()));
+        assert_eq!(job.step(&mut world), JobStep::Pending);
+        world.asked.pop();
+        assert_eq!(
+            job.step(&mut world),
+            JobStep::Ready,
+            "its answer can no longer come"
+        );
+        assert!(world.applied.is_empty());
+    }
+
+    /// The editor closed while a plugin worked: nothing is left to write.
+    #[test]
+    fn a_save_ends_when_its_editor_closes() {
+        let mut world = Fake::new(&["trim", "fmt"]);
+        let mut job = save_job(&["trim", "fmt"]);
+        job.step(&mut world);
+        world.editor = None;
+        world.answer(Ok(trim()));
+        assert_eq!(job.step(&mut world), JobStep::Dropped);
+        assert!(world.applied.is_empty());
+
+        let mut job = save_job(&["trim"]);
+        assert_eq!(
+            job.step(&mut world),
+            JobStep::Dropped,
+            "before asking anyone"
+        );
+        assert_eq!(world.asked.len(), 1);
+    }
+
+    /// With no plugin running the file is written straight away.
+    #[test]
+    fn a_save_with_no_plugin_running_writes_at_once() {
+        let mut world = Fake::new(&[]);
+        assert_eq!(save_job(&["a", "b"]).step(&mut world), JobStep::Ready);
+        assert!(world.asked.is_empty());
+    }
+
+    /// A plugin that handled `Ctrl+E` ends it: the others are not asked.
+    #[test]
+    fn an_edit_a_plugin_handled_ends_there() {
+        let mut world = Fake::new(&["p4", "other"]);
+        let mut job = edit_job(&["p4", "other"], true);
+        assert_eq!(job.step(&mut world), JobStep::Pending);
+        assert_eq!(world.asked[0].1, events::FILE_WILL_EDIT);
+        assert_eq!(
+            world.asked[0].2,
+            json!({ "path": "/p/a.txt", "edit": true, "modified": true })
+        );
+        assert_eq!(job.step(&mut world), JobStep::Pending, "no answer yet");
+        world.answer(Ok(json!({ "handled": true })));
+        assert_eq!(job.step(&mut world), JobStep::Dropped);
+        assert_eq!(world.asked(), ["p4"]);
+    }
+
+    /// A plugin that asks for the unsaved work to be saved settles it: the
+    /// others are not asked, and the file is written, then viewed.
+    #[test]
+    fn an_edit_whose_unsaved_work_a_plugin_saves_is_written_then_viewed() {
+        let mut world = Fake::new(&["p4", "other"]);
+        let mut job = edit_job(&["p4", "other"], false);
+        job.step(&mut world);
+        world.answer(Ok(json!({ "buffer": "save" })));
+        assert_eq!(job.step(&mut world), JobStep::Ready);
+        assert_eq!(world.asked(), ["p4"]);
+        assert_eq!(job.ending(&mut world), EditEnding::SaveThenView);
+    }
+
+    /// Discarding takes the file from disk before editing turns off, and
+    /// no question about the unsaved work is asked.
+    #[test]
+    fn an_edit_whose_unsaved_work_a_plugin_discards_reloads_the_file() {
+        let mut world = Fake::new(&["p4"]);
+        let mut job = edit_job(&["p4"], false);
+        job.step(&mut world);
+        world.answer(Ok(json!({ "buffer": "discard" })));
+        assert_eq!(job.step(&mut world), JobStep::Ready);
+        assert_eq!(
+            job.ending(&mut world),
+            EditEnding::SetEditable {
+                edit: false,
+                reload: true
+            }
+        );
+    }
+
+    /// When no plugin dealt with it, `Ctrl+E` does what it does without
+    /// plugins: asks about unsaved work before editing turns off.
+    #[test]
+    fn an_edit_no_plugin_dealt_with_goes_as_ctrl_e_would() {
+        let mut world = Fake::new(&["p4"]);
+        let mut job = edit_job(&["gone", "p4"], false);
+        assert_eq!(job.step(&mut world), JobStep::Pending, "one not running");
+        assert!(world.asked.is_empty());
+        job.step(&mut world);
+        world.answer(Ok(json!({ "handled": false })));
+        assert_eq!(job.step(&mut world), JobStep::Ready);
+        assert_eq!(job.ending(&mut world), EditEnding::AskStopEditing);
+
+        world.editor = Some((7, false));
+        assert_eq!(
+            job.ending(&mut world),
+            EditEnding::SetEditable {
+                edit: false,
+                reload: false
+            }
+        );
+        let on = edit_job(&[], true);
+        world.editor = Some((7, true));
+        assert_eq!(
+            on.ending(&mut world),
+            EditEnding::SetEditable {
+                edit: true,
+                reload: false
+            }
+        );
+    }
+
+    /// The editor closed while a plugin was asked: the job ends.
+    #[test]
+    fn an_edit_ends_when_its_editor_closes() {
+        let mut world = Fake::new(&["p4", "other"]);
+        let mut job = edit_job(&["p4", "other"], false);
+        job.step(&mut world);
+        world.editor = None;
+        world.answer(Ok(json!({ "handled": false })));
+        assert_eq!(job.step(&mut world), JobStep::Dropped);
+        assert_eq!(edit_job(&[], true).ending(&mut world), EditEnding::Dropped);
     }
 }
