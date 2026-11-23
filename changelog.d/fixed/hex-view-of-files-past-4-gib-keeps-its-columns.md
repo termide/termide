@@ -1,0 +1,1 @@
+- **The hex view of a file past 4 GiB keeps its columns.** The offset column grew past eight digits on later rows only, shifting the bytes and making clicks land on the wrong byte; it now has one width for the whole file, and the layout and click mapping follow it.

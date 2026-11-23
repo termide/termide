@@ -7,20 +7,33 @@ use crate::{BinaryPanel, ViewMode, Zone};
 /// Bytes per section; rows are laid out in whole sections (16, 32, 48, …).
 const SECTION: u64 = 16;
 
-/// Bytes shown per row for the given inner width: as many whole 16-byte
-/// sections as fit, at least one. Row layout is
-/// `8 offset + 2 + n*3 hex + 1 + n ascii` ≈ `11 + 4n` columns.
-fn bytes_per_row(width: u16) -> u64 {
-    let usable = (width as i64 - 11).max(0);
+/// Bytes shown per row for the given inner width and offset column width:
+/// as many whole 16-byte sections as fit, at least one. Row layout is
+/// `w offset + 2 + n*3 hex + 1 + n ascii` = `w + 3 + 4n` columns.
+fn bytes_per_row(width: u16, offset_width: u64) -> u64 {
+    let usable = (width as i64 - offset_width as i64 - 3).max(0);
     let fit = (usable / 4) as u64;
     (fit / SECTION).max(1) * SECTION
 }
 
+/// Hex digits the offset column needs for a file of `len` bytes: eight, or
+/// more past 4 GiB so every row's offset has the same width.
+pub(crate) fn offset_width(len: u64) -> u64 {
+    let last = len.saturating_sub(1);
+    let digits = u64::from((u64::BITS - last.leading_zeros()).div_ceil(4));
+    digits.max(8)
+}
+
 impl BinaryPanel {
+    /// Width of the hex view's offset column, from the file length.
+    pub(crate) fn offset_width(&self) -> u64 {
+        offset_width(self.len)
+    }
+
     /// Bytes per row for the current width and mode.
     pub(crate) fn cols(&self) -> u64 {
         match self.mode {
-            ViewMode::Hex => bytes_per_row(self.last_area.width),
+            ViewMode::Hex => bytes_per_row(self.last_area.width, self.offset_width()),
             ViewMode::Text => (self.last_area.width as u64).max(1),
         }
     }
@@ -129,13 +142,15 @@ impl BinaryPanel {
                 Zone::Ascii,
             ));
         }
-        let ascii_start = 11 + cols * 3; // 8 offset + 2 + cols*3 hex + 1 sep
+        // offset + 2, then cols*3 hex, 1 separator, cols ascii.
+        let hex_start = self.offset_width() + 2;
+        let ascii_start = hex_start + cols * 3 + 1;
         if cx >= ascii_start && cx < ascii_start + cols {
             let i = cx - ascii_start;
             return Some(((row_start + i).min(self.len.saturating_sub(1)), Zone::Ascii));
         }
-        if (10..10 + cols * 3).contains(&cx) {
-            let i = (cx - 10) / 3;
+        if (hex_start..hex_start + cols * 3).contains(&cx) {
+            let i = (cx - hex_start) / 3;
             return Some(((row_start + i).min(self.len.saturating_sub(1)), Zone::Hex));
         }
         None
@@ -157,9 +172,29 @@ mod tests {
 
     #[test]
     fn bytes_per_row_rounds_to_16_byte_sections() {
-        assert_eq!(bytes_per_row(80), 16);
-        assert_eq!(bytes_per_row(140), 32);
-        assert_eq!(bytes_per_row(10), 16);
+        assert_eq!(bytes_per_row(80, 8), 16);
+        assert_eq!(bytes_per_row(140, 8), 32);
+        assert_eq!(bytes_per_row(10, 8), 16);
+        // Two more offset digits cost the second section at 139 columns.
+        assert_eq!(bytes_per_row(139, 8), 32);
+        assert_eq!(bytes_per_row(139, 10), 16);
+    }
+
+    #[test]
+    fn the_offset_column_widens_past_4_gib() {
+        assert_eq!(offset_width(0), 8);
+        assert_eq!(offset_width(1 << 32), 8);
+        assert_eq!(offset_width((1 << 32) + 1), 9);
+        assert_eq!(offset_width(1 << 40), 10);
+    }
+
+    #[test]
+    fn clicks_follow_a_wider_offset_column() {
+        let p = panel_with(1 << 40, 80, 10); // 10 digits, 16 cols
+                                             // hex byte 2 at col 12 + 2*3 = 18; ascii starts at 12 + 48 + 1 = 61
+        assert_eq!(p.byte_at(18, 0), Some((2, Zone::Hex)));
+        assert_eq!(p.byte_at(63, 0), Some((2, Zone::Ascii)));
+        assert_eq!(p.byte_at(11, 0), None);
     }
 
     #[test]
