@@ -117,6 +117,41 @@ fn canonicalize_lenient(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Progress of a copy at `source`, with the speed and the time left
+/// reckoned from `start_time`.
+fn transfer_progress(
+    source: &Path,
+    bytes_copied: u64,
+    total_bytes: u64,
+    files_copied: usize,
+    total_files: usize,
+    start_time: Instant,
+) -> OperationProgress {
+    let elapsed = start_time.elapsed().as_secs_f64();
+    let speed_bps = if elapsed > 0.0 {
+        bytes_copied as f64 / elapsed
+    } else {
+        0.0
+    };
+    let remaining_bytes = total_bytes.saturating_sub(bytes_copied);
+    let eta_seconds = (speed_bps > 0.0).then(|| (remaining_bytes as f64 / speed_bps) as u64);
+    OperationProgress {
+        phase: OperationPhase::Transferring,
+        bytes_transferred: bytes_copied,
+        total_bytes,
+        files_completed: files_copied,
+        total_files,
+        current_item: source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .map(String::from),
+        speed_bps,
+        eta_seconds,
+        individual_file_bytes: 0,
+        individual_file_total: 0,
+    }
+}
+
 /// Whether a failed `rename` means source and destination are on different
 /// filesystems, so a move has to fall back to copy + delete. std reports
 /// EXDEV (Unix) and ERROR_NOT_SAME_DEVICE (Windows) as `CrossesDevices`.
@@ -170,7 +205,14 @@ pub struct LocalCopyWorker {
     destination: PathBuf,
     /// Whether to delete source after copy (move).
     is_move: bool,
+    /// When the copy last reported a file or folder done; see
+    /// [`Self::entry_progress_due`].
+    last_entry_progress: std::cell::Cell<Option<Instant>>,
 }
+
+/// How often a copy reports the files and folders it finishes: one message
+/// per entry would allocate a name per entry for a tree of small ones.
+const COPY_ENTRY_PROGRESS_INTERVAL: Duration = Duration::from_millis(100);
 
 impl LocalCopyWorker {
     /// Create a new local copy worker.
@@ -179,7 +221,23 @@ impl LocalCopyWorker {
             sources,
             destination,
             is_move,
+            last_entry_progress: std::cell::Cell::new(None),
         }
+    }
+
+    /// Whether a finished file or folder is to be reported: the first one
+    /// and then one per [`COPY_ENTRY_PROGRESS_INTERVAL`]. Empty files,
+    /// links and folders carry no chunk of data, so without this a tree of
+    /// them would keep showing the scan until the copy ends.
+    fn entry_progress_due(&self) -> bool {
+        let due = self
+            .last_entry_progress
+            .get()
+            .is_none_or(|t| t.elapsed() >= COPY_ENTRY_PROGRESS_INTERVAL);
+        if due {
+            self.last_entry_progress.set(Some(Instant::now()));
+        }
+        due
     }
 
     /// Scan directory to count files and total size with progress reporting.
@@ -293,36 +351,14 @@ impl LocalCopyWorker {
                 file_bytes_copied += bytes_read as u64;
                 *bytes_copied += bytes_read as u64;
 
-                // Calculate speed and ETA
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let speed_bps = if elapsed > 0.0 {
-                    *bytes_copied as f64 / elapsed
-                } else {
-                    0.0
-                };
-                let remaining_bytes = total_bytes.saturating_sub(*bytes_copied);
-                let eta_seconds = if speed_bps > 0.0 {
-                    Some((remaining_bytes as f64 / speed_bps) as u64)
-                } else {
-                    None
-                };
-
-                // Send progress
-                let _ = progress_tx.send(OperationProgress {
-                    phase: OperationPhase::Transferring,
-                    bytes_transferred: *bytes_copied,
+                let _ = progress_tx.send(transfer_progress(
+                    source,
+                    *bytes_copied,
                     total_bytes,
-                    files_completed: *files_copied,
+                    *files_copied,
                     total_files,
-                    current_item: source
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .map(String::from),
-                    speed_bps,
-                    eta_seconds,
-                    individual_file_bytes: 0,
-                    individual_file_total: 0,
-                });
+                    start_time,
+                ));
             }
 
             *files_copied += 1;
@@ -358,6 +394,17 @@ impl LocalCopyWorker {
             dest_file.persist(dest).map_err(|e| e.error)?;
         }
 
+        if self.entry_progress_due() {
+            let _ = progress_tx.send(transfer_progress(
+                source,
+                *bytes_copied,
+                total_bytes,
+                *files_copied,
+                total_files,
+                start_time,
+            ));
+        }
+
         Ok(())
     }
 
@@ -388,6 +435,16 @@ impl LocalCopyWorker {
 
         // Create destination directory
         fs::create_dir_all(dest)?;
+        if self.entry_progress_due() {
+            let _ = progress_tx.send(transfer_progress(
+                source,
+                *bytes_copied,
+                total_bytes,
+                *files_copied,
+                total_files,
+                start_time,
+            ));
+        }
 
         for entry in fs::read_dir(source)? {
             control.check_cancelled()?;
@@ -1445,6 +1502,46 @@ mod tests {
             .expect("copy reports scanned totals");
         assert_eq!(scanned.files_completed, 3, "3 files in the fixture");
         assert_eq!(scanned.total_bytes, 1 + 2 + 3);
+    }
+
+    /// A tree of empty files and folders carries no chunk of data, yet the
+    /// copy reports it under way rather than leaving the scan shown to its
+    /// end; throttled, as the delete is.
+    #[test]
+    fn a_copy_of_empty_files_reports_the_transfer() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("empty");
+        for i in 0..500 {
+            let dir = source.join(format!("d{i}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("f.txt"), b"").unwrap();
+        }
+        let dest_parent = tmp.path().join("dest");
+        fs::create_dir_all(&dest_parent).unwrap();
+
+        let (result, updates) = run(LocalCopyWorker::new(
+            vec![source.clone()],
+            dest_parent.clone(),
+            false,
+        ));
+
+        assert!(
+            matches!(
+                result,
+                OperationResult::Success | OperationResult::SuccessWithPath(_)
+            ),
+            "{result:?}"
+        );
+        assert!(dest_parent.join("empty/d499/f.txt").exists());
+        let transfers = updates
+            .iter()
+            .filter(|u| matches!(u.phase, OperationPhase::Transferring))
+            .count();
+        assert!(transfers > 0, "the copy never left the scan");
+        assert!(
+            transfers < 50,
+            "expected a handful of throttled updates, got {transfers} for 1000 entries"
+        );
     }
 
     /// Cross-device moves fall back to copy+delete, and only then does the
