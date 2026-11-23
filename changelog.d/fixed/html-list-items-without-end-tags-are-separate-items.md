@@ -1,0 +1,1 @@
+- **HTML list items without end tags are separate items.** In the HTML preview and HTML inside Markdown, `<ul><li>One<li>Two</ul>` rendered as a single item; a new `<li>` now ends the open one, as browsers do. An `<ol start="4">` numbers from 4.
