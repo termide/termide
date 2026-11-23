@@ -35,6 +35,9 @@ pub struct RenderContext {
     /// Lines with a breakpoint, for the gutter marker.
     pub breakpoint_lines: BTreeSet<usize>,
 
+    /// Lines whose breakpoint the running debugger could not set.
+    pub unverified_breakpoint_lines: BTreeSet<usize>,
+
     /// The line a debugger stopped at, in this file.
     pub execution_line: Option<usize>,
 }
@@ -87,6 +90,7 @@ impl RenderContext {
             diagnostic_line_severity,
             tab_size,
             breakpoint_lines: BTreeSet::new(),
+            unverified_breakpoint_lines: BTreeSet::new(),
             execution_line: None,
         }
     }
@@ -96,9 +100,16 @@ impl RenderContext {
         self.diagnostic_line_severity.get(&line).copied()
     }
 
-    /// Whether `line` carries a breakpoint.
-    pub fn has_breakpoint(&self, line: usize) -> bool {
-        self.breakpoint_lines.contains(&line)
+    /// The breakpoint `line` carries, if any.
+    pub fn breakpoint_at(&self, line: usize) -> crate::git::BreakpointMark {
+        use crate::git::BreakpointMark;
+        if !self.breakpoint_lines.contains(&line) {
+            BreakpointMark::None
+        } else if self.unverified_breakpoint_lines.contains(&line) {
+            BreakpointMark::Unverified
+        } else {
+            BreakpointMark::Set
+        }
     }
 
     /// Whether the debugger stopped at `line`.

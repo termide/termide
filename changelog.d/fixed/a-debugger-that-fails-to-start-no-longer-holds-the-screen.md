@@ -1,0 +1,1 @@
+- **A debugger that fails to start no longer holds the screen.** Reading the last lines an adapter printed before it quit now stops after a fifth of a second, so an adapter still writing as it goes down cannot hold the interface.

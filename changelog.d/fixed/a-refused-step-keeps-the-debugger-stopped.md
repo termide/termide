@@ -1,0 +1,1 @@
+- **A refused step keeps the debugger stopped.** When the debug adapter refuses a continue, step or pause, the session goes back to stopped where it was, with the call stack and variables fetched again and the adapter's reason in the output, instead of showing a program running that never moved.

@@ -1,0 +1,1 @@
+- **The outline goes to the right column after non-ASCII text.** A symbol after accented letters, CJK or emoji on its line is now reached at its own column, not further right.

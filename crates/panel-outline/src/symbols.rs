@@ -73,7 +73,7 @@ pub struct SymbolInfo {
     pub kind: SymbolKind,
     /// 0-indexed line number.
     pub line: usize,
-    /// 0-indexed column number.
+    /// 0-indexed column, in grapheme clusters as the editor counts them.
     pub column: usize,
     /// Nesting depth for indentation.
     pub depth: usize,
@@ -103,14 +103,33 @@ pub fn extract_symbols(
     };
 
     // Try tree-sitter extraction first
-    let symbols = crate::treesitter::extract_symbols_treesitter(source, lang, parser);
-    if !symbols.is_empty() {
-        return symbols;
+    let mut symbols = crate::treesitter::extract_symbols_treesitter(source, lang, parser);
+    if symbols.is_empty() {
+        // Fall back to lightweight extractors for languages without a
+        // tree-sitter query (including Alatyr).
+        symbols = crate::regex_fallback::extract_symbols_regex(source, lang);
     }
+    // Every extractor counts columns in bytes; the editor goes to a column
+    // of grapheme clusters.
+    graphemes_for_byte_columns(source, &mut symbols);
+    symbols
+}
 
-    // Fall back to lightweight extractors for languages without a tree-sitter
-    // query (including Alatyr).
-    crate::regex_fallback::extract_symbols_regex(source, lang)
+/// Turn the byte columns of `symbols` into grapheme columns of their lines
+/// in `source`.
+fn graphemes_for_byte_columns(source: &str, symbols: &mut [SymbolInfo]) {
+    use unicode_segmentation::UnicodeSegmentation;
+    let lines: Vec<&str> = source.lines().collect();
+    for symbol in symbols {
+        let Some(line) = lines.get(symbol.line) else {
+            continue;
+        };
+        let mut byte = symbol.column.min(line.len());
+        while !line.is_char_boundary(byte) {
+            byte -= 1;
+        }
+        symbol.column = line[..byte].graphemes(true).count();
+    }
 }
 
 fn detect_outline_language(path: &std::path::Path) -> Option<&'static str> {
@@ -143,5 +162,23 @@ mod tests {
         assert_eq!(symbols.len(), 1);
         assert_eq!(symbols[0].name, "main");
         assert_eq!(symbols[0].kind, SymbolKind::Function);
+    }
+
+    /// The editor goes to a grapheme column; a name after wider-than-a-byte
+    /// characters was reached past its start.
+    #[test]
+    fn columns_count_graphemes_not_bytes() {
+        let mut parser = tree_sitter::Parser::new();
+        // Tree-sitter: `é` is two bytes, `🙂` four.
+        let source = "/* é🙂 */ fn main() {}\n";
+        let symbols = extract_symbols(source, Some("rust"), None, &mut parser);
+        let main = symbols.iter().find(|s| s.name == "main").unwrap();
+        assert_eq!(main.column, "/* é🙂 */ fn ".chars().count());
+
+        // The XML fallback.
+        let source = "<root>\n  <ä/><item/>\n</root>\n";
+        let symbols = extract_symbols(source, Some("xml"), None, &mut parser);
+        let item = symbols.iter().find(|s| s.name == "item").unwrap();
+        assert_eq!(item.column, "  <ä/>".chars().count());
     }
 }

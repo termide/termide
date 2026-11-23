@@ -608,7 +608,7 @@ Opens a dedicated References panel listing all locations where the symbol is use
 |-------------------|--------------------------------------------|
 | `F4`              | Rename symbol under cursor                 |
 
-Opens an input dialog to enter the new name. All occurrences across the project are updated via LSP WorkspaceEdit.
+Opens an input dialog to enter the new name. All occurrences across the project are updated via LSP WorkspaceEdit: a file open in an editor is changed in its buffer, left unsaved for you to review and save (its unsaved edits are kept), and a file not open is written on disk.
 
 ### Code Actions
 
@@ -616,7 +616,7 @@ Opens an input dialog to enter the new name. All occurrences across the project 
 |-------------------|--------------------------------------------|
 | `Alt+Enter`       | Show code actions / quick-fixes at cursor  |
 
-Requests quick-fixes for the current line (for example "Import class" to add a `use` statement in PHP) and shows them in a popup. Use `↑`/`↓` to select, `Enter` to apply, `Esc` to dismiss. The chosen action's edit is applied across files, reloading any open editors. (`Ctrl+.` is bound to toggle-comment, so the default is `Alt+Enter`.)
+Requests quick-fixes for the current line (for example "Import class" to add a `use` statement in PHP) and shows them in a popup. Use `↑`/`↓` to select, `Enter` to apply, `Esc` to dismiss. The chosen action's edit is applied across files as a rename is: in the buffer of a file open in an editor, left unsaved, and on disk for a file not open. (`Ctrl+.` is bound to toggle-comment, so the default is `Alt+Enter`.)
 
 ### Server Status Indicator
 
@@ -661,12 +661,12 @@ Termide tells `docker-language-server` to send no telemetry when it starts; the 
 | Shortcut   | Action                                                        |
 |------------|---------------------------------------------------------------|
 | `Ctrl+F8`  | Set or remove a breakpoint on the cursor line (`toggle_breakpoint`) |
-| `F5`       | Start debugging (`start_debug`); continue while a session is stopped |
+| `F5`       | Start debugging (`start_debug`); continue while a session is stopped; while it builds, starts or runs, a status message says so |
 | `F7` / `Shift+F7` | Next / previous git change (`next_change`, `prev_change`); see [Staging and Reverting Changes](#staging-and-reverting-changes) |
 
-A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text.
+A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text. While a debug adapter runs, a breakpoint it could not set — in code not loaded yet, or on a line with no code — is drawn as a dimmed `○` instead, until the adapter reports it set; the agent's `debug` tool lists such breakpoints, and those the adapter moved to another line.
 
-A breakpoint stays with its text as you edit: lines added or removed above move it, a deleted line takes its breakpoint with it, and lines joined into one keep it on the joined line. Breakpoints are kept per file in `breakpoints.toml` in the data directory (`~/.local/share/termide/` on Linux, `~/Library/Application Support/termide/` on macOS), so they come back when the file is opened again, in any project and after a restart. **Remove all breakpoints** in the command palette or the editor's `[≡]` menu clears them everywhere.
+A breakpoint stays with its text as you edit: lines added or removed above move it, a deleted line takes its breakpoint with it, and lines joined into one keep it on the joined line. Edits you throw away — reloading the file over them, or closing the editor without saving — take the breakpoints back to their lines as of the last load or save. Breakpoints are kept per file in `breakpoints.toml` in the data directory (`~/.local/share/termide/` on Linux, `~/Library/Application Support/termide/` on macOS), so they come back when the file is opened again, in any project and after a restart. **Remove all breakpoints** in the command palette or the editor's `[≡]` menu clears them everywhere.
 
 `F5` starts debugging with the project's breakpoints set and runs the program to the first one: through a debug adapter (lldb-dap, gdb, debugpy, Delve) in the debug panel, or a command-line debugger (lldb, gdb, Delve, pdb) in a terminal panel. What it debugs comes from a command with a `debugger` in `commands.toml`, or, for a Python, Go or Rust file, from the file alone; with nothing to launch, a form to set the launch up opens; see [Debugging](actions.md#debugging). When a debug adapter stops the program, the line it stopped at gets `→` on a highlighted cell in the gutter and the cursor; stepping moves it. The editor's `[≡]` menu has **Start debugging** and **Set up debugging…** too.
 

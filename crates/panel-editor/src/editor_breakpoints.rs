@@ -4,7 +4,9 @@
 //! edited; the process-wide store in `termide_debug` holds them for every
 //! file, for a debug launch and across restarts. An editor loads its file's
 //! breakpoints from the store when it opens or reloads the file and writes
-//! them back after every input that changed them.
+//! them back after every input that changed them. Edits that are then
+//! discarded — a reload, a close without saving — take the breakpoints back
+//! to where they sit in the file on disk.
 
 use std::collections::BTreeSet;
 
@@ -30,6 +32,11 @@ impl Editor {
         }
         let set = self.buffer.toggle_line_mark(line);
         self.sync_breakpoints();
+        if !self.buffer.is_modified() {
+            // Set on the text as it is on disk: kept whatever becomes of
+            // later edits.
+            self.breakpoints_saved();
+        }
         set
     }
 
@@ -49,6 +56,27 @@ impl Editor {
             return;
         };
         let lines = termide_debug::breakpoints::store().lines(path);
+        self.buffer.set_line_marks(lines);
+        self.breakpoints_synced = self.buffer.line_marks_version();
+        self.breakpoints_saved();
+    }
+
+    /// The text was loaded or saved: the breakpoints sit where they are now
+    /// in the file on disk.
+    pub(crate) fn breakpoints_saved(&mut self) {
+        self.breakpoints_on_disk = self.buffer.line_marks().clone();
+    }
+
+    /// The unsaved edits are being dropped (a reload, a close without
+    /// saving): put this file's breakpoints back where they were at the
+    /// last load or save, in the editor and in the store, since the edits
+    /// that moved them never reach the file.
+    pub fn discard_breakpoint_edits(&mut self) {
+        let Some(path) = self.buffer.file_path() else {
+            return;
+        };
+        let lines = self.breakpoints_on_disk.clone();
+        termide_debug::breakpoints::store().set_lines(path, lines.iter().copied());
         self.buffer.set_line_marks(lines);
         self.breakpoints_synced = self.buffer.line_marks_version();
     }
@@ -119,6 +147,40 @@ mod tests {
         e.cursor.line = 2;
         e.handle_key(key(KeyCode::F(8), KeyModifiers::CONTROL));
         assert!(stored(file.path()).is_empty());
+    }
+
+    /// A reload that drops the edits puts the breakpoints back on the lines
+    /// of the text it reads, not where the dropped edits moved them.
+    #[test]
+    fn a_reload_that_discards_edits_restores_the_breakpoint_lines() {
+        let (mut e, file) = editor("a\nb\nc\n");
+        e.toggle_breakpoint_at(1);
+        e.cursor = termide_buffer::Cursor::at(0, 0);
+        e.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        e.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(stored(file.path()), [3]);
+
+        e.reload_from_disk().unwrap();
+        assert_eq!(stored(file.path()), [1]);
+        assert!(e.breakpoint_lines().contains(&1));
+        assert_eq!(e.breakpoint_lines().len(), 1);
+    }
+
+    /// Closing without saving does the same; a breakpoint toggled on the
+    /// saved text, and one moved by edits then saved, are kept.
+    #[test]
+    fn discarding_edits_keeps_the_breakpoints_of_the_saved_text() {
+        let (mut e, file) = editor("a\nb\nc\nd\n");
+        e.toggle_breakpoint_at(1);
+        e.cursor = termide_buffer::Cursor::at(0, 0);
+        e.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(stored(file.path()), [2]);
+        e.save().unwrap();
+        // Saved: line 2 of the file now has it.
+        e.handle_key(key(KeyCode::Enter, KeyModifiers::NONE));
+        assert_eq!(stored(file.path()), [3]);
+        e.discard_breakpoint_edits();
+        assert_eq!(stored(file.path()), [2]);
     }
 
     #[test]

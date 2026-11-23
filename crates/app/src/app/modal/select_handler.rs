@@ -219,7 +219,15 @@ impl App {
                     self.close_panel_at_index();
                 }
                 1 => {
-                    // Close without saving
+                    // Close without saving: the breakpoints the dropped
+                    // edits moved go back to their lines on disk.
+                    if let Some(editor) = self
+                        .layout_manager
+                        .active_panel_mut()
+                        .and_then(|p| p.as_editor_mut())
+                    {
+                        editor.discard_breakpoint_edits();
+                    }
                     self.close_panel_at_index();
                 }
                 _ => {

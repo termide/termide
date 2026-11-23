@@ -439,6 +439,7 @@ impl Translation for RuntimeTranslation {
         debug_setup_debugger_args,
         debug_setup_no_program,
         debug_breakpoints_cleared,
+        debug_session_running,
         debug_panel_title,
         debug_section_stack,
         debug_section_variables,

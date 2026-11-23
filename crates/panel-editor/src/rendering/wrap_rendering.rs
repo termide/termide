@@ -273,7 +273,7 @@ fn render_empty_line(
         git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
     let lsp_marker = git::get_lsp_marker(
         diagnostic_severity,
-        render_context.has_breakpoint(line_idx),
+        render_context.breakpoint_at(line_idx),
         render_context.is_execution_line(line_idx),
         theme,
     );
@@ -368,7 +368,7 @@ fn render_visual_line<H: LineHighlighter>(
             git::get_line_number_git_style(line_idx, git_diff_cache, show_git_diff, theme);
         let lsp_marker = git::get_lsp_marker(
             diagnostic_severity,
-            render_context.has_breakpoint(line_idx),
+            render_context.breakpoint_at(line_idx),
             render_context.is_execution_line(line_idx),
             theme,
         );

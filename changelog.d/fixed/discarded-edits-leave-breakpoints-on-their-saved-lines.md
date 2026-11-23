@@ -1,0 +1,1 @@
+- **Discarded edits leave breakpoints on their saved lines.** Reloading a file over unsaved edits, or closing its editor without saving, takes the breakpoints back to the lines they had at the last load or save, instead of keeping them where the thrown-away edits had moved them.

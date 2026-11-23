@@ -36,13 +36,25 @@ impl App {
     /// Start debugging: the only launch there is, or a list to choose from.
     /// `file` is the file the request came from.
     pub(in crate::app) fn start_debug(&mut self, file: Option<PathBuf>) -> Result<()> {
-        // While a session runs, the key resumes it rather than starting another.
+        // While a session is active the key never starts another: it resumes
+        // a stopped program, and says why it does nothing otherwise.
         {
             let mut slot = self.debug_session.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(session) = slot.as_mut().filter(|s| s.is_active()) {
-                session.continue_();
-                self.state.needs_redraw = true;
-                return Ok(());
+            if let Some(session) = slot.as_mut() {
+                match key_in_session(session) {
+                    SessionKey::Start => {}
+                    SessionKey::Continue => {
+                        session.continue_();
+                        self.state.needs_redraw = true;
+                        return Ok(());
+                    }
+                    SessionKey::Busy => {
+                        self.state
+                            .set_info(termide_i18n::t().debug_session_running().to_string());
+                        self.state.needs_redraw = true;
+                        return Ok(());
+                    }
+                }
             }
         }
         // Read the files afresh, as the Commands menu does when it opens.
@@ -613,7 +625,8 @@ impl App {
         {
             old.stop();
         }
-        if execution::set(None) {
+        let unverified = execution::set_unverified(Vec::new());
+        if execution::set(None) || unverified {
             self.state.needs_redraw = true;
         }
     }
@@ -642,6 +655,7 @@ impl App {
                 }
             }
             let point = session.execution_point().filter(|(path, _)| path.is_file());
+            changed |= execution::set_unverified(session.unverified_breakpoints());
             (changed, point, session.is_active(), terminal)
         };
         if let Some(request) = terminal {
@@ -770,6 +784,28 @@ fn choice_label(choice: &DebugChoice) -> String {
     }
 }
 
+/// What `start_debug` (F5) does with the session there is.
+#[derive(Debug, PartialEq, Eq)]
+enum SessionKey {
+    /// It is over: start another.
+    Start,
+    /// It is stopped: continue it.
+    Continue,
+    /// It builds, starts or runs: there is nothing to continue, and starting
+    /// another would end it unasked.
+    Busy,
+}
+
+fn key_in_session(session: &Session) -> SessionKey {
+    if !session.is_active() {
+        SessionKey::Start
+    } else if session.is_stopped() {
+        SessionKey::Continue
+    } else {
+        SessionKey::Busy
+    }
+}
+
 /// The debugger a Rust file gets without a command (`[debug] native`).
 #[derive(Debug, Clone, Copy)]
 pub(super) enum NativeDebugger {
@@ -840,6 +876,41 @@ mod tests {
             picked_choice(&termide_modal::ModalPayload::wrap(7usize), vec!["app"]),
             None
         );
+    }
+
+    #[test]
+    fn f5_continues_only_a_stopped_session() {
+        let spec = LaunchSpec {
+            adapter: Adapter::LldbDap,
+            debugger_settings: Default::default(),
+            adapter_args: Vec::new(),
+            program: "app".into(),
+            args: Vec::new(),
+            cwd: "/p".into(),
+            build: None,
+            env: Vec::new(),
+            label: "app".into(),
+            console: Console::Panel,
+            tty: None,
+        };
+        let mut session = Session::detached(spec);
+        for (status, key) in [
+            (dap::Status::Building, SessionKey::Busy),
+            (dap::Status::Starting, SessionKey::Busy),
+            (dap::Status::Running, SessionKey::Busy),
+            (
+                dap::Status::Stopped {
+                    reason: "breakpoint".into(),
+                    description: None,
+                },
+                SessionKey::Continue,
+            ),
+            (dap::Status::Ended, SessionKey::Start),
+            (dap::Status::Exited { code: Some(0) }, SessionKey::Start),
+        ] {
+            session.status = status.clone();
+            assert_eq!(key_in_session(&session), key, "{status:?}");
+        }
     }
 
     #[test]

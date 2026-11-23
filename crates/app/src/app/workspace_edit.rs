@@ -1,4 +1,5 @@
-//! Apply LSP WorkspaceEdit to files on disk and reload open editors.
+//! Apply LSP WorkspaceEdit: a file open in an editor is changed in its buffer
+//! (left unsaved), and a file that is not open is written on disk.
 
 use std::path::PathBuf;
 

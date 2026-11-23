@@ -46,14 +46,17 @@ pub struct CompletionPopup {
     filter: String,
     /// Filtered item indices.
     filtered_indices: Vec<usize>,
+    /// The server said the list is incomplete: typing on asks it again
+    /// rather than only filtering what it sent.
+    is_incomplete: bool,
 }
 
 impl CompletionPopup {
     /// Create a new completion popup from LSP response.
     pub fn from_response(response: CompletionResponse) -> Self {
-        let items = match response {
-            CompletionResponse::Array(items) => items,
-            CompletionResponse::List(list) => list.items,
+        let (items, is_incomplete) = match response {
+            CompletionResponse::Array(items) => (items, false),
+            CompletionResponse::List(list) => (list.items, list.is_incomplete),
         };
 
         let filtered_indices: Vec<usize> = (0..items.len()).collect();
@@ -64,7 +67,13 @@ impl CompletionPopup {
             scroll_offset: 0,
             filter: String::new(),
             filtered_indices,
+            is_incomplete,
         }
+    }
+
+    /// Whether the server said the list is incomplete.
+    pub fn is_incomplete(&self) -> bool {
+        self.is_incomplete
     }
 
     /// Check if popup has any items.
@@ -393,6 +402,22 @@ fn kind_icon(kind: Option<CompletionItemKind>) -> char {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_incomplete_list_is_remembered() {
+        let list = |is_incomplete| {
+            CompletionResponse::List(lsp_types::CompletionList {
+                is_incomplete,
+                items: vec![CompletionItem {
+                    label: "a".into(),
+                    ..Default::default()
+                }],
+            })
+        };
+        assert!(CompletionPopup::from_response(list(true)).is_incomplete());
+        assert!(!CompletionPopup::from_response(list(false)).is_incomplete());
+        assert!(!CompletionPopup::from_response(CompletionResponse::Array(vec![])).is_incomplete());
+    }
 
     #[test]
     fn test_empty_popup() {

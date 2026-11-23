@@ -129,6 +129,10 @@ pub struct LspState {
     /// Flag indicating completion was requested (Ctrl+Space)
     pub completion_requested: bool,
 
+    /// The typed prefix changed under an incomplete list: ask the server
+    /// again (`TriggerForIncompleteCompletions`) on the next tick.
+    pub completion_requery: bool,
+
     /// Column position where completion was triggered (start of word)
     /// Used to calculate prefix length when accepting completion
     pub completion_trigger_column: usize,
@@ -206,6 +210,7 @@ impl LspState {
             completion_popup: None,
             code_action_popup: None,
             completion_requested: false,
+            completion_requery: false,
             completion_trigger_column: 0,
             popup_rect: None,
             completion_timer: None,

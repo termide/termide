@@ -1,0 +1,1 @@
+- **Breakpoints the debugger could not set are shown.** While a debug session runs, a breakpoint the adapter could not set — in code not loaded yet, or on a line without code — is drawn as a dimmed `○`, and turns into `●` when the adapter reports it set. The agent's `debug` tool lists such breakpoints with the adapter's reason, and those moved to another line.
