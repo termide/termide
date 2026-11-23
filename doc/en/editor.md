@@ -604,7 +604,7 @@ Opens a dedicated References panel listing all locations where the symbol is use
 |-------------------|--------------------------------------------|
 | `F4`              | Rename symbol under cursor                 |
 
-Opens an input dialog to enter the new name. All occurrences across the project are updated via LSP WorkspaceEdit.
+Opens an input dialog to enter the new name. All occurrences across the project are updated via LSP WorkspaceEdit: a file open in an editor is changed in its buffer, left unsaved for you to review and save (its unsaved edits are kept), and a file not open is written on disk.
 
 ### Code Actions
 
@@ -612,7 +612,7 @@ Opens an input dialog to enter the new name. All occurrences across the project 
 |-------------------|--------------------------------------------|
 | `Alt+Enter`       | Show code actions / quick-fixes at cursor  |
 
-Requests quick-fixes for the current line (for example "Import class" to add a `use` statement in PHP) and shows them in a popup. Use `↑`/`↓` to select, `Enter` to apply, `Esc` to dismiss. The chosen action's edit is applied across files, reloading any open editors. (`Ctrl+.` is bound to toggle-comment, so the default is `Alt+Enter`.)
+Requests quick-fixes for the current line (for example "Import class" to add a `use` statement in PHP) and shows them in a popup. Use `↑`/`↓` to select, `Enter` to apply, `Esc` to dismiss. The chosen action's edit is applied across files as a rename is: in the buffer of a file open in an editor, left unsaved, and on disk for a file not open. (`Ctrl+.` is bound to toggle-comment, so the default is `Alt+Enter`.)
 
 ### Server Status Indicator
 
