@@ -469,6 +469,8 @@ pub trait Translation: Send + Sync {
     fn references_none(&self) -> &str;
     fn fm_search_no_matches(&self) -> &str;
     fn binary_open_failed_fmt(&self, error: &str) -> String;
+    /// A viewer that could not open its file or page.
+    fn open_failed_fmt(&self, error: &str) -> String;
     fn editor_force_save_failed_fmt(&self, error: &str) -> String;
     fn editor_clipboard_error_fmt(&self, error: &str) -> String;
     fn editor_replace_failed_fmt(&self, error: &str) -> String;

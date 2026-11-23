@@ -1,0 +1,1 @@
+- **The viewers say "Cannot open" in your language.** The Markdown, HTML, Mermaid and CSV viewers showed a file or page they could not open with an English message whatever the interface language.

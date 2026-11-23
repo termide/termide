@@ -2399,6 +2399,10 @@ impl Translation for RuntimeTranslation {
         self.format("binary_open_failed_fmt", &[("error", error)])
     }
 
+    fn open_failed_fmt(&self, error: &str) -> String {
+        self.format("open_failed_fmt", &[("error", error)])
+    }
+
     fn editor_force_save_failed_fmt(&self, error: &str) -> String {
         self.format("editor_force_save_failed_fmt", &[("error", error)])
     }

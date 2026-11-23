@@ -1624,6 +1624,7 @@ settings_kb_key_taken_fmt = "{key} এই ক্রিয়ার সঙ্গ�
 settings_kb_conflict_fmt = "{key} {held}-এর সঙ্গেও বাঁধা"
 usage_counting_fmt = "সেশন লগ গোনা হচ্ছে: {total}-এর মধ্যে {done}"
 binary_open_failed_fmt = "ফাইল খোলা যাচ্ছে না: {error}"
+open_failed_fmt = "খোলা যাচ্ছে না: {error}"
 editor_force_save_failed_fmt = "জোর করে সংরক্ষণ ব্যর্থ: {error}"
 editor_clipboard_error_fmt = "ক্লিপবোর্ড ত্রুটি: {error}"
 editor_replace_failed_fmt = "প্রতিস্থাপন ব্যর্থ: {error}"

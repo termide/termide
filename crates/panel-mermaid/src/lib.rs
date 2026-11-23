@@ -295,7 +295,7 @@ impl Panel for MermaidPanel {
 
         if let Some(err) = &self.error {
             let msg = ratatui::text::Line::styled(
-                format!(" Cannot open: {err}"),
+                format!(" {}", termide_i18n::t().open_failed_fmt(err)),
                 Style::default().fg(self.colors.error),
             );
             buf.set_line(area.x, area.y, &msg, area.width);
