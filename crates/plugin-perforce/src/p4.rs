@@ -66,8 +66,8 @@ impl P4 {
     }
 
     /// Run p4 in `cwd`, the project root without one: its standard output,
-    /// or what it wrote to standard error. Absolute paths among `args` are
-    /// written as p4 spells them (see [`Self::as_p4_spells`]).
+    /// or what it wrote to standard error. A file among `args` goes as
+    /// [`Self::file`] (or [`Self::literal`] for `add -f`) writes it.
     ///
     /// # Errors
     ///
@@ -93,20 +93,8 @@ impl P4 {
         input: Option<&str>,
     ) -> Result<String, P4Error> {
         let cwd = cwd.unwrap_or(&self.project_root);
-        let args: Vec<String> = args
-            .iter()
-            .map(|arg| {
-                if Path::new(arg).is_absolute() {
-                    self.as_p4_spells(Path::new(arg))
-                        .to_string_lossy()
-                        .into_owned()
-                } else {
-                    (*arg).to_string()
-                }
-            })
-            .collect();
         let mut child = Command::new(&self.program)
-            .args(&args)
+            .args(args)
             .current_dir(cwd)
             .env("PATH", termide_fsutil::absolute_path_var())
             .env("PWD", cwd)
@@ -147,7 +135,7 @@ impl P4 {
                     let _ = child.wait();
                     return Err(P4Error(format!(
                         "p4 {} gave no answer in {} s",
-                        args.first().map_or("", String::as_str),
+                        args.first().copied().unwrap_or_default(),
                         TIMEOUT.as_secs()
                     )));
                 }
@@ -173,7 +161,7 @@ impl P4 {
     ///
     /// When p4 fails otherwise.
     pub fn fstat(&self, path: &Path) -> Result<Option<Record>, P4Error> {
-        let arg = path.to_string_lossy();
+        let arg = self.file(path);
         match self.run(&["-ztag", "fstat", &arg], path.parent()) {
             Ok(out) => Ok(parse_ztag(&out).into_iter().next()),
             Err(error) if not_in_depot(&error.0) => Ok(None),
@@ -201,9 +189,11 @@ impl P4 {
             .get("clientName")
             .is_none_or(|name| name == "*unknown*");
         let workspace = match record.get("clientRoot") {
+            // A root holding `@`, `#`, `%` or `*` is written escaped in the
+            // client spec, and p4 gives it so.
             Some(root) if !unknown && !root.is_empty() => Some(Workspace {
-                real: real_path(Path::new(root)),
-                spelled: PathBuf::from(root),
+                real: real_path(Path::new(&unescape(root))),
+                spelled: PathBuf::from(unescape(root)),
             }),
             _ => None,
         };
@@ -242,6 +232,22 @@ impl P4 {
         }
     }
 
+    /// `path` as an argument of p4: written as p4 spells it, then with the
+    /// characters p4 reads as revisions and wildcards escaped, so that
+    /// `icon@2x.png` is that file and not a revision of `icon`. A revision
+    /// (`#3`) or a wildcard (`/...`) goes after it.
+    #[must_use]
+    pub fn file(&self, path: &Path) -> String {
+        escape(&self.literal(path))
+    }
+
+    /// `path` as p4 spells it, not escaped: what `p4 add -f` takes, as it
+    /// escapes the name itself.
+    #[must_use]
+    pub fn literal(&self, path: &Path) -> String {
+        self.as_p4_spells(path).to_string_lossy().into_owned()
+    }
+
     /// `path`, however p4 spells it, written under the project root as
     /// termide has it; `None` outside the project.
     #[must_use]
@@ -261,6 +267,49 @@ impl P4 {
             _ => path.to_string_lossy().into_owned(),
         }
     }
+}
+
+/// `text` with the characters p4 reads as a revision (`@`, `#`) or a
+/// wildcard (`*`, `%`) written as p4 escapes them; `%` first, so the
+/// escapes are not escaped again. `...` is a wildcard of three dots and
+/// has no escape.
+#[must_use]
+pub fn escape(text: &str) -> String {
+    text.replace('%', "%25")
+        .replace('@', "%40")
+        .replace('#', "%23")
+        .replace('*', "%2A")
+}
+
+/// `text` as [`escape`] wrote it, read back in one pass, so that `%2540`
+/// is `%40` and not `@`; a `%` that starts no escape stays.
+#[must_use]
+pub fn unescape(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('%') {
+        out.push_str(&rest[..at]);
+        let code = rest.get(at + 1..at + 3).map(str::to_ascii_uppercase);
+        let decoded = match code.as_deref() {
+            Some("25") => Some('%'),
+            Some("40") => Some('@'),
+            Some("23") => Some('#'),
+            Some("2A") => Some('*'),
+            _ => None,
+        };
+        match decoded {
+            Some(c) => {
+                out.push(c);
+                rest = &rest[at + 3..];
+            }
+            None => {
+                out.push('%');
+                rest = &rest[at + 1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Whether p4's complaint means the depot has no such file.
@@ -340,6 +389,30 @@ mod tests {
         assert_eq!(records[1]["depotFile"], "//depot/b c.txt");
         assert_eq!(records[1]["desc"], "two words");
         assert_eq!(records[1]["flag"], "");
+    }
+
+    #[test]
+    fn revision_and_wildcard_characters_are_escaped_and_read_back() {
+        assert_eq!(escape("/ws/icon@2x.png"), "/ws/icon%402x.png");
+        assert_eq!(escape("a#1 50%*.c"), "a%231 50%25%2A.c");
+        // `%` first: an escape is never escaped twice.
+        assert_eq!(escape("%40"), "%2540");
+        assert_eq!(escape("/ws/plain.c"), "/ws/plain.c");
+        for text in ["/ws/icon@2x.png", "a#1 50%*.c", "%40", "100%", "x%zz"] {
+            assert_eq!(unescape(&escape(text)), text);
+        }
+        assert_eq!(unescape("/w%40s/%2a"), "/w@s/*");
+        assert_eq!(unescape("50%"), "50%");
+    }
+
+    #[test]
+    fn a_file_argument_is_escaped_and_an_added_one_is_not() {
+        let p4 = P4::new(PathBuf::from("p4"), PathBuf::from("/ws"));
+        let file = Path::new("/ws/icon@2x.png");
+        assert_eq!(p4.file(file), "/ws/icon%402x.png");
+        // A revision goes after the escaped name.
+        assert_eq!(format!("{}#3", p4.file(file)), "/ws/icon%402x.png#3");
+        assert_eq!(p4.literal(file), "/ws/icon@2x.png");
     }
 
     #[test]

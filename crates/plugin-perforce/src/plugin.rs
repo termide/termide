@@ -284,7 +284,7 @@ impl Perforce {
             None => None,
             Some("add") => Some(String::new()),
             Some(rev) => {
-                let at = format!("{}{rev}", path.to_string_lossy());
+                let at = format!("{}{rev}", self.p4.file(path));
                 match self.p4.run(&["print", "-q", &at], path.parent()) {
                     Ok(text) => Some(text),
                     Err(error) => {
@@ -482,9 +482,7 @@ impl Perforce {
             }
             Some(_) => {}
         }
-        let outcome = self
-            .p4
-            .run(&["revert", &path.to_string_lossy()], path.parent());
+        let outcome = self.p4.run(&["revert", &self.p4.file(path)], path.parent());
         self.after_change();
         match outcome {
             Ok(_) => {
@@ -514,13 +512,12 @@ impl Perforce {
     fn open_for_edit(&self, path: &Path) -> Result<Option<&'static str>, P4Error> {
         let record = self.p4.fstat(path)?;
         let name = self.p4.relative(path);
-        let arg = path.to_string_lossy();
         let Some(record) = record else {
             let question = format!("{name} is not in the depot. Open it for add?");
             if !self.termide.confirm("Open for add", &question) {
                 return Ok(None);
             }
-            self.p4.run(&["add", &arg], path.parent())?;
+            self.add(path)?;
             return Ok(Some("add"));
         };
         if let Some(action) = record.get("action") {
@@ -539,8 +536,15 @@ impl Perforce {
                 return Ok(None);
             }
         }
-        self.p4.run(&["edit", &arg], path.parent())?;
+        self.p4.run(&["edit", &self.p4.file(path)], path.parent())?;
         Ok(Some("edit"))
+    }
+
+    /// `p4 add -f`: the name as it is, which `-f` lets hold `@`, `#`, `%`
+    /// and `*` (p4 escapes them itself); what p4 answered.
+    fn add(&self, path: &Path) -> Result<String, P4Error> {
+        self.p4
+            .run(&["add", "-f", &self.p4.literal(path)], path.parent())
     }
 
     fn revert_command(&self) -> Result<(), P4Error> {
@@ -572,13 +576,13 @@ impl Perforce {
             return Ok(false);
         }
         self.p4
-            .run(&["revert", &path.to_string_lossy()], path.parent())?;
+            .run(&["revert", &self.p4.file(path)], path.parent())?;
         Ok(true)
     }
 
     fn diff(&self, path: &Path) -> Result<String, P4Error> {
         self.p4
-            .run(&["diff", "-du", &path.to_string_lossy()], path.parent())
+            .run(&["diff", "-du", &self.p4.file(path)], path.parent())
     }
 
     /// The file's changes as a unified diff named by its path in the
@@ -630,11 +634,9 @@ impl Perforce {
     /// The project's opened files: records with `clientFile` a local path,
     /// `action` and `change`.
     fn opened_files(&self) -> Result<Vec<Record>, P4Error> {
-        let all = self.root().join("...");
-        match self
-            .p4
-            .run(&["-ztag", "fstat", "-Ro", &all.to_string_lossy()], None)
-        {
+        // The root escaped, then p4's wildcard for everything below it.
+        let all = format!("{}/...", self.p4.file(self.root()));
+        match self.p4.run(&["-ztag", "fstat", "-Ro", &all], None) {
             Ok(out) => Ok(parse_ztag(&out)
                 .into_iter()
                 .filter(|r| r.contains_key("clientFile"))
@@ -924,10 +926,12 @@ impl Perforce {
                         results.push(format!("{name}: already opened for {action}"));
                         continue;
                     }
-                    let verb = if record.is_none() { "add" } else { "edit" };
-                    let out = self
-                        .p4
-                        .run(&[verb, &path.to_string_lossy()], path.parent())?;
+                    let (verb, out) = if record.is_none() {
+                        ("add", self.add(&path)?)
+                    } else {
+                        let file = self.p4.file(&path);
+                        ("edit", self.p4.run(&["edit", &file], path.parent())?)
+                    };
                     let out = out.trim();
                     results.push(if out.is_empty() {
                         format!("{name}: opened for {verb}")

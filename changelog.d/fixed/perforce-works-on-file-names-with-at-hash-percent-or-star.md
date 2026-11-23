@@ -1,0 +1,1 @@
+- **Perforce works on files whose names hold `@`, `#`, `%` or `*`.** The built-in Perforce plugin handed such a name to `p4` as it was, so `p4` read `@` and `#` as a revision and `*` as a wildcard, and acted on the wrong file or on none. It now escapes them, opens a new file for add with `p4 add -f`, and reads the names `p4` prints back unescaped.
