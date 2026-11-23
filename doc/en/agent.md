@@ -1270,8 +1270,9 @@ and **send_message** (see
 [Debugging](#debugging)), and **task**, which hands a job to another agent,
 with **jobs**, which lists and stops what the agent set going (see
 [Subagents](#subagents) and
-[What the agent set going](#what-the-agent-set-going)), and **checklist**,
-described after the list.
+[What the agent set going](#what-the-agent-set-going)). Every agent but a
+`termide --prompt` run, a subagent included, also has **checklist**, described
+after the list.
 
 Calls the model asks for in one reply that change nothing — `read`, `recall`,
 `fetch`, `web_search`, `skill`, `agents`, `jobs` listing, `debug` reading the
@@ -1286,7 +1287,8 @@ something. How many delegated tasks think at once is the
 `max_concurrent_requests` of the connection they run on.
 
 - **read** returns a file with line numbers, paged with an offset when a file
-  is long.
+  is long; a PNG, JPEG, GIF or WebP image comes back as the picture itself,
+  scaled down to at most 1568 pixels a side.
 - **edit** replaces a unique piece of text in a file and reports a diff of
   what changed.
 - **write** creates a file or replaces its whole content.
@@ -1322,7 +1324,8 @@ something. How many delegated tasks think at once is the
 - **terminals** lists the agent's terminal sessions, reads what one printed
   since the agent last looked, types into one and waits for its answer,
   shows its screen, interrupts its command or closes it.
-- **web_search** asks a search engine and returns titles, links and snippets.
+- **web_search** asks a search engine and returns titles, links and snippets,
+  ten unless the call asks for another number, up to thirty.
 - **fetch** loads a web page and returns its text as markdown, paged like
   `read` when it is long.
 - **recall** searches the project's earlier agent sessions, its git history
@@ -1353,8 +1356,10 @@ on past one already answered, as the arrows in the title show
 answering again moves on to the next. The answers go back once the last
 question is answered. Waiting for an answer counts as the call's pause
 (`‖`), as a permission question does. Asking never needs a permission, in plan mode too.
-Only the panel's agent has this tool, Claude Code on termide's tools included:
-a subagent and a `termide --prompt` run have no one to ask and decide on their own. An agent whose `tools` list leaves out
+The panel's agent has this tool, Claude Code on termide's tools included, and
+so does a subagent it delegates to: its questions come to you in the panel
+that delegated the task. A `termide --prompt` run and its subagents have no one
+to ask and decide on their own. An agent whose `tools` list leaves out
 `question` does not ask either.
 
 **suggest_command** hands you a command instead of running it. The agent puts

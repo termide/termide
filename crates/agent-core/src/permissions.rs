@@ -155,9 +155,10 @@ pub enum Lasting {
     Global,
 }
 
-/// Whether a call can change nothing: a read, a skill, or a shell command
-/// made only of read-only parts without substitution, read as `shell` reads
-/// it.
+/// Whether a call can change nothing: a read, a skill, a web read, a
+/// question, `recall`, `agents`, `checklist`, a look at what the agent set
+/// going, at its debug session or at its terminals, or a shell command made
+/// only of read-only parts without substitution, read as `shell` reads it.
 #[must_use]
 pub fn is_read_only_call(call: &ToolCall, shell: ShellSyntax) -> bool {
     not_read_only(call, shell).is_none()
@@ -284,8 +285,10 @@ fn debug_moves_only(call: &ToolCall) -> bool {
 /// without `[Run]` in plan mode, so the user can still copy the command.
 /// `suggest_goal` and `suggest_loop` start nothing themselves either: what
 /// the user starts on their card runs in plan mode like a typed request.
-/// `send_message` stays refused: the agent it reaches is not in plan mode,
-/// and could make the change this one may not.
+/// Stopping what the agent itself set going — `jobs` stopping one, or
+/// interrupting or closing one of its terminals — changes nothing the user
+/// owns, so it passes too. `send_message` stays refused: the agent it reaches
+/// is not in plan mode, and could make the change this one may not.
 pub struct PlanGuard {
     mode: ModeHandle,
     /// What the model reads for a refusal.
