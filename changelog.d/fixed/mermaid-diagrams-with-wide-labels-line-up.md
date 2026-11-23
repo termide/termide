@@ -1,0 +1,1 @@
+- **Mermaid diagrams with CJK or emoji labels line up.** A double-width character took one cell of the diagram, so box borders, edges and Gantt bars after it were shifted; it now takes two, and the Mermaid viewer measures and scrolls by display columns.

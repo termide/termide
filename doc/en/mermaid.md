@@ -43,20 +43,25 @@ location with **`Ctrl+S`** or the **`Save diagram as…`** menu entry.
 
 Parsed and laid out without an external Mermaid engine (pure Rust):
 
-- **flowchart** / **graph** — layered (Sugiyama-style) layout with orthogonal
+- **flowchart** / **graph** (and `flowchart-elk`) — layered (Sugiyama-style) layout with orthogonal
   elbow edges, box-drawing junctions, and edge labels.
 - **sequenceDiagram** — participant boxes, lifelines, arrows (solid/dashed/open/
   cross heads), notes, and self-messages.
 - **stateDiagram** — reuses the flowchart engine (`[*]` becomes start/end nodes).
-- **classDiagram** / **erDiagram** — boxes with members/attributes drawn in
+- **classDiagram** (and `classDiagram-v2`) / **erDiagram** — boxes with members/attributes drawn in
   compartments.
 - **gantt** — timeline bars grouped by section, with a gridded table layout: a
   date axis duplicated above and below, vertical gridlines, and `┼` dividers
   between sections.
 - **pie**, **journey**, **mindmap**, **timeline**, **gitGraph**, **quadrant**.
 
-Diagram kinds that are not yet laid out (e.g. `requirementDiagram`,
-`C4Context`) show the source with an informative note.
+Diagram kinds that are not yet laid out — `requirementDiagram`, the C4 family
+(`C4Context`, `C4Container`, `C4Component`, `C4Dynamic`, `C4Deployment`),
+`zenuml`, `sankey`, `xychart`, `block`, `packet`, `kanban`, `architecture`,
+`radar` and `treemap` — show the source with an informative note.
+
+A YAML front-matter block (`---` … `---`) and `%%{init: …}%%` directives
+before the header line are skipped.
 
 ## Navigation and copy
 

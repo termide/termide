@@ -2,7 +2,7 @@
 //! quadrant charts. These read clearly as bars, timelines, scored lists,
 //! indented trees, and plotted grids without 2-D graph layout.
 
-use crate::canvas::{label_width, Canvas};
+use crate::canvas::{clip_to_width, label_width, write_cells, Canvas, WIDE_TAIL};
 use crate::parser::{Gantt, Journey, Mindmap, Pie, Quadrant, TaskStatus, Timeline};
 
 const BAR_WIDTH: usize = 30;
@@ -86,11 +86,7 @@ pub fn render_gantt(g: &Gantt) -> Vec<String> {
     // bar is never overwritten).
     let make_row = |prefix: &str| -> Vec<char> {
         let mut row = vec![' '; row_width];
-        for (i, ch) in prefix.chars().enumerate() {
-            if i < row_width {
-                row[i] = ch;
-            }
-        }
+        write_cells(&mut row, 0, prefix);
         for &(x, _) in &ticks {
             if row[x] == ' ' {
                 row[x] = '┆';
@@ -99,7 +95,7 @@ pub fn render_gantt(g: &Gantt) -> Vec<String> {
         row
     };
     let finish = |row: Vec<char>| -> String {
-        let s: String = row.into_iter().collect();
+        let s: String = row.into_iter().filter(|&ch| ch != WIDE_TAIL).collect();
         s.trim_end().to_string()
     };
 
@@ -293,8 +289,7 @@ pub fn render_quadrant(q: &Quadrant) -> Vec<String> {
     let put_clip = |c: &mut Canvas, x: usize, y: usize, s: &str| {
         let max = if x < w / 2 { w / 2 - 1 } else { w - 1 };
         let avail = max.saturating_sub(x);
-        let s: String = s.chars().take(avail).collect();
-        c.text(x, y, &s);
+        c.text(x, y, clip_to_width(s, avail));
     };
     put_clip(&mut c, w / 2 + 2, h / 4, &q.quads[0]);
     put_clip(&mut c, 2, h / 4, &q.quads[1]);

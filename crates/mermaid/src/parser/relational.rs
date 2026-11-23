@@ -75,7 +75,11 @@ pub fn parse_class(src: &str) -> ClassDiagram {
 
     for raw in src.lines() {
         let line = raw.trim();
-        if line.is_empty() || line.starts_with("%%") || line == "classDiagram" {
+        if line.is_empty()
+            || line.starts_with("%%")
+            || line == "classDiagram"
+            || line == "classDiagram-v2"
+        {
             continue;
         }
         if let Some(name) = &block {
