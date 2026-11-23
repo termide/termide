@@ -177,6 +177,29 @@ impl FileManager {
             return;
         }
         self.reload_dirty = false;
+        self.spawn_passive_read();
+    }
+
+    /// Re-read the current directory while its listing stays on screen: the
+    /// cursor and the marks keep to their entries once the new one lands
+    /// (`check_async_reload`), and keys pressed meanwhile act on the old
+    /// rows instead of being lost on an empty list. For an explicit reload
+    /// (Ctrl+R, a rescan, the end of an operation); `keep_marks` false drops
+    /// the marks at once.
+    pub(crate) fn reload_in_place(&mut self, keep_marks: bool) {
+        if !keep_marks {
+            self.selection.clear();
+            self.selection.end_drag();
+        }
+        // A read already under way may predate the change: this one replaces
+        // it, and a navigation's cursor waiting on it waits on this one.
+        self.reload_dirty = false;
+        self.spawn_passive_read();
+        self.refresh_git_status();
+    }
+
+    /// Read the current directory on a worker for `check_async_reload`.
+    fn spawn_passive_read(&mut self) {
         let dir_path = self.current_path.clone();
         let show_hidden = self.show_hidden;
         let git_cache = self.git_status_cache.clone();
