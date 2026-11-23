@@ -66,6 +66,7 @@ pub fn spawn_detached(project_root: &Path, args: &[OsString]) -> Result<String> 
 
     let id = paths::allocate_id(project_root)?;
     let socket = paths::socket_path(&id)?;
+    paths::check_socket_path(&socket)?;
 
     // Bind before forking so that a `--attach` racing the returning parent
     // finds a socket rather than "no such instance".

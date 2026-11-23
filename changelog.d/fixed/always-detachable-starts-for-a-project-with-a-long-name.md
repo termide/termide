@@ -1,0 +1,1 @@
+- **Always detachable starts for a project with a long name.** The instance id was the whole folder name, so its socket path could exceed what a unix socket allows and termide refused to start. Ids are now at most 24 characters, kept apart by a short hash; a too-long path is reported plainly, and when no host can be made termide runs in the terminal instead of exiting.

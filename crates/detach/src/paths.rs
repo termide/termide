@@ -54,10 +54,52 @@ pub fn info_path(id: &str) -> Result<PathBuf> {
     Ok(runtime_dir()?.join(format!("{id}.info")))
 }
 
+/// Longest instance id stem. The socket is `<runtime dir>/<id>.sock`, and
+/// a unix socket path is limited to `sun_path` (104 bytes on macOS and the
+/// BSDs, 108 on Linux), with the runtime directory already taking much of it.
+pub const MAX_STEM_LEN: usize = 24;
+
+/// Characters of the name kept before the hash in a shortened stem.
+const SHORT_PREFIX_LEN: usize = MAX_STEM_LEN - 9;
+
+/// Longest socket path `bind` accepts: `sun_path` less its terminating NUL.
+#[cfg(unix)]
+pub fn max_socket_path_len() -> usize {
+    // SAFETY: sockaddr_un is plain old data; all-zero is a valid value.
+    let addr: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    std::mem::size_of_val(&addr.sun_path) - 1
+}
+
+/// Fail with a clear message when `socket` is too long to bind, instead of
+/// the bare "path must be shorter than SUN_LEN" of `bind`.
+#[cfg(unix)]
+pub fn check_socket_path(socket: &Path) -> Result<()> {
+    use std::os::unix::ffi::OsStrExt;
+    let len = socket.as_os_str().as_bytes().len();
+    let max = max_socket_path_len();
+    if len > max {
+        anyhow::bail!(
+            "Socket path {} is {len} bytes, longer than the {max} a unix socket allows; \
+             set XDG_RUNTIME_DIR to a shorter directory",
+            socket.display()
+        );
+    }
+    Ok(())
+}
+
+/// FNV-1a: a hash stable across Rust releases, unlike `DefaultHasher`.
+fn fnv1a(bytes: &[u8]) -> u32 {
+    bytes.iter().fold(0x811c_9dc5u32, |h, &b| {
+        (h ^ u32::from(b)).wrapping_mul(0x0100_0193)
+    })
+}
+
 /// Turn a project directory into an instance id stem.
 ///
 /// The stem is the directory name reduced to characters that are safe both
-/// as a filename and as something the user retypes into `--attach`.
+/// as a filename and as something the user retypes into `--attach`. A name
+/// longer than [`MAX_STEM_LEN`] keeps its start and gets a hash of the whole
+/// name, so that two long names sharing a prefix stay apart.
 pub fn id_stem_for_project(project_root: &Path) -> String {
     let raw = project_root
         .file_name()
@@ -78,6 +120,10 @@ pub fn id_stem_for_project(project_root: &Path) -> String {
     let trimmed = cleaned.trim_matches('-').to_string();
     if trimmed.is_empty() {
         "instance".to_string()
+    } else if trimmed.len() > MAX_STEM_LEN {
+        // `cleaned` is ASCII, so byte slicing is on character boundaries.
+        let prefix = trimmed[..SHORT_PREFIX_LEN].trim_end_matches('-');
+        format!("{prefix}-{:08x}", fnv1a(raw.as_bytes()))
     } else {
         trimmed
     }
@@ -134,5 +180,38 @@ mod tests {
     fn id_stem_falls_back_when_there_is_no_name() {
         assert_eq!(id_stem_for_project(Path::new("/")), "instance");
         assert_eq!(id_stem_for_project(Path::new("...")), "instance");
+    }
+
+    #[test]
+    fn long_names_are_shortened_and_stay_distinct() {
+        let long = "a-really-long-project-directory-name-that-goes-on-and-on";
+        let a = id_stem_for_project(&Path::new("/p").join(format!("{long}-one")));
+        let b = id_stem_for_project(&Path::new("/p").join(format!("{long}-two")));
+        assert!(
+            a.len() <= MAX_STEM_LEN && b.len() <= MAX_STEM_LEN,
+            "{a} {b}"
+        );
+        assert!(a.starts_with("a-really-long"), "{a}");
+        assert_ne!(a, b);
+        // Stable: the same directory gives the same stem.
+        assert_eq!(
+            a,
+            id_stem_for_project(&Path::new("/p").join(format!("{long}-one")))
+        );
+        // Exactly at the limit: kept as is.
+        let fits = "x".repeat(MAX_STEM_LEN);
+        assert_eq!(id_stem_for_project(&Path::new("/p").join(&fits)), fits);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn overlong_socket_paths_are_refused_before_bind() {
+        let max = max_socket_path_len();
+        assert!(max >= 103, "{max}");
+        let fits = PathBuf::from(format!("/{}", "s".repeat(max - 1)));
+        assert!(check_socket_path(&fits).is_ok());
+        let long = PathBuf::from(format!("/{}", "s".repeat(max)));
+        let err = check_socket_path(&long).unwrap_err().to_string();
+        assert!(err.contains("longer than"), "{err}");
     }
 }
