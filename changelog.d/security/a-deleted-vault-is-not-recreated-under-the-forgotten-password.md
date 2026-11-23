@@ -1,0 +1,1 @@
+- **A vault deleted while termide runs stays deleted.** Deleting `vault.toml` is the way out of a forgotten master password, but a termide that had the vault open wrote it back under the old key at the next password or API key it saved. It now notices the file is gone and asks for a new master password.

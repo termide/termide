@@ -258,7 +258,7 @@ impl LayoutPersistence for LayoutManager {
             let mut group = PanelGroup::from_parts(
                 panels,
                 expanded_idx,
-                saved_group.width,
+                restored_width(saved_group.width, term_width),
                 split_heights,
                 fullscreen_cache,
             );
@@ -276,6 +276,13 @@ impl LayoutPersistence for LayoutManager {
 
         Ok(manager)
     }
+}
+
+/// A saved group width, no wider than the terminal: the file may have been
+/// edited by hand, and widths far past the screen would only be squeezed —
+/// or, summed, overflow.
+fn restored_width(saved: Option<u16>, term_width: u16) -> Option<u16> {
+    saved.map(|w| w.min(term_width.max(1)))
 }
 
 /// Reopen the file of a saved editor, with the unsaved changes kept in the
@@ -496,6 +503,13 @@ mod tests {
             split_heights,
             fullscreen_cache: None,
         }
+    }
+
+    #[test]
+    fn restored_widths_stay_within_the_terminal() {
+        assert_eq!(restored_width(None, 120), None);
+        assert_eq!(restored_width(Some(40), 120), Some(40));
+        assert_eq!(restored_width(Some(u16::MAX), 120), Some(120));
     }
 
     #[test]

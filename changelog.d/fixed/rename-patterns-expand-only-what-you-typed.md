@@ -1,0 +1,1 @@
+- **Rename patterns expand only what you typed.** A name holding `$` was expanded again after `$0` inserted it, so with the default `$0` pattern `report$I.txt` became `report1.txt`; and `$-N` past the name's last part gave its first part instead of nothing. Patterns are now read once, left to right.

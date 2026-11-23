@@ -48,6 +48,10 @@ pub enum Error {
     WrongPassword,
     #[error("vault is locked")]
     Locked,
+    /// The vault file was deleted while this vault was open; it is not
+    /// written back under the old master password.
+    #[error("vault file was deleted")]
+    Gone,
     #[error("stored secret failed authentication (the entry was altered)")]
     Tampered,
     #[error("system random generator failed: {0}")]
@@ -316,12 +320,16 @@ impl Vault {
 
     /// Re-read the file from disk (another process may have changed it).
     /// Keeps the vault unlocked unless its key pair was replaced.
+    /// [`Error::Gone`] when the file was deleted: the vault is then emptied
+    /// and locked, and should be dropped — writes to it fail, so a new vault
+    /// is created under a new master password rather than the forgotten one.
     pub fn reload(&mut self) -> Result<(), Error> {
         match file::read(&self.path)? {
             Some(record) => self.adopt(record),
             None => {
                 self.record.entries.clear();
                 self.private = None;
+                return Err(Error::Gone);
             }
         }
         Ok(())
@@ -456,12 +464,18 @@ impl Vault {
 
     /// Read-modify-write under an exclusive file lock, so concurrent termide
     /// processes merge their changes instead of overwriting each other.
+    /// [`Error::Gone`] when the file was deleted: deleting it is the way out
+    /// of a forgotten master password, so the old key is never written back.
     fn mutate<T>(
         &mut self,
         f: impl FnOnce(&mut VaultRecord) -> Result<T, Error>,
     ) -> Result<T, Error> {
         let _guard = file::lock(&self.path)?;
-        let mut record = file::read(&self.path)?.unwrap_or_else(|| self.record.clone());
+        let Some(mut record) = file::read(&self.path)? else {
+            self.record.entries.clear();
+            self.private = None;
+            return Err(Error::Gone);
+        };
         let out = f(&mut record)?;
         file::write(&self.path, &record)?;
         self.adopt(record);

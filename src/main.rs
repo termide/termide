@@ -611,9 +611,29 @@ fn main() -> Result<()> {
 
     #[cfg(unix)]
     if spawns_host && cli.files.is_empty() {
-        let id = termide_detach::spawn_detached(&project_root, &hosted_args(&cli))?;
-        let code = termide_detach::client::attach(Some(id), false)?;
-        std::process::exit(code);
+        match termide_detach::spawn_detached(&project_root, &hosted_args(&cli)) {
+            Ok(id) => {
+                let code = termide_detach::client::attach(Some(id), false)?;
+                std::process::exit(code);
+            }
+            // No host (a socket path too long, a runtime directory not
+            // writable): run in this terminal rather than not at all.
+            Err(e) => {
+                config_load_warnings.push(format!(
+                    "Could not start a detached host, running in this terminal: {e:#}"
+                ));
+                // The host would have claimed the project; only a look was
+                // taken above, so claim it here.
+                if cli.prompt.is_none() && cli.recall.is_none() {
+                    match termide_project::claim_project(&project_root, None) {
+                        Ok(claim) => start_claim = claim,
+                        Err(owner) => {
+                            std::process::exit(project_taken(&project_root, &owner, !hosted))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Initialize icon mode based on config + terminal capabilities

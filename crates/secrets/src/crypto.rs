@@ -30,12 +30,25 @@ pub(crate) fn random<const N: usize>() -> Result<[u8; N], Error> {
     Ok(buf)
 }
 
+/// Ceilings on the Argon2 parameters read from the file: a vault file
+/// asking for more would make unlocking take gigabytes or minutes. The
+/// default is 64 MiB, 3 passes, 1 lane.
+pub(crate) const MAX_M_COST: u32 = 1024 * 1024; // KiB: 1 GiB
+pub(crate) const MAX_T_COST: u32 = 10;
+pub(crate) const MAX_P_COST: u32 = 16;
+
 /// Derive the key-encryption key from the master password.
 pub(crate) fn derive_master_key(
     master: &str,
     salt: &[u8],
     params: &KdfParams,
 ) -> Result<Zeroizing<[u8; KEY_LEN]>, Error> {
+    if params.m_cost > MAX_M_COST || params.t_cost > MAX_T_COST || params.p_cost > MAX_P_COST {
+        return Err(Error::Format(format!(
+            "argon2 parameters above the limits (m_cost {} > {MAX_M_COST}, t_cost {} > {MAX_T_COST} or p_cost {} > {MAX_P_COST})",
+            params.m_cost, params.t_cost, params.p_cost
+        )));
+    }
     let p = Params::new(params.m_cost, params.t_cost, params.p_cost, Some(KEY_LEN))
         .map_err(|e| Error::Format(format!("argon2 parameters: {e}")))?;
     let mut out = Zeroizing::new([0u8; KEY_LEN]);

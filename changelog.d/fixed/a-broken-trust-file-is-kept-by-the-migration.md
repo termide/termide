@@ -1,0 +1,1 @@
+- **A broken `trust.toml` survives the store migration.** Moving old grants into a project's `trust.toml` replaced a file that did not parse with the grants alone. It is now kept as `trust.toml.broken-<time>` first.

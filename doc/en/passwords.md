@@ -79,6 +79,10 @@ lock_after_mins = 15   # 0 keeps it unlocked until termide exits
 
 **Lock password vault** in the command palette locks it at once.
 
+Locking takes the master key out of memory, not the secrets already handed
+out: an API key a connection has used and the passphrase of an SSH key stay
+in termide's memory until it exits.
+
 A [detached instance](detached-instances.md) holds the unlocked vault in the
 server process; clients never receive it.
 
@@ -102,7 +106,8 @@ is one vault per user, never one per project.
   vault. Writes are atomic and serialised by a lock file.
 
 **A forgotten master password cannot be recovered.** Delete `vault.toml` to
-start over; the stored passwords are lost with it.
+start over; the stored passwords are lost with it. A termide that is running
+notices: the next password it saves asks for a new master password.
 
 ## What it protects against
 

@@ -5,6 +5,16 @@ use ratatui::layout::Rect;
 use crate::geometry::{calculate_group_rects, divider_positions};
 use crate::layout_manager::{LayoutManager, MIN_GROUP_WIDTH};
 
+/// Widths come from layout files too, so a sum may not fit a `u16`:
+/// add in `u32` and cap at the largest width a terminal can have.
+fn sum(widths: impl Iterator<Item = u16>) -> u16 {
+    saturate(widths.map(u32::from).sum())
+}
+
+fn saturate(n: u32) -> u16 {
+    u16::try_from(n).unwrap_or(u16::MAX)
+}
+
 impl LayoutManager {
     /// Calculate actual widths of all groups.
     pub fn calculate_actual_widths(&self, available_width: u16) -> Vec<u16> {
@@ -12,7 +22,7 @@ impl LayoutManager {
             return Vec::new();
         }
 
-        let total_fixed_width: u16 = self.panel_groups.iter().filter_map(|g| g.width).sum();
+        let total_fixed_width = sum(self.panel_groups.iter().filter_map(|g| g.width));
         let auto_count = self
             .panel_groups
             .iter()
@@ -53,7 +63,7 @@ impl LayoutManager {
             let fixed_groups: Vec<u16> = self.panel_groups.iter().filter_map(|g| g.width).collect();
 
             if !fixed_groups.is_empty() && auto_count > 0 {
-                let fixed_total: u16 = fixed_groups.iter().sum();
+                let fixed_total = sum(fixed_groups.iter().copied());
                 let remaining = available_width.saturating_sub(fixed_total);
                 let per_auto = (remaining / auto_count as u16).max(MIN_GROUP_WIDTH);
                 for group in self.panel_groups.iter_mut() {
@@ -72,7 +82,7 @@ impl LayoutManager {
         }
 
         let actual_widths = self.calculate_actual_widths(available_width);
-        let total_actual: u16 = actual_widths.iter().sum();
+        let total_actual = sum(actual_widths.iter().copied());
 
         if total_actual == 0 {
             return;
@@ -80,7 +90,7 @@ impl LayoutManager {
 
         let min_width = MIN_GROUP_WIDTH;
         let n = actual_widths.len();
-        let min_total = min_width * n as u16;
+        let min_total = saturate(u32::from(min_width) * n as u32);
 
         // If all groups at minimum already exceed budget, just assign minimums.
         if min_total >= available_width {
@@ -88,7 +98,7 @@ impl LayoutManager {
             // Give any leftover to the last group (may be 0)
             let last = n - 1;
             new_widths[last] = available_width
-                .saturating_sub(min_width * (n - 1) as u16)
+                .saturating_sub(saturate(u32::from(min_width) * (n - 1) as u32))
                 .max(min_width);
             for (idx, &width) in new_widths.iter().enumerate() {
                 self.panel_groups[idx].width = Some(width);
@@ -115,7 +125,7 @@ impl LayoutManager {
                 -1.0
             };
             remainders.push((idx, remainder));
-            allocated_width += floored;
+            allocated_width = allocated_width.saturating_add(floored);
         }
 
         // Distribute leftover pixels to groups with the largest fractional remainders
@@ -126,13 +136,13 @@ impl LayoutManager {
                 if leftover == 0 {
                     break;
                 }
-                new_widths[idx] += 1;
+                new_widths[idx] = new_widths[idx].saturating_add(1);
                 leftover -= 1;
             }
         }
 
         // If over-allocated (due to min_width clamps pushing total up), trim largest groups
-        let mut total: u16 = new_widths.iter().sum();
+        let mut total = sum(new_widths.iter().copied());
         while total > available_width {
             // Find largest group above minimum
             if let Some(idx) = new_widths

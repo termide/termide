@@ -298,3 +298,75 @@ fn secrets_are_not_stored_in_clear() {
     assert!(!text.contains("very-secret-value"));
     assert!(text.contains("ftp://h"));
 }
+
+#[test]
+fn deleted_file_is_not_written_back_under_the_old_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = new_vault(&dir);
+    v.put(SecretKind::Password, "ftp://h", None, "p", None)
+        .unwrap();
+    let path = v.path().to_path_buf();
+    fs::remove_file(&path).unwrap();
+
+    // A write to the open vault must not re-create the file with the
+    // forgotten master password's key.
+    assert!(matches!(
+        v.put(SecretKind::ApiKey, "c", None, "k", None),
+        Err(Error::Gone)
+    ));
+    assert!(!path.exists());
+    assert!(!v.is_unlocked());
+    assert!(v.entries().is_empty());
+    assert!(matches!(
+        v.remove(SecretKind::Password, "ftp://h", None),
+        Err(Error::Gone)
+    ));
+    assert!(!path.exists());
+}
+
+#[test]
+fn reload_reports_a_deleted_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut v = new_vault(&dir);
+    v.put(SecretKind::Password, "ftp://h", None, "p", None)
+        .unwrap();
+    fs::remove_file(v.path()).unwrap();
+    assert!(matches!(v.reload(), Err(Error::Gone)));
+    assert!(!v.is_unlocked());
+    assert!(v.entries().is_empty());
+    // A new vault under a new password can take its place.
+    let mut fresh = Vault::create(v.path(), "new master", FAST).unwrap();
+    fresh
+        .put(SecretKind::Password, "ftp://h", None, "p2", None)
+        .unwrap();
+    let mut reopened = Vault::open(v.path()).unwrap().unwrap();
+    assert!(matches!(
+        reopened.unlock("master"),
+        Err(Error::WrongPassword)
+    ));
+    reopened.unlock("new master").unwrap();
+}
+
+#[test]
+fn excessive_kdf_parameters_are_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let v = new_vault(&dir);
+    let path = v.path().to_path_buf();
+    let text = fs::read_to_string(&path).unwrap();
+    for (from, to) in [
+        ("m_cost = 64", "m_cost = 4194304"),
+        ("t_cost = 1", "t_cost = 1000"),
+        ("p_cost = 1", "p_cost = 255"),
+    ] {
+        assert!(text.contains(from), "{from} not in {text}");
+        fs::write(&path, text.replace(from, to)).unwrap();
+        let mut v = Vault::open(&path).unwrap().unwrap();
+        assert!(
+            matches!(v.unlock("master"), Err(Error::Format(_))),
+            "{to} accepted"
+        );
+    }
+    fs::write(&path, &text).unwrap();
+    let mut v = Vault::open(&path).unwrap().unwrap();
+    v.unlock("master").unwrap();
+}

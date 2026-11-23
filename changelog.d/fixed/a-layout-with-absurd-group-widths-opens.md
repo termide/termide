@@ -1,0 +1,1 @@
+- **A layout with absurd group widths opens sanely.** Group widths in a hand-edited `project.toml` were taken as written, and summing them past the largest number they fit in laid the groups out wrong. They are now held to the terminal's width and summed safely.

@@ -83,15 +83,24 @@ pub fn claim_project(root: &Path, instance: Option<&str>) -> Result<Option<Proje
 
 /// The instance the project at `root` is open in, `None` when it is free.
 ///
-/// Takes the project and lets it go at once, so the answer may be stale by
-/// the time it is used; [`claim_project`] is what decides. A project with no
-/// lock file is free, and asking leaves none.
+/// Tries the lock and lets it go at once, so the answer may be stale by the
+/// time it is used; [`claim_project`] is what decides. Only looks: it writes
+/// no owner note and creates no lock file — a project with none is free.
 pub fn project_owner(root: &Path) -> Option<Owner> {
-    let dir = project_dir_in(&get_data_dir().ok()?, root);
-    if !dir.join(LOCK_FILE).exists() {
-        return None;
+    owner_in(&project_dir_in(&get_data_dir().ok()?, root))
+}
+
+pub(crate) fn owner_in(dir: &Path) -> Option<Owner> {
+    let lock = File::open(dir.join(LOCK_FILE)).ok()?;
+    match lock.try_lock() {
+        // Free; dropping the file lets the lock go.
+        Ok(()) => None,
+        Err(TryLockError::WouldBlock) => Some(read_owner(dir)),
+        Err(TryLockError::Error(e)) => {
+            log::warn!("Cannot lock {}: {e}", dir.display());
+            None
+        }
     }
-    claim_in(&dir, None).err()
 }
 
 pub(crate) fn claim_in(dir: &Path, instance: Option<&str>) -> Result<Option<ProjectClaim>, Owner> {
@@ -255,6 +264,29 @@ mod tests {
         assert!(!still_at(&stale, &dir.join(LOCK_FILE)));
         let fresh = File::open(dir.join(LOCK_FILE)).unwrap();
         assert!(still_at(&fresh, &dir.join(LOCK_FILE)));
+    }
+
+    #[test]
+    fn asking_for_the_owner_only_looks() {
+        let data = tempfile::tempdir().unwrap();
+        let dir = dir_of(data.path(), "/src/demo");
+        assert_eq!(owner_in(&dir), None);
+        assert!(!dir.exists(), "asking creates nothing");
+
+        let claim = claim_in(&dir, Some("demo")).unwrap();
+        let note = fs::read_to_string(dir.join(OWNER_FILE)).unwrap();
+        let owner = owner_in(&dir).unwrap();
+        assert_eq!(owner.instance.as_deref(), Some("demo"));
+        assert_eq!(
+            fs::read_to_string(dir.join(OWNER_FILE)).unwrap(),
+            note,
+            "the holder's note is left as it was"
+        );
+        // A lock left by a probe would keep the holder's successor out.
+        fs::write(dir.join("project.toml"), "").unwrap();
+        drop(claim);
+        assert_eq!(owner_in(&dir), None);
+        assert!(claim_in(&dir, None).unwrap().is_some());
     }
 
     #[test]
