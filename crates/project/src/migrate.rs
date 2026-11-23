@@ -340,8 +340,23 @@ fn migrate_grants(old: &Path, new: &Path) -> std::io::Result<()> {
     fs::create_dir_all(new)?;
     let path = new.join(TRUST_FILE);
     if let Ok(text) = fs::read_to_string(&path) {
-        if let Ok(current) = toml::from_str::<toml::Table>(&text) {
-            merge_into(&mut merged, current);
+        match toml::from_str::<toml::Table>(&text) {
+            Ok(current) => merge_into(&mut merged, current),
+            // Kept for the user to mend, as a broken layout is, rather than
+            // overwritten by the migrated grants alone.
+            Err(e) => {
+                let stamp = chrono::Local::now().format("%Y%m%d-%H%M%S%.3f");
+                let mut aside = path.as_os_str().to_owned();
+                aside.push(format!(".broken-{stamp}"));
+                let aside = PathBuf::from(aside);
+                fs::rename(&path, &aside)?;
+                log::warn!(
+                    "{} did not parse ({}); it was kept as {}",
+                    path.display(),
+                    e.message().trim(),
+                    aside.display()
+                );
+            }
         }
     }
     let text = toml::to_string(&merged).map_err(std::io::Error::other)?;
@@ -537,6 +552,33 @@ mod tests {
         // for the old tree.
         assert!(migrate_tree(data).is_empty());
         assert!(a.join("buffers/unsaved-1.txt").is_file());
+    }
+
+    /// A `trust.toml` that does not parse is set aside, not overwritten by
+    /// the grants migrated into its place.
+    #[test]
+    fn a_broken_trust_file_is_kept_aside() {
+        let tmp = tempfile::tempdir().unwrap();
+        let old = tmp.path().join("old");
+        let new = tmp.path().join("new");
+        write(&old, "approved.toml", "[mcp]\nx = \"spec\"\n");
+        write(&new, TRUST_FILE, "[[[ hand-edited, broken");
+
+        migrate_grants(&old, &new).unwrap();
+
+        let trust: toml::Table =
+            toml::from_str(&fs::read_to_string(new.join(TRUST_FILE)).unwrap()).unwrap();
+        assert_eq!(trust["approved"]["mcp"]["x"].as_str(), Some("spec"));
+        let aside: Vec<_> = fs::read_dir(&new)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with("trust.toml.broken-"))
+            .collect();
+        assert_eq!(aside.len(), 1, "{aside:?}");
+        assert_eq!(
+            fs::read_to_string(new.join(&aside[0])).unwrap(),
+            "[[[ hand-edited, broken"
+        );
     }
 
     /// An older termide still running writes its layout in the tree again;
