@@ -1461,6 +1461,7 @@ fn a_stopped_parent_stops_its_subagent_at_once() {
             prompt: "look around",
             call: "c1",
             background: false,
+            panel: false,
         },
         &ToolContext::new(tmp.path().to_path_buf()),
         &cancel,
@@ -1653,6 +1654,7 @@ fn plan_mode_switched_on_mid_task_holds_the_subagent() {
             prompt: "write it",
             call: "c1",
             background: false,
+            panel: false,
         },
         &ToolContext::new(tmp.path().to_path_buf()),
         &CancelToken::new(),
@@ -1716,6 +1718,7 @@ fn a_subagents_calls_go_through_the_command_hooks() {
             prompt: "read the notes",
             call: "c1",
             background: false,
+            panel: false,
         },
         &ToolContext::new(tmp.path().to_path_buf()),
         &CancelToken::new(),
@@ -1753,6 +1756,7 @@ fn a_subagents_calls_go_through_the_command_hooks() {
             prompt: "read the notes",
             call: "c2",
             background: false,
+            panel: false,
         },
         &ctx,
         &CancelToken::new(),
@@ -1815,6 +1819,7 @@ fn a_waited_task_moves_to_the_background_when_the_user_writes() {
                     prompt: "look around",
                     call,
                     background: false,
+                    panel: false,
                 },
                 &ctx,
                 &cancel,
@@ -1884,6 +1889,7 @@ fn a_delegate_stopped_by_a_limit_is_parked_rather_than_answered() {
         prompt: "cut the release",
         call: "call-1",
         background: false,
+        panel: false,
     };
     let quota = Failure::from_text("You've hit your session limit · resets 9:50pm");
     let outcome = park_or_answer(
@@ -1948,6 +1954,7 @@ fn a_stopped_policy_ends_a_parked_task_with_words_that_point_forward() {
         prompt: "cut the release",
         call: "call-2",
         background: false,
+        panel: false,
     };
     let report = {
         let mut report = SubagentReport::new(4, "claude-code");
@@ -1990,6 +1997,7 @@ fn a_failure_that_waits_for_nothing_is_not_parked() {
         prompt: "cut the release",
         call: "call-3",
         background: false,
+        panel: false,
     };
     for kind in [FailureKind::Auth, FailureKind::BadRequest] {
         let outcome = park_or_answer(
@@ -2037,6 +2045,7 @@ fn a_task_parked_past_its_tries_is_given_up() {
         prompt: "cut the release",
         call: "call-4",
         background: false,
+        panel: false,
     };
     let quota = Failure::new(FailureKind::QuotaExhausted);
     // Each try of a parked task is its own run, and each ends the same way.

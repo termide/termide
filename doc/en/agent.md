@@ -2470,6 +2470,16 @@ without you, so a chain of background tasks is cut off as such messages
 are. Only an agent in a panel can hand a task over in the background: a
 headless run has nowhere to take the answer.
 
+A `task` call with `panel` hands the task over in the background and shows
+it in an agent panel of its own beside the others, as if you had moved its
+view into one (`F9`): the focus stays where it was, the panel follows the
+task while it runs, and once the task is over it holds the delegate's
+session, to go on talking to. Its answer still reaches the delegating agent.
+It is how you start an agent with a clean context and a prompt of the
+agent's writing, then work with it yourself: ask the agent for a fresh
+agent in a panel. A fork does the same with the conversation so far; a
+`panel` task starts from the prompt alone.
+
 #### What the agent set going
 
 An agent can set work going that runs on while it does something else: tasks
@@ -2503,7 +2513,7 @@ gets `jobs` only by naming it. Subagents have neither.
 | Work | Set going by | Its row above the input | Stopped by | What comes back | Bounded by |
 |---|---|---|---|---|---|
 | A subagent waited for | the agent's `task` | `& Delegating to · agent` | `✕`, `Esc` | its answer, as the call's result | 50 model calls (`max_turns`) |
-| A task in the background | `task` with `background`, or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message | the messages agents pass without you (`max_agent_messages`) |
+| A task in the background | `task` with `background` or `panel` (shown in a panel of its own), or a message typed while a task was waited for | the same; `· paused` while the panel pauses | `✕`, `jobs`, `Esc`, closing the panel | its answer, later, as a message | the messages agents pass without you (`max_agent_messages`) |
 | A parked task | a limit that passes on its own | `↻ Parked at a limit · agent 21:50` | `✕`, `jobs` (both give it up) | its answer once it goes again and ends | six tries |
 | A task left unfinished | termide closing while it ran | `& Delegating to · agent · left unfinished` | its session's carry-on card | its answer once carried on | — |
 | A call moved to the background | an external agent, to take a message typed while it ran | `$ Running  cargo test` | `✕`, `jobs`, `Esc` | its result, to the agent, which goes on by itself | — |

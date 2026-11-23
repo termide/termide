@@ -106,9 +106,19 @@ impl App {
         };
         // One view at a time: another one gives its cards back first.
         self.close_overlay();
-        // On the default agent until the task is over: the view only reads
-        // the log, and the delegate's own agent — an external one would
-        // start a process of its own — comes with its session once it opens.
+        let mut view = self.delegate_view();
+        view.set_in_overlay(true);
+        view.start_watch(watch);
+        self.layout_manager.overlay = Some(Box::new(view));
+        self.state.needs_redraw = true;
+        true
+    }
+
+    /// An agent panel to follow a delegated task in. On the default agent
+    /// until the task is over: it only reads the log, and the delegate's own
+    /// agent — an external one would start a process of its own — comes with
+    /// its session once it opens.
+    fn delegate_view(&self) -> AgentPanel {
         let settings = self.project_ai_settings();
         let setup = agent_setup(
             &settings,
@@ -117,12 +127,52 @@ impl App {
             DEFAULT_AGENT,
             None,
         );
-        let mut view = AgentPanel::new(setup);
-        view.set_in_overlay(true);
-        view.start_watch(watch);
-        self.layout_manager.overlay = Some(Box::new(view));
+        AgentPanel::new(setup)
+    }
+
+    /// Open a panel beside the others, leaving the focus where it is, on
+    /// the task the `task` call `call` of panel `panel` asked to show in one:
+    /// following it while it runs, as a view moved into a panel does, else
+    /// on its `session` log, which holds it as it ended. A panel already on
+    /// the task, or on its log, is left as it is.
+    pub(in crate::app) fn show_delegate(
+        &mut self,
+        panel: u64,
+        call: &str,
+        session: Option<PathBuf>,
+    ) -> Result<()> {
+        let shown = self.layout_manager.iter_all_panels_mut().any(|candidate| {
+            candidate.downcast_ref::<AgentPanel>().is_some_and(|agent| {
+                agent.runs_task(panel, call)
+                    || (session.is_some() && agent.session_path() == session.as_deref())
+            })
+        });
+        if shown {
+            return Ok(());
+        }
+        if let Some(watch) = termide_panel_agent::live::watch(panel, call) {
+            let mut view = self.delegate_view();
+            view.start_watch(watch);
+            self.add_panel_without_focus(Box::new(view));
+        } else if let Some(path) = session.filter(|path| path.exists()) {
+            let settings = self.state.config.ai.clone();
+            let Some(view) = super::restore_agent_panel(
+                &settings,
+                &self.project_root,
+                self.project_root.clone(),
+                Some(path),
+                None,
+                termide_core::AgentSetupState::default(),
+            ) else {
+                return Ok(());
+            };
+            self.add_panel_without_focus(Box::new(view));
+        } else {
+            return Ok(());
+        }
+        self.auto_save_layout();
         self.state.needs_redraw = true;
-        true
+        Ok(())
     }
 
     /// The agent panel shown over the layout, if one is.

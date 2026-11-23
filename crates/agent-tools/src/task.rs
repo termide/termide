@@ -64,6 +64,10 @@ pub struct SubagentTask<'a> {
     /// Hand the task over and go on: the call returns once the task is
     /// placed, and the delegate's answer comes later as a message of its own.
     pub background: bool,
+    /// Show the task in an agent panel of its own beside the others, which
+    /// follows it while it runs and holds its session, for the user to go on
+    /// with, once it is over. Always handed over in the background.
+    pub panel: bool,
 }
 
 /// Runs the named agent on the task to completion. Progress is forwarded
@@ -138,6 +142,10 @@ impl Tool for TaskTool {
                 "background": {
                     "type": "boolean",
                     "description": "Hand it over and carry on without waiting; its answer comes later as a message"
+                },
+                "panel": {
+                    "type": "boolean",
+                    "description": "Show it in an agent panel of its own, where the user follows it and goes on with its session once it is over; implies `background`"
                 }
             },
             "required": ["agent", "prompt"]
@@ -174,15 +182,19 @@ impl Tool for TaskTool {
                 format!("no agent named {agent}; available: {}", names.join(", ")),
             );
         }
-        let background = call
-            .arguments
-            .get("background")
-            .is_some_and(|value| value.as_bool() == Some(true) || value.as_str() == Some("true"));
+        let flag = |name: &str| {
+            call.arguments.get(name).is_some_and(|value| {
+                value.as_bool() == Some(true) || value.as_str() == Some("true")
+            })
+        };
+        // A task shown in a panel is the user's to follow: no call waits on it.
+        let panel = flag("panel");
         let task = SubagentTask {
             agent,
             prompt,
             call: &call.id,
-            background,
+            background: panel || flag("background"),
+            panel,
         };
         let outcome = (self.run)(&task, ctx, cancel, on_update);
         // What the subagent spent and where its session went ride in the
@@ -228,8 +240,11 @@ mod tests {
     fn it_lists_agents_delegates_and_reports_errors() {
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
         let seen_run = Arc::clone(&seen);
+        let panels = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let panels_run = Arc::clone(&panels);
         let run: SubagentRun = Arc::new(move |task: &SubagentTask, _ctx, _c, _u| {
             let agent = task.agent;
+            panels_run.lock().unwrap().push(task.panel);
             seen_run.lock().unwrap().push((
                 agent.to_string(),
                 task.prompt.to_string(),
@@ -296,6 +311,15 @@ mod tests {
             json!({ "agent": "reviewer", "prompt": "later", "background": true }),
         );
         assert!(seen.lock().unwrap().last().unwrap().3);
+        assert!(!panels.lock().unwrap().last().unwrap());
+        // A task shown in a panel goes in the background.
+        assert!(schema["properties"]["panel"].is_object());
+        run_with(
+            &tool,
+            json!({ "agent": "reviewer", "prompt": "in view", "panel": true }),
+        );
+        assert!(seen.lock().unwrap().last().unwrap().3);
+        assert!(*panels.lock().unwrap().last().unwrap());
 
         let failed = run_with(&tool, json!({ "agent": "writer", "prompt": "x" }));
         assert!(failed.is_error);

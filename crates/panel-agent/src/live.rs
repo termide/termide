@@ -68,6 +68,8 @@ pub struct LiveTask<'a> {
     pub session: Option<PathBuf>,
     /// Handed over in the background.
     pub background: bool,
+    /// To be shown in an agent panel of its own (see [`take_wanted`]).
+    pub in_panel: bool,
 }
 
 /// A task's place in the registry, for as long as it runs: dropped, the
@@ -108,6 +110,13 @@ pub fn register(task: LiveTask<'_>) -> Registration {
     let status = Arc::new(Mutex::new(String::new()));
     let key = task.panel.map(|panel| {
         let key = (panel, task.call.to_string());
+        if task.in_panel {
+            wanted_lock().push(Wanted {
+                panel,
+                call: task.call.to_string(),
+                session: task.session.clone(),
+            });
+        }
         lock().insert(
             key.clone(),
             Live {
@@ -195,6 +204,36 @@ pub(crate) fn set_viewed(panel: u64, call: &str, viewed: bool) {
     if let Some(live) = lock().get_mut(&(panel, call.to_string())) {
         live.viewed = viewed;
     }
+}
+
+/// A task its `task` call asked to show in an agent panel of its own, not
+/// yet shown.
+struct Wanted {
+    panel: u64,
+    call: String,
+    session: Option<PathBuf>,
+}
+
+fn wanted_lock() -> std::sync::MutexGuard<'static, Vec<Wanted>> {
+    static WANTED: Mutex<Vec<Wanted>> = Mutex::new(Vec::new());
+    WANTED.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The tasks panel `panel` handed over that are to be shown in panels of
+/// their own, as `(call, session log)`, oldest first; taken once. The panel
+/// that delegated them asks on its tick, so a panel is opened for them in
+/// its project. One that ended meanwhile is shown by its log.
+pub fn take_wanted(panel: u64) -> Vec<(String, Option<PathBuf>)> {
+    let mut wanted = wanted_lock();
+    let mut taken = Vec::new();
+    wanted.retain(|entry| {
+        if entry.panel != panel {
+            return true;
+        }
+        taken.push((entry.call.clone(), entry.session.clone()));
+        false
+    });
+    taken
 }
 
 /// Whether a panel follows the task the `task` call `call` of panel
@@ -330,6 +369,7 @@ pub fn take_withdrawn(panel: u64, call: &str) -> bool {
 /// panel's own; a task the run waits on is stopped with the run, and its
 /// log does not read as paused.
 pub fn stop_all(panel: u64) {
+    take_wanted(panel);
     for ((owner, _), live) in lock().iter() {
         if *owner != panel {
             continue;
@@ -642,7 +682,37 @@ mod tests {
             task: "find it",
             session: Some(PathBuf::from("/tmp/x.jsonl")),
             background,
+            in_panel: false,
         }
+    }
+
+    #[test]
+    fn a_task_to_show_in_a_panel_is_handed_to_its_panel_once() {
+        let plain = register(task(Some(7101), "call-1", true));
+        let shown = register(LiveTask {
+            in_panel: true,
+            ..task(Some(7101), "call-2", true)
+        });
+        let other = register(LiveTask {
+            in_panel: true,
+            ..task(Some(7102), "call-3", true)
+        });
+        assert_eq!(
+            take_wanted(7101),
+            vec![("call-2".to_string(), Some(PathBuf::from("/tmp/x.jsonl")))]
+        );
+        assert!(take_wanted(7101).is_empty());
+        // Over before its panel asked, it is still to show, by its log.
+        drop(other);
+        assert_eq!(take_wanted(7102).len(), 1);
+        // A panel closing takes its wishes with it.
+        let closing = register(LiveTask {
+            in_panel: true,
+            ..task(Some(7103), "call-4", true)
+        });
+        stop_all(7103);
+        assert!(take_wanted(7103).is_empty());
+        drop((plain, shown, closing));
     }
 
     #[test]

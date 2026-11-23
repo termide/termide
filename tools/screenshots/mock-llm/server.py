@@ -145,6 +145,14 @@ AGAIN_STEP = {
     "text": "Once more, in the background.",
     "tool": ("task", {"agent": "default", "prompt": SUBTASK, "background": True}),
 }
+# Asked to delegate it "in a panel" (the TUI harness's delegate-panel), the
+# agent hands the scan over to be shown in an agent panel of its own.
+IN_PANEL = "in a panel"
+IN_PANEL_STEP = {
+    "reasoning": "",
+    "text": "I'll hand the stock scan to a subagent in a panel.",
+    "tool": ("task", {"agent": "default", "prompt": SUBTASK, "panel": True}),
+}
 
 
 # A third, played when the user asks to "break the count" in a Cargo project
@@ -365,6 +373,8 @@ class Handler(BaseHTTPRequestHandler):
                         "text": "The subagent is back: 3 items, " + found + ".",
                         "tool": None,
                     }
+                elif done == 0 and any(IN_PANEL in u for u in users):
+                    step = IN_PANEL_STEP
                 else:
                     step = DELEGATE_SCRIPT[min(done, len(DELEGATE_SCRIPT) - 1)]
         kwargs = request.get("chat_template_kwargs") or {}

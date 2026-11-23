@@ -1,0 +1,34 @@
+# A task handed over with `panel` (the mock model's "in a panel"): an agent
+# panel opens beside the delegating one, the focus staying where it was, and
+# follows the task; once it is over the panel holds the delegate's session,
+# its report in sight, and the report goes back to the delegating agent too.
+size 160x40
+config side-models.toml
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+type "delegate the stock scan in a panel"
+key Enter
+wait "I'll hand the stock scan to a subagent in a panel." 20
+wait "Agent wants to run task" 15
+type "1"
+wait-gone "Agent wants to run task" 10
+# The panel following it: its input names whose delegate it is.
+wait "Agent: SUBTASK: list the items" 10
+wait "Delegate of default" 5
+snapshot following
+# The focus stayed in the delegating panel: what is typed goes there (the
+# panel following the task takes no input).
+type "zzfocuscheck"
+wait "zzfocuscheck" 5
+# Over: the panel holds the delegate's session, its report among it, and
+# the delegating agent quotes the same report.
+wait "SUBREPORT: 3 items under their" 30
+# Open to go on with: the input asks for the user's words.
+wait-gone "Delegate of default" 10
+wait "The subagent is back: 3 items, checked on qwen3-coder-subagent" 30
+snapshot done
+quit

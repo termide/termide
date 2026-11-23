@@ -463,6 +463,11 @@ impl App {
                     self.state.needs_redraw = true;
                 }
             }
+            PanelEvent::ShowDelegate {
+                panel,
+                call,
+                session,
+            } => self.show_delegate(panel, &call, session)?,
             // A view shown over the layout moves into a panel of its own.
             PanelEvent::DockOverlay => self.dock_overlay(),
 

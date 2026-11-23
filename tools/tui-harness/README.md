@@ -42,7 +42,8 @@ minute.
   `inventory/report.py`, edit it, run the tests, answer), or, asked to
   "delegate the stock scan", hands a task to a subagent in the background
   and quotes its report ("… and again" hands it over a second time when the
-  first report comes back); asked to "break the count", it makes a number a
+  first report comes back, "… in a panel" hands it over to show in a panel
+  of its own); asked to "break the count", it makes a number a
   string in a Cargo project's `src/main.rs` and repeats what the edit's
   result said of the language server's errors. It logs the model every call asks for. `mock-acp codex`
   (or `claude_code`, `gemini_cli`) makes that ACP agent the connection and

@@ -232,6 +232,7 @@ fn a_running_task_is_stopped_from_its_row() {
         task: "find the loader",
         session: None,
         background: false,
+        in_panel: false,
     });
     let (width, height) = (80, 20);
     let rows = render_text(&mut panel, width, height);
@@ -393,6 +394,7 @@ fn a_background_task_has_a_row_that_stops_or_follows_it() {
         task: "find the loader\nin src/",
         session: None,
         background: true,
+        in_panel: false,
     });
     registration.set_status("· read src/main.rs");
     let (width, height) = (80, 30);
@@ -614,6 +616,7 @@ fn the_strip_count_of_subagents_unfolds_and_folds_back() {
                 task,
                 session: None,
                 background: true,
+                in_panel: false,
             })
         })
         .collect();
@@ -1051,6 +1054,7 @@ fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
         task: "find the loader",
         session: None,
         background: true,
+        in_panel: false,
     });
     let waited = crate::live::register(crate::live::LiveTask {
         panel: Some(id),
@@ -1060,6 +1064,7 @@ fn pausing_the_panel_holds_its_delegates_and_resumes_them() {
         task: "review the diff",
         session: None,
         background: false,
+        in_panel: false,
     });
 
     panel.busy = true;
@@ -1100,6 +1105,7 @@ fn stopping_the_run_stops_its_delegates_and_holds_their_answers() {
         task: "find the loader",
         session: None,
         background: true,
+        in_panel: false,
     });
     panel.busy = true;
     assert!(panel.request_pause());
@@ -1185,6 +1191,7 @@ fn a_delegates_cards_follow_the_view_of_its_task() {
         task: "find it",
         session: Some(std::path::PathBuf::from("/nonexistent/x.jsonl")),
         background: false,
+        in_panel: false,
     });
     let watch = crate::live::watch(id, "call-cards").unwrap();
     let mut view = panel(vec![]);
@@ -1277,6 +1284,7 @@ fn the_session_waits_for_the_tasks_handed_over_in_the_background() {
         task: "find it",
         session: None,
         background: true,
+        in_panel: false,
     });
     assert!(!panel.switch_session(None));
     assert!(panel.transcript.items().iter().any(|item| matches!(
@@ -1526,6 +1534,7 @@ fn a_pause_the_run_never_reached_frees_its_delegates() {
         task: "find the loader",
         session: None,
         background: true,
+        in_panel: false,
     });
     panel.apply(AgentEvent::AgentStart);
     assert!(panel.request_pause());

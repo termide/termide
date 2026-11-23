@@ -967,6 +967,14 @@ impl AgentPanel {
         }
         changed |= self.settle_restored();
         changed |= self.settle_watch();
+        // The tasks handed over to show in panels of their own get them.
+        for (call, session) in crate::live::take_wanted(self.panel_id) {
+            events.push(PanelEvent::ShowDelegate {
+                panel: self.panel_id,
+                call,
+                session,
+            });
+        }
         // A goal or loop started, stepped or stopped is written to the log,
         // so a session reopened later offers to carry it on — between runs,
         // so nothing comes between a request's start and its message.

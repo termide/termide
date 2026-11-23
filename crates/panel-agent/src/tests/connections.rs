@@ -109,6 +109,7 @@ fn a_refused_connection_switch_changes_nothing() {
         task: "find the loader",
         session: None,
         background: true,
+        in_panel: false,
     });
     assert!(!panel.switch_connection("local"));
     assert_eq!(panel.connection, "cli");

@@ -2072,6 +2072,7 @@ impl Subagents {
             task.call.to_string(),
         );
         let thread_agent = agent.clone();
+        let in_panel = task.panel;
         std::thread::Builder::new()
             .name(format!("background-{agent}"))
             .spawn(move || {
@@ -2080,6 +2081,7 @@ impl Subagents {
                     prompt: &prompt,
                     call: &call,
                     background: true,
+                    panel: in_panel,
                 };
                 // Nobody waits on the call: the user stops the task, from its
                 // row or a panel following it, or by closing its panel.
@@ -2107,6 +2109,15 @@ impl Subagents {
                 );
             })
             .map_err(|error| format!("cannot start the task: {error}"))?;
+        if in_panel {
+            return Ok(format!(
+                "{agent} took the task in a panel of its own beside yours; its id is {}. The \
+                 user follows it there and goes on with its session once it is over. Carry on: \
+                 its answer comes to you later as a message of its own. Do not wait for it with \
+                 tools, and do not hand the same task over again.",
+                task.call
+            ));
+        }
         Ok(format!(
             "{agent} took the task and works on it out of sight; its id is {}. Carry on: its \
              answer comes to you later as a message of its own. Do not wait for it with tools, \
@@ -2191,6 +2202,7 @@ impl Subagents {
                     prompt: &carried,
                     call: &call,
                     background: true,
+                    panel: false,
                 };
                 let outcome = this
                     .delegate(&caller, &task, &ctx, &CancelToken::new(), &mut |_| {})
@@ -2276,6 +2288,7 @@ impl Subagents {
                     prompt: &prompt,
                     call: &call,
                     background: false,
+                    panel: false,
                 };
                 let outcome = this
                     .delegate(
@@ -3149,6 +3162,7 @@ fn register_live(
         task: task.prompt,
         session: log.path(),
         background: task.background,
+        in_panel: task.panel,
     })
 }
 
