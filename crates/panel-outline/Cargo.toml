@@ -12,6 +12,7 @@ publish = false
 crossterm.workspace = true
 ratatui.workspace = true
 unicode-width.workspace = true
+unicode-segmentation.workspace = true
 tree-sitter.workspace = true
 streaming-iterator = "0.1"
 regex.workspace = true
