@@ -870,7 +870,9 @@ mod tests {
         #[test]
         fn a_crash_is_reported_once_and_a_shutdown_not_at_all() {
             let dir = tempfile::tempdir().unwrap();
-            let (server, crashes) = start_noticed(dir.path(), "exit 0");
+            // The stand-in exits once `initialize` reaches it: one that exits
+            // at once can be gone before `start` sends it, and `start` fails.
+            let (server, crashes) = start_noticed(dir.path(), "read -r _; exit 0");
             assert_eq!(crashes.recv_timeout(Duration::from_secs(5)), Ok(7));
             server.shutdown_within(Duration::from_secs(5), Duration::from_secs(5));
             assert!(crashes.try_recv().is_err());
@@ -886,7 +888,7 @@ mod tests {
         #[test]
         fn requests_to_a_crashed_server_fail_fast() {
             let dir = tempfile::tempdir().unwrap();
-            let server = start(dir.path(), "exit 0");
+            let server = start(dir.path(), "read -r _; exit 0");
             wait_for(&server, ServerStatus::Crashed);
 
             for _ in 0..50 {
