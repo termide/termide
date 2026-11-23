@@ -534,7 +534,7 @@ root_markers = ["pyproject.toml", "setup.py", "requirements.txt"]
 [lsp.servers.typescript]
 command = "typescript-language-server"
 args = ["--stdio"]
-root_markers = ["package.json", "tsconfig.json"]
+root_markers = ["tsconfig.json", "package.json"]
 ```
 
 Entries under `[lsp.servers]` override or add to the built-in servers listed in
@@ -632,7 +632,7 @@ LSP works with any language server that implements the LSP protocol. Common exam
 - **Python** - pylsp, pyright
 - **TypeScript/JavaScript** - typescript-language-server
 - **Go** - gopls
-- **C/C++** - clangd
+- **C/C++** - clangd (not built in: add it under `[lsp.servers]`)
 
 Built-in server definitions, used automatically when the binary is on `PATH`:
 

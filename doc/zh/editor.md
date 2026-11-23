@@ -439,7 +439,7 @@ root_markers = ["pyproject.toml", "setup.py", "requirements.txt"]
 [lsp.servers.typescript]
 command = "typescript-language-server"
 args = ["--stdio"]
-root_markers = ["package.json", "tsconfig.json"]
+root_markers = ["tsconfig.json", "package.json"]
 ```
 
 `[lsp.servers]` 中的条目会覆盖或补充[支持的语言](#支持的语言)中列出的内置服务器；
@@ -524,7 +524,7 @@ LSP 可与任何实现了 LSP 协议的语言服务器配合使用。常见示�
 - **Python** - pylsp、pyright
 - **TypeScript/JavaScript** - typescript-language-server
 - **Go** - gopls
-- **C/C++** - clangd
+- **C/C++** - clangd（非内置：请在 `[lsp.servers]` 中添加）
 
 内置的服务器定义，只要可执行文件在 `PATH` 中即自动使用：
 

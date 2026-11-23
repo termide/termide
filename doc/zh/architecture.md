@@ -661,7 +661,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 - 默认每个面板都可见；用户通过鼠标拖动（面板下边框或标题栏）、`Alt+Shift+=` / `Alt+Shift+-` 或它们的任意组合来调整高度。
 - `Alt+F11` 切换「聚焦面板全屏」预设，模拟旧的手风琴视图（一个面板占满整列，其余缩为一行），先前的高度被保存以便瞬间恢复。
 - 高度被缓存，并在终端尺寸变化时按比例重缩放。
-- 终端过窄时（`min_panel_width`）仍会自动堆叠到同一组中。
+- 终端过窄时（`auto_stack_threshold`）仍会自动堆叠到同一组中。
 
 ### 为什么选择动态面板？
 
@@ -718,7 +718,7 @@ OpenSSL 或 libssh——SFTP 运行在 `russh` + `russh-sftp` 上，FTPS 运行�
 | FileManager 子树展开             | `crates/panel-file-manager/src/lib.rs` (`start_listing`)        | 同一路径的 `poll_pending_expansions`；占位行在解析前显示 `…`                   |
 | FileManager 每条目 git 状态      | `crates/panel-file-manager/src/git_status.rs`                   | `check_git_status_async`；若目录读取抢先，`apply_git_statuses` 会重新应用      |
 | Git 状态/日志面板刷新            | `crates/panel-git-status/src/lib.rs`、`panel-git-log/src/lib.rs`| 各面板 `tick` 中的 `poll_refresh`                                             |
-| Git 子模块发现（RepoManager）    | `crates/git/src/repo_manager.rs` (`spawn_submodule_walk`)       | git 面板 `tick` 中的 `RepoManager::poll`                                       |
+| Git 仓库发现（RepoManager）      | `crates/git/src/repo_manager.rs` (`spawn_repo_walk`)            | git 面板 `tick` 中的 `RepoManager::poll`；嵌套仓库与子模块深度至 3，仓库忽略或未跟踪的克隆来自一次 `git ls-files --others --directory`，包含项目的外层仓库在遍历结束时剔除 |
 | 布局恢复——并行构建面板           | `crates/app/src/layout_store.rs`（每面板 `construct_panel`）  | 启动后同步 join，因此最慢的面板仍决定首帧                                     |
 | 监视器仓库注册                   | `crates/watcher/src/lib.rs` (`watch_repository`)                | 主循环中的 `poll_pending`；inotify 每帧按 `INSTALL_CHUNK` 分块安装，FSEvents（macOS）为单个递归根监视，投递时按 `.gitignore` 过滤 |
 | 目录大小遍历（宽视图）           | `crates/panel-file-manager/src/utils.rs` (`shared_dir_size_cache`) | 对共享缓存逐帧 `try_recv`；每次遍历有预算限制                              |

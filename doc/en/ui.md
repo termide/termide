@@ -60,9 +60,14 @@ repository, so it may not name a program termide starts, a file it writes or
 where a key is sent, nor loosen the agent: the terminal's default shell, the
 log file, the web tools' browser, an LSP server's or a debugger's command and
 arguments, a connection's base URL and API key variable, and the agent's
-permission mode. Stored in the project, these fields show their value with
-"set in the global settings" and cannot be changed; found in a project file,
-they are ignored, with a line in the log.
+permission mode; nor lift a limit the user set: the cap on an agent's messages
+to other agents (`ai.max_agent_messages`) and the vault's auto-lock
+(`vault.lock_after_mins`). A plugin's mode is the user's too: a project only
+switches the plugin within it. Stored in the project, these fields show their
+value with "set in the global settings" and cannot be changed; found in a
+project file, they are ignored, with a line in the log. A project's permission
+rules may make the agent ask or refuse but never let a call through: every
+`allow` among them is dropped the same way.
 
 **Sidebar sections:**
 - General, Editor, File Manager, Terminal, LSP, Debug, Logging, VFS, AI, Plugins — plain leaves

@@ -543,7 +543,7 @@ root_markers = ["pyproject.toml", "setup.py", "requirements.txt"]
 [lsp.servers.typescript]
 command = "typescript-language-server"
 args = ["--stdio"]
-root_markers = ["package.json", "tsconfig.json"]
+root_markers = ["tsconfig.json", "package.json"]
 ```
 
 Записи в `[lsp.servers]` переопределяют встроенные серверы из раздела
@@ -642,7 +642,7 @@ LSP работает с любым языковым сервером, реали
 - **Python** — pylsp, pyright
 - **TypeScript/JavaScript** — typescript-language-server
 - **Go** — gopls
-- **C/C++** — clangd
+- **C/C++** — clangd (не встроен: добавьте его в `[lsp.servers]`)
 
 Встроенные определения серверов (используются автоматически, если бинарник есть в `PATH`):
 

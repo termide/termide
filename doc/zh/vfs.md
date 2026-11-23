@@ -43,6 +43,10 @@ nfs://nas.local/srv/backup
 说明：
 - `path` 支持非 ASCII 字符；解析器在与服务器通信前会将其
   percent-decode 回 UTF-8。
+- 路径中的 `%`、`#` 和 `?`，以及用户名中的 `@` 或 `:`，需写成
+  percent-encode 形式：`%25`、`%23`、`%3F`、`%40`、`%3A`——例如
+  `sftp://me%40corp.example@host/srv/issue%231`。Termide 自己也以这种
+  方式写出服务器 URL。
 - 省略用户名或端口时，SFTP 会从 SSH 配置中取得它们（见
   [SSH 配置](#ssh-配置sftp)）。
 - 否则，省略端口时使用协议默认值（22 / 21 / 990 / 445）；NFS 会询问
