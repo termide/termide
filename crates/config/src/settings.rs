@@ -212,8 +212,12 @@ pub struct AiSettings {
 pub struct Connection {
     /// `openai_compatible` (omlx, llama.cpp, OpenAI, OpenRouter and most
     /// gateways), `anthropic_compatible` (the Messages API), or a CLI agent
-    /// driven over ACP: `claude_code`, `codex`, `gemini_cli`.
-    #[serde(default = "agent_defaults::provider")]
+    /// driven over ACP: `claude_code`, `codex`, `gemini_cli`. Read trimmed
+    /// and lowercased, so every comparison sees one spelling.
+    #[serde(
+        default = "agent_defaults::provider",
+        deserialize_with = "provider_name"
+    )]
     pub provider: String,
     /// Base URL including the API prefix, e.g. `http://127.0.0.1:10000/v1`.
     /// For `anthropic_compatible` it is left at the default unless a gateway
@@ -312,6 +316,17 @@ where
         LevelOrSwitch::Switch(false) => ThinkingLevel::Off,
         LevelOrSwitch::Level(level) => level,
     })
+}
+
+/// A connection's provider name as written, trimmed and lowercased:
+/// `Claude_Code` is `claude_code` everywhere it is compared.
+fn provider_name<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Ok(String::deserialize(deserializer)?
+        .trim()
+        .to_ascii_lowercase())
 }
 
 impl Default for Connection {
@@ -623,7 +638,9 @@ mod recall_defaults {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebSettings {
     /// `auto` (Chrome when found, else plain HTTP), `chrome` or `http`.
-    /// Plain HTTP reads pages but cannot search.
+    /// Plain HTTP reads pages and searches through the engine's results
+    /// page, which works only with an engine that does not build its results
+    /// with JavaScript (DuckDuckGo, the default).
     #[serde(default = "web_defaults::backend")]
     pub backend: String,
     /// Search engine: the name of a file under `ai/web/engines/`.
@@ -837,7 +854,7 @@ pub struct CustomLanguage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GeneralSettings {
     /// Selected theme name
-    #[serde(default = "default_theme_name")]
+    #[serde(default = "default_theme_name", deserialize_with = "theme_name")]
     pub theme: String,
 
     /// Interface language: a code of `termide_i18n::SUPPORTED_LANGUAGES`, or `auto`
@@ -1074,7 +1091,7 @@ pub struct LoggingSettings {
     #[serde(default)]
     pub file_path: Option<String>,
 
-    /// Minimum log level (debug, info, warn, error)
+    /// Minimum log level (trace, debug, info, warn, error)
     #[serde(default = "default_min_level")]
     pub min_level: String,
 }
@@ -1239,6 +1256,21 @@ pub struct LspServerSettings {
 // Default value functions for serde
 fn default_theme_name() -> String {
     defaults::THEME_NAME.to_string()
+}
+
+/// A theme name as written, with the old stock `default` read as the
+/// default theme it always fell back to, so the settings window finds it in
+/// the theme list.
+fn theme_name<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let name = String::deserialize(deserializer)?;
+    Ok(if name == "default" {
+        default_theme_name()
+    } else {
+        name
+    })
 }
 
 mod agent_defaults {
@@ -1572,7 +1604,7 @@ where
 /// Legacy flat config format for migration.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LegacyConfig {
-    #[serde(default = "default_theme_name")]
+    #[serde(default = "default_theme_name", deserialize_with = "theme_name")]
     pub theme: String,
     #[serde(default = "default_tab_size")]
     pub tab_size: usize,
@@ -1944,6 +1976,25 @@ mod ai_settings_tests {
         assert!(!saved.contains("reasoning_param"), "{saved}");
         assert!(!saved.contains("send_reasoning"), "{saved}");
         assert!(!saved.contains("prefill_progress"), "{saved}");
+    }
+
+    /// The old stock `theme = "default"` names no theme; it reads as the one
+    /// it always fell back to, and another name stays as written.
+    #[test]
+    fn the_old_default_theme_name_reads_as_the_default_theme() {
+        let theme = |text: &str| toml::from_str::<Config>(text).unwrap().general.theme;
+        assert_eq!(theme("[general]\ntheme = \"default\"\n"), "windows-xp");
+        assert_eq!(theme("[general]\ntheme = \"dracula\"\n"), "dracula");
+        assert_eq!(theme(""), "windows-xp");
+    }
+
+    /// However the file spells the provider, every check sees one name: a
+    /// `Claude_Code` connection is a CLI agent, not an unknown model API.
+    #[test]
+    fn a_connections_provider_is_read_in_one_spelling() {
+        let connection: Connection = toml::from_str("provider = \" Claude_Code \"\n").unwrap();
+        assert_eq!(connection.provider, "claude_code");
+        assert!(connection.is_cli());
     }
 
     #[test]

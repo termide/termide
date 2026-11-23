@@ -793,7 +793,8 @@ impl AgentCatalog for FsCatalog {
         let mut tools = base_tools(&self.dirs, self.web.as_ref(), self.recall.as_ref(), true);
         // Someone watches the panel's agent to answer its questions, to
         // confirm a command it is offered and to start a goal or a loop it
-        // offers; a subagent and headless mode build their tools without them.
+        // offers. A subagent gets `question` alone, and only when its parent
+        // has a user to answer it; headless mode builds its tools without them.
         tools.insert(Arc::new(QuestionTool));
         tools.insert(Arc::new(SuggestCommandTool));
         tools.insert(Arc::new(SuggestGoalTool));
@@ -3807,7 +3808,7 @@ fn connection_provider(name: &str, connection: &Connection) -> Arc<dyn Provider>
 /// back to OpenAI-compatible with a warning.
 fn build_provider(connection: &Connection, api_key: Option<String>) -> Arc<dyn Provider> {
     let settings = connection;
-    match settings.provider.trim().to_ascii_lowercase().as_str() {
+    match settings.provider.as_str() {
         // A CLI-adapter provider runs over ACP; the built-in model provider is
         // unused, but something must be returned. A quiet OpenAI-compatible
         // placeholder avoids the "unknown provider" warning below.

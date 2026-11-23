@@ -185,7 +185,7 @@ impl Theme {
 
 impl Default for Theme {
     fn default() -> Self {
-        *Self::get_by_name("default")
+        *Self::get_by_name("windows-xp")
     }
 }
 

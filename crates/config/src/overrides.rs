@@ -125,7 +125,7 @@ mod tests {
         let saved = overrides.strip(running);
         assert_eq!(saved.logging.min_level, "warn");
         assert!(saved.lsp.enabled);
-        assert_eq!(saved.general.theme, "default");
+        assert_eq!(saved.general.theme, crate::defaults::THEME_NAME);
         assert_eq!(saved.editor.tab_size, 8);
     }
 
@@ -154,10 +154,10 @@ mod tests {
 
         // Picking the default theme later keeps it: the console no longer
         // swaps it.
-        saved.general.theme = "default".into();
+        saved.general.theme = crate::defaults::THEME_NAME.into();
         overrides.apply(&mut saved);
         assert!(saved.lsp.enabled);
-        assert_eq!(saved.general.theme, "default");
+        assert_eq!(saved.general.theme, crate::defaults::THEME_NAME);
     }
 
     #[test]

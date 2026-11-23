@@ -543,8 +543,8 @@ pub(super) struct EnumOptions {
     /// Index of the value currently held by the config, or `None` when the
     /// config holds something the list does not offer.
     ///
-    /// That is not hypothetical: the stock config ships `theme = "default"`,
-    /// which is a fallback name rather than a theme in `all_theme_names()`.
+    /// That is not hypothetical: a theme file the user removed leaves its
+    /// name in the config, which is not a theme in `all_theme_names()`.
     /// Cycling with Left/Right silently did nothing in that state, because it
     /// looked the current value up by position and found none.
     pub current: Option<usize>,
@@ -1431,7 +1431,7 @@ mod enum_option_tests {
 mod unlisted_value_tests {
     use super::*;
 
-    /// The stock config names a theme that is not in the theme list, and the
+    /// The config may name a theme that is not in the theme list, and the
     /// dropdown must still open on it — marking nothing as current rather than
     /// pointing at an unrelated entry.
     #[test]

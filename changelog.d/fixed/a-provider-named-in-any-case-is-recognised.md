@@ -1,0 +1,1 @@
+- **A connection's provider is recognised however it is spelled.** `provider = "Claude_Code"` or a name with stray spaces was matched as written in some places and lowercased in others, so such a connection ran as a placeholder model API with no CLI agent behind it. The name is now read trimmed and lowercased once, and every check sees the same one.

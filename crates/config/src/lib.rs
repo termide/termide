@@ -59,7 +59,7 @@ use std::path::{Path, PathBuf};
 
 /// Default values as constants
 pub mod defaults {
-    pub const THEME_NAME: &str = "default";
+    pub const THEME_NAME: &str = "windows-xp";
     pub const LANGUAGE: &str = "auto";
     pub const AUTO_STACK_THRESHOLD: u16 = 80;
     pub const MIN_PANEL_WIDTH: u16 = 20;

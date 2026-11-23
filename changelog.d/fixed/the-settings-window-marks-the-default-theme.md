@@ -1,0 +1,1 @@
+- **The settings window marks the default theme.** The default theme was stored as `default`, a name no theme has, so the theme list marked none of its entries until a theme was picked. The default is now `windows-xp` by name, and a config that still says `theme = "default"` reads as `windows-xp`.
