@@ -133,7 +133,7 @@ fn a_command_moved_to_the_background_shows_in_the_state_strip() {
     let rows = render_text(&mut panel, 80, 20);
     let head = format!(
         "$ {}  cargo test --workspace",
-        termide_i18n::t().agent_tool_bash()
+        termide_i18n::t().agent_tool_shell()
     );
     let clock = crate::transcript::fmt_dur(134_000);
     let y = rows

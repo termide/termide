@@ -1335,7 +1335,7 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: tokens-per-second unit in a block's meta line.
     fn agent_unit_tok_per_sec(&self) -> &str;
     /// Agent transcript: the action verb after a shell call's `$`.
-    fn agent_tool_bash(&self) -> &str;
+    fn agent_tool_shell(&self) -> &str;
     /// Agent transcript: the action verb for a `read` tool call.
     fn agent_tool_read(&self) -> &str;
     /// Agent transcript: the action verb for a `write` tool call.

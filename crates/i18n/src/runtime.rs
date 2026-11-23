@@ -852,7 +852,7 @@ impl Translation for RuntimeTranslation {
         time_unit_hours,
         time_unit_days,
         agent_unit_tok_per_sec,
-        agent_tool_bash,
+        agent_tool_shell,
         agent_pick_connection,
         agent_delete_this_session,
         agent_fork_this_session,

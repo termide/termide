@@ -1580,7 +1580,7 @@ fn shell_prefix(call: &ToolCall, state: ratatui::style::Color) -> Vec<Span<'stat
     let verb = if call.name == "suggest_command" {
         t.agent_tool_suggest()
     } else {
-        t.agent_tool_bash()
+        t.agent_tool_shell()
     };
     let accent = Style::default().fg(state);
     vec![
