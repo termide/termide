@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use lsp_types::{InitializeResult, PublishDiagnosticsParams, ServerCapabilities, WorkspaceEdit};
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize};
 use serde_json::Value;
 
 use crate::protocol::{
@@ -239,33 +239,36 @@ impl LspServer {
         }
     }
 
-    /// Handle a response from the server
+    /// Handle a response from the server: hand it to the request waiting for
+    /// it, and take the server's capabilities from the reply to `initialize`.
     fn handle_response(
         pending: &PendingRequests,
         capabilities: &Arc<Mutex<Option<ServerCapabilities>>>,
         response: JsonRpcResponse,
     ) {
-        // Find and notify the waiting request
         let mut pending = pending.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(tx) = pending.waiting.remove(&response.id) {
-            if let Some(result) = response.result {
-                // Try to parse as InitializeResult before sending
-                // This avoids cloning the entire JSON value
-                if let Ok(init_result) = serde_json::from_value::<InitializeResult>(result.clone())
-                {
-                    *capabilities.lock().unwrap_or_else(|e| e.into_inner()) =
-                        Some(init_result.capabilities);
+        let is_initialize = pending.initialize_id.as_ref() == Some(&response.id);
+        if is_initialize {
+            pending.initialize_id = None;
+        }
+        let waiting = pending.waiting.remove(&response.id);
+        drop(pending);
+        if let Some(result) = response.result {
+            if is_initialize {
+                // Read in place: only this one reply is parsed this way.
+                match InitializeResult::deserialize(&result) {
+                    Ok(init_result) => {
+                        *capabilities.lock().unwrap_or_else(|e| e.into_inner()) =
+                            Some(init_result.capabilities)
+                    }
+                    Err(e) => log::warn!("LSP: unreadable initialize reply: {e}"),
                 }
+            }
+            if let Some(tx) = waiting {
                 let _ = tx.send(result);
-            } else if let Some(error) = response.error {
-                log::warn!("LSP error {}: {}", error.code, error.message);
             }
-        } else if let Some(result) = response.result {
-            // No pending request - might be initialize response
-            if let Ok(init_result) = serde_json::from_value::<InitializeResult>(result) {
-                *capabilities.lock().unwrap_or_else(|e| e.into_inner()) =
-                    Some(init_result.capabilities);
-            }
+        } else if let Some(error) = response.error {
+            log::warn!("LSP error {}: {}", error.code, error.message);
         }
     }
 
@@ -339,7 +342,16 @@ impl LspServer {
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .insert(token);
-                    *status.lock().unwrap_or_else(|e| e.into_inner()) = ServerStatus::Indexing;
+                    // Progress moves a live server between indexing and
+                    // running only: a server shutting down, stopped or
+                    // crashed stays so, or its end would read as a crash.
+                    let mut status = status.lock().unwrap_or_else(|e| e.into_inner());
+                    if matches!(
+                        *status,
+                        ServerStatus::Starting | ServerStatus::Indexing | ServerStatus::Running
+                    ) {
+                        *status = ServerStatus::Indexing;
+                    }
                 }
                 ProgressParamsValue::WorkDone(WorkDoneProgress::Report(_report)) => {
                     // Optional: could show percentage if available
@@ -349,7 +361,10 @@ impl LspServer {
                     progress.remove(&token);
                     if progress.is_empty() {
                         drop(progress); // Release before acquiring status lock
-                        *status.lock().unwrap_or_else(|e| e.into_inner()) = ServerStatus::Running;
+                        let mut status = status.lock().unwrap_or_else(|e| e.into_inner());
+                        if *status == ServerStatus::Indexing {
+                            *status = ServerStatus::Running;
+                        }
                     }
                 }
             }
@@ -425,6 +440,9 @@ impl LspServer {
                 anyhow::bail!("LSP server is not running");
             }
             pending.waiting.insert(id.clone(), tx);
+            if method == "initialize" {
+                pending.initialize_id = Some(id.clone());
+            }
         }
 
         if self.writer_tx.send(msg).is_err() {
@@ -619,5 +637,72 @@ mod tests {
         assert!(apply_rx.try_recv().is_err());
         let msg = writer_rx.try_recv().unwrap();
         assert!(msg.contains("\"result\":null"));
+    }
+
+    fn progress(kind: &str) -> Value {
+        serde_json::json!({ "token": "t", "value": { "kind": kind, "title": "Indexing" } })
+    }
+
+    /// Progress a server reports while it shuts down leaves it shutting
+    /// down: set back to running, its clean exit was logged as a crash.
+    #[test]
+    fn progress_does_not_take_a_server_out_of_shutdown() {
+        let active = Arc::new(Mutex::new(HashSet::new()));
+        for end in [
+            ServerStatus::ShuttingDown,
+            ServerStatus::Stopped,
+            ServerStatus::Crashed,
+        ] {
+            let status = Arc::new(Mutex::new(end));
+            LspServer::handle_progress(&status, &active, progress("begin"));
+            assert_eq!(*status.lock().unwrap(), end);
+            LspServer::handle_progress(&status, &active, progress("end"));
+            assert_eq!(*status.lock().unwrap(), end);
+        }
+
+        let status = Arc::new(Mutex::new(ServerStatus::Running));
+        LspServer::handle_progress(&status, &active, progress("begin"));
+        assert_eq!(*status.lock().unwrap(), ServerStatus::Indexing);
+        LspServer::handle_progress(&status, &active, progress("end"));
+        assert_eq!(*status.lock().unwrap(), ServerStatus::Running);
+    }
+
+    /// Only the reply to `initialize` sets the capabilities; another reply
+    /// that happens to parse as one (`{"capabilities": …}`) does not.
+    #[test]
+    fn only_the_initialize_reply_carries_capabilities() {
+        let pending: PendingRequests = Default::default();
+        let capabilities = Arc::new(Mutex::new(None));
+        let (tx, rx) = mpsc::channel();
+        {
+            let mut p = pending.lock().unwrap();
+            p.waiting.insert(RequestId::Number(2), tx);
+            p.initialize_id = Some(RequestId::Number(1));
+        }
+        let reply = |id, result: Value| JsonRpcResponse {
+            jsonrpc: "2.0".into(),
+            id: RequestId::Number(id),
+            result: Some(result),
+            error: None,
+        };
+        let looks_like = serde_json::json!({ "capabilities": { "hoverProvider": true } });
+        LspServer::handle_response(&pending, &capabilities, reply(2, looks_like.clone()));
+        assert!(capabilities.lock().unwrap().is_none());
+        assert_eq!(
+            rx.try_recv().unwrap(),
+            looks_like,
+            "still handed to its request"
+        );
+
+        LspServer::handle_response(
+            &pending,
+            &capabilities,
+            reply(
+                1,
+                serde_json::json!({ "capabilities": { "hoverProvider": true } }),
+            ),
+        );
+        assert!(capabilities.lock().unwrap().is_some());
+        assert!(pending.lock().unwrap().initialize_id.is_none());
     }
 }

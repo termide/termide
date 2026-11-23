@@ -1,0 +1,1 @@
+- **A language server shutting down stays shutting down.** Progress reports a server sends while it shuts down no longer bring it back to indexing or running, and only the reply to its initialize request is read as its capabilities.

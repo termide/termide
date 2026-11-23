@@ -93,6 +93,9 @@ struct Pending {
     waiting: HashMap<RequestId, mpsc::Sender<Value>>,
     /// Set once the connection is lost; no request is accepted after it.
     closed: bool,
+    /// The id of the `initialize` request, whose reply alone carries the
+    /// server's capabilities.
+    initialize_id: Option<RequestId>,
 }
 
 type PendingRequests = Arc<Mutex<Pending>>;
