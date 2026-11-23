@@ -557,7 +557,7 @@ you have named or sent even one message to is always kept.
 | `Shift+Enter`, `Alt+Enter`, `Ctrl+J` | New line in the input |
 | `Esc` | Clear the input when something is typed (even while a task runs); with the input empty, stop the running task; with nothing running either, pick a message to rewind to (see [Rewinding to a message](#rewinding-to-a-message)). `Esc` never closes the agent panel |
 | `Ctrl+O` | Expand or collapse every block, and new blocks after them |
-| `Tab` | Move focus between the input and the chat; in the chat, `↑`/`↓` pick a block, `Space`/`Enter` fold or unfold it, `→`/`←` unfold or fold it as in the file manager's tree, `Shift+→`/`Shift+←` pan its diagram too wide for the panel, `o` opens it in its own panel, and any other character goes back to the input and is typed there; on a fresh session's banner, `↑`/`↓` pick a recent session and `Enter` opens it |
+| `Tab` | Move focus between the input and the chat; in the chat, `↑`/`↓` pick a block, `Space`/`Enter` fold or unfold it, `→`/`←` unfold or fold it as in the file manager's tree, `Shift+→`/`Shift+←` pan its diagram too wide for the panel, `o` opens it in its own panel (a picture in the image panel), `O` opens its picture or written page outside, and any other character goes back to the input and is typed there; on a fresh session's banner, `↑`/`↓` pick a recent session and `Enter` opens it |
 | Click an unfocused panel | Only focus the panel: the click selects no block, opens no session and places no cursor; click again where you meant to |
 | Click a block | Focus the chat and select that block (the selected block is shown inverted, success and error colours keeping their hue); click it again to fold or unfold it |
 | Ctrl+Click on a link | Follow it inside termide, as a link opens from the terminal (see [HTML preview](html.md)): a link in an answer, the file or page a tool call's headline names, or a web address or existing path written out in the text. Holding `Ctrl` over one lights it whole |
@@ -673,13 +673,21 @@ what the agent writes — is an empty frame of its size until it has stood
 still for 150 ms; with Kitty it moves as text does. Folding its block by hand
 folds it to `▸ PNG 1280×800`; unfold the block to see it again.
 
+A click on a picture picks its block, as a click anywhere on the block does;
+a second click on it opens the picture in the image panel, and `Alt`+click
+opens it at once outside, in the system's default image viewer. With the block
+picked in the chat, `o` opens its first picture in the image panel and `O`
+opens it outside. A picture `read` returned from a file that is still there
+opens as that file; any other — one you pasted, one an MCP tool or an external
+agent sent — is written to a temporary file first.
+
 A page or document the agent writes is not shown in the transcript: a `write`
 of an HTML, Markdown or Mermaid file (`.html`, `.htm`, `.md`, `.markdown`,
 `.mmd`) adds one row under the path in its headline, `Open in HTML ↗` (at the
 block's body indent in a panel too narrow for it there). A click on it,
 or `o` on the block, opens the file in the viewer it opens in from Open… — the
-HTML, Markdown or Mermaid panel; `Alt`+click opens it outside, in the system's
-default application.
+HTML, Markdown or Mermaid panel; `Alt`+click, or `O` on the block, opens it
+outside, in the system's default application.
 
 While a run works, a run clock sits right-aligned under its last block: an
 animated `✽` and the time since the request was sent. It has its own glyph

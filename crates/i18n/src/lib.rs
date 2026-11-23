@@ -408,6 +408,7 @@ pub trait Translation: Send + Sync {
     fn help_desc_agent_save(&self) -> &str;
     fn help_desc_agent_chat_fold(&self) -> &str;
     fn help_desc_agent_chat_open(&self) -> &str;
+    fn help_desc_agent_chat_open_external(&self) -> &str;
     fn help_desc_agent_rename(&self) -> &str;
     fn help_desc_agent_info(&self) -> &str;
     fn help_desc_agent_rewind(&self) -> &str;

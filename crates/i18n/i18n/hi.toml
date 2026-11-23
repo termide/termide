@@ -255,6 +255,7 @@ help_desc_agent_copy = "इनपुट का चयन या चुना ग
 help_desc_agent_save = "चैट को Markdown में सहेजें"
 help_desc_agent_chat_fold = "चुना गया ब्लॉक समेटें / खोलें (चैट पर फ़ोकस)"
 help_desc_agent_chat_open = "चुने गए ब्लॉक को अलग पैनल में खोलें (चैट पर फ़ोकस)"
+help_desc_agent_chat_open_external = "चुने गए ब्लॉक की तस्वीर या पेज बाहरी ऐप में खोलें (चैट पर फ़ोकस)"
 help_desc_agent_rename = "सत्र का नाम बदलें"
 help_desc_agent_info = "सत्र जानकारी"
 help_desc_agent_rewind = "पिछले संदेश पर वापस जाएँ"

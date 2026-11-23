@@ -745,6 +745,10 @@ impl AgentPanel {
     /// that file; anything else is written to a temporary file first. Focus
     /// stays in the chat.
     pub(crate) fn open_selected_in_panel(&mut self) -> Vec<PanelEvent> {
+        // A block with pictures opens its first one.
+        if self.transcript.picture(self.selected, 0).is_some() {
+            return self.open_picture(self.selected, 0, false);
+        }
         let Some(item) = self.transcript.items().get(self.selected) else {
             return vec![];
         };
@@ -821,6 +825,97 @@ impl AgentPanel {
                 vec![PanelEvent::NeedsRedraw]
             }
         }
+    }
+
+    /// Open the selected block's file outside termide, in the system's
+    /// default application: its first picture, or the page it wrote.
+    pub(crate) fn open_selected_outside(&mut self) -> Vec<PanelEvent> {
+        if self.transcript.picture(self.selected, 0).is_some() {
+            return self.open_picture(self.selected, 0, true);
+        }
+        if let Some(target) = self
+            .transcript
+            .items()
+            .get(self.selected)
+            .and_then(transcript::artifact_path)
+            .and_then(|href| LinkTarget::from_href(&href, &self.cwd))
+        {
+            return vec![PanelEvent::OpenLinkExternal(target)];
+        }
+        self.notice(
+            termide_i18n::t().agent_notice_nothing_to_open(),
+            NoticeKind::Info,
+        );
+        vec![PanelEvent::NeedsRedraw]
+    }
+
+    /// Open picture `ordinal` of item `item` in the image panel, or with
+    /// `outside` in the system's default application.
+    pub(crate) fn open_picture(
+        &mut self,
+        item: usize,
+        ordinal: usize,
+        outside: bool,
+    ) -> Vec<PanelEvent> {
+        match self.picture_file(item, ordinal) {
+            Ok(path) => {
+                let target = LinkTarget::Path(path);
+                vec![if outside {
+                    PanelEvent::OpenLinkExternal(target)
+                } else {
+                    PanelEvent::OpenLink(target)
+                }]
+            }
+            Err(error) => {
+                self.notice(
+                    termide_i18n::t().agent_notice_cannot_open_block_fmt(&error.to_string()),
+                    NoticeKind::Error,
+                );
+                vec![PanelEvent::NeedsRedraw]
+            }
+        }
+    }
+
+    /// A file holding picture `ordinal` of item `item`: the image `read`
+    /// returned it from while that is still there, or else its data written
+    /// to a temporary file.
+    fn picture_file(&self, item: usize, ordinal: usize) -> std::io::Result<std::path::PathBuf> {
+        let (media_type, data) = self
+            .transcript
+            .picture(item, ordinal)
+            .ok_or(std::io::ErrorKind::NotFound)?;
+        if let Some(Item::Tool { call, .. }) = self.transcript.items().get(item) {
+            let source = (call.name == "read" && ordinal == 0)
+                .then(|| call.arguments.get("path")?.as_str())
+                .flatten()
+                .filter(|href| termide_ui::text_utils::is_image_path(href))
+                .and_then(|href| LinkTarget::from_href(href, &self.cwd));
+            if let Some(LinkTarget::Path(path)) = source {
+                if path.is_file() {
+                    return Ok(path);
+                }
+            }
+        }
+        let bytes = termide_panel_image::inline::picture_bytes(data)
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidData))?;
+        // `image/png` is a `.png` (`image/svg+xml` a `.svg`), so the panel
+        // its extension opens takes it.
+        let subtype = media_type.rsplit('/').next().unwrap_or_default();
+        let ext: String = subtype
+            .split('+')
+            .next()
+            .unwrap_or_default()
+            .chars()
+            .filter(char::is_ascii_alphanumeric)
+            .collect();
+        let ext = if ext.is_empty() { "png".into() } else { ext };
+        let path = std::env::temp_dir().join(format!(
+            "termide-agent-{}-picture-{}.{ext}",
+            now_millis(),
+            ordinal + 1
+        ));
+        std::fs::write(&path, bytes)?;
+        Ok(path)
     }
 
     /// The `@`-file mention under the cursor: the span from the `@` to the
@@ -1400,6 +1495,13 @@ impl AgentPanel {
                     }
                     return vec![PanelEvent::NeedsRedraw];
                 }
+                // `O` opens it outside; a terminal may report it as `Shift+o`.
+                KeyCode::Char('O') if !ctrl && !alt => {
+                    return self.open_selected_outside();
+                }
+                KeyCode::Char('o') if shift && !ctrl && !alt => {
+                    return self.open_selected_outside();
+                }
                 KeyCode::Char('o') if !ctrl => {
                     return self.open_selected_in_panel();
                 }
@@ -1748,6 +1850,15 @@ impl AgentPanel {
                         } else {
                             PanelEvent::OpenLink(target)
                         }];
+                    }
+                    // A click on a picture of the block already picked opens
+                    // it in the image panel, as a first click picks the block
+                    // anywhere; Alt+click opens it outside at once.
+                    if let Some(spot) = self.transcript.picture_at(press.line, press.col) {
+                        let outside = event.modifiers.contains(KeyModifiers::ALT);
+                        if outside || (self.chat_focus && self.selected == spot.item) {
+                            return self.open_picture(spot.item, spot.ordinal, outside);
+                        }
                     }
                 }
                 if event.modifiers.contains(KeyModifiers::CONTROL) {

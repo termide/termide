@@ -264,6 +264,7 @@ help_desc_agent_copy = "入力の選択範囲または選択中のブロック�
 help_desc_agent_save = "チャットを Markdown で保存"
 help_desc_agent_chat_fold = "選択中のブロックを折りたたみ / 展開（チャットにフォーカス）"
 help_desc_agent_chat_open = "選択中のブロックを専用パネルで開く（チャットにフォーカス）"
+help_desc_agent_chat_open_external = "選択中のブロックの画像やページを外部で開く（チャットにフォーカス）"
 help_desc_agent_rename = "セッション名を変更"
 help_desc_agent_info = "セッション情報"
 help_desc_agent_rewind = "以前のメッセージまで巻き戻す"

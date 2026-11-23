@@ -1053,6 +1053,19 @@ impl Transcript {
         item_pictures(item).get(ordinal).map(|(_, data)| *data)
     }
 
+    /// Picture `ordinal` of item `item`, as `(media type, base64 data)`.
+    pub(crate) fn picture(&self, item: usize, ordinal: usize) -> Option<(&str, &str)> {
+        item_pictures(self.items.get(item)?).get(ordinal).copied()
+    }
+
+    /// The picture laid out over column `col` of flattened line `line`.
+    pub(crate) fn picture_at(&self, line: usize, col: usize) -> Option<PictureSpot> {
+        self.flat_pictures.iter().copied().find(|spot| {
+            (spot.line..spot.line + usize::from(spot.rows)).contains(&line)
+                && (usize::from(spot.col)..usize::from(spot.col + spot.cols)).contains(&col)
+        })
+    }
+
     /// Show (`expanded` true) or hide the detail of item `index`; false when
     /// it does not fold or already is that way.
     pub fn set_expanded(&mut self, index: usize, expanded: bool) -> bool {

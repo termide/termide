@@ -922,6 +922,7 @@ impl HelpGenerator {
             entry("Ctrl+S", t.help_desc_agent_save()),
             entry("Space / ← / →", t.help_desc_agent_chat_fold()),
             entry("o", t.help_desc_agent_chat_open()),
+            entry("O", t.help_desc_agent_chat_open_external()),
             entry("F2", t.help_desc_agent_rename()),
             entry("F3", t.help_desc_agent_info()),
             entry("F4", t.help_desc_agent_rewind()),

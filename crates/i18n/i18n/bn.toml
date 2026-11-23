@@ -265,6 +265,7 @@ help_desc_agent_copy = "ইনপুটের নির্বাচন বা �
 help_desc_agent_save = "চ্যাট Markdown হিসেবে সংরক্ষণ করুন"
 help_desc_agent_chat_fold = "নির্বাচিত ব্লক গুটান / খুলুন (চ্যাটে ফোকাস)"
 help_desc_agent_chat_open = "নির্বাচিত ব্লক আলাদা প্যানেলে খুলুন (চ্যাটে ফোকাস)"
+help_desc_agent_chat_open_external = "নির্বাচিত ব্লকের ছবি বা পাতা বাইরের অ্যাপে খুলুন (চ্যাটে ফোকাস)"
 help_desc_agent_rename = "সেশনের নাম বদলান"
 help_desc_agent_info = "সেশনের তথ্য"
 help_desc_agent_rewind = "আগের বার্তায় ফিরে যান"

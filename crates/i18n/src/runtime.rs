@@ -555,6 +555,7 @@ impl Translation for RuntimeTranslation {
         help_desc_agent_save,
         help_desc_agent_chat_fold,
         help_desc_agent_chat_open,
+        help_desc_agent_chat_open_external,
         help_desc_agent_rename,
         help_desc_agent_info,
         help_desc_agent_rewind,

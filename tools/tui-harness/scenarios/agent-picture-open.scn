@@ -1,0 +1,25 @@
+# A picture pasted into a message: with its block picked in the chat, `o`
+# opens it in the image panel rather than the message's text. Clicks on the
+# picture, `Alt`+click and `O` (which start the system's viewer) are checked
+# by the panel's unit tests.
+setup "python3 -c 'import struct,zlib;c=lambda t,d:struct.pack(\">I\",len(d))+t+d+struct.pack(\">I\",zlib.crc32(t+d));open(\"shot.png\",\"wb\").write(b\"\\x89PNG\\r\\n\\x1a\\n\"+c(b\"IHDR\",struct.pack(\">IIBBBBB\",64,32,8,2,0,0,0))+c(b\"IDAT\",zlib.compress(b\"\".join(b\"\\0\"+b\"\\xc8\\x1e\\x1e\"*64 for _ in range(32))))+c(b\"IEND\",b\"\"))'"
+mock-llm
+start
+wait "README.md"
+key Alt+A
+wait "Agent"
+key Alt+Home Alt+F11
+paste "shot.png"
+wait "pasted image"
+key Enter
+wait "Allow once" 20
+type "1"
+wait "Want me to highlight" 20
+# Up to the system prompt, the first block; the message is the next.
+key Tab Up Up Up Up Up Up Up Up Up Up Up Up Down
+snapshot picked
+type "o"
+wait "picture-1.png"
+expect-not "message.txt"
+snapshot opened
+quit

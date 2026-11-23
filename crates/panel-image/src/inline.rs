@@ -132,8 +132,14 @@ fn current_cell_px() -> Option<(u16, u16)> {
     Some((size.width / size.columns, size.height / size.rows)).filter(|(w, h)| *w > 0 && *h > 0)
 }
 
-fn decode_bytes(data: &str) -> Option<Vec<u8>> {
+/// The bytes of the picture in base64 `data`, as its file holds them.
+#[must_use]
+pub fn picture_bytes(data: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD.decode(data).ok()
+}
+
+fn decode_bytes(data: &str) -> Option<Vec<u8>> {
+    picture_bytes(data)
 }
 
 fn decode(data: &str) -> Option<DynamicImage> {

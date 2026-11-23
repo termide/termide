@@ -255,6 +255,7 @@ help_desc_agent_copy = "คัดลอกส่วนที่เลือก�
 help_desc_agent_save = "บันทึกแชตเป็น Markdown"
 help_desc_agent_chat_fold = "ยุบ / ขยายบล็อกที่เลือก (โฟกัสที่แชต)"
 help_desc_agent_chat_open = "เปิดบล็อกที่เลือกในแผงของตัวเอง (โฟกัสที่แชต)"
+help_desc_agent_chat_open_external = "เปิดรูปหรือหน้าของบล็อกที่เลือกภายนอก (โฟกัสที่แชต)"
 help_desc_agent_rename = "เปลี่ยนชื่อเซสชัน"
 help_desc_agent_info = "ข้อมูลเซสชัน"
 help_desc_agent_rewind = "ย้อนกลับไปยังข้อความก่อนหน้า"

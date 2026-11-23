@@ -265,6 +265,7 @@ help_desc_agent_copy = "Sao chép vùng chọn ô nhập hoặc khối đã ch�
 help_desc_agent_save = "Lưu chat dạng Markdown"
 help_desc_agent_chat_fold = "Thu gọn / mở khối đã chọn (tiêu điểm ở chat)"
 help_desc_agent_chat_open = "Mở khối đã chọn trong panel riêng (tiêu điểm ở chat)"
+help_desc_agent_chat_open_external = "Mở hình hoặc trang của khối đã chọn bên ngoài (tiêu điểm ở chat)"
 help_desc_agent_rename = "Đổi tên phiên"
 help_desc_agent_info = "Thông tin phiên"
 help_desc_agent_rewind = "Quay lui về tin nhắn trước"

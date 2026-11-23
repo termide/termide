@@ -307,6 +307,7 @@ help_desc_agent_copy = "Копировать выделение в вводе и
 help_desc_agent_save = "Сохранить чат в Markdown"
 help_desc_agent_chat_fold = "Свернуть / развернуть выбранный блок (фокус в чате)"
 help_desc_agent_chat_open = "Открыть выбранный блок в отдельной панели (фокус в чате)"
+help_desc_agent_chat_open_external = "Открыть картинку или страницу выбранного блока снаружи (фокус в чате)"
 help_desc_agent_rename = "Переименовать сессию"
 help_desc_agent_info = "Сведения о сессии"
 help_desc_agent_rewind = "Откатиться к прежнему сообщению"

@@ -413,6 +413,112 @@ fn where_moving_is_cheap_a_moving_picture_is_drawn() {
     assert!(!panel.pictures_settled());
 }
 
+/// A click on the middle of the first picture laid out, with `modifiers`.
+fn click_picture(panel: &mut AgentPanel, modifiers: KeyModifiers) -> Vec<PanelEvent> {
+    let spot = panel.transcript.pictures()[0];
+    let area = panel.transcript_area;
+    let row = area.y + (spot.line - panel.top) as u16 + spot.rows / 2;
+    let mouse = |kind| MouseEvent {
+        kind,
+        column: area.x + spot.col + spot.cols / 2,
+        row,
+        modifiers,
+    };
+    panel.handle_mouse(mouse(MouseEventKind::Down(MouseButton::Left)), area);
+    panel.handle_mouse(mouse(MouseEventKind::Up(MouseButton::Left)), area)
+}
+
+/// The file an open event names, with whether it opens outside.
+fn opened(events: &[PanelEvent]) -> Option<(PathBuf, bool)> {
+    match events {
+        [PanelEvent::OpenLink(LinkTarget::Path(p))] => Some((p.clone(), false)),
+        [PanelEvent::OpenLinkExternal(LinkTarget::Path(p))] => Some((p.clone(), true)),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_second_click_on_a_picture_opens_it_and_alt_click_opens_it_outside() {
+    let mut panel = picture_panel();
+    panel.transcript.push(picture_read(400, 200));
+    let _ = render_buf(&mut panel, 60, 30);
+    // The first click picks the block, as anywhere on it.
+    let events = click_picture(&mut panel, KeyModifiers::NONE);
+    assert!(opened(&events).is_none(), "{events:?}");
+    assert!(panel.chat_focus && panel.selected == 0);
+    // The second opens the picture, not folding the block.
+    let expanded = panel.transcript.is_expanded(0);
+    let events = click_picture(&mut panel, KeyModifiers::NONE);
+    let (path, outside) = opened(&events).unwrap_or_else(|| panic!("{events:?}"));
+    assert!(!outside);
+    assert_eq!(panel.transcript.is_expanded(0), expanded);
+    // `shot.png` is not in the panel's directory: its data is written out.
+    assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+    let picture = image::open(&path).unwrap();
+    assert_eq!((picture.width(), picture.height()), (400, 200));
+    let _ = std::fs::remove_file(&path);
+
+    // Alt+click opens it outside at once, picked or not.
+    panel.chat_focus = false;
+    let events = click_picture(&mut panel, KeyModifiers::ALT);
+    let (path, outside) = opened(&events).unwrap_or_else(|| panic!("{events:?}"));
+    assert!(outside);
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_picture_read_from_a_file_opens_that_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut panel = picture_panel();
+    panel.cwd = dir.path().to_path_buf();
+    std::fs::write(dir.path().join("shot.png"), b"png").unwrap();
+    panel.transcript.push(picture_read(400, 200));
+    let _ = render_buf(&mut panel, 60, 30);
+    let events = click_picture(&mut panel, KeyModifiers::ALT);
+    assert_eq!(opened(&events), Some((dir.path().join("shot.png"), true)));
+}
+
+#[test]
+fn o_opens_the_blocks_first_picture_and_shift_o_opens_it_outside() {
+    let mut panel = picture_panel();
+    let user =
+        UserMessage::text("[#1 pasted image 30×10] [#2 pasted image 20×10]").with_images(vec![
+            ("image/png".into(), png(30, 10)),
+            ("image/png".into(), png(20, 10)),
+        ]);
+    panel
+        .transcript
+        .push(transcript::user_item(&user, "12:00:00".into(), None));
+    let _ = render_buf(&mut panel, 60, 30);
+    panel.chat_focus = true;
+    panel.selected = 0;
+    for (key, outside) in [
+        (chord(KeyCode::Char('o'), KeyModifiers::NONE), false),
+        (chord(KeyCode::Char('O'), KeyModifiers::SHIFT), true),
+    ] {
+        let events = panel.handle_key(key);
+        let (path, out) = opened(&events).unwrap_or_else(|| panic!("{events:?}"));
+        assert_eq!(out, outside);
+        assert_eq!(image::open(&path).unwrap().width(), 30, "the first one");
+        let _ = std::fs::remove_file(&path);
+    }
+    assert!(panel.chat_focus, "Shift+O is not typed into the prompt");
+}
+
+#[test]
+fn shift_o_opens_a_written_page_outside() {
+    let mut panel = panel(vec![]);
+    panel.transcript.push(wrote("out/report.html", true));
+    let _ = render_text(&mut panel, 60, 12);
+    panel.chat_focus = true;
+    panel.selected = 0;
+    let events = panel.handle_key(chord(KeyCode::Char('O'), KeyModifiers::SHIFT));
+    assert_eq!(
+        opened(&events),
+        Some((panel.cwd.join("out/report.html"), true))
+    );
+}
+
 #[test]
 fn a_written_page_is_a_card_that_opens_the_file() {
     let mut panel = panel(vec![]);

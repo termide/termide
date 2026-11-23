@@ -89,7 +89,8 @@ A scenario that does not `quit` is killed at its end. The examples:
 with a permission card), `agent-rule-scopes` (the same task's edit card
 answered "always", its second step listing the file, its folder and the
 whole project, `Esc` back to the first step), `agent-artifact-card` (a Markdown file written,
-its block's `Open in Markdown ↗` card), `acp-codex` (the same task through Codex over
+its block's `Open in Markdown ↗` card), `agent-picture-open` (a picture pasted into a
+message, `o` on its block opening it in the image panel), `acp-codex` (the same task through Codex over
 ACP), `agent-review` (the Claude Code stand-in's edit reviewed with
 `/changes`, a hunk rejected and the agent told of it), `agent-snippets`
 (an editor's selection and a terminal's last lines sent from their menus
