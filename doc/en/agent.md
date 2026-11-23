@@ -2270,7 +2270,9 @@ records what it shipped (in `.seeds.toml`) and keeps these files current on
 later starts: one you never edited is refreshed when the shipped version
 changes, so upgrades reach you; one you edited is left untouched, with the new
 default written beside it as `<file>.new` to compare and merge at your leisure.
-Delete a file to get the shipped version back.
+A file termide no longer ships, such as the text of a tool since removed, is
+deleted when you never edited it and left to you when you did. Delete a file
+to get the shipped version back.
 
 ### Agents
 

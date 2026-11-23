@@ -7,7 +7,7 @@
 //! entries (agents, skills, prompts) is the union of all roots, a name from a
 //! higher root hiding the same name below.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
@@ -451,6 +451,7 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
             manifest_changed = true;
         }
     }
+    manifest_changed |= retire_unshipped_assets(global, &mut manifest);
 
     if manifest_changed {
         let written = toml::to_string(&manifest)
@@ -464,6 +465,44 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Forget the assets `manifest` records that termide no longer ships, such as
+/// the text of a tool since removed. A file still as termide wrote it is
+/// deleted, with a `.new` sidecar still holding that version; one the user
+/// edited stays theirs. Returns whether `manifest` changed.
+fn retire_unshipped_assets(global: &Path, manifest: &mut BTreeMap<String, String>) -> bool {
+    let shipped: BTreeSet<String> = shipped_assets().into_iter().map(|(rel, _)| rel).collect();
+    let retired: Vec<(String, String)> = manifest
+        .iter()
+        .filter(|(relative, _)| !shipped.contains(*relative))
+        .map(|(relative, hash)| (relative.clone(), hash.clone()))
+        .collect();
+    let mut changed = false;
+    for (relative, last) in retired {
+        let path = global.join(&relative);
+        let untouched = |path: &Path| match std::fs::read_to_string(path) {
+            Ok(current) => Some(seed_hash(&current) == last),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(false),
+            // Unreadable: decide on a later start.
+            Err(_) => None,
+        };
+        let Some(remove) = untouched(&path) else {
+            continue;
+        };
+        if remove {
+            if let Err(error) = std::fs::remove_file(&path) {
+                log::warn!("Could not remove {}: {error}", path.display());
+                continue;
+            }
+        }
+        if untouched(&dot_new(&path)) == Some(true) {
+            let _ = std::fs::remove_file(dot_new(&path));
+        }
+        manifest.remove(&relative);
+        changed = true;
+    }
+    changed
 }
 
 /// Move a default agent template kept as `ai/AGENTS.md` into its `AGENT.md`,
@@ -1892,6 +1931,44 @@ mod tests {
         let dirs = AgentDirs::new(tmp.path(), None, Some(&global));
         assert_eq!(dirs.soul(DEFAULT_AGENT).as_deref(), Some(""));
         assert_eq!(dirs.soul("other").as_deref(), Some(""));
+    }
+
+    /// The text of a tool termide no longer ships goes when it is as termide
+    /// wrote it, and stays when the user edited it; either way it is no
+    /// longer recorded.
+    #[test]
+    fn assets_no_longer_shipped_go_unless_edited() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        ensure_global_layout(&global).unwrap();
+        let tools = global.join(TOOLS_DIR);
+        let old = "---\nsnippet: old\n---\nA tool since removed.\n";
+        std::fs::write(tools.join("task.md"), old).unwrap();
+        std::fs::write(dot_new(&tools.join("task.md")), old).unwrap();
+        std::fs::write(tools.join("fork.md"), "Mine.\n").unwrap();
+        std::fs::write(dot_new(&tools.join("fork.md")), old).unwrap();
+        let manifest = global.join(SEEDS_MANIFEST);
+        let mut text = std::fs::read_to_string(&manifest).unwrap();
+        for name in ["task", "fork", "agents"] {
+            text.push_str(&format!("\"tools/{name}.md\" = \"{}\"\n", seed_hash(old)));
+        }
+        std::fs::write(&manifest, text).unwrap();
+
+        ensure_global_layout(&global).unwrap();
+        assert!(!tools.join("task.md").exists());
+        assert!(!dot_new(&tools.join("task.md")).exists());
+        assert_eq!(
+            std::fs::read_to_string(tools.join("fork.md")).unwrap(),
+            "Mine.\n"
+        );
+        assert!(!dot_new(&tools.join("fork.md")).exists());
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        for name in ["task", "fork", "agents"] {
+            assert!(!text.contains(&format!("tools/{name}.md")), "{name}");
+        }
+        // What is still shipped stays.
+        assert!(tools.join("start_session.md").exists());
+        assert!(text.contains("tools/start_session.md"));
     }
 
     /// A seed file that exists but cannot be read as text is the user's; it
