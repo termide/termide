@@ -11,6 +11,7 @@ publish = false
 
 [dependencies]
 crossterm.workspace = true
+percent-encoding.workspace = true
 ratatui.workspace = true
 url.workspace = true
 

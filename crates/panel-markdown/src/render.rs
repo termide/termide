@@ -6,6 +6,8 @@
 //! only the `pulldown-cmark` → `Builder` adapter; all layout lives in
 //! `termide-richtext`.
 
+use std::collections::HashMap;
+
 use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use termide_core::ThemeColors;
 use termide_html::HtmlState;
@@ -32,6 +34,32 @@ pub fn render_markdown_with(
     fold: Option<DiagramFold>,
     pan_wide: bool,
 ) -> Rendered {
+    render_markdown_after(
+        src,
+        width,
+        colors,
+        is_light,
+        fold,
+        pan_wide,
+        &mut Slugs::new(),
+    )
+}
+
+/// Heading slugs taken so far, and how many times each, so a repeated
+/// heading is numbered as GitHub numbers it (`x`, `x-1`, `x-2`).
+pub(crate) type Slugs = HashMap<String, usize>;
+
+/// Render `src` as [`render_markdown_with`] does, as the continuation of a
+/// document whose headings took `slugs`; the slugs `src` takes are added.
+pub(crate) fn render_markdown_after(
+    src: &str,
+    width: u16,
+    colors: &ThemeColors,
+    is_light: bool,
+    fold: Option<DiagramFold>,
+    pan_wide: bool,
+    slugs: &mut Slugs,
+) -> Rendered {
     let mut b = Builder::new(width, colors, is_light);
     b.fold_diagrams(fold);
     b.pan_wide_diagrams(pan_wide);
@@ -41,15 +69,41 @@ pub fn render_markdown_with(
     let mut html = HtmlState::default();
     // Heading currently being collected, for generating a fragment anchor
     // (GitHub-style slug) so a table-of-contents `[x](#heading)` link works.
-    let mut heading: Option<HeadingCap> = None;
+    let mut headings = Headings {
+        current: None,
+        slugs: std::mem::take(slugs),
+    };
     let mut opts = Options::empty();
     opts.insert(Options::ENABLE_TABLES);
     opts.insert(Options::ENABLE_STRIKETHROUGH);
     opts.insert(Options::ENABLE_TASKLISTS);
+    // `# Title {#id}` sets the anchor and is not shown.
+    opts.insert(Options::ENABLE_HEADING_ATTRIBUTES);
     for ev in Parser::new_ext(src, opts) {
-        event(&mut b, &mut html, &mut heading, ev);
+        event(&mut b, &mut html, &mut headings, ev);
     }
+    *slugs = headings.slugs;
     b.finish()
+}
+
+/// Heading anchors: the heading being collected and the slugs given so far.
+struct Headings {
+    current: Option<HeadingCap>,
+    slugs: Slugs,
+}
+
+impl Headings {
+    /// `slug`, or `slug-1`, `slug-2`… when an earlier heading took it.
+    fn unique(&mut self, slug: String) -> String {
+        let mut result = slug.clone();
+        while self.slugs.contains_key(&result) {
+            let n = self.slugs.entry(slug.clone()).or_default();
+            *n += 1;
+            result = format!("{slug}-{n}");
+        }
+        self.slugs.insert(result.clone(), 0);
+        result
+    }
 }
 
 /// A heading being collected between its start and end events.
@@ -62,10 +116,11 @@ struct HeadingCap {
     explicit_id: Option<String>,
 }
 
-fn event(b: &mut Builder, html: &mut HtmlState, heading: &mut Option<HeadingCap>, ev: Event<'_>) {
+fn event(b: &mut Builder, html: &mut HtmlState, headings: &mut Headings, ev: Event<'_>) {
+    let heading = &mut headings.current;
     match ev {
         Event::Start(tag) => start(b, heading, tag),
-        Event::End(tag) => end(b, heading, tag),
+        Event::End(tag) => end(b, headings, tag),
         Event::Text(t) => {
             if let Some(h) = heading.as_mut() {
                 h.text.push_str(&t);
@@ -130,15 +185,15 @@ fn start(b: &mut Builder, heading: &mut Option<HeadingCap>, tag: Tag<'_>) {
     }
 }
 
-fn end(b: &mut Builder, heading: &mut Option<HeadingCap>, tag: TagEnd) {
+fn end(b: &mut Builder, headings: &mut Headings, tag: TagEnd) {
     match tag {
         TagEnd::Paragraph => b.end_paragraph(),
         TagEnd::Heading(_) => {
-            if let Some(h) = heading.take() {
+            if let Some(h) = headings.current.take() {
                 if let Some(id) = h.explicit_id {
                     b.add_anchor_at(id, h.line);
                 }
-                let slug = slugify(&h.text);
+                let slug = headings.unique(slugify(&h.text));
                 b.add_anchor_at(slug, h.line);
             }
             b.end_heading();
@@ -172,25 +227,20 @@ fn heading_depth(level: HeadingLevel) -> usize {
     }
 }
 
-/// GitHub-style heading slug: lowercase, drop punctuation, spaces → `-`,
-/// collapse and trim hyphens. Used as a fragment anchor so a `[x](#heading)`
-/// table-of-contents link resolves.
+/// GitHub-style heading slug: lowercase, punctuation other than `-` and `_`
+/// dropped, each space a `-` (runs of them are kept, as GitHub keeps them).
+/// Used as a fragment anchor so a `[x](#heading)` table-of-contents link
+/// resolves.
 fn slugify(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for ch in text.chars() {
-        if ch.is_alphanumeric() {
+    for ch in text.trim().chars() {
+        if ch.is_alphanumeric() || ch == '_' || ch == '-' {
             out.extend(ch.to_lowercase());
-        } else if ch == '_' {
-            out.push('_'); // GitHub keeps underscores
-        } else if ch == ' ' || ch == '-' {
-            // Collapse runs of spaces/hyphens into a single hyphen.
-            if !out.ends_with('-') {
-                out.push('-');
-            }
+        } else if ch == ' ' {
+            out.push('-');
         }
-        // All other punctuation is dropped (matches GitHub).
     }
-    out.trim_matches('-').to_string()
+    out
 }
 
 #[cfg(test)]
@@ -583,5 +633,29 @@ mod tests {
         let joined = out.join("\n");
         assert!(joined.contains("more"), "no summary: {out:?}");
         assert!(joined.contains("hidden body"), "no body: {out:?}");
+    }
+
+    #[test]
+    fn slugs_follow_github() {
+        assert_eq!(slugify("Hello, World!"), "hello-world");
+        assert_eq!(slugify("a - b"), "a---b");
+        assert_eq!(slugify("snake_case and C++"), "snake_case-and-c");
+        assert_eq!(slugify("-x-"), "-x-");
+    }
+
+    #[test]
+    fn repeated_headings_are_numbered_and_attributes_set_the_id() {
+        let r = render_markdown(
+            "# Intro\n\n# Intro\n\n# Intro\n\n## Setup {#install}\n",
+            80,
+            &colors(),
+            false,
+        );
+        let ids: Vec<&str> = r.anchors.iter().map(|(id, _)| id.as_str()).collect();
+        for id in ["intro", "intro-1", "intro-2", "install", "setup"] {
+            assert!(ids.contains(&id), "{id} missing from {ids:?}");
+        }
+        let lines = render("## Setup {#install}\n");
+        assert!(lines.iter().all(|l| !l.contains("{#")), "{lines:?}");
     }
 }

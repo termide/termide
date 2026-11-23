@@ -173,9 +173,14 @@ impl Viewer {
     }
 
     /// Scroll so the named anchor's line is at the top of the view. No-op if
-    /// the anchor is unknown.
+    /// the anchor is unknown. The fragment may be percent-encoded, as a link
+    /// to a heading in another script usually is.
     pub fn scroll_to_anchor(&mut self, frag: &str) {
-        if let Some(&(_, line)) = self.doc.anchors.iter().find(|(id, _)| id == frag) {
+        let decoded = percent_encoding::percent_decode_str(frag).decode_utf8_lossy();
+        let found = [frag, decoded.as_ref()]
+            .into_iter()
+            .find_map(|frag| self.doc.anchors.iter().find(|(id, _)| id == frag));
+        if let Some(&(_, line)) = found {
             self.top = line.min(self.max_top());
             self.cursor = (line, 0);
             self.anchor = None;

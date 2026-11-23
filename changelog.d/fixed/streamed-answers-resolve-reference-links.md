@@ -1,0 +1,1 @@
+- **Reference links resolve while an answer streams.** In the agent transcript, a `[text][ref]` link and its `[ref]: url` definition in different blocks of a streaming answer were rendered apart and the link showed as plain brackets; an answer with a reference definition now renders as a whole.

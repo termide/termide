@@ -7,11 +7,13 @@
 //! head before the cut is rendered once and kept; each call renders only
 //! the tail and joins the two, as the whole document would render. Where
 //! a cut is not certain no cut is made, and the whole document renders.
+//! A reference definition (`[x]: url`) can serve a link anywhere in the
+//! document, before it too, so a document with one renders whole.
 
 use termide_core::ThemeColors;
 use termide_richtext::{LinkSpan, Rendered, RowCopy, WideDiagram};
 
-use crate::render::render_markdown_with;
+use crate::render::{render_markdown_after, render_markdown_with, Slugs};
 
 /// The rendered head of a growing document, for [`render_streamed`].
 pub struct StreamedHead {
@@ -24,6 +26,8 @@ pub struct StreamedHead {
     /// blank line need not close: no later cut is certain then.
     frozen: bool,
     rendered: Rendered,
+    /// The heading slugs the head took, for numbering the tail's repeats.
+    slugs: Slugs,
 }
 
 /// Render `src` as [`render_markdown_with`] does with no diagrams folded,
@@ -47,13 +51,26 @@ pub fn render_streamed(
     if !usable {
         *head = None;
     }
+    if has_reference_definition(src) {
+        *head = None;
+        return render_markdown_with(src, width, colors, is_light, None, pan_wide);
+    }
     let (from, frozen) = head
         .as_ref()
         .map_or((0, false), |head| (head.source.len(), head.frozen));
     if !frozen {
         let (cut, frozen) = last_cut(src, from);
         if cut > from {
-            let whole = render_markdown_with(&src[..cut], width, colors, is_light, None, pan_wide);
+            let mut slugs = Slugs::new();
+            let whole = render_markdown_after(
+                &src[..cut],
+                width,
+                colors,
+                is_light,
+                None,
+                pan_wide,
+                &mut slugs,
+            );
             *head = Some(StreamedHead {
                 width,
                 is_light,
@@ -61,6 +78,7 @@ pub fn render_streamed(
                 source: src[..cut].to_string(),
                 frozen,
                 rendered: whole,
+                slugs,
             });
         } else if let Some(head) = head.as_mut() {
             head.frozen = frozen;
@@ -72,21 +90,32 @@ pub fn render_streamed(
                 source: String::new(),
                 frozen,
                 rendered: render_markdown_with("", width, colors, is_light, None, pan_wide),
+                slugs: Slugs::new(),
             });
         }
     }
     let Some(head) = head.as_ref() else {
         return render_markdown_with(src, width, colors, is_light, None, pan_wide);
     };
-    let tail = render_markdown_with(
+    let tail = render_markdown_after(
         &src[head.source.len()..],
         width,
         colors,
         is_light,
         None,
         pan_wide,
+        &mut head.slugs.clone(),
     );
     join(&head.rendered, tail)
+}
+
+/// Whether a line of `src` may be a reference definition (`[x]: url`).
+/// Erring towards yes only costs rendering the whole document.
+fn has_reference_definition(src: &str) -> bool {
+    src.lines().any(|line| {
+        let line = line.trim_start_matches(['>', ' ', '\t']);
+        line.starts_with('[') && line.contains("]:")
+    })
 }
 
 /// The last place in `src` past `from` (a cut, or 0) where the document
@@ -234,6 +263,7 @@ mod tests {
         assert_eq!(groups(whole), groups(joined), "source:\n{src}");
         assert_eq!(whole.diagrams, joined.diagrams, "source:\n{src}");
         assert_eq!(whole.wide_diagrams, joined.wide_diagrams, "source:\n{src}");
+        assert_eq!(whole.anchors, joined.anchors, "source:\n{src}");
     }
 
     const DOCUMENTS: &[&str] = &[
@@ -251,6 +281,9 @@ mod tests {
          ```mermaid\ngraph TD\n  C --> D\n```\n\nEnd.",
         "Loose:\n\n1. first\n\n2. second\n\n10. tenth\n\n* star\n\n+ plus\n\nEnd.",
         "Para\n\n    indented code\n\n    more\n\nPara two\n\n---\n\nAfter a rule.",
+        "See [the docs][d] and [more].\n\nA paragraph between.\n\n[d]: https://d.e\n\n\
+         Later [d] again.\n\n[more]: https://m.n\n\nEnd.",
+        "# Intro\n\nText.\n\n# Intro\n\nMore.\n\n## Intro\n\nEnd.",
     ];
 
     /// Every document, fed a few bytes at a time, renders the same at each
@@ -313,5 +346,27 @@ mod tests {
         let head = head.expect("a head before the HTML");
         assert_eq!(head.source, "One.\n\n");
         assert!(head.frozen);
+    }
+
+    #[test]
+    fn a_reference_definition_makes_the_document_render_whole() {
+        let colors = ThemeColors::default();
+        let mut head = None;
+        let _ = render_streamed(
+            &mut head,
+            "See [d].\n\nMore.\n\nTe",
+            40,
+            &colors,
+            false,
+            false,
+        );
+        assert!(head.is_some(), "plain text is cut");
+        let src = "See [d].\n\nMore.\n\nText.\n\n[d]: https://d.e\n";
+        let joined = render_streamed(&mut head, src, 40, &colors, false, false);
+        assert!(head.is_none(), "the head is dropped");
+        assert_eq!(
+            joined.links.first().map(|l| l.url.as_str()),
+            Some("https://d.e")
+        );
     }
 }

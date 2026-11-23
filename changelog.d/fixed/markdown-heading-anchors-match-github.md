@@ -1,0 +1,1 @@
+- **Markdown heading anchors match GitHub's.** A `#heading` link finds the heading GitHub would: punctuation other than `-` and `_` is dropped and each space becomes `-` without merging them, a repeated heading is `#name-1`, `#name-2`, `## Title {#id}` sets the anchor without showing `{#id}`, and a percent-encoded fragment (a heading in Cyrillic, say) is decoded.

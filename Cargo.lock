@@ -6368,6 +6368,7 @@ name = "termide-viewer"
 version = "0.50.0"
 dependencies = [
  "crossterm",
+ "percent-encoding",
  "ratatui",
  "termide-config",
  "termide-core",
