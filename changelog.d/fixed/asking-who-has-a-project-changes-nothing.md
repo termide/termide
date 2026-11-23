@@ -1,0 +1,1 @@
+- **Asking who has a project open changes nothing.** A launch with Always detachable looked for the project's owner by claiming it for a moment, which rewrote the owner note with its own process id, so the next launch could name the wrong instance. It now only tries the lock and reads the note.
