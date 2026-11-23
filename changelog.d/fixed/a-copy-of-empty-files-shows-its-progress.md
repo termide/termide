@@ -1,0 +1,1 @@
+- **A copy of empty files shows its progress.** Copying a tree of empty files, links or folders kept its card in the Operations panel at "Scanning" until the end, since only data reported progress. The card now moves on to the copy and counts the files done.

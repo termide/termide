@@ -525,7 +525,8 @@ impl FileManager {
             // Explicit reload — drop cached sizes under the current path
             // so the user sees a fresh recomputation.
             utils::shared_dir_size_cache().invalidate_subtree(&self.current_path);
-            self.load_directory_inner(false)
+            self.reload_in_place(false);
+            Ok(())
         }
     }
 
@@ -563,7 +564,8 @@ impl FileManager {
 
         // Explicit reload — drop cached sizes under the current path.
         utils::shared_dir_size_cache().invalidate_subtree(&self.current_path);
-        self.load_directory_inner(true)
+        self.reload_in_place(true);
+        Ok(())
     }
 
     /// Get current directory path
@@ -2283,6 +2285,41 @@ mod tests {
         wait_for_expansions(&mut fm);
         assert_eq!(cursor_path(&fm), root.join("sub/z.txt"));
         assert_eq!(fm.get_selected_paths(), vec![root.join("sub/inner.txt")]);
+    }
+
+    /// A reload (Ctrl+R, a watcher rescan) keeps the listing and the cursor
+    /// while the directory is read again, so keys pressed meanwhile act on
+    /// the rows shown; a cursor the user moves meanwhile stays where it went.
+    #[test]
+    fn a_reload_keeps_the_listing_while_the_directory_is_read() {
+        let (mut fm, temp_dir) = create_file_manager_in_temp();
+        let root = canonical_temp_path(&temp_dir);
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(root.join(name), "x").unwrap();
+        }
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("b.txt").unwrap();
+        let listed = names(&fm);
+
+        std::fs::write(root.join("0.txt"), "x").unwrap();
+        fm.navigation.last_reload_time = None;
+        fm.reload_directory().unwrap();
+        assert_eq!(names(&fm), listed);
+        assert_eq!(cursor_path(&fm), root.join("b.txt"));
+
+        fm.selected = fm.find_entry_index("c.txt").unwrap();
+        wait_for_local_listing(&mut fm);
+        assert!(names(&fm).contains(&"0.txt".to_string()));
+        assert_eq!(cursor_path(&fm), root.join("c.txt"));
+
+        // The reload at the end of an operation drops the marks at once.
+        fm.selection.select(fm.find_entry_index("a.txt").unwrap());
+        fm.force_reload_directory().unwrap();
+        assert!(fm.save_selection_paths().is_empty());
+        assert_eq!(cursor_path(&fm), root.join("c.txt"));
+        wait_for_local_listing(&mut fm);
+        assert_eq!(cursor_path(&fm), root.join("c.txt"));
     }
 
     /// Rows a folder's listing inserts above the cursor push it down with
