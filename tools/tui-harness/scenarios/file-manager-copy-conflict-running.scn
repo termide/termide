@@ -5,12 +5,17 @@
 # way kept.
 project empty
 config file-manager-taken-names.toml
-setup "mkdir dst big && echo new > big/marker && (cd big && seq 1 60000 | xargs touch)"
+# The copy is asked only when the destination appears between the check
+# before it starts and the copy's own, after its scan: 60000 folders make
+# that scan last about two seconds here (as many files, a tenth of it).
+# They are made outside the project and moved in whole: made in place,
+# their events overflow the watcher's queue, which arrives late as a
+# rescan, and the panel reloads under the keys that follow.
+setup "mkdir dst ../stage ../stage/big && echo new > ../stage/big/marker && (cd ../stage/big && seq 1 60000 | xargs mkdir) && mv ../stage/big big"
 start
 wait "big"
 
-# Copy big into dst; the copy's scan of 60000 files leaves time to put a
-# file named big in its way.
+# Copy big into dst; while the copy scans, put a file named big in its way.
 key Home Down
 key F5
 wait "Copy"
