@@ -659,7 +659,10 @@ mod tests {
         git(root, &["checkout", "-q", "main"]);
         std::fs::write(root.join("src/a.rs"), "main\n").unwrap();
         commit("main");
+        // With an identity, as `git` gives every command: without one git
+        // refuses the merge before it conflicts where none can be guessed.
         let merge = std::process::Command::new("git")
+            .args(["-c", "user.name=t", "-c", "user.email=t@t"])
             .args(["merge", "-q", "side"])
             .current_dir(root)
             .output()
