@@ -531,6 +531,7 @@ class Run:
                 TERMIDE_CONFIG=str(config_dir(self.home)),
                 TERMIDE_DATA=str(data_dir(self.home)),
                 TERMIDE_BIN=str(self.args.bin),
+                TERMIDE_REPO=str(REPO),
             ),
             capture_output=True,
             text=True,

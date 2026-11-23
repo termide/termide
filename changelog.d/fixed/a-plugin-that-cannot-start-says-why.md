@@ -1,0 +1,1 @@
+- **A plugin that cannot start says why.** **Plugins: show where each stands** showed `off` for a plugin whose program could not be found or run; it now shows `cannot start:` and the reason.

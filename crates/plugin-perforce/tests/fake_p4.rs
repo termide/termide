@@ -232,7 +232,7 @@ fn shows_the_state_and_opens_for_edit() {
     status_count(1);
     assert_eq!(
         statuses.lock().unwrap()[0],
-        "p4: #3/5 (out of date) · also opened by bob@other"
+        "#3/5 (out of date) · also opened by bob@other"
     );
 
     // Outside the workspace there is nothing to say.
@@ -259,7 +259,7 @@ fn shows_the_state_and_opens_for_edit() {
     status_count(3);
     assert_eq!(
         statuses.lock().unwrap()[2],
-        "p4: edit #3/5 (out of date) · also opened by bob@other"
+        "edit #3/5 (out of date) · also opened by bob@other"
     );
     assert_eq!(
         asked.lock().unwrap().len(),

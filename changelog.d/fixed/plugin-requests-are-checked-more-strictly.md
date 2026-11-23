@@ -1,0 +1,1 @@
+- **Plugins' windows and panels behave as documented.** `panel/close` closes a plugin's panel in a project parked in the background too; `window/choose` refuses items that are not strings instead of showing them as JSON; a form's whole numbers come back as integers rather than as `3.0`; and a dialog's default button reads OK in the interface's language.

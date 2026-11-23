@@ -11,9 +11,13 @@ stdout, and the protocol of doc/en/plugins.md as functions and decorators.
 
     plugin.run()
 
-Handlers run on a pool of threads, so one may call termide and wait for the
-answer (`plugin.read(path)`, `plugin.confirm(...)`) while termide goes on
-talking to the plugin. Standard library only; Python 3.8 or later.
+Events reach their handlers one after another, in the order termide sent
+them, on a thread of their own; requests (commands, tools, providers, saves)
+run on a pool of threads. Either may call termide and wait for the answer
+(`plugin.read(path)`, `plugin.confirm(...)`) while termide goes on talking to
+the plugin; a request termide sends that the plugin has no handler for is
+answered with JSON-RPC's "method not found". Standard library only; Python
+3.8 or later.
 """
 
 import json
@@ -23,6 +27,10 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 
 __all__ = ["Plugin", "RequestError", "utf16_len"]
+
+# JSON-RPC's error codes.
+METHOD_NOT_FOUND = -32601
+SERVER_ERROR = -32000
 
 
 def utf16_len(text):
@@ -38,6 +46,10 @@ class RequestError(Exception):
         super().__init__(f"{message} (code {code})")
         self.code = code
         self.message = message
+
+
+class _MethodNotFound(Exception):
+    """termide asked for something the plugin does not do."""
 
 
 class Plugin:
@@ -60,7 +72,9 @@ class Plugin:
         self._lock = threading.Lock()
         self._pending = {}
         self._next = 0
+        # Requests may wait on each other; events keep their order.
         self._pool = ThreadPoolExecutor(max_workers=workers)
+        self._ordered = ThreadPoolExecutor(max_workers=1)
 
     # ----------------------------------------------------------- declaring
 
@@ -252,8 +266,11 @@ class Plugin:
             if method == "initialize":
                 self._initialize(rid, message.get("params") or {})
                 continue
-            self._pool.submit(self._dispatch, method, rid, message.get("params") or {})
+            # A notification (no id) is an event: one worker, in order.
+            worker = self._ordered if rid is None else self._pool
+            worker.submit(self._dispatch, method, rid, message.get("params") or {})
         self._pool.shutdown(wait=False)
+        self._ordered.shutdown(wait=False)
         os._exit(0)
 
     def _send(self, message):
@@ -262,11 +279,11 @@ class Plugin:
             sys.stdout.write(line)
             sys.stdout.flush()
 
-    def _answer(self, rid, result=None, error=None):
+    def _answer(self, rid, result=None, error=None, code=SERVER_ERROR):
         if rid is None:
             return
         if error is not None:
-            self._send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32000, "message": str(error)}})
+            self._send({"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": str(error)}})
         else:
             self._send({"jsonrpc": "2.0", "id": rid, "result": result})
 
@@ -293,6 +310,8 @@ class Plugin:
         try:
             result = self._handle(method, params)
             self._answer(rid, result)
+        except _MethodNotFound:
+            self._answer(rid, error=f"{method} is not handled", code=METHOD_NOT_FOUND)
         except Exception as error:  # an answer, not a crash
             self._answer(rid, error=error)
 
@@ -349,4 +368,4 @@ class Plugin:
             span = {k: params.get(k) for k in ("line", "col", "end_line", "end_col")}
             actions = self._provide("codeActions", params.get("path"), span, params.get("diagnostics") or [])
             return {"actions": actions or []}
-        return None
+        raise _MethodNotFound()

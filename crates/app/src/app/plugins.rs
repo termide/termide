@@ -21,7 +21,7 @@ use termide_plugins::{
     Contributions, Host, HostEvent, Installed, Launch, PluginKey, ProcessLauncher, Timing,
 };
 
-use super::parked_projects::{plugin_panel_id, PluginPanelMut};
+use super::parked_projects::PluginPanelMut;
 use super::App;
 
 /// The action prefix of a plugin command in the palette.
@@ -45,6 +45,15 @@ pub(crate) struct PluginRuntime {
     /// Plugins given up on after crashing: marked in their project's status
     /// bar until they run again.
     gave_up: BTreeSet<PluginKey>,
+    /// Plugins a project enables that cannot be started, with why: shown
+    /// in "Plugins: show where each stands" rather than as merely off.
+    start_problems: BTreeMap<PluginKey, String>,
+    /// Commands the plugins answered with an error, sent from the threads
+    /// that wait on them and shown on the tick.
+    command_failures: (
+        std::sync::mpsc::Sender<CommandFailure>,
+        std::sync::mpsc::Receiver<CommandFailure>,
+    ),
     /// The projects the host was last told about.
     synced: Vec<PathBuf>,
     /// The open projects or a config changed: sync on the next tick.
@@ -73,6 +82,17 @@ fn builtin_plugins() -> Vec<Installed> {
         termide_plugin_perforce::DESCRIPTION,
         dir,
     )]
+}
+
+/// The language plugins are told the interface speaks: termide's own,
+/// English before one is set.
+fn plugin_locale() -> String {
+    let language = termide_i18n::current_language();
+    if language.is_empty() {
+        "en".to_string()
+    } else {
+        language
+    }
 }
 
 /// What the plugins directory beside the global config file holds now,
@@ -127,6 +147,8 @@ impl PluginRuntime {
             contributions: BTreeMap::new(),
             status: BTreeMap::new(),
             gave_up: BTreeSet::new(),
+            start_problems: BTreeMap::new(),
+            command_failures: std::sync::mpsc::channel(),
             synced: Vec::new(),
             dirty: true,
             panels: BTreeMap::new(),
@@ -141,16 +163,39 @@ impl PluginRuntime {
         self.dirty = true;
     }
 
-    /// The status items of `project`'s plugins, in plugin and id order, then
-    /// a mark for each of its plugins given up on, joined for the status
-    /// bar; `None` without any.
+    /// Show `text`, already cleaned, as the status item `item`; an empty one
+    /// removes it. A plugin past [`protocol::MAX_STATUS_ITEMS`] is refused
+    /// a new one.
+    fn set_status(&mut self, item: (PluginKey, String), text: String) -> Result<(), RpcError> {
+        if text.is_empty() {
+            self.status.remove(&item);
+            return Ok(());
+        }
+        let held = self.status.keys().filter(|(k, _)| *k == item.0).count();
+        if !self.status.contains_key(&item) && held >= protocol::MAX_STATUS_ITEMS {
+            return Err(RpcError::new(
+                INVALID_PARAMS,
+                format!(
+                    "at most {} status items at once",
+                    protocol::MAX_STATUS_ITEMS
+                ),
+            ));
+        }
+        self.status.insert(item, text);
+        Ok(())
+    }
+
+    /// The status items of `project`'s plugins, in plugin and id order, each
+    /// headed by its plugin's name, which the plugin cannot choose, then a
+    /// mark for each of its plugins given up on, joined for the status bar;
+    /// `None` without any.
     fn status_line(&self, project: &Path) -> Option<String> {
         let gave_up = termide_i18n::t().plugins_state_gave_up();
         let items: Vec<String> = self
             .status
             .iter()
             .filter(|((key, _), _)| key.project == project)
-            .map(|(_, text)| text.clone())
+            .map(|((key, _), text)| format!("{}: {text}", key.name))
             .chain(
                 self.gave_up
                     .iter()
@@ -162,8 +207,11 @@ impl PluginRuntime {
     }
 
     /// The launches `plugins` (a project's effective `[plugins]`) allows,
-    /// with one line for each plugin that cannot be started.
-    fn launches(&self, plugins: &BTreeMap<String, PluginSettings>) -> (Vec<Launch>, Vec<String>) {
+    /// with the name of each plugin that cannot be started and why.
+    fn launches(
+        &self,
+        plugins: &BTreeMap<String, PluginSettings>,
+    ) -> (Vec<Launch>, Vec<(String, String)>) {
         let mut launches = Vec::new();
         let mut problems = Vec::new();
         for installed in &self.installed {
@@ -178,7 +226,7 @@ impl PluginRuntime {
             let program = match installed.program() {
                 Ok(program) => program,
                 Err(e) => {
-                    problems.push(format!("plugin {}: {e}", installed.name));
+                    problems.push((installed.name.clone(), e.to_string()));
                     continue;
                 }
             };
@@ -193,6 +241,7 @@ impl PluginRuntime {
                 args: installed.manifest.args.clone(),
                 env: installed.manifest.env.clone(),
                 settings,
+                locale: plugin_locale(),
             });
         }
         (launches, problems)
@@ -233,11 +282,24 @@ impl App {
                 }
             };
             let (launches, problems) = self.plugins.launches(&config.plugins);
-            for problem in problems {
-                log::warn!("{problem}");
+            self.plugins
+                .start_problems
+                .retain(|key, _| key.project != *root);
+            for (name, problem) in problems {
+                log::warn!("plugin {name}: {problem}");
+                self.plugins.start_problems.insert(
+                    PluginKey {
+                        project: root.clone(),
+                        name,
+                    },
+                    problem,
+                );
             }
             stopped.extend(self.plugins.host.set_project(root, launches));
         }
+        self.plugins
+            .start_problems
+            .retain(|key, _| roots.contains(&key.project));
         let closed: Vec<PathBuf> = self
             .plugins
             .synced
@@ -299,6 +361,7 @@ impl App {
         for event in self.plugins.host.poll() {
             self.handle_plugin_event(event);
         }
+        self.report_command_failures();
         self.notice_closed_plugin_panels();
         self.serve_plugin_windows();
         self.watch_editors_for_plugins();
@@ -464,12 +527,8 @@ impl App {
             }
             protocol::STATUS_SET => {
                 let item = (key.clone(), text("id")?);
-                let value = text("text")?;
-                if value.is_empty() {
-                    self.plugins.status.remove(&item);
-                } else {
-                    self.plugins.status.insert(item, value);
-                }
+                let value = protocol::clean_text(&text("text")?, protocol::MAX_STATUS);
+                self.plugins.set_status(item, value)?;
                 self.refresh_plugin_ui();
                 Ok(Value::Null)
             }
@@ -597,22 +656,14 @@ impl App {
             }
             protocol::PANEL_CLOSE => {
                 let id = self.owned_panel(key, params)?;
-                let position = self
-                    .layout_manager
-                    .iter_all_panels_mut()
-                    .position(|panel| plugin_panel_id(panel.as_any()) == Some(id));
-                match position {
-                    Some(position) => {
-                        let width = self.state.terminal.width;
-                        self.layout_manager.remove_panel_at(position, width);
-                        self.plugins.panels.remove(&id);
-                        self.state.needs_redraw = true;
-                        Ok(Value::Null)
-                    }
-                    None => Err(RpcError::new(
-                        INVALID_PARAMS,
-                        "the panel is not in the current project",
-                    )),
+                // Wherever it is: a parked project's panel is updated, so it
+                // is closed too.
+                if self.remove_plugin_panel(id) {
+                    self.plugins.panels.remove(&id);
+                    self.state.needs_redraw = true;
+                    Ok(Value::Null)
+                } else {
+                    Err(RpcError::new(INVALID_PARAMS, "the panel is not open"))
                 }
             }
             _ => Err(RpcError::new(
@@ -808,7 +859,14 @@ impl App {
                 .set_error(termide_i18n::t().plugin_not_running_fmt(name));
             return;
         };
-        let (name, id) = (name.to_string(), id.to_string());
+        let title = self
+            .plugins
+            .contributions
+            .get(&key)
+            .and_then(|c| c.commands.iter().find(|command| command.id == id))
+            .map_or_else(|| id.to_string(), |command| command.title.clone());
+        let id = id.to_string();
+        let failed = self.plugins.command_failures.0.clone();
         std::thread::spawn(move || {
             if let Err(e) = peer.request(
                 protocol::COMMAND_EXECUTE,
@@ -816,9 +874,26 @@ impl App {
                 COMMAND_TIMEOUT,
                 &|| false,
             ) {
-                log::warn!("plugin {name}: command {id}: {e}");
+                log::warn!("plugin {}: command {id}: {e}", key.name);
+                let _ = failed.send(CommandFailure {
+                    key,
+                    title,
+                    error: e,
+                });
             }
         });
+    }
+
+    /// Show the commands that failed since the last tick, each where its
+    /// project is current; a parked project's go to the log only.
+    fn report_command_failures(&mut self) {
+        while let Ok(failure) = self.plugins.command_failures.1.try_recv() {
+            if failure.key.project != self.open_projects.current() {
+                continue;
+            }
+            self.state.set_error(command_failure_text(&failure));
+            self.state.needs_redraw = true;
+        }
     }
 
     /// The plugins installed, by name, each with whether termide carries it
@@ -874,13 +949,14 @@ impl App {
                         .iter()
                         .find(|(key, _)| key.project == current && key.name == installed.name)
                         .map(|(_, state)| *state);
-                    let text = match state {
-                        Some(termide_plugins::PluginState::Ready) => t.plugins_state_ready(),
-                        Some(termide_plugins::PluginState::Starting) => t.plugins_state_starting(),
-                        Some(termide_plugins::PluginState::GaveUp) => t.plugins_state_gave_up(),
-                        None => t.plugins_state_off(),
-                    };
-                    (installed.name.clone(), text.to_string())
+                    let problem = self.plugins.start_problems.get(&PluginKey {
+                        project: current.clone(),
+                        name: installed.name.clone(),
+                    });
+                    (
+                        installed.name.clone(),
+                        plugin_state_text(state, problem.map(String::as_str)),
+                    )
                 })
                 .collect()
         };
@@ -925,6 +1001,42 @@ impl App {
     /// Stop every plugin, waiting briefly for each to finish.
     pub(super) fn shutdown_plugins(&mut self) {
         self.plugins.host.shutdown();
+    }
+}
+
+/// A plugin command answered with an error.
+pub(crate) struct CommandFailure {
+    key: PluginKey,
+    /// The command's title, or its id when the plugin no longer lists it.
+    title: String,
+    error: String,
+}
+
+/// What the user is told of a failed command: the plugin, the command and
+/// the error, the error cleaned as any plugin text on termide's chrome.
+fn command_failure_text(failure: &CommandFailure) -> String {
+    termide_i18n::t().plugin_command_failed_fmt(
+        &failure.key.name,
+        &failure.title,
+        &protocol::clean_text(&failure.error, MAX_COMMAND_ERROR),
+    )
+}
+
+/// The longest error of a command shown, in characters.
+const MAX_COMMAND_ERROR: usize = 300;
+
+/// Where a plugin stands in a project, as "Plugins: show where each stands"
+/// says it: its process's state, or, without one, why it could not be
+/// started, or off.
+fn plugin_state_text(state: Option<termide_plugins::PluginState>, problem: Option<&str>) -> String {
+    use termide_plugins::PluginState;
+    let t = termide_i18n::t();
+    match (state, problem) {
+        (Some(PluginState::Ready), _) => t.plugins_state_ready().to_string(),
+        (Some(PluginState::Starting), _) => t.plugins_state_starting().to_string(),
+        (Some(PluginState::GaveUp), _) => t.plugins_state_gave_up().to_string(),
+        (None, Some(problem)) => t.plugins_state_cannot_start_fmt(problem),
+        (None, None) => t.plugins_state_off().to_string(),
     }
 }
 
@@ -1264,8 +1376,13 @@ impl PluginToolHub {
 
 #[cfg(test)]
 mod tests {
-    use super::{agent_run_event, is_one_command_line, plugin_title, projects_of_repo};
+    use super::{
+        agent_run_event, is_one_command_line, plugin_title, projects_of_repo, protocol, Host,
+        PluginKey, PluginRuntime, ProcessLauncher, Timing,
+    };
+    use std::collections::{BTreeMap, BTreeSet};
     use std::path::{Path, PathBuf};
+    use std::sync::Arc;
 
     #[test]
     fn a_panel_shows_exactly_one_kind_of_content() {
@@ -1290,21 +1407,16 @@ mod tests {
         assert!(of(json!({ "title": "x" })).is_none());
     }
 
-    #[test]
-    fn a_plugin_given_up_on_is_marked_in_its_own_projects_status_bar() {
-        use super::{Host, PluginKey, PluginRuntime, ProcessLauncher, Timing};
-        use std::collections::{BTreeMap, BTreeSet};
-        use std::sync::Arc;
-        let key = |project: &str, name: &str| PluginKey {
-            project: PathBuf::from(project),
-            name: name.into(),
-        };
-        let mut plugins = PluginRuntime {
+    /// A runtime with no plugins installed and no process started.
+    fn runtime() -> PluginRuntime {
+        PluginRuntime {
             host: Host::new(Arc::new(ProcessLauncher), Timing::default()),
             installed: Vec::new(),
             contributions: BTreeMap::new(),
             status: BTreeMap::new(),
             gave_up: BTreeSet::new(),
+            start_problems: BTreeMap::new(),
+            command_failures: std::sync::mpsc::channel(),
             synced: Vec::new(),
             dirty: false,
             panels: BTreeMap::new(),
@@ -1312,14 +1424,77 @@ mod tests {
             windows: Default::default(),
             editors: Default::default(),
             files: Default::default(),
+        }
+    }
+
+    #[test]
+    fn a_plugin_given_up_on_is_marked_in_its_own_projects_status_bar() {
+        let key = |project: &str, name: &str| PluginKey {
+            project: PathBuf::from(project),
+            name: name.into(),
         };
+        let mut plugins = runtime();
         plugins
             .status
             .insert((key("/a", "clock"), "t".into()), "12:00".into());
         plugins.gave_up.insert(key("/a", "lint"));
         let line = plugins.status_line(Path::new("/a")).unwrap();
-        assert!(line.starts_with("12:00 · ⚠ lint: "), "{line}");
+        assert!(line.starts_with("clock: 12:00 · ⚠ lint: "), "{line}");
         assert_eq!(plugins.status_line(Path::new("/b")), None);
+    }
+
+    #[test]
+    fn a_plugin_that_cannot_start_says_why_rather_than_off() {
+        use termide_plugins::PluginState;
+        let text = super::plugin_state_text(None, Some("python3 is not on PATH"));
+        assert!(text.contains("python3 is not on PATH"), "{text}");
+        assert_ne!(text, super::plugin_state_text(None, None));
+        // A process that runs says how it runs, whatever was said before.
+        assert_eq!(
+            super::plugin_state_text(Some(PluginState::Ready), Some("old")),
+            super::plugin_state_text(Some(PluginState::Ready), None)
+        );
+    }
+
+    #[test]
+    fn a_failed_command_names_its_plugin_command_and_error() {
+        let failure = super::CommandFailure {
+            key: PluginKey {
+                project: PathBuf::from("/a"),
+                name: "deploy".into(),
+            },
+            title: "Ship it".into(),
+            error: "no\u{202E} server\n".into(),
+        };
+        let text = super::command_failure_text(&failure);
+        assert!(text.contains("deploy"), "{text}");
+        assert!(text.contains("Ship it"), "{text}");
+        assert!(text.contains("no server"), "{text}");
+        assert!(!text.contains('\u{202E}'), "{text:?}");
+    }
+
+    #[test]
+    fn a_plugin_holds_a_bounded_number_of_status_items() {
+        let mut plugins = runtime();
+        let key = PluginKey {
+            project: PathBuf::from("/a"),
+            name: "clock".into(),
+        };
+        for i in 0..protocol::MAX_STATUS_ITEMS {
+            plugins
+                .set_status((key.clone(), format!("{i}")), "x".into())
+                .unwrap();
+        }
+        let extra = (key.clone(), "extra".to_string());
+        assert!(plugins.set_status(extra.clone(), "x".into()).is_err());
+        // One already shown may change, and one removed makes room.
+        plugins
+            .set_status((key.clone(), "0".into()), "y".into())
+            .unwrap();
+        plugins
+            .set_status((key.clone(), "0".into()), String::new())
+            .unwrap();
+        plugins.set_status(extra, "x".into()).unwrap();
     }
 
     #[test]

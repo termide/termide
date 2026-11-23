@@ -175,10 +175,10 @@ pub fn segment_hit_areas(segments: &[StatusSegment], start_x: u16, width: u16) -
     )
     .into_iter()
     .filter_map(|(x, text, action)| {
-        let start = start_x + x as u16;
+        let start = start_x.saturating_add(u16::try_from(x).unwrap_or(u16::MAX));
         Some(SegmentHit {
             start,
-            end: start + text.width() as u16,
+            end: start.saturating_add(u16::try_from(text.width()).unwrap_or(u16::MAX)),
             action: action?,
         })
     })
@@ -197,7 +197,9 @@ pub fn status_trailing_width(
         .filter(|ops| ops.has_operations)
         .map_or(0, |ops| " | ".width() + background_ops_text(ops).width());
     let disk = disk_space.map_or(0, |disk| disk_text(disk).width());
-    (plugins + ops + disk) as u16
+    // Saturated, not cast: a long plugin text must not wrap the sum to a
+    // small width that leaves the segments room they do not have.
+    u16::try_from(plugins.saturating_add(ops).saturating_add(disk)).unwrap_or(u16::MAX)
 }
 
 /// Summary of background file operations (for status bar display).
@@ -597,6 +599,13 @@ mod tests {
         assert!(drawn.ends_with(" | PROBE  | ⟳ Copy "), "{drawn:?}");
         let trailing = status_trailing_width(Some("PROBE"), params.background_ops.as_ref(), None);
         assert_eq!(usize::from(trailing), " | PROBE  | ⟳ Copy ".width());
+    }
+
+    #[test]
+    fn a_huge_plugin_status_saturates_the_trailing_width() {
+        // 70 000 columns wrapped to 4 464 as `u16`.
+        let text = "x".repeat(70_000);
+        assert_eq!(status_trailing_width(Some(&text), None, None), u16::MAX);
     }
 
     #[test]

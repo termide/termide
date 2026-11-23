@@ -90,14 +90,20 @@ fn parse(method: &str, params: &Value) -> Result<Kind, String> {
             message: clean_message(text("message")),
         },
         protocol::WINDOW_CHOOSE => {
+            const NOT_STRINGS: &str = "`items` must be a list of strings";
+            // Every item kept, or none: the answer is an index into the
+            // plugin's own list, which a skipped item would shift.
             let items: Vec<String> = params["items"]
                 .as_array()
-                .ok_or("`items` must be a list of strings")?
+                .ok_or(NOT_STRINGS)?
                 .iter()
-                .filter_map(Value::as_str)
-                .map(|item| protocol::clean_text(item, protocol::MAX_TITLE * 2))
                 .take(MAX_ITEMS)
-                .collect();
+                .map(|item| {
+                    item.as_str()
+                        .map(|item| protocol::clean_text(item, protocol::MAX_TITLE * 2))
+                        .ok_or(NOT_STRINGS)
+                })
+                .collect::<Result<_, _>>()?;
             if items.is_empty() {
                 return Err("`items` is empty".into());
             }
@@ -199,7 +205,7 @@ fn parse_dialog(params: &Value) -> Result<termide_modal::dialog::DialogSpec, Str
         _ => return Err("`list` must be an object".into()),
     };
     let buttons: Vec<String> = match &params["buttons"] {
-        Value::Null => vec!["OK".to_string()],
+        Value::Null => vec![termide_i18n::t().modal_ok().to_string()],
         Value::Array(buttons) => buttons
             .iter()
             .take(MAX_BUTTONS)
@@ -427,7 +433,8 @@ impl App {
 }
 
 /// A form's values as the plugin gets them: switches as booleans, numbers
-/// as numbers where they read as one, the rest as text.
+/// as numbers where they read as one — whole ones as integers, so `3` comes
+/// back `3` and not `3.0` — the rest as text.
 fn form_answer(
     fields: &[CommandParam],
     values: &std::collections::HashMap<String, String>,
@@ -440,7 +447,13 @@ fn form_answer(
         let value = match field.param_type {
             CommandParamType::Bool => json!(raw == "true"),
             CommandParamType::Number => {
-                raw.parse::<f64>().map_or_else(|_| json!(raw), |n| json!(n))
+                let raw = raw.trim();
+                raw.parse::<i64>().map(|n| json!(n)).unwrap_or_else(|_| {
+                    raw.parse::<f64>()
+                        .ok()
+                        .filter(|n| n.is_finite())
+                        .map_or_else(|| json!(raw), |n| json!(n))
+                })
             }
             CommandParamType::Text | CommandParamType::Select => json!(raw),
         };
@@ -585,6 +598,8 @@ mod tests {
             &json!({ "fields": [
                 { "name": "on", "type": "bool" },
                 { "name": "n", "type": "number" },
+                { "name": "r", "type": "number" },
+                { "name": "x", "type": "number" },
                 { "name": "t", "type": "text" },
             ] }),
         )
@@ -594,11 +609,29 @@ mod tests {
         let values = std::collections::HashMap::from([
             ("on".to_string(), "true".to_string()),
             ("n".to_string(), "3".to_string()),
+            ("r".to_string(), "0.5".to_string()),
+            ("x".to_string(), "inf".to_string()),
             ("t".to_string(), "hi".to_string()),
         ]);
+        let answer = form_answer(&fields, &values);
         assert_eq!(
-            form_answer(&fields, &values),
-            json!({ "on": true, "n": 3.0, "t": "hi" })
+            answer,
+            json!({ "on": true, "n": 3, "r": 0.5, "x": "inf", "t": "hi" })
+        );
+        // A whole number reaches the plugin as an integer, not `3.0`.
+        assert!(answer["n"].is_i64(), "{answer}");
+    }
+
+    #[test]
+    fn a_choice_of_anything_but_strings_is_refused() {
+        // Skipping the number would shift every index after it.
+        assert!(parse("window/choose", &json!({ "items": ["a", 3, "b"] })).is_err());
+        assert!(parse("window/choose", &json!({ "items": "a" })).is_err());
+        assert_eq!(
+            parse("window/choose", &json!({ "items": ["a", "b"] })).unwrap(),
+            Kind::Choose {
+                items: vec!["a".into(), "b".into()]
+            }
         );
     }
 }

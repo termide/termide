@@ -3,8 +3,8 @@
 //! JSON-RPC 2.0, one message per line on the plugin's stdin and stdout.
 //!
 //! termide → plugin:
-//! - `initialize` (request): [`initialize_params`]; the result is a
-//!   [`Contributions`].
+//! - `initialize` (request): [`initialize_params`], among them the
+//!   interface's `locale`; the result is a [`Contributions`].
 //! - `initialized` (notification), once the result is taken.
 //! - events (notifications) the plugin subscribed to, of its own project:
 //!   `file/opened`, `file/saved`, `file/closed` `{ "path" }`;
@@ -24,9 +24,11 @@
 //! - `contributions/changed` (notification): a new [`Contributions`].
 //! - `window/notify` (request) `{ "message", "level"? }`.
 //! - `status/set` (request) `{ "id", "text" }`; an empty text removes it.
+//!   The text is cleaned and cut to [`MAX_STATUS`]; a plugin holds at most
+//!   [`MAX_STATUS_ITEMS`].
 //! - `window/confirm` `{ "title", "message" }` → `true`, `false` or `null`
 //!   (dismissed); `window/choose` `{ "title", "items" }` → an index or
-//!   `null`; `window/input` `{ "title", "prompt", "default"? }` → text or
+//!   `null` (the items all strings); `window/input` `{ "title", "prompt", "default"? }` → text or
 //!   `null`; `window/form` `{ "title", "fields" }` → `{ name: value }` or
 //!   `null`; `window/message` `{ "title", "message" }` → `null`;
 //!   `window/dialog` `{ "title", "message"?, "input"?, "list"?, "buttons"? }`
@@ -185,6 +187,10 @@ pub const MAX_MENU_ITEMS: usize = 12;
 pub const MAX_TITLE: usize = 60;
 /// The longest a plugin's menu label may be, in characters.
 pub const MAX_LABEL: usize = 40;
+/// The longest a plugin's status item may be, in characters.
+pub const MAX_STATUS: usize = 80;
+/// The most status items one plugin shows at once.
+pub const MAX_STATUS_ITEMS: usize = 8;
 
 /// The params of `initialize`.
 #[must_use]
@@ -195,6 +201,7 @@ pub fn initialize_params(key: &PluginKey, launch: &Launch) -> Value {
         "plugin": { "name": key.name, "dir": launch.dir },
         "project": { "root": key.project },
         "settings": launch.settings,
+        "locale": launch.locale,
     })
 }
 
@@ -277,7 +284,9 @@ pub struct Contributions {
 
 impl Contributions {
     /// Read from a message, keeping each entry that is well formed and
-    /// dropping the rest, so one bad entry does not cost the others.
+    /// dropping the rest, so one bad entry does not cost the others. A
+    /// command's title is cleaned as any text of a plugin on termide's
+    /// chrome; one left empty drops the command.
     #[must_use]
     pub fn from_value(value: &Value) -> Self {
         fn each<T: for<'de> Deserialize<'de>>(value: &Value, field: &str) -> Vec<T> {
@@ -290,7 +299,13 @@ impl Contributions {
         }
         Self {
             subscriptions: each(value, "subscriptions"),
-            commands: each(value, "commands"),
+            commands: each::<CommandInfo>(value, "commands")
+                .into_iter()
+                .filter_map(|mut command| {
+                    command.title = clean_text(&command.title, MAX_TITLE);
+                    (!command.title.is_empty()).then_some(command)
+                })
+                .collect(),
             tools: each(value, "tools"),
             providers: serde_json::from_value(value["providers"].clone()).unwrap_or_default(),
         }
@@ -314,6 +329,43 @@ mod tests {
         assert_eq!(c.tools.len(), 1);
         assert!(c.tools[0].read_only);
         assert_eq!(c.tools[0].input_schema["type"], "object");
+    }
+
+    #[test]
+    fn initialize_tells_the_interfaces_language() {
+        let key = PluginKey {
+            project: "/w/p".into(),
+            name: "lint".into(),
+        };
+        let launch = Launch {
+            name: "lint".into(),
+            dir: "/plugins/lint".into(),
+            program: "/plugins/lint/run".into(),
+            args: Vec::new(),
+            env: std::collections::BTreeMap::new(),
+            settings: json!({ "level": 2 }),
+            locale: "ru".into(),
+        };
+        let params = initialize_params(&key, &launch);
+        assert_eq!(params["locale"], "ru");
+        assert_eq!(params["settings"]["level"], 2);
+        assert_eq!(params["project"]["root"], "/w/p");
+    }
+
+    #[test]
+    fn command_titles_are_cleaned_and_cut() {
+        let long = "x".repeat(200);
+        let value = json!({
+            "commands": [
+                { "id": "a", "title": "Run\u{202E}\n it" },
+                { "id": "b", "title": long },
+                { "id": "c", "title": "\u{200B} " },
+            ],
+        });
+        let c = Contributions::from_value(&value);
+        assert_eq!(c.commands.len(), 2, "an empty title drops the command");
+        assert_eq!(c.commands[0].title, "Run it");
+        assert_eq!(c.commands[1].title.chars().count(), MAX_TITLE);
     }
 
     #[test]

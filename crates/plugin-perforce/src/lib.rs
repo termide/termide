@@ -16,7 +16,7 @@ pub mod termide;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-pub use plugin::describe;
+pub use plugin::{describe, translation};
 
 /// The plugin's name, as config's `[plugins.perforce]` names it.
 pub const NAME: &str = "perforce";
@@ -42,7 +42,9 @@ pub fn serve(
             .map(PathBuf::from)
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_default();
-        let plugin = plugin::Perforce::new(termide.clone(), p4::P4::new(program, root));
-        (plugin, plugin::contributions())
+        let tr = plugin::translation(params["locale"].as_str().unwrap_or_default());
+        let contributions = plugin::contributions(&tr);
+        let plugin = plugin::Perforce::new(termide.clone(), p4::P4::new(program, root), tr);
+        (plugin, contributions)
     });
 }

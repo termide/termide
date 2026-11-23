@@ -42,7 +42,8 @@ one, **Plugins: read the plugins directory again** in the command palette
 (`Ctrl+P`) takes it in without a restart: every plugin starts afresh, and the
 language features of one installed since reach the editors opened after it.
 **Plugins: show where each stands**
-lists the installed plugins and their state in the current project, and
+lists the installed plugins and their state in the current project — for one
+whose program cannot be found or run, `cannot start:` and why — and
 **Plugins: restart <name>** starts one afresh.
 
 ## Built-in plugins
@@ -123,19 +124,33 @@ requests to it fail at once, until it reads again.
 Each message is one line of JSON-RPC 2.0. Anything a plugin writes to stderr
 goes to termide's log. In Python, `examples/plugins/sdk/termide_plugin.py` in
 the repository speaks it for you, and `examples/plugins/` holds plugins built
-with it.
+with it. The library covers the handshake, events, commands, tools with
+progress, completion, hover, fixes, definitions and references,
+`file/will_save`, and the requests to termide as functions: notices, the
+status bar, the editor, marks, terminals, Markdown panels, and confirm,
+choose and input windows. For anything else — `file/will_edit`,
+`contributions/changed`, `window/form`, `window/dialog`, list and diff
+panels, `files/status`, `editor/base` — it hands over `plugin.request()` and
+`plugin.send_notification()`. Events reach their handlers one at a time, in
+the order termide sent them; requests run side by side on a pool of threads,
+and one it has no handler for is answered with JSON-RPC's `method not found`
+(-32601).
 
 **termide → plugin**
 
 | Method | Kind | Params | Result |
 |---|---|---|---|
-| `initialize` | request | `protocolVersion` (1), `termide.version`, `plugin.name`, `plugin.dir`, `project.root`, `settings` | what the plugin contributes, see below |
+| `initialize` | request | `protocolVersion` (1), `termide.version`, `plugin.name`, `plugin.dir`, `project.root`, `settings`, `locale` | what the plugin contributes, see below |
 | `initialized` | notification | | |
-| `command/execute` | request | `id` | anything |
+| `command/execute` | request | `id` | anything; an error is shown to the user while the plugin's project is the current one |
 | `tool/call` | request | `name`, `arguments`, `progress` | `text`, `isError` |
 | `$/cancelRequest` | notification | `id` of a request termide gave up on | |
 | `shutdown` | request | | `null` |
 | `exit` | notification | | |
+
+`locale` is the language of termide's interface, as its settings name it
+(`en`, `ru`, `zh`, …), for a plugin that shows texts of its own; a change of
+language starts the plugins afresh.
 
 The events a plugin subscribes to, notifications about its own project:
 
@@ -194,7 +209,9 @@ notification sent later to replace it:
 ```
 
 Commands appear as `<plugin>: <title>` in the command palette (`Plugins`
-category) and at the end of the Commands menu. A command's `key` runs it from
+category) and at the end of the Commands menu. A title is cleaned of control
+and invisible characters and cut to 60 characters; a command whose title is
+left empty is dropped. A command's `key` runs it from
 anywhere, if termide binds that key nowhere — the user's own commands
 included — and it is `Ctrl` or `Alt` with another modifier (`Ctrl+Alt+K`,
 `Ctrl+Shift+K`, `Alt+Shift+K`) or an F-key with one (`Shift+F7`): keys a
@@ -221,6 +238,10 @@ is followed by `$/cancelRequest`, as is a command past its five.
 | `contributions/changed` | notification | as the `initialize` result |
 | `window/notify` | request | `message`, `level` (`"info"` or `"error"`) |
 | `status/set` | request | `id`, `text` (an empty text removes the item) |
+
+The status bar shows each item as `<plugin>: <text>`, so it is clear whose it
+is. The text is cleaned of control and invisible characters and cut to 80
+characters; a plugin holds at most 8 items, and a ninth is refused.
 
 A plugin of a project in the background is not shown on screen: its
 notifications go to the log. termide takes at most 256 messages from all
@@ -341,9 +362,9 @@ request is answered when the user closes the window: with the answer, or
 | Method | Params | Answer |
 |---|---|---|
 | `window/confirm` | `title`, `message` | `true`, `false` or `null` |
-| `window/choose` | `title`, `items` (strings) | the index picked, or `null` |
+| `window/choose` | `title`, `items` (strings; anything else is refused) | the index picked, or `null` |
 | `window/input` | `title`, `prompt`, `default` (optional) | the text, or `null` |
-| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` one of `text`, `number`, `bool`, `select`, `default` a string, number or boolean | `{ name: value }` (switches as booleans, numbers as numbers), or `null` |
+| `window/form` | `title`, `fields`: `[{ "name", "label", "type", "options"?, "default"? }]`, `type` one of `text`, `number`, `bool`, `select`, `default` a string, number or boolean | `{ name: value }` (switches as booleans, numbers as numbers: whole ones as integers), or `null` |
 | `window/message` | `title`, `message` | `null` |
 | `window/dialog` | `title`, and any of `message`, `input`, `list`, `buttons` (below) | `{ "button", "text"?, "checked"?, "selected"? }`, or `null` |
 
@@ -352,7 +373,7 @@ A **dialog** is put together from parts, each left out when not needed: a
 1 to 10 lines; a `list`, `{ "items", "pick"? }`, whose items are strings or
 `{ "label", "detail"?, "checked"? }` and whose `pick` is `none` (only to
 read, the default), `one` or `many` (to tick); and `buttons`, up to 6
-labels, `["OK"]` when left out. `Tab` and `Shift+Tab` go from part to part.
+labels, one OK button in the interface's language when left out. `Tab` and `Shift+Tab` go from part to part.
 In a one-line field, and in the list, `Enter` presses the first button; in a
 field of several lines it starts a new line. `Space` ticks a row; `←`/`→`
 choose a button and `Enter` presses it; a click on a row ticks it, on a
@@ -432,7 +453,7 @@ panel does not reload by itself: the plugin updates it.
 |---|---|---|---|
 | `panel/open` | request | plugin → termide | `title`, one of `markdown`, `list` or `diff`, `menu` (optional); the result is `{ "panel" }`, its id |
 | `panel/update` | request | plugin → termide | `panel`, `markdown`, `list` or `diff` (the kind it was opened with), `title` and `menu` (optional) |
-| `panel/close` | request | plugin → termide | `panel` |
+| `panel/close` | request | plugin → termide | `panel`, also of a project in the background |
 | `panel/action` | notification | termide → plugin | `panel`, `action` |
 | `panel/closed` | notification | termide → plugin | `panel`: the user closed it |
 

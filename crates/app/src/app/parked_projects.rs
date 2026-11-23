@@ -627,6 +627,18 @@ impl App {
             .find(|panel| panel.id() == id)
     }
 
+    /// Close the plugin panel `id`, in the current project or a parked one,
+    /// as [`Self::plugin_panel_mut`] finds it; whether it was there.
+    pub(super) fn remove_plugin_panel(&mut self, id: u64) -> bool {
+        let width = self.state.terminal.width;
+        let layouts = std::iter::once(&mut self.layout_manager).chain(
+            self.open_projects
+                .parked_mut()
+                .map(|(_, parked)| &mut parked.layout),
+        );
+        remove_plugin_panel_from(layouts, id, width)
+    }
+
     /// The ids of every plugin panel open, in any project.
     pub(super) fn plugin_panel_ids(&mut self) -> Vec<u64> {
         let parked = self
@@ -1037,9 +1049,54 @@ pub(super) fn plugin_panel_id(panel: &dyn std::any::Any) -> Option<u64> {
         .and_then(termide_panel_markdown::MarkdownPanel::plugin_panel_id)
 }
 
+/// Close the plugin panel `id` in the first of `layouts` that has it;
+/// whether one had it.
+fn remove_plugin_panel_from<'a>(
+    layouts: impl Iterator<Item = &'a mut LayoutManager>,
+    id: u64,
+    width: u16,
+) -> bool {
+    for layout in layouts {
+        let position = layout
+            .iter_all_panels_mut()
+            .position(|panel| plugin_panel_id(panel.as_any()) == Some(id));
+        if let Some(position) = position {
+            return layout.remove_panel_at(position, width).is_some();
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_plugin_panel_closes_in_a_parked_project_too() {
+        let config = termide_config::Config::default();
+        let with_panel = |id: u64| {
+            let mut layout = LayoutManager::new();
+            let panel =
+                termide_panel_markdown::MarkdownPanel::for_plugin(id, "p".into(), "# x".into());
+            layout.add_panel(Box::new(panel), &config, 80);
+            layout
+        };
+        // The current project's layout first, then a parked one's.
+        let mut current = with_panel(1);
+        let mut parked = with_panel(2);
+        assert!(remove_plugin_panel_from(
+            [&mut current, &mut parked].into_iter(),
+            2,
+            80
+        ));
+        assert_eq!(parked.panel_count(), 0);
+        assert_eq!(current.panel_count(), 1);
+        assert!(!remove_plugin_panel_from(
+            [&mut current, &mut parked].into_iter(),
+            2,
+            80
+        ));
+    }
 
     #[test]
     fn a_parked_queue_drops_redraws_and_keeps_one_directory_change() {

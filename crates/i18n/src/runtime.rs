@@ -271,6 +271,36 @@ impl Translation for RuntimeTranslation {
         plugins_state_gave_up,
         plugins_state_off,
         plugins_none,
+        p4_cmd_edit,
+        p4_cmd_revert,
+        p4_cmd_diff,
+        p4_opened_files,
+        p4_sync_workspace,
+        p4_login_title,
+        p4_open_file_first,
+        p4_project_not_in_workspace,
+        p4_revert_add_modified,
+        p4_revert_add,
+        p4_revert_modified,
+        p4_revert_edit,
+        p4_open_for_add_title,
+        p4_open_for_edit_title,
+        p4_revert_title,
+        p4_default_changelist,
+        p4_action_open,
+        p4_action_diff,
+        p4_submit,
+        p4_no_opened_files,
+        p4_refresh,
+        p4_submitted,
+        p4_done,
+        p4_submit_default_title,
+        p4_change_description,
+        p4_not_submitted,
+        p4_needs_description,
+        p4_no_files_picked,
+        p4_status_not_in_depot,
+        p4_status_locked,
         command_report_no_output,
         git_operation_cancelled,
         modal_ok,
@@ -3409,6 +3439,106 @@ impl Translation for RuntimeTranslation {
 
     fn plugin_not_running_fmt(&self, name: &str) -> String {
         self.format("plugin_not_running_fmt", &[("name", name)])
+    }
+
+    fn plugins_state_cannot_start_fmt(&self, reason: &str) -> String {
+        self.format("plugins_state_cannot_start_fmt", &[("reason", reason)])
+    }
+
+    fn plugin_command_failed_fmt(&self, name: &str, command: &str, error: &str) -> String {
+        self.format(
+            "plugin_command_failed_fmt",
+            &[("name", name), ("command", command), ("error", error)],
+        )
+    }
+
+    fn p4_login_question_fmt(&self, error: &str) -> String {
+        self.format("p4_login_question_fmt", &[("error", error)])
+    }
+
+    fn p4_not_in_workspace_fmt(&self, path: &str) -> String {
+        self.format("p4_not_in_workspace_fmt", &[("path", path)])
+    }
+
+    fn p4_stop_editing_unsaved_fmt(&self, name: &str) -> String {
+        self.format("p4_stop_editing_unsaved_fmt", &[("name", name)])
+    }
+
+    fn p4_stop_editing_fmt(&self, name: &str) -> String {
+        self.format("p4_stop_editing_fmt", &[("name", name)])
+    }
+
+    fn p4_save_then_stop_fmt(&self, action: &str) -> String {
+        self.format("p4_save_then_stop_fmt", &[("action", action)])
+    }
+
+    fn p4_discard_then_stop_fmt(&self, action: &str) -> String {
+        self.format("p4_discard_then_stop_fmt", &[("action", action)])
+    }
+
+    fn p4_only_stop_fmt(&self, action: &str) -> String {
+        self.format("p4_only_stop_fmt", &[("action", action)])
+    }
+
+    fn p4_add_question_fmt(&self, name: &str) -> String {
+        self.format("p4_add_question_fmt", &[("name", name)])
+    }
+
+    fn p4_already_opened_fmt(&self, name: &str, action: &str) -> String {
+        self.format(
+            "p4_already_opened_fmt",
+            &[("name", name), ("action", action)],
+        )
+    }
+
+    fn p4_locked_by_fmt(&self, name: &str, user: &str) -> String {
+        self.format("p4_locked_by_fmt", &[("name", name), ("user", user)])
+    }
+
+    fn p4_also_opened_question_fmt(&self, name: &str, user: &str) -> String {
+        self.format(
+            "p4_also_opened_question_fmt",
+            &[("name", name), ("user", user)],
+        )
+    }
+
+    fn p4_not_opened_fmt(&self, name: &str) -> String {
+        self.format("p4_not_opened_fmt", &[("name", name)])
+    }
+
+    fn p4_revert_question_fmt(&self, name: &str) -> String {
+        self.format("p4_revert_question_fmt", &[("name", name)])
+    }
+
+    fn p4_diff_title_fmt(&self, name: &str) -> String {
+        self.format("p4_diff_title_fmt", &[("name", name)])
+    }
+
+    fn p4_change_fmt(&self, change: &str) -> String {
+        self.format("p4_change_fmt", &[("change", change)])
+    }
+
+    fn p4_submit_change_question_fmt(&self, change: &str) -> String {
+        self.format("p4_submit_change_question_fmt", &[("change", change)])
+    }
+
+    fn p4_status_out_of_date_fmt(&self, rev: &str) -> String {
+        self.format("p4_status_out_of_date_fmt", &[("rev", rev)])
+    }
+
+    fn p4_status_change_fmt(&self, change: &str) -> String {
+        self.format("p4_status_change_fmt", &[("change", change)])
+    }
+
+    fn p4_status_locked_by_fmt(&self, user: &str) -> String {
+        self.format("p4_status_locked_by_fmt", &[("user", user)])
+    }
+
+    fn p4_status_also_opened_fmt(&self, user: &str, more: &str) -> String {
+        self.format(
+            "p4_status_also_opened_fmt",
+            &[("user", user), ("more", more)],
+        )
     }
 
     fn settings_save_failed_fmt(&self, error: &str) -> String {

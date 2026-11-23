@@ -1,0 +1,22 @@
+# The example plugin trim-on-save sees Ctrl+S first: the file written has
+# lost the spaces at the ends of its lines.
+project empty
+setup "mkdir -p \"$TERMIDE_CONFIG/plugins\" && cp -R \"$TERMIDE_REPO/examples/plugins/trim-on-save\" \"$TERMIDE_CONFIG/plugins/\" && printf 'alpha   \nbeta\t\n' > notes.txt"
+start
+wait "notes.txt"
+# Until the plugin is ready, Ctrl+S would not wait for it.
+key Ctrl+P
+type "show where"
+key Enter
+wait "trim-on-save  running" 15
+snapshot plugins
+key Esc
+key End F4
+wait "alpha"
+key Ctrl+End
+type "gamma  "
+key Ctrl+S
+file-contains notes.txt "gamma"
+run "grep -q '^alpha$' notes.txt && ! grep -q '[[:blank:]]$' notes.txt"
+snapshot saved
+quit

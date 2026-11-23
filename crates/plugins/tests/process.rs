@@ -69,6 +69,7 @@ fn a_script_plugin_runs_in_its_directory_and_stops_cleanly() {
         args: plugin.manifest.args.clone(),
         env: plugin.manifest.env.clone(),
         settings: json!({ "level": 2 }),
+        locale: "ru".into(),
     };
     let project = root.path().join("project");
     let mut host = Host::new(Arc::new(ProcessLauncher), Timing::default());

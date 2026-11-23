@@ -1,0 +1,1 @@
+- **A plugin command that fails says so.** A command from a plugin that answered with an error went to the log only; the error now shows in the status bar, naming the plugin and the command, while the plugin's project is the current one.

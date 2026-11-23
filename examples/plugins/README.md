@@ -35,6 +35,9 @@ def saved(params):
 plugin.run()
 ```
 
-Handlers run on a pool of threads, so one may ask termide (`plugin.read`,
-`plugin.confirm`, …) and wait for the answer. Columns are UTF-16 code units,
+Events reach their handlers one at a time, in the order termide sent them;
+requests (commands, tools, providers, saves) run on a pool of threads. Either
+may ask termide (`plugin.read`, `plugin.confirm`, …) and wait for the answer.
+A request the plugin has no handler for is answered with JSON-RPC's `method
+not found`. Columns are UTF-16 code units,
 as in LSP: `utf16_len(text)` gives them.

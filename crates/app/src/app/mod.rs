@@ -794,7 +794,9 @@ impl App {
         }
         termide_panel_terminal::set_scrollback_lines(config.terminal.scrollback_lines);
         termide_panel_terminal::set_shell_integration(config.terminal.shell_integration);
-        if config.plugins != old.plugins {
+        // Plugins learn the language in `initialize`: a new one starts them
+        // afresh, as a change of their settings does.
+        if config.plugins != old.plugins || config.general.language != old.general.language {
             self.plugins.mark_dirty();
         }
         // The table is built from the keybindings in the config.
