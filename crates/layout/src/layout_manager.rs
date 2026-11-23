@@ -528,6 +528,22 @@ mod tests {
         lm
     }
 
+    /// Widths read from a hand-edited layout file sum past `u16::MAX`:
+    /// computing and redistributing them must not overflow.
+    #[test]
+    fn huge_saved_widths_do_not_overflow() {
+        let mut lm = groups_with_widths(&[Some(60_000), Some(60_000), None]);
+        let widths = lm.calculate_actual_widths(120);
+        assert_eq!(widths, vec![60_000, 60_000, 0]);
+        lm.redistribute_widths_proportionally(120);
+        let total: u32 = lm
+            .panel_groups
+            .iter()
+            .map(|g| u32::from(g.width.unwrap()))
+            .sum();
+        assert!(total <= 120, "{total}");
+    }
+
     /// Regression: dividers were placed at the sum of the stored widths,
     /// while the groups are drawn where the layout solver puts them. Three
     /// groups wanting 20 columns each in 50 columns are squeezed, and an
