@@ -1,0 +1,1 @@
+- **A vault file cannot make unlocking take gigabytes.** The Argon2 settings in `vault.toml` were taken as written, so an edited file could ask for any amount of memory and passes. Settings above 1 GiB, 10 passes or 16 lanes are refused as a malformed vault.

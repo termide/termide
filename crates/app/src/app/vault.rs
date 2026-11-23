@@ -250,7 +250,12 @@ impl VaultState {
             return Ok(None);
         };
         match &mut self.vault {
-            Some(v) => v.reload()?,
+            Some(v) => match v.reload() {
+                // Deleted (the way out of a forgotten master password):
+                // forget it, so the next save asks for a new master password.
+                Err(termide_secrets::Error::Gone) => self.vault = Vault::open(&path)?,
+                r => r?,
+            },
             None => self.vault = Vault::open(&path)?,
         }
         Ok(self.vault.as_mut())
@@ -388,6 +393,9 @@ impl App {
 
     fn vault_error(&mut self, e: &termide_secrets::Error) {
         log::warn!("password vault: {e}");
+        if matches!(e, termide_secrets::Error::Gone) {
+            self.vault.vault = None;
+        }
         self.state
             .set_error(termide_i18n::t().vault_error(&e.to_string()));
     }
@@ -1308,6 +1316,26 @@ mod tests {
         assert!(!state.lock_if_idle(Some(Duration::from_secs(3600))));
         assert!(state.is_unlocked());
         assert!(state.lock_if_idle(Some(Duration::ZERO)));
+        assert!(!state.is_unlocked());
+    }
+
+    #[test]
+    fn a_vault_deleted_while_open_is_forgotten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vault.toml");
+        let mut state = VaultState::new(Some(path.clone()));
+        let fast = KdfParams {
+            m_cost: 64,
+            t_cost: 1,
+            p_cost: 1,
+        };
+        state.vault = Some(Vault::create(&path, "forgotten", fast).unwrap());
+        std::fs::remove_file(&path).unwrap();
+        // No vault: the next save asks for a new master password instead of
+        // re-creating the file under the forgotten one.
+        assert!(state.current().unwrap().is_none());
+        assert!(state.vault.is_none());
+        assert!(!path.exists());
         assert!(!state.is_unlocked());
     }
 }
