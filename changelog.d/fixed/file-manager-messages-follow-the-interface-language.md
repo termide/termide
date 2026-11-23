@@ -1,1 +1,0 @@
-- **More file manager messages follow the interface language.** The title of the rename-by-pattern window, the error when a new file or folder cannot be created, and the summary after creating symlinks were in English whatever the language; the Thai Checkout button read in English too.

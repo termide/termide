@@ -1,1 +1,1 @@
-- **The Always detachable setting says it takes effect after a restart**, as the Option as Alt one does: termide reads it only when it starts.
+- **The Always detachable setting says it takes effect after a restart.** Like the Option as Alt setting, it is read only when termide starts.

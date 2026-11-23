@@ -1,1 +1,0 @@
-- **Thai and Hindi agent messages read correctly.** A number of them, mostly around forking a session and carrying on delegated tasks, had broken words, misplaced characters or romanised text mixed into the script.
