@@ -44,7 +44,13 @@ impl RenamePattern {
         Self { template }
     }
 
-    /// Apply pattern to filename
+    /// Apply pattern to filename.
+    ///
+    /// The template is read once, left to right, so text a placeholder puts
+    /// in — a name holding `$I` — is never expanded again. `$0` is the whole
+    /// name, `$1`..`$9` its dot-separated parts from the left, `$-1`..`$-9`
+    /// from the right (empty past the last part), `$I` the counter, `$C`
+    /// and `$M` the creation and modification times. Any other `$` is kept.
     pub fn apply(
         &self,
         original_name: &str,
@@ -52,45 +58,47 @@ impl RenamePattern {
         created: Option<SystemTime>,
         modified: Option<SystemTime>,
     ) -> String {
-        // Collect parts without allocating Strings - just &str slices
         let parts: Vec<&str> = original_name.split('.').collect();
-        let mut result = self.template.clone();
-
-        // Replace $0 (full name)
-        result = result.replace("$0", original_name);
-
-        // Replace $1-9 (parts from left)
-        for i in 1..=9 {
-            let placeholder = format!("${}", i);
-            let value = parts.get(i - 1).copied().unwrap_or("");
-            result = result.replace(&placeholder, value);
+        let digit = |c: Option<char>| c.and_then(|c| c.to_digit(10)).map(|d| d as usize);
+        let mut result = String::with_capacity(self.template.len() + original_name.len());
+        let mut rest = self.template.as_str();
+        while let Some(at) = rest.find('$') {
+            result.push_str(&rest[..at]);
+            let after = &rest[at + 1..];
+            let mut chars = after.chars();
+            let first = chars.next();
+            // (expansion, bytes of the template consumed after `$`)
+            let expanded: Option<(String, usize)> = match first {
+                Some('0') => Some((original_name.to_string(), 1)),
+                Some('I') => Some((counter.to_string(), 1)),
+                Some('C') => Some((created.map(Self::format_time).unwrap_or_default(), 1)),
+                Some('M') => Some((modified.map(Self::format_time).unwrap_or_default(), 1)),
+                Some('-') => match digit(chars.next()) {
+                    Some(n) if n > 0 => {
+                        let part = parts
+                            .len()
+                            .checked_sub(n)
+                            .and_then(|i| parts.get(i))
+                            .copied()
+                            .unwrap_or("");
+                        Some((part.to_string(), 2))
+                    }
+                    _ => None,
+                },
+                c => digit(c).map(|n| (parts.get(n - 1).copied().unwrap_or("").to_string(), 1)),
+            };
+            match expanded {
+                Some((text, used)) => {
+                    result.push_str(&text);
+                    rest = &after[used..];
+                }
+                None => {
+                    result.push('$');
+                    rest = after;
+                }
+            }
         }
-
-        // Replace $-1 to $-9 (parts from right)
-        for i in 1..=9 {
-            let placeholder = format!("$-{}", i);
-            let idx = parts.len().saturating_sub(i);
-            let value = parts.get(idx).copied().unwrap_or("");
-            result = result.replace(&placeholder, value);
-        }
-
-        // Replace $I (counter)
-        result = result.replace("$I", &counter.to_string());
-
-        // Replace $C (creation time)
-        if let Some(time) = created {
-            result = result.replace("$C", &Self::format_time(time));
-        } else {
-            result = result.replace("$C", "");
-        }
-
-        // Replace $M (modification time)
-        if let Some(time) = modified {
-            result = result.replace("$M", &Self::format_time(time));
-        } else {
-            result = result.replace("$M", "");
-        }
-
+        result.push_str(rest);
         result
     }
 
@@ -578,6 +586,35 @@ mod tests {
     fn test_rename_pattern_no_extension() {
         let pattern = RenamePattern::new("$1_backup".to_string());
         assert_eq!(pattern.preview("README"), "README_backup");
+    }
+
+    #[test]
+    fn inserted_text_is_not_expanded_again() {
+        let pattern = RenamePattern::new("$0".to_string());
+        assert_eq!(pattern.preview("report$I.txt"), "report$I.txt");
+        assert_eq!(pattern.preview("a$1$-1$C$M$0.txt"), "a$1$-1$C$M$0.txt");
+        let pattern = RenamePattern::new("$1-$I.$-1".to_string());
+        assert_eq!(
+            pattern.apply("pay$Iroll.$0", 7, None, None),
+            "pay$Iroll-7.$0"
+        );
+    }
+
+    #[test]
+    fn parts_past_the_last_are_empty() {
+        let pattern = RenamePattern::new("[$-3][$-2][$-1]".to_string());
+        assert_eq!(pattern.preview("file.txt"), "[][file][txt]");
+        let pattern = RenamePattern::new("[$-9]".to_string());
+        assert_eq!(pattern.preview("a.b.c"), "[]");
+    }
+
+    #[test]
+    fn unknown_and_trailing_dollars_are_kept() {
+        let pattern = RenamePattern::new("$x_$-_$-0_$".to_string());
+        assert_eq!(pattern.preview("f.txt"), "$x_$-_$-0_$");
+        // `$12` is part 1 followed by "2", as before.
+        let pattern = RenamePattern::new("$12".to_string());
+        assert_eq!(pattern.preview("f.txt"), "f2");
     }
 
     #[test]
