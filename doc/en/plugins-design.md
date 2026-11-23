@@ -89,9 +89,10 @@ enabled = false
   modes against its own config. There is no shared daemon, so state never
   crosses projects. A detached instance keeps its plugins in the server half.
 - **Startup:** termide sends `initialize` (protocol version, project root,
-  termide version, the plugin's settings). The plugin answers with its
-  capabilities: the events it subscribes to and the commands, status items and
-  agent tools it contributes.
+  termide version, the plugin's settings, the interface's locale). The plugin
+  answers with its capabilities: the events it subscribes to and the commands,
+  agent tools and editor providers it contributes. Status items are not among
+  them: the plugin sets them later with `status/set`.
 - **Crashes:** a crashed plugin is restarted with backoff. After N crashes in a
   window it is disabled for the session and the user is notified. A broken
   plugin never blocks termide, the same rule that agent hooks follow.

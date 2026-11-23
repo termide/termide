@@ -8,6 +8,8 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
+use termide_i18n::runtime::RuntimeTranslation;
+use termide_i18n::Translation;
 use termide_plugins::protocol::{self, events};
 use termide_plugins::rpc::RpcError;
 
@@ -17,20 +19,31 @@ use crate::termide::{unknown_method, Handler, Termide};
 /// The status bar item's id.
 const STATUS: &str = "p4";
 
+/// The texts the user reads, in the language `initialize` named (its
+/// `locale`); English for one termide does not know. The plugin keeps its
+/// own rather than switching the process-wide language. What the agent
+/// reads (tool descriptions and results) stays English.
+#[must_use]
+pub fn translation(locale: &str) -> RuntimeTranslation {
+    RuntimeTranslation::new(locale)
+        .or_else(|_| RuntimeTranslation::new("en"))
+        .expect("English is built in")
+}
+
 /// The answer to `initialize`.
 #[must_use]
-pub fn contributions() -> Value {
+pub fn contributions(tr: &dyn Translation) -> Value {
     json!({
         "subscriptions": [
             events::FILE_OPENED, events::EDITOR_FOCUSED, events::FILE_CLOSED, events::FILE_SAVED,
             events::FILE_WILL_EDIT,
         ],
         "commands": [
-            { "id": "edit", "title": "Open the file for edit or add" },
-            { "id": "revert", "title": "Revert the file" },
-            { "id": "diff", "title": "Show the file's changes" },
-            { "id": "opened", "title": "Opened files", "replaces": "open_git_status" },
-            { "id": "sync", "title": "Sync the workspace" },
+            { "id": "edit", "title": tr.p4_cmd_edit() },
+            { "id": "revert", "title": tr.p4_cmd_revert() },
+            { "id": "diff", "title": tr.p4_cmd_diff() },
+            { "id": "opened", "title": tr.p4_opened_files(), "replaces": "open_git_status" },
+            { "id": "sync", "title": tr.p4_sync_workspace() },
         ],
         "tools": [
             {
@@ -72,6 +85,8 @@ pub struct Perforce {
     panel: Mutex<OpenedPanel>,
     /// What termide was told of the files.
     marks: Mutex<Marks>,
+    /// The user's texts, see [`translation`].
+    tr: RuntimeTranslation,
 }
 
 /// What termide was last told of the files, so only changes are sent.
@@ -169,12 +184,13 @@ impl Handler for Perforce {
 
 impl Perforce {
     #[must_use]
-    pub fn new(termide: Termide, p4: P4) -> Self {
+    pub fn new(termide: Termide, p4: P4, tr: RuntimeTranslation) -> Self {
         Self {
             termide,
             p4,
             panel: Mutex::new(OpenedPanel::default()),
             marks: Mutex::new(Marks::default()),
+            tr,
         }
     }
 
@@ -205,7 +221,7 @@ impl Perforce {
         let text = match self.p4.fstat(path) {
             Ok(record) => {
                 self.refresh_base(path, record.as_ref());
-                describe(record.as_ref())
+                describe(record.as_ref(), &self.tr)
             }
             Err(error) => {
                 eprintln!("perforce: fstat {}: {error}", path.display());
@@ -329,8 +345,8 @@ impl Perforce {
         if lower.contains("login")
             && (text.contains("expired") || text.contains("invalid") || text.contains("P4PASSWD"))
         {
-            let question = format!("{text}\n\nRun `p4 login` in a terminal?");
-            if self.termide.confirm("Login", &question) {
+            let question = self.tr.p4_login_question_fmt(text);
+            if self.termide.confirm(self.tr.p4_login_title(), &question) {
                 self.termide.run_in_terminal(
                     &format!("{} login", shell_word(&self.p4.program().to_string_lossy())),
                     self.root(),
@@ -345,13 +361,12 @@ impl Perforce {
     fn active_path(&self) -> Option<PathBuf> {
         let active = self.termide.active();
         let Some(path) = active["path"].as_str().filter(|p| !p.is_empty()) else {
-            self.termide
-                .notify("Open a file in the editor first", "info");
+            self.termide.notify(self.tr.p4_open_file_first(), "info");
             return None;
         };
         let path = PathBuf::from(path);
         if !self.p4.in_workspace(&path) {
-            let text = format!("{} is not in a Perforce workspace", self.p4.relative(&path));
+            let text = self.tr.p4_not_in_workspace_fmt(&self.p4.relative(&path));
             self.termide.notify(&text, "error");
             return None;
         }
@@ -363,7 +378,7 @@ impl Perforce {
             return true;
         }
         self.termide
-            .notify("This project is not in a Perforce workspace", "error");
+            .notify(self.tr.p4_project_not_in_workspace(), "error");
         false
     }
 
@@ -442,29 +457,27 @@ impl Perforce {
             }
         };
         let name = self.p4.relative(path);
-        let losing = if modified {
-            "losing its saved and unsaved changes"
-        } else {
-            "losing its changes"
-        };
-        let revert = if action == "add" {
-            format!("Revert it in Perforce: no longer add it, {losing}")
-        } else {
-            format!("Revert it in Perforce, {losing}")
-        };
+        let tr = &self.tr;
+        let revert = match (action == "add", modified) {
+            (true, true) => tr.p4_revert_add_modified(),
+            (true, false) => tr.p4_revert_add(),
+            (false, true) => tr.p4_revert_modified(),
+            (false, false) => tr.p4_revert_edit(),
+        }
+        .to_string();
         // The harmless choices first, where `Enter` lands.
         let (title, mut items) = if modified {
             (
-                format!("Stop editing {name}: it has unsaved changes"),
+                tr.p4_stop_editing_unsaved_fmt(&name),
                 vec![
-                    format!("Save, then stop editing: keep it opened for {action}"),
-                    format!("Discard the unsaved changes: keep it opened for {action}"),
+                    tr.p4_save_then_stop_fmt(&action),
+                    tr.p4_discard_then_stop_fmt(&action),
                 ],
             )
         } else {
             (
-                format!("Stop editing {name}"),
-                vec![format!("Only stop editing: keep it opened for {action}")],
+                tr.p4_stop_editing_fmt(&name),
+                vec![tr.p4_only_stop_fmt(&action)],
             )
         };
         items.push(revert);
@@ -513,8 +526,11 @@ impl Perforce {
         let record = self.p4.fstat(path)?;
         let name = self.p4.relative(path);
         let Some(record) = record else {
-            let question = format!("{name} is not in the depot. Open it for add?");
-            if !self.termide.confirm("Open for add", &question) {
+            let question = self.tr.p4_add_question_fmt(&name);
+            if !self
+                .termide
+                .confirm(self.tr.p4_open_for_add_title(), &question)
+            {
                 return Ok(None);
             }
             self.add(path)?;
@@ -522,17 +538,20 @@ impl Perforce {
         };
         if let Some(action) = record.get("action") {
             self.termide
-                .notify(&format!("{name} is already opened for {action}"), "info");
+                .notify(&self.tr.p4_already_opened_fmt(&name, action), "info");
             return Ok(None);
         }
         if let Some(locker) = record.get("otherLock0") {
             self.termide
-                .notify(&format!("{name} is locked by {locker}"), "error");
+                .notify(&self.tr.p4_locked_by_fmt(&name, locker), "error");
             return Ok(None);
         }
         if let Some(other) = record.get("otherOpen0") {
-            let question = format!("{name} is also opened by {other}. Open it for edit too?");
-            if !self.termide.confirm("Open for edit", &question) {
+            let question = self.tr.p4_also_opened_question_fmt(&name, other);
+            if !self
+                .termide
+                .confirm(self.tr.p4_open_for_edit_title(), &question)
+            {
                 return Ok(None);
             }
         }
@@ -556,7 +575,7 @@ impl Perforce {
             .fstat(&path)?
             .is_some_and(|record| record.contains_key("action"));
         if !opened {
-            let text = format!("{} is not opened", self.p4.relative(&path));
+            let text = self.tr.p4_not_opened_fmt(&self.p4.relative(&path));
             self.termide.notify(&text, "info");
             return Ok(());
         }
@@ -568,11 +587,8 @@ impl Perforce {
 
     /// `p4 revert`, asked about first; whether it was done.
     fn revert(&self, path: &Path) -> Result<bool, P4Error> {
-        let question = format!(
-            "Revert {}? The changes made to it since it was opened are lost.",
-            self.p4.relative(path)
-        );
-        if !self.termide.confirm("Revert", &question) {
+        let question = self.tr.p4_revert_question_fmt(&self.p4.relative(path));
+        if !self.termide.confirm(self.tr.p4_revert_title(), &question) {
             return Ok(false);
         }
         self.p4
@@ -610,7 +626,7 @@ impl Perforce {
             .file_name()
             .map_or_else(String::new, |n| n.to_string_lossy().into_owned());
         self.termide
-            .open_diff(&format!("diff {file}"), &diff)
+            .open_diff(&self.tr.p4_diff_title_fmt(&file), &diff)
             .map_err(P4Error)?;
         Ok(())
     }
@@ -690,13 +706,14 @@ impl Perforce {
                 .or_default()
                 .push(index);
         }
+        let tr = &self.tr;
         let groups: Vec<Value> = groups
             .iter()
             .map(|((_, change), indices)| {
                 let label = if change == "default" {
-                    "Default changelist".to_string()
+                    tr.p4_default_changelist().to_string()
                 } else {
-                    format!("Change {change}")
+                    tr.p4_change_fmt(change)
                 };
                 let detail = descriptions.get(change).map_or("", String::as_str);
                 let items: Vec<Value> = indices
@@ -711,9 +728,9 @@ impl Perforce {
                             "detail": action,
                             "status": status_of(action),
                             "actions": [
-                                { "label": "Open", "action": format!("open-{index}"), "key": "edit" },
-                                { "label": "Diff", "action": format!("diff-{index}"), "key": "view" },
-                                { "label": "Revert", "action": format!("revert-{index}"), "key": "revert" },
+                                { "label": tr.p4_action_open(), "action": format!("open-{index}"), "key": "edit" },
+                                { "label": tr.p4_action_diff(), "action": format!("diff-{index}"), "key": "view" },
+                                { "label": tr.p4_revert_title(), "action": format!("revert-{index}"), "key": "revert" },
                             ],
                         })
                     })
@@ -721,18 +738,18 @@ impl Perforce {
                 json!({
                     "label": label,
                     "detail": detail,
-                    "actions": [{ "label": "Submit", "action": format!("submit-{change}") }],
+                    "actions": [{ "label": tr.p4_submit(), "action": format!("submit-{change}") }],
                     "items": items,
                 })
             })
             .collect();
         Ok(json!({
             "groups": groups,
-            "empty": "No files are opened in this project.",
+            "empty": tr.p4_no_opened_files(),
             "refresh": "refresh",
             "buttons": [
-                { "label": "Refresh", "action": "refresh" },
-                { "label": "Sync the workspace", "action": "sync" },
+                { "label": tr.p4_refresh(), "action": "refresh" },
+                { "label": tr.p4_sync_workspace(), "action": "sync" },
             ],
         }))
     }
@@ -744,7 +761,7 @@ impl Perforce {
             None => {
                 let id = self
                     .termide
-                    .open_list("Opened files", list)
+                    .open_list(self.tr.p4_opened_files(), list)
                     .map_err(P4Error)?;
                 panel.id = Some(id);
                 Ok(())
@@ -807,17 +824,23 @@ impl Perforce {
             };
             out
         } else {
-            if !self
-                .termide
-                .confirm("Submit", &format!("Submit change {change}?"))
-            {
+            if !self.termide.confirm(
+                self.tr.p4_submit(),
+                &self.tr.p4_submit_change_question_fmt(change),
+            ) {
                 return Ok(());
             }
             self.p4.run(&["submit", "-c", change], None)?
         };
         let out = out.trim();
-        self.termide
-            .message("Submitted", if out.is_empty() { "Done." } else { out });
+        self.termide.message(
+            self.tr.p4_submitted(),
+            if out.is_empty() {
+                self.tr.p4_done()
+            } else {
+                out
+            },
+        );
         Ok(())
     }
 
@@ -843,11 +866,11 @@ impl Perforce {
             })
             .collect();
         let answer = self.termide.dialog(
-            "Submit the default changelist",
+            self.tr.p4_submit_default_title(),
             json!({
-                "input": { "label": "Description of the change", "lines": 4 },
+                "input": { "label": self.tr.p4_change_description(), "lines": 4 },
                 "list": { "items": items, "pick": "many" },
-                "buttons": ["Submit", "Cancel"],
+                "buttons": [self.tr.p4_submit(), self.tr.ui_cancel()],
             }),
         );
         let Some(answer) = answer.filter(|a| a["button"] == 0) else {
@@ -856,7 +879,7 @@ impl Perforce {
         let description = answer["text"].as_str().unwrap_or_default().trim();
         if description.is_empty() {
             self.termide
-                .message("Not submitted", "A change needs a description.");
+                .message(self.tr.p4_not_submitted(), self.tr.p4_needs_description());
             return Ok(None);
         }
         let picked: Vec<&str> = answer["checked"]
@@ -869,7 +892,7 @@ impl Perforce {
             .collect();
         if picked.is_empty() {
             self.termide
-                .message("Not submitted", "No files were picked.");
+                .message(self.tr.p4_not_submitted(), self.tr.p4_no_files_picked());
             return Ok(None);
         }
         if picked.len() == files.len() {
@@ -968,11 +991,11 @@ impl Perforce {
 }
 
 /// The status bar text for a file's record; `None` for a file the depot
-/// does not have.
+/// does not have. termide puts the plugin's name before it.
 #[must_use]
-pub fn describe(record: Option<&Record>) -> String {
+pub fn describe(record: Option<&Record>, tr: &dyn Translation) -> String {
     let Some(record) = record else {
-        return "p4: not in depot".to_string();
+        return tr.p4_status_not_in_depot().to_string();
     };
     let action = record.get("action");
     let mut parts = Vec::new();
@@ -988,7 +1011,7 @@ pub fn describe(record: Option<&Record>) -> String {
                 rev = format!("{action} {rev}");
             }
             if have != head {
-                rev.push_str(" (out of date)");
+                rev = tr.p4_status_out_of_date_fmt(&rev);
             }
             parts.push(rev);
         }
@@ -997,11 +1020,11 @@ pub fn describe(record: Option<&Record>) -> String {
     }
     if action.is_some() {
         if let Some(change) = record.get("change").filter(|c| *c != "default") {
-            parts.push(format!("change {change}"));
+            parts.push(tr.p4_status_change_fmt(change));
         }
     }
     if let Some(locker) = record.get("otherLock0") {
-        parts.push(format!("locked by {locker}"));
+        parts.push(tr.p4_status_locked_by_fmt(locker));
     } else if let Some(other) = record.get("otherOpen0") {
         let others: usize = record
             .get("otherOpen")
@@ -1012,12 +1035,12 @@ pub fn describe(record: Option<&Record>) -> String {
         } else {
             String::new()
         };
-        parts.push(format!("also opened by {other}{more}"));
+        parts.push(tr.p4_status_also_opened_fmt(other, &more));
     }
     if record.contains_key("ourLock") {
-        parts.push("locked".to_string());
+        parts.push(tr.p4_status_locked().to_string());
     }
-    format!("p4: {}", parts.join(" · "))
+    parts.join(" · ")
 }
 
 /// `word` as one word for a shell: as it is when it holds nothing a shell
@@ -1114,39 +1137,70 @@ mod tests {
 
     #[test]
     fn the_status_says_revisions_actions_and_other_people() {
-        assert_eq!(describe(None), "p4: not in depot");
+        let en = translation("en");
+        assert_eq!(describe(None, &en), "not in depot");
         assert_eq!(
-            describe(Some(&record(&[("haveRev", "3"), ("headRev", "5")]))),
-            "p4: #3/5 (out of date)"
+            describe(Some(&record(&[("haveRev", "3"), ("headRev", "5")])), &en),
+            "#3/5 (out of date)"
         );
         assert_eq!(
-            describe(Some(&record(&[
-                ("haveRev", "1"),
-                ("headRev", "1"),
-                ("action", "edit"),
-                ("change", "12"),
-                ("otherOpen0", "bob@ws"),
-                ("otherOpen", "3"),
-            ]))),
-            "p4: edit #1/1 · change 12 · also opened by bob@ws +2"
+            describe(
+                Some(&record(&[
+                    ("haveRev", "1"),
+                    ("headRev", "1"),
+                    ("action", "edit"),
+                    ("change", "12"),
+                    ("otherOpen0", "bob@ws"),
+                    ("otherOpen", "3"),
+                ])),
+                &en
+            ),
+            "edit #1/1 · change 12 · also opened by bob@ws +2"
         );
         assert_eq!(
-            describe(Some(&record(&[
-                ("action", "add"),
-                ("change", "default"),
-                ("ourLock", ""),
-            ]))),
-            "p4: add · locked"
+            describe(
+                Some(&record(&[
+                    ("action", "add"),
+                    ("change", "default"),
+                    ("ourLock", ""),
+                ])),
+                &en
+            ),
+            "add · locked"
         );
         assert_eq!(
-            describe(Some(&record(&[
-                ("haveRev", "2"),
-                ("headRev", "2"),
-                ("otherLock0", "ann@ws"),
-                ("otherOpen0", "ann@ws"),
-            ]))),
-            "p4: #2/2 · locked by ann@ws"
+            describe(
+                Some(&record(&[
+                    ("haveRev", "2"),
+                    ("headRev", "2"),
+                    ("otherLock0", "ann@ws"),
+                    ("otherOpen0", "ann@ws"),
+                ])),
+                &en
+            ),
+            "#2/2 · locked by ann@ws"
         );
+    }
+
+    /// The user's texts follow `initialize`'s `locale`; one termide does
+    /// not know is English.
+    #[test]
+    fn the_texts_follow_the_locale_termide_names() {
+        let ru = translation("ru");
+        assert_eq!(
+            describe(Some(&record(&[("haveRev", "3"), ("headRev", "5")])), &ru),
+            "#3/5 (устарел)"
+        );
+        assert_eq!(
+            contributions(&ru)["commands"][0]["title"],
+            "Открыть файл для правки или добавления"
+        );
+        let unknown = translation("xx");
+        assert_eq!(
+            contributions(&unknown)["commands"][0]["title"],
+            "Open the file for edit or add"
+        );
+        assert_eq!(describe(None, &unknown), "not in depot");
     }
 
     #[test]

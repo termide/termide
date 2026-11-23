@@ -6198,6 +6198,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "termide-fsutil",
+ "termide-i18n",
  "termide-plugins",
 ]
 

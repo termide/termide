@@ -1,0 +1,1 @@
+- **Plugins learn the interface's language, and the Perforce plugin speaks it.** `initialize` carries `locale`, the language of termide's interface, and a change of language starts the plugins afresh. The built-in Perforce plugin's commands, questions, panel and status bar texts follow it in all 15 languages.

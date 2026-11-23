@@ -38,6 +38,9 @@ pub struct Launch {
     pub env: BTreeMap<String, String>,
     /// The `settings` handed over in `initialize`.
     pub settings: Value,
+    /// The language termide's interface speaks (`en`, `ru`, …), handed over
+    /// in `initialize` as `locale`; a change starts the plugin afresh.
+    pub locale: String,
 }
 
 /// A plugin running for a project.
@@ -840,6 +843,7 @@ mod tests {
             args: vec![part.into()],
             env: BTreeMap::new(),
             settings: json!({}),
+            locale: "en".into(),
         }
     }
 
