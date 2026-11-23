@@ -261,6 +261,10 @@ arrives in one piece.
 | `Ctrl+X`          | Cut selected text                          |
 | `Ctrl+V`          | Paste from system clipboard                |
 
+Over SSH or on a host with no display server a copy reaches your terminal's
+clipboard through OSC 52, which termide cannot read back; `Ctrl+V` inside
+termide then pastes the text termide last copied.
+
 ## Sending to the Agent
 
 While text is selected, the panel's `[≡]` menu (`Alt+K`) offers **Send to

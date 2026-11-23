@@ -251,6 +251,42 @@ fn osc52_copy(text: &str) -> Result<(), String> {
         .map_err(|e| format!("Failed to write OSC 52: {}", e))
 }
 
+/// The last text copied that reached no system clipboard — OSC 52 only:
+/// without a display server termide cannot read the terminal's clipboard
+/// back, so a paste inside termide takes it from here.
+static LOCAL: Mutex<Option<String>> = Mutex::new(None);
+
+fn set_local(text: Option<&str>) {
+    if let Ok(mut held) = LOCAL.lock() {
+        *held = text.map(str::to_owned);
+    }
+}
+
+fn local_text() -> Option<String> {
+    LOCAL.lock().ok().and_then(|held| held.clone())
+}
+
+/// What a paste yields: the system clipboard when there is one to read,
+/// else the text last copied through OSC 52 alone.
+fn pick_paste(display: bool, system: impl FnOnce() -> Option<String>) -> Option<String> {
+    if display {
+        if let Some(text) = system() {
+            return Some(text);
+        }
+    }
+    local_text()
+}
+
+/// Copy through OSC 52 alone, keeping the text for pastes inside termide.
+fn osc52_copy_kept(text: &str) -> Result<(), String> {
+    let result = osc52_copy(text);
+    if result.is_ok() {
+        set_local(Some(text));
+        clear_cut();
+    }
+    result
+}
+
 /// Detect whether a display server is available on Linux.
 ///
 /// Returns true when `$DISPLAY` or `$WAYLAND_DISPLAY` is set, indicating
@@ -289,17 +325,14 @@ pub fn copy(text: &str) -> Result<(), String> {
     // Without a display server arboard cannot reach the clipboard — go
     // straight to OSC 52 which the terminal emulator handles locally.
     if !has_display_server() {
-        let result = osc52_copy(text);
-        if result.is_ok() {
-            clear_cut();
-        }
-        return result;
+        return osc52_copy_kept(text);
     }
 
     // Try arboard first (works with display server)
     let arboard_result = copy_arboard(text);
 
     if arboard_result.is_ok() {
+        set_local(None);
         clear_cut();
         return Ok(());
     }
@@ -309,11 +342,7 @@ pub fn copy(text: &str) -> Result<(), String> {
         "arboard failed ({}), falling back to OSC 52",
         arboard_result.unwrap_err()
     );
-    let result = osc52_copy(text);
-    if result.is_ok() {
-        clear_cut();
-    }
-    result
+    osc52_copy_kept(text)
 }
 
 /// Copy text using arboard (requires display server).
@@ -393,6 +422,7 @@ pub fn copy_files(paths: &[PathBuf]) -> Result<(), String> {
         log::warn!("arboard file_list failed: {}", e);
         e
     })?;
+    set_local(None);
 
     // The clipboard now holds this list, so any earlier cut is gone.
     // `cut_files` sets its marker after this returns, so a cut survives.
@@ -574,12 +604,19 @@ pub fn paste_text_or_paths() -> Option<String> {
 /// Returns None if clipboard is empty or inaccessible.
 ///
 /// Note: OSC 52 paste (reading from terminal) is not supported because it requires
-/// async terminal response handling. Paste in SSH sessions relies on the terminal
-/// emulator's bracketed paste (Ctrl+V in the terminal sends the text directly).
+/// async terminal response handling. Without a display server — or when the
+/// system clipboard cannot be read — the text termide last copied through
+/// OSC 52 is returned, so a copy and paste inside termide works; text copied
+/// elsewhere arrives through the terminal emulator's bracketed paste.
 pub fn paste() -> Option<String> {
     if let Some(text) = fake_text() {
         return Some(text);
     }
+    pick_paste(has_display_server(), paste_system)
+}
+
+/// Read the system clipboard through arboard.
+fn paste_system() -> Option<String> {
     let mut clipboard = get_clipboard().ok()?.lock().ok()?;
 
     #[cfg(target_os = "linux")]
@@ -641,6 +678,28 @@ mod tests {
     fn text_to_paths_handles_crlf_from_foreign_clipboards() {
         let paths = text_to_paths("/a\r\n/b\r\n");
         assert_eq!(paths, vec![PathBuf::from("/a"), PathBuf::from("/b")]);
+    }
+
+    /// Without a display server a copy goes out through OSC 52 alone; a
+    /// paste inside termide still gets it back.
+    #[test]
+    fn a_copy_without_a_system_clipboard_is_pasted_from_memory() {
+        set_local(Some("copied over OSC 52"));
+        assert_eq!(
+            pick_paste(false, || panic!("no system clipboard to read")).as_deref(),
+            Some("copied over OSC 52")
+        );
+        // A readable system clipboard wins; an unreadable one falls back.
+        assert_eq!(
+            pick_paste(true, || Some("system".into())).as_deref(),
+            Some("system")
+        );
+        assert_eq!(
+            pick_paste(true, || None).as_deref(),
+            Some("copied over OSC 52")
+        );
+        set_local(None);
+        assert_eq!(pick_paste(false, || None), None);
     }
 
     #[test]

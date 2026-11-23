@@ -1,0 +1,1 @@
+- **Copy and paste inside termide work over SSH.** With no display server a copy went only to the terminal through OSC 52, which termide cannot read back, so `Ctrl+V` after `Ctrl+C` pasted nothing. termide now keeps what it copied and pastes it when there is no system clipboard to read.

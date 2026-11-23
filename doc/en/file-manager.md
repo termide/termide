@@ -270,7 +270,9 @@ then a folded `… N` — over the destination, so it says which files land and
 not only how many.
 
 Over SSH or on a headless host there is no display server, so the file
-flavor is unavailable and copying falls back to path text.
+flavor is unavailable and copying falls back to path text. That text goes to
+your terminal's clipboard through OSC 52, which termide cannot read back, so
+termide also keeps it: `Ctrl+V` inside termide pastes what it last copied.
 
 ### Cut and paste
 
