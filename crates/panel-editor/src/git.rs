@@ -10,6 +10,17 @@ use termide_buffer::TextBuffer;
 use termide_git::{load_original_async, GitDiffAsyncResult, GitDiffCache, LineStatus};
 use termide_theme::Theme;
 
+/// The breakpoint of a line, as the gutter shows it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BreakpointMark {
+    #[default]
+    None,
+    Set,
+    /// Set, but the running debugger could not place it (code not loaded,
+    /// or no code on the line).
+    Unverified,
+}
+
 /// LSP diagnostic marker information for gutter
 pub struct LspMarkerInfo {
     pub marker: char,
@@ -237,12 +248,13 @@ pub fn get_line_number_git_style(
 /// - ' ' (space) for no diagnostic or INFO/HINT
 /// - ● (red) for a breakpoint, which takes the cell over a diagnostic: the
 ///   diagnostic still shows on its virtual line
+/// - ○ (dimmed) for a breakpoint the running debugger could not set
 /// - → on a highlighted cell for the line a debugger stopped at, over both
 ///
 /// On Windows U+25B6 ▶ is outside WGL4; U+25BA ► is used instead.
 pub fn get_lsp_marker(
     diagnostic_severity: Option<lsp_types::DiagnosticSeverity>,
-    breakpoint: bool,
+    breakpoint: BreakpointMark,
     execution: bool,
     theme: &Theme,
 ) -> LspMarkerInfo {
@@ -250,16 +262,30 @@ pub fn get_lsp_marker(
     if execution {
         return LspMarkerInfo {
             marker: '→',
-            color: if breakpoint { theme.error } else { theme.bg },
+            color: match breakpoint {
+                BreakpointMark::Set => theme.error,
+                BreakpointMark::Unverified => theme.disabled,
+                BreakpointMark::None => theme.bg,
+            },
             bg: Some(theme.warning),
         };
     }
-    if breakpoint {
-        return LspMarkerInfo {
-            marker: '●',
-            color: theme.error,
-            bg: None,
-        };
+    match breakpoint {
+        BreakpointMark::Set => {
+            return LspMarkerInfo {
+                marker: '●',
+                color: theme.error,
+                bg: None,
+            }
+        }
+        BreakpointMark::Unverified => {
+            return LspMarkerInfo {
+                marker: '○',
+                color: theme.disabled,
+                bg: None,
+            }
+        }
+        BreakpointMark::None => {}
     }
     if let Some(severity) = diagnostic_severity {
         use lsp_types::DiagnosticSeverity;

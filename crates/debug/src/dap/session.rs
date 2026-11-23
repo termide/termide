@@ -24,6 +24,9 @@ use crate::Breakpoint;
 const MAX_OUTPUT_LINES: usize = 5000;
 /// Frames asked for at a stop.
 const STACK_DEPTH: u64 = 64;
+/// How long an adapter that hung up while starting is read for its last
+/// lines.
+const LAST_LINES_WAIT: Duration = Duration::from_millis(200);
 
 /// What to debug, and how.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,12 +148,43 @@ pub struct OutputLine {
     pub text: String,
 }
 
+/// What the adapter made of one breakpoint it was sent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BreakpointState {
+    /// The line it was asked for, 1-based.
+    pub line: usize,
+    /// Whether the adapter could set it; one in code not loaded yet, or on
+    /// a line with no code, is not.
+    pub verified: bool,
+    /// The line the adapter set it on, when it says; may differ from `line`
+    /// (a blank line moves to the next statement).
+    pub actual_line: Option<usize>,
+    /// Why it is not verified, when the adapter says.
+    pub message: Option<String>,
+    /// The adapter's id for it, which a `breakpoint` event names.
+    id: Option<i64>,
+}
+
+/// A step or continue on its way: what to go back to if the adapter
+/// refuses it.
+#[derive(Debug, Clone)]
+struct Resume {
+    /// The generation the resume moved the session to.
+    generation: u64,
+    reason: String,
+    description: Option<String>,
+}
+
 /// What a response that is still to come is for.
 #[derive(Debug, Clone)]
 enum Pending {
     Initialize,
     Launch,
-    SetBreakpoints,
+    /// The breakpoints of `path`, `lines` as sent.
+    SetBreakpoints {
+        path: PathBuf,
+        lines: Vec<usize>,
+    },
     ConfigurationDone,
     /// Threads at `generation`; `then_stack` asks for the stack of the first.
     Threads {
@@ -169,8 +203,8 @@ enum Pending {
         path: Vec<usize>,
     },
     Evaluate,
-    /// continue, next, stepIn, stepOut, pause.
-    Control,
+    /// continue, next, stepIn, stepOut — with the stop they left — or pause.
+    Control(Option<Resume>),
     Disconnect,
 }
 
@@ -209,6 +243,9 @@ pub struct Session {
     configured: bool,
     /// Lines last sent per file, to send only changes.
     sent: BTreeMap<PathBuf, Vec<usize>>,
+    /// What the adapter answered for the breakpoints last sent, per file;
+    /// a file whose answer is still to come has none.
+    breakpoint_states: BTreeMap<PathBuf, Vec<BreakpointState>>,
     seq: i64,
     pending: HashMap<i64, Pending>,
     partial: Option<(OutputKind, String)>,
@@ -304,6 +341,7 @@ impl Session {
             capabilities: Value::Null,
             configured: false,
             sent: BTreeMap::new(),
+            breakpoint_states: BTreeMap::new(),
             seq: 0,
             pending: HashMap::new(),
             partial: None,
@@ -338,6 +376,32 @@ impl Session {
         }
         let frame = self.frames.get(self.selected_frame)?;
         Some((frame.path.clone()?, frame.line))
+    }
+
+    /// The breakpoints the adapter could not set while the session is
+    /// active, by file (1-based lines as sent): what editors show apart.
+    pub fn unverified_breakpoints(&self) -> Vec<(PathBuf, usize)> {
+        if !self.is_active() {
+            return Vec::new();
+        }
+        self.breakpoint_states
+            .iter()
+            .flat_map(|(path, states)| {
+                states
+                    .iter()
+                    .filter(|s| !s.verified)
+                    .map(move |s| (path.clone(), s.line))
+            })
+            .collect()
+    }
+
+    /// What the adapter answered for the breakpoints of `path`; empty
+    /// until it has.
+    pub fn breakpoint_states(&self, path: &Path) -> &[BreakpointState] {
+        self.breakpoint_states
+            .get(path)
+            .map(Vec::as_slice)
+            .unwrap_or_default()
     }
 
     /// Whether the program is on its way somewhere: building, starting,
@@ -391,6 +455,21 @@ impl Session {
         ));
         if let Some((path, line)) = self.execution_point() {
             out.push_str(&format!("At: {}:{line}\n", path.display()));
+        }
+        for (path, states) in &self.breakpoint_states {
+            for state in states {
+                let place = format!("{}:{}", path.display(), state.line);
+                if !state.verified {
+                    let why = state
+                        .message
+                        .as_deref()
+                        .map(|m| format!(" ({m})"))
+                        .unwrap_or_default();
+                    out.push_str(&format!("Breakpoint not set: {place}{why}\n"));
+                } else if let Some(actual) = state.actual_line.filter(|&l| l != state.line) {
+                    out.push_str(&format!("Breakpoint {place} set on line {actual}\n"));
+                }
+            }
         }
         if !self.frames.is_empty() {
             out.push_str("\nCall stack:\n");
@@ -711,14 +790,23 @@ impl Session {
     /// so wait for it to exit and read its last lines, then fail with them.
     fn failed_to_start(&mut self, queue: &mut VecDeque<Incoming>) {
         let exit = self.wait_for_adapter(Duration::from_millis(500));
+        // This runs on the UI thread: an adapter that keeps printing must
+        // not hold it, so its lines are read for a bounded time.
+        let deadline = Instant::now() + LAST_LINES_WAIT;
         let mut rest = VecDeque::new();
         loop {
             let next = match queue.pop_front() {
                 Some(incoming) => incoming,
-                None => match self.inbox.recv_timeout(Duration::from_millis(30)) {
-                    Ok(incoming) => incoming,
-                    Err(_) => break,
-                },
+                None => {
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if left.is_zero() {
+                        break;
+                    }
+                    match self.inbox.recv_timeout(left.min(Duration::from_millis(30))) {
+                        Ok(incoming) => incoming,
+                        Err(_) => break,
+                    }
+                }
             };
             match next {
                 Incoming::Log(line) => self.adapter_line(line),
@@ -893,6 +981,36 @@ impl Session {
                     self.changed();
                 }
                 Pending::Disconnect => {}
+                Pending::Control(Some(resume)) => {
+                    // The program never left the stop the session showed
+                    // it leaving.
+                    self.push_line(OutputKind::Error, text);
+                    if resume.generation == self.generation && self.status == Status::Running {
+                        self.status = Status::Stopped {
+                            reason: resume.reason,
+                            description: resume.description,
+                        };
+                        self.fetch_stop(self.thread_id);
+                    }
+                    self.changed();
+                }
+                Pending::SetBreakpoints { path, lines } => {
+                    log::debug!("Debug session: {text}");
+                    if self.sent.get(&path) == Some(&lines) {
+                        let states = lines
+                            .iter()
+                            .map(|&line| BreakpointState {
+                                line,
+                                verified: false,
+                                actual_line: None,
+                                message: Some(text.clone()),
+                                id: None,
+                            })
+                            .collect();
+                        self.breakpoint_states.insert(path, states);
+                        self.changed();
+                    }
+                }
                 _ => log::debug!("Debug session: {text}"),
             }
             return;
@@ -916,7 +1034,35 @@ impl Session {
                     self.changed();
                 }
             }
-            Pending::SetBreakpoints | Pending::Control | Pending::Disconnect => {}
+            Pending::SetBreakpoints { path, lines } => {
+                // An answer to lines since replaced is stale: the newer
+                // request's answer is still to come.
+                if self.sent.get(&path) != Some(&lines) {
+                    return;
+                }
+                let answered = body["breakpoints"].as_array().cloned().unwrap_or_default();
+                let states = lines
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &line)| {
+                        // DAP answers one entry per breakpoint sent, in order.
+                        let mut state = BreakpointState {
+                            line,
+                            verified: true,
+                            actual_line: None,
+                            message: None,
+                            id: None,
+                        };
+                        if let Some(answer) = answered.get(i) {
+                            apply_breakpoint(&mut state, answer);
+                        }
+                        state
+                    })
+                    .collect();
+                self.breakpoint_states.insert(path, states);
+                self.changed();
+            }
+            Pending::Control(_) | Pending::Disconnect => {}
             Pending::Threads {
                 generation,
                 then_stack,
@@ -1025,7 +1171,6 @@ impl Session {
                 );
             }
             "stopped" => {
-                self.generation += 1;
                 self.status = Status::Stopped {
                     reason: body["reason"].as_str().unwrap_or("pause").to_string(),
                     description: body["description"]
@@ -1033,24 +1178,30 @@ impl Session {
                         .or_else(|| body["text"].as_str())
                         .map(str::to_string),
                 };
-                self.frames.clear();
-                self.scopes.clear();
-                match body["threadId"].as_i64() {
-                    Some(thread) => {
-                        self.thread_id = Some(thread);
-                        self.request_stack();
+                self.fetch_stop(body["threadId"].as_i64());
+                self.changed();
+            }
+            "breakpoint" => {
+                let Some(id) = body["breakpoint"]["id"].as_i64() else {
+                    return;
+                };
+                let reason = body["reason"].as_str().unwrap_or_default();
+                let Some(state) = self
+                    .breakpoint_states
+                    .values_mut()
+                    .flatten()
+                    .find(|s| s.id == Some(id))
+                else {
+                    // One the adapter made itself ("new") is not the user's.
+                    return;
+                };
+                match reason {
+                    "changed" => apply_breakpoint(state, &body["breakpoint"]),
+                    "removed" => {
+                        state.verified = false;
+                        state.actual_line = None;
                     }
-                    None => {
-                        let generation = self.generation;
-                        self.request(
-                            "threads",
-                            json!({}),
-                            Pending::Threads {
-                                generation,
-                                then_stack: true,
-                            },
-                        );
-                    }
+                    _ => return,
                 }
                 self.changed();
             }
@@ -1114,6 +1265,31 @@ impl Session {
         self.changed();
     }
 
+    /// Fetch the stack of a new stop, of `thread` or, when no thread is
+    /// named, of the first the adapter lists.
+    fn fetch_stop(&mut self, thread: Option<i64>) {
+        self.generation += 1;
+        self.frames.clear();
+        self.scopes.clear();
+        match thread {
+            Some(thread) => {
+                self.thread_id = Some(thread);
+                self.request_stack();
+            }
+            None => {
+                let generation = self.generation;
+                self.request(
+                    "threads",
+                    json!({}),
+                    Pending::Threads {
+                        generation,
+                        then_stack: true,
+                    },
+                );
+            }
+        }
+    }
+
     fn request_stack(&mut self) {
         let Some(thread) = self.thread_id else {
             return;
@@ -1148,13 +1324,18 @@ impl Session {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let breakpoints: Vec<Value> = lines.iter().map(|l| json!({ "line": l })).collect();
+        // Until the adapter answers, nothing is known of the new lines.
+        self.breakpoint_states.remove(path);
         self.request(
             "setBreakpoints",
             json!({
                 "source": { "path": path.to_string_lossy(), "name": name },
                 "breakpoints": breakpoints,
             }),
-            Pending::SetBreakpoints,
+            Pending::SetBreakpoints {
+                path: path.to_path_buf(),
+                lines: lines.to_vec(),
+            },
         );
     }
 
@@ -1195,12 +1376,27 @@ impl Session {
     // === What the user does ===
 
     fn control(&mut self, command: &str) {
-        if !self.is_stopped() {
+        let Status::Stopped {
+            reason,
+            description,
+        } = self.status.clone()
+        else {
             return;
-        }
+        };
         let thread = self.thread_id.unwrap_or(1);
-        self.request(command, json!({ "threadId": thread }), Pending::Control);
-        // Not every adapter sends `continued` for a resume it was asked for.
+        // Not every adapter sends `continued` for a resume it was asked for,
+        // so the session shows it running at once; a refusal brings the
+        // stop back (see `handle_response`).
+        let resume = Resume {
+            generation: self.generation + 1,
+            reason,
+            description,
+        };
+        self.request(
+            command,
+            json!({ "threadId": thread }),
+            Pending::Control(Some(resume)),
+        );
         self.resumed();
     }
 
@@ -1225,7 +1421,11 @@ impl Session {
             return;
         }
         let thread = self.thread_id.unwrap_or(1);
-        self.request("pause", json!({ "threadId": thread }), Pending::Control);
+        self.request(
+            "pause",
+            json!({ "threadId": thread }),
+            Pending::Control(None),
+        );
     }
 
     /// End the session, ending the program too.
@@ -1463,6 +1663,20 @@ fn group_by_file(breakpoints: &[Breakpoint]) -> BTreeMap<PathBuf, Vec<usize>> {
         lines.dedup();
     }
     files
+}
+
+/// Take what an adapter says of a breakpoint (a DAP `Breakpoint`) into
+/// `state`.
+fn apply_breakpoint(state: &mut BreakpointState, answer: &Value) {
+    state.verified = answer["verified"].as_bool().unwrap_or(false);
+    state.actual_line = answer["line"]
+        .as_u64()
+        .map(|l| l as usize)
+        .or(state.actual_line);
+    state.message = answer["message"].as_str().map(str::to_string);
+    if let Some(id) = answer["id"].as_i64() {
+        state.id = Some(id);
+    }
 }
 
 fn parse_frame(frame: &Value) -> Frame {

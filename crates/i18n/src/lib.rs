@@ -280,6 +280,7 @@ pub trait Translation: Send + Sync {
     fn debug_setup_debugger_args(&self) -> &str;
     fn debug_setup_no_program(&self) -> &str;
     fn debug_breakpoints_cleared(&self) -> &str;
+    fn debug_session_running(&self) -> &str;
     fn debug_panel_title(&self) -> &str;
     fn debug_section_stack(&self) -> &str;
     fn debug_section_variables(&self) -> &str;

@@ -9,7 +9,8 @@ pub use adapter::{
     debugpy_available, debugpy_available_with, find_in_path, resolve_program, Adapter, Console,
 };
 pub use session::{
-    Frame, LaunchSpec, OutputKind, OutputLine, Session, Status, TerminalRequest, Variable,
+    BreakpointState, Frame, LaunchSpec, OutputKind, OutputLine, Session, Status, TerminalRequest,
+    Variable,
 };
 pub use termide_config::split_words;
 

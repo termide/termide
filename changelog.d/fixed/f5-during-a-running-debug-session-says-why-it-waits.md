@@ -1,0 +1,1 @@
+- **F5 during a running debug session says why it does nothing.** While a session builds, starts or runs, `F5` shows a status message instead of doing nothing silently; it still continues a stopped session.

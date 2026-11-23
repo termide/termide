@@ -657,10 +657,10 @@ Termide tells `docker-language-server` to send no telemetry when it starts; the 
 | Shortcut   | Action                                                        |
 |------------|---------------------------------------------------------------|
 | `Ctrl+F8`  | Set or remove a breakpoint on the cursor line (`toggle_breakpoint`) |
-| `F5`       | Start debugging (`start_debug`); continue while a session is stopped |
+| `F5`       | Start debugging (`start_debug`); continue while a session is stopped; while it builds, starts or runs, a status message says so |
 | `F7` / `Shift+F7` | Next / previous git change (`next_change`, `prev_change`); see [Staging and Reverting Changes](#staging-and-reverting-changes) |
 
-A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text.
+A breakpoint is drawn as a red `●` in the cell right of the line number, where a diagnostic's `▶` would be; it takes that cell over a diagnostic, whose message still shows on its own line below. A click on a line number sets or removes one too. Both work in view mode and in every Vim mode, as neither changes the text. While a debug adapter runs, a breakpoint it could not set — in code not loaded yet, or on a line with no code — is drawn as a dimmed `○` instead, until the adapter reports it set; the agent's `debug` tool lists such breakpoints, and those the adapter moved to another line.
 
 A breakpoint stays with its text as you edit: lines added or removed above move it, a deleted line takes its breakpoint with it, and lines joined into one keep it on the joined line. Breakpoints are kept per file in `breakpoints.toml` in the data directory (`~/.local/share/termide/` on Linux, `~/Library/Application Support/termide/` on macOS), so they come back when the file is opened again, in any project and after a restart. **Remove all breakpoints** in the command palette or the editor's `[≡]` menu clears them everywhere.
 

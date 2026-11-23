@@ -258,6 +258,155 @@ fn a_step_resumes_and_a_late_answer_is_dropped() {
     assert!(h.session.frames.is_empty());
 }
 
+impl Harness {
+    /// Answer the last `command` with a failure saying `message`.
+    fn refuse(&mut self, command: &str, message: &str) {
+        let request_seq = self.last_seq_of(command);
+        self.adapter_seq += 1;
+        let message = json!({
+            "seq": self.adapter_seq, "type": "response", "request_seq": request_seq,
+            "command": command, "success": false, "message": message,
+        });
+        self.tx.send(Incoming::Message(message)).unwrap();
+        self.session.poll();
+    }
+}
+
+/// A step the adapter refuses leaves the program where it was: the session
+/// showed it running and ignored every key until it was ended.
+#[test]
+fn a_refused_step_brings_the_stop_back() {
+    let mut h = Harness::stopped_at_breakpoint();
+    h.session.step_over();
+    assert_eq!(h.session.status, Status::Running);
+    h.sent();
+    h.refuse("next", "cannot step: the thread is not stopped");
+    assert!(
+        matches!(&h.session.status, Status::Stopped { reason, .. } if reason == "breakpoint"),
+        "{:?}",
+        h.session.status
+    );
+    assert_eq!(h.commands(), ["stackTrace"], "the stop is fetched again");
+    h.respond(
+        "stackTrace",
+        json!({ "stackFrames": [{ "id": 10, "name": "app::main", "line": 4,
+                                  "source": { "path": "/p/src/main.rs" } }] }),
+    );
+    assert_eq!(
+        h.session.execution_point(),
+        Some((PathBuf::from("/p/src/main.rs"), 4))
+    );
+    assert!(
+        h.session
+            .output
+            .iter()
+            .any(|l| l.kind == OutputKind::Error
+                && l.text == "cannot step: the thread is not stopped")
+    );
+    // Stopped again, the keys act.
+    h.sent();
+    h.session.continue_();
+    assert_eq!(h.commands(), ["continue"]);
+}
+
+/// A refusal that arrives after the program stopped again elsewhere does not
+/// take that stop back.
+#[test]
+fn a_late_refusal_leaves_a_newer_stop() {
+    let mut h = Harness::stopped_at_breakpoint();
+    h.session.continue_();
+    h.event("stopped", json!({ "reason": "step", "threadId": 1 }));
+    h.refuse("continue", "late");
+    assert!(matches!(&h.session.status, Status::Stopped { reason, .. } if reason == "step"));
+}
+
+#[test]
+fn the_adapter_says_which_breakpoints_it_could_set() {
+    let mut h = Harness::new(vec![bp("/p/src/main.rs", 4), bp("/p/src/main.rs", 9)]);
+    h.respond(
+        "initialize",
+        json!({ "supportsConfigurationDoneRequest": true }),
+    );
+    h.event("initialized", json!({}));
+    assert!(
+        h.session.unverified_breakpoints().is_empty(),
+        "nothing is known before the answer"
+    );
+    h.respond(
+        "setBreakpoints",
+        json!({ "breakpoints": [
+            { "id": 1, "verified": true, "line": 5 },
+            { "id": 2, "verified": false, "message": "no code here" }
+        ]}),
+    );
+    let states = h.session.breakpoint_states(Path::new("/p/src/main.rs"));
+    assert_eq!(states.len(), 2);
+    assert!(states[0].verified);
+    assert_eq!(states[0].actual_line, Some(5), "the adapter moved it");
+    assert!(!states[1].verified);
+    assert_eq!(
+        h.session.unverified_breakpoints(),
+        [(PathBuf::from("/p/src/main.rs"), 9)]
+    );
+    let text = h.session.describe(0);
+    assert!(text.contains("Breakpoint not set: /p/src/main.rs:9 (no code here)"));
+    assert!(text.contains("Breakpoint /p/src/main.rs:4 set on line 5"));
+
+    // A library loads later: the adapter verifies the second one.
+    h.event(
+        "breakpoint",
+        json!({ "reason": "changed",
+                "breakpoint": { "id": 2, "verified": true, "line": 9 } }),
+    );
+    assert!(h.session.unverified_breakpoints().is_empty());
+
+    // The answer to lines since replaced is dropped; the newer one counts.
+    h.session.update_breakpoints(&[bp("/p/src/main.rs", 4)]);
+    h.session.update_breakpoints(&[bp("/p/src/main.rs", 6)]);
+    let first = h.last_seq_of("setBreakpoints") - 1;
+    h.tx.send(Incoming::Message(json!({
+        "seq": 7000, "type": "response", "request_seq": first,
+        "command": "setBreakpoints", "success": true,
+        "body": { "breakpoints": [{ "verified": false }] }
+    })))
+    .unwrap();
+    h.session.poll();
+    assert!(h.session.unverified_breakpoints().is_empty());
+    h.respond(
+        "setBreakpoints",
+        json!({ "breakpoints": [{ "verified": false }] }),
+    );
+    assert_eq!(
+        h.session.unverified_breakpoints(),
+        [(PathBuf::from("/p/src/main.rs"), 6)]
+    );
+    // An ended session marks none.
+    h.session.stop();
+    assert!(h.session.unverified_breakpoints().is_empty());
+}
+
+/// An adapter that hangs up while starting and keeps printing must not
+/// hold the UI thread reading it.
+#[test]
+fn a_chatty_adapter_that_hangs_up_does_not_hold_the_poll() {
+    let mut h = Harness::new(Vec::new());
+    let tx = h.tx.clone();
+    std::thread::spawn(move || {
+        while tx.send(Incoming::Log("still talking".into())).is_ok() {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    });
+    h.tx.send(Incoming::Closed).unwrap();
+    let started = Instant::now();
+    h.session.poll();
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "poll took {:?}",
+        started.elapsed()
+    );
+    assert!(matches!(h.session.status, Status::Failed(_)));
+}
+
 #[test]
 fn another_thread_continuing_keeps_the_stop() {
     let mut h = Harness::stopped_at_breakpoint();

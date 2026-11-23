@@ -176,9 +176,10 @@ pub fn render_editor_content<H: LineHighlighter>(
         tab_size,
     );
     render_context.breakpoint_lines = buffer.line_marks().clone();
-    render_context.execution_line = buffer
-        .file_path()
-        .and_then(termide_debug::execution::line_in);
+    if let Some(path) = buffer.file_path() {
+        render_context.execution_line = termide_debug::execution::line_in(path);
+        render_context.unverified_breakpoint_lines = termide_debug::execution::unverified_in(path);
+    }
 
     // Group diagnostics by line once per render — hot paths read this
     // instead of rebuilding the HashMap for every visible row.

@@ -61,7 +61,7 @@ pub fn render_line_no_wrap<H: LineHighlighter>(
         git_diff_cache,
         show_git_diff,
         diagnostic_severity,
-        render_context.has_breakpoint(line_idx),
+        render_context.breakpoint_at(line_idx),
         render_context.is_execution_line(line_idx),
         theme,
         line_number_width,
@@ -140,7 +140,7 @@ fn render_line_gutter(
     git_diff_cache: &Option<GitDiffCache>,
     show_git_diff: bool,
     diagnostic_severity: Option<lsp_types::DiagnosticSeverity>,
-    breakpoint: bool,
+    breakpoint: git::BreakpointMark,
     execution: bool,
     theme: &Theme,
     line_number_width: u16,
@@ -897,6 +897,7 @@ pub fn render_content_no_wrap<H: LineHighlighter>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::git::BreakpointMark;
     use ratatui::style::Color;
 
     fn test_theme() -> Theme {
@@ -917,14 +918,14 @@ mod tests {
     }
 
     fn gutter_text(line_idx: usize, line_number_width: u16) -> String {
-        gutter_with(line_idx, line_number_width, None, false)
+        gutter_with(line_idx, line_number_width, None, BreakpointMark::None)
     }
 
     fn gutter_with(
         line_idx: usize,
         line_number_width: u16,
         severity: Option<lsp_types::DiagnosticSeverity>,
-        breakpoint: bool,
+        breakpoint: crate::git::BreakpointMark,
     ) -> String {
         let area = Rect::new(0, 0, 20, 3);
         let mut buf = Buffer::empty(area);
@@ -961,16 +962,38 @@ mod tests {
 
     #[test]
     fn a_breakpoint_takes_the_marker_cell_over_a_diagnostic() {
-        assert_eq!(gutter_with(41, 6, None, true), "  42● ");
+        assert_eq!(gutter_with(41, 6, None, BreakpointMark::Set), "  42● ");
         let error = Some(lsp_types::DiagnosticSeverity::ERROR);
-        assert_eq!(gutter_with(41, 6, error, true), "  42● ");
-        assert_ne!(gutter_with(41, 6, error, false), "  42● ");
+        assert_eq!(gutter_with(41, 6, error, BreakpointMark::Set), "  42● ");
+        assert_ne!(gutter_with(41, 6, error, BreakpointMark::None), "  42● ");
+    }
+
+    #[test]
+    fn a_breakpoint_the_debugger_could_not_set_is_hollow_and_dimmed() {
+        assert_eq!(
+            gutter_with(41, 6, None, BreakpointMark::Unverified),
+            "  42○ "
+        );
+        let theme = test_theme();
+        let mark = crate::git::get_lsp_marker(None, BreakpointMark::Unverified, false, &theme);
+        assert_eq!(mark.color, theme.disabled);
+    }
+
+    #[test]
+    fn the_render_context_tells_an_unverified_breakpoint_apart() {
+        let mut ctx = super::super::context::RenderContext::prepare(&None, &None, &[], 0..10, 4);
+        ctx.breakpoint_lines = [2, 5].into_iter().collect();
+        ctx.unverified_breakpoint_lines = [5, 7].into_iter().collect();
+        assert_eq!(ctx.breakpoint_at(2), BreakpointMark::Set);
+        assert_eq!(ctx.breakpoint_at(5), BreakpointMark::Unverified);
+        // No breakpoint in the editor: whatever the debugger said is moot.
+        assert_eq!(ctx.breakpoint_at(7), BreakpointMark::None);
     }
 
     #[test]
     fn the_line_a_debugger_stopped_at_is_marked_over_a_breakpoint() {
         let theme = test_theme();
-        let mark = crate::git::get_lsp_marker(None, true, true, &theme);
+        let mark = crate::git::get_lsp_marker(None, BreakpointMark::Set, true, &theme);
         assert_eq!(mark.marker, '→');
         assert_eq!(mark.bg, Some(theme.warning));
         assert_eq!(
