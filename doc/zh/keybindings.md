@@ -45,7 +45,7 @@ Termide 在与绑定匹配前对每个按键事件进行规范化。规范化在
 
 ### 增强层(需要 Kitty 键盘协议)
 
-- `Ctrl+标点`(`Ctrl+-`、`Ctrl+=`、`Ctrl+,`、`Ctrl+.`)—— `Ctrl+/` 和 `Ctrl+\`
+- `Ctrl+标点`，带或不带 `Shift`(`Ctrl+-`、`Ctrl+=`、`Ctrl+,`、`Ctrl+.`、`Ctrl+Shift+-`)—— `Ctrl+/` 和 `Ctrl+\`
   除外,它们在传统终端上也能到达 termide(见下文默认值下的注)。
 - `Ctrl+Shift+字母`。
 - `Ctrl+Alt+任意键`。

@@ -54,7 +54,8 @@ Termide канонизирует каждое событие клавиатур�
 
 ### Расширенные (требуют Kitty keyboard protocol)
 
-- `Ctrl+пунктуация` (`Ctrl+-`, `Ctrl+=`, `Ctrl+,`, `Ctrl+.`) — кроме
+- `Ctrl+пунктуация`, с `Shift` или без (`Ctrl+-`, `Ctrl+=`, `Ctrl+,`, `Ctrl+.`,
+  `Ctrl+Shift+-`) — кроме
   `Ctrl+/` и `Ctrl+\`, которые доходят до termide и на legacy-терминалах
   (см. примечание под дефолтами ниже).
 - `Ctrl+Shift+буква`.

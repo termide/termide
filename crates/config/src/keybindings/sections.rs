@@ -69,8 +69,8 @@ pub struct GlobalKeybindings {
     /// shortcut or a shell binding somewhere.
     pub prev_project: Option<KeyBinding>,
     pub next_project: Option<KeyBinding>,
-    /// Switch to the open project with this number. Unbound by default, as
-    /// above.
+    /// Switch to the open project with this number: `Alt+1`…`Alt+9` by
+    /// default.
     pub goto_project_1: Option<KeyBinding>,
     pub goto_project_2: Option<KeyBinding>,
     pub goto_project_3: Option<KeyBinding>,
@@ -611,7 +611,7 @@ impl GlobalKeybindings {
         set_default!(panel_grow_vertical, "Alt+Shift+=");
         set_default!(panel_shrink_vertical, "Alt+Shift+-");
 
-        // Navigation (with WASD alternatives)
+        // Navigation
         set_default_multiple!(toggle_menu, "Alt+M", "F9");
         set_default_multiple!(open_help, "Alt+H", "F1");
         set_default_multiple!(close_panel, "Alt+W", "Alt+X", "F10");

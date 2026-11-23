@@ -492,8 +492,9 @@ pub fn actions_reachable_only_by_function_key(
 ///
 /// Rules (matching what crossterm 0.28 can decode in legacy mode on
 /// VTE / xterm):
-/// - `Ctrl + punctuation` (no Shift, no Alt): no ASCII control code,
-///   silently dropped to plain glyph or collapsed onto another chord.
+/// - `Ctrl + punctuation`, with or without Shift (no Alt): no ASCII
+///   control code, silently dropped to plain glyph or collapsed onto
+///   another chord.
 /// - `Ctrl + Shift + letter`: legacy encoding does not survive the
 ///   shift bit; only Kitty CSI-u carries it.
 /// - `Ctrl + Alt + anything`: `ESC + control-byte` is ambiguous and
@@ -535,7 +536,7 @@ pub fn binding_requires_kitty(parsed: &ParsedKeyBinding) -> bool {
         return true;
     }
 
-    if has_ctrl && !has_alt && !has_shift && is_punct {
+    if has_ctrl && !has_alt && is_punct {
         return true;
     }
 
@@ -571,6 +572,7 @@ mod tests {
         assert!(!binding_requires_kitty(&parse("Ctrl+\\")));
 
         // Enhanced — needs Kitty.
+        assert!(binding_requires_kitty(&parse("Ctrl+Shift+-")));
         assert!(binding_requires_kitty(&parse("Ctrl+,")));
         assert!(binding_requires_kitty(&parse("Ctrl+-"))); // -, parsed as Char('-')
         assert!(binding_requires_kitty(&parse("Ctrl+.")));

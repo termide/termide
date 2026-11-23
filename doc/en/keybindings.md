@@ -52,7 +52,8 @@ cannot deliver any of the configured Enhanced-tier chords.
 
 ### Enhanced tier (requires Kitty keyboard protocol)
 
-- `Ctrl+punctuation` (`Ctrl+-`, `Ctrl+=`, `Ctrl+,`, `Ctrl+.`) —
+- `Ctrl+punctuation`, with or without `Shift` (`Ctrl+-`, `Ctrl+=`,
+  `Ctrl+,`, `Ctrl+.`, `Ctrl+Shift+-`) —
   except `Ctrl+/` and `Ctrl+\`, which reach termide on legacy terminals
   too (see the note under the defaults below).
 - `Ctrl+Shift+letter`.
