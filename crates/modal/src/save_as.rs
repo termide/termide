@@ -12,6 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::base::{button_style, render_modal_block};
 use crate::input_keys::{handle_input_key, InputKeyResult};
@@ -106,7 +107,7 @@ impl SaveAsModal {
     /// Calculate dynamic modal width and height
     fn calculate_modal_size(&self, screen_width: u16, screen_height: u16) -> (u16, u16) {
         let t = i18n::t();
-        let title_width = self.title.len() as u16 + 2;
+        let title_width = self.title.width() as u16 + 2;
         let buttons_width = 21u16; // "[ OK ]    [ Cancel ]"
         let input_width = self.field.text_width() as u16 + 20;
         let checkbox_width = max_line_width(&format!("[✓] {}", t.checkbox_executable()));
@@ -227,8 +228,7 @@ impl Modal for SaveAsModal {
             Span::styled(format!("[ {} ]", t.ui_cancel()), cancel_style),
         ]);
 
-        let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
-        buttons_paragraph.render(chunks[2], buf);
+        crate::base::render_centered_line(&buttons, chunks[2], buf);
 
         // Save buttons area for mouse handling
         self.last_buttons_area = Some(chunks[2]);
@@ -380,13 +380,14 @@ impl Modal for SaveAsModal {
         // Calculate button positions
         let ok_text = format!("[ {} ]", t.ui_ok());
         let cancel_text = format!("[ {} ]", t.ui_cancel());
-        let total_text_width = ok_text.len() + MODAL_BUTTON_SPACING as usize + cancel_text.len();
+        let total_text_width =
+            ok_text.width() + MODAL_BUTTON_SPACING as usize + cancel_text.width();
 
         let start_col =
             buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
-        let ok_end = start_col + ok_text.len() as u16;
+        let ok_end = start_col + ok_text.width() as u16;
         let cancel_start = ok_end + MODAL_BUTTON_SPACING;
-        let cancel_end = cancel_start + cancel_text.len() as u16;
+        let cancel_end = cancel_start + cancel_text.width() as u16;
 
         // Determine which button was clicked
         if mouse.column >= start_col && mouse.column < ok_end {

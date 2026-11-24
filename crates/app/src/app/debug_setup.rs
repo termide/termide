@@ -13,7 +13,7 @@ use termide_config::commands::{
 use termide_debug::dap::{self, Adapter};
 use termide_debug::{shell_quote, Debugger};
 
-use super::debug::NativeDebugger;
+use super::debug::{shell_quoting, NativeDebugger};
 use super::App;
 
 /// Every debugger the form offers, as `commands.toml` spells them: the
@@ -173,7 +173,7 @@ impl App {
                     .and_then(|bins| bins.into_iter().next())
                 {
                     guess.program = self.relative(&bin.program);
-                    guess.build = bin.build_command(&self.project_root);
+                    guess.build = bin.build_command(&self.project_root, shell_quoting());
                     guess.subject = bin.name;
                 }
             }
@@ -212,7 +212,7 @@ impl App {
     /// the command line.
     fn relative(&self, path: &Path) -> String {
         let shown = path.strip_prefix(&self.project_root).unwrap_or(path);
-        shell_quote(&shown.to_string_lossy())
+        shell_quote(&shown.to_string_lossy(), shell_quoting())
     }
 }
 

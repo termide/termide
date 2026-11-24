@@ -187,6 +187,7 @@ impl AppState {
             }
         }
         self.batch.sub_operation_id = None;
+        self.batch.size_scan = None;
     }
 
     /// Update batch tracked operation file-level progress.

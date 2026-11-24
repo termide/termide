@@ -1926,11 +1926,21 @@ fn shorten_path(path: &Path, max: usize) -> String {
             }
         })
         .unwrap_or(full);
-    let count = display.chars().count();
-    if max <= 1 || count <= max {
+    let width = termide_ui::str_display_width;
+    if max <= 1 || width(&display) <= max {
         return display;
     }
-    let tail: String = display.chars().skip(count - (max - 1)).collect();
+    // Columns, not characters: a wide character takes two.
+    let mut tail = String::new();
+    let mut used = 0;
+    for ch in display.chars().rev() {
+        let w = width(ch.encode_utf8(&mut [0; 4]));
+        if used + w > max - 1 {
+            break;
+        }
+        used += w;
+        tail.insert(0, ch);
+    }
     format!("…{tail}")
 }
 

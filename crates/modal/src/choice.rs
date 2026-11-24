@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use termide_theme::Theme;
 
@@ -48,15 +49,15 @@ impl ChoiceModal {
 
     /// Calculate modal width based on content
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
-        let title_width = self.title.len() as u16 + 4;
+        let title_width = self.title.width() as u16 + 4;
 
-        let message_width = self.message.as_ref().map(|m| m.len() as u16).unwrap_or(0);
+        let message_width = self.message.as_ref().map(|m| m.width() as u16).unwrap_or(0);
 
         // Buttons: "[ btn1 ]  [ btn2 ]  [ btn3 ]"
         let buttons_width: u16 = self
             .buttons
             .iter()
-            .map(|b| b.len() as u16 + 4) // "[ label ]"
+            .map(|b| b.width() as u16 + 4) // "[ label ]"
             .sum::<u16>()
             + (self.buttons.len().saturating_sub(1) as u16) * 2; // spacing
 
@@ -204,21 +205,57 @@ impl ChoiceModal {
         }
 
         // Calculate total width and starting position for centering
-        let total_width: usize = self.buttons.iter().map(|b| b.len() + 4).sum::<usize>()
+        let total_width: usize = self.buttons.iter().map(|b| b.width() + 4).sum::<usize>()
             + (self.buttons.len().saturating_sub(1)) * 2;
 
-        let start_col = area.x + (area.width.saturating_sub(total_width as u16)) / 2;
+        let start_col = crate::base::centered_start(area, total_width);
 
         // Track button positions for mouse handling
         let mut col = start_col;
         for label in &self.buttons {
-            let btn_width = label.len() as u16 + 4;
+            let btn_width = label.width() as u16 + 4;
             self.last_button_positions.push((col, col + btn_width));
             col += btn_width + 2; // button + spacing
         }
 
         let buttons_line = Line::from(spans);
-        let buttons_para = Paragraph::new(buttons_line).alignment(Alignment::Center);
-        buttons_para.render(area, buf);
+        crate::base::render_centered_line(&buttons_line, area, buf);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::KeyModifiers;
+
+    fn click(column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    /// Labels in a script of several bytes a character are still clicked
+    /// where they are drawn: the hit areas count columns, not bytes.
+    #[test]
+    fn a_click_lands_on_the_button_drawn_under_it() {
+        let mut modal =
+            ChoiceModal::new("x", None, vec!["Удалить".to_string(), "Отмена".to_string()]);
+        let area = Rect::new(0, 0, 60, 1);
+        let mut buf = Buffer::empty(area);
+        modal.render_buttons(area, &mut buf, &Theme::default());
+        // The second button, `[ Отмена ]`, from its bracket to its bracket.
+        let label = (0..area.width)
+            .find(|&x| buf[(x, 0)].symbol() == "О")
+            .expect("the second label is drawn");
+        for column in label - 2..label + "Отмена".width() as u16 + 2 {
+            let result = modal.handle_mouse(click(column, 0), area).unwrap();
+            assert!(
+                matches!(result, Some(ModalResult::Confirmed(1))),
+                "column {column}: {result:?}"
+            );
+        }
     }
 }

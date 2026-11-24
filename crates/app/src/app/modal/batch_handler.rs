@@ -77,37 +77,6 @@ impl RemoteBatchTarget {
     }
 }
 
-/// Calculate total size of all sources (files and directories recursively).
-fn scan_sources_total_bytes(sources: &[PathBuf]) -> u64 {
-    fn dir_size(path: &Path) -> u64 {
-        let mut total = 0u64;
-        if let Ok(entries) = std::fs::read_dir(path) {
-            for entry in entries.flatten() {
-                let meta = match entry.metadata() {
-                    Ok(m) => m,
-                    Err(_) => continue,
-                };
-                if meta.is_dir() {
-                    total += dir_size(&entry.path());
-                } else {
-                    total += meta.len();
-                }
-            }
-        }
-        total
-    }
-
-    let mut total = 0u64;
-    for source in sources {
-        match std::fs::metadata(source) {
-            Ok(meta) if meta.is_dir() => total += dir_size(source),
-            Ok(meta) => total += meta.len(),
-            Err(_) => {}
-        }
-    }
-    total
-}
-
 /// Format VfsPath for display in progress modal
 fn format_vfs_path_for_display(vfs_path: &VfsPath, file_path: &Path) -> String {
     if vfs_path.is_local() {
@@ -494,21 +463,22 @@ impl App {
                 (BatchOperationType::Move, false) => OperationType::Move,
             };
 
-            // Pre-scan all sources to get total bytes for progress display
-            let total_bytes = if !is_remote_operation {
-                scan_sources_total_bytes(&operation.sources)
-            } else {
-                0 // Remote sources: byte progress comes from individual operations
-            };
-
-            // Start batch tracking in Operations panel
+            // Start batch tracking in Operations panel; the size of local
+            // sources is added up off the UI thread, a remote source's comes
+            // from its own operations.
             let batch_id = self.state.start_batch_tracking(
                 op_type,
                 source_display,
                 dest_display,
                 operation.total_count(),
-                total_bytes,
+                0,
             );
+            if !is_remote_operation {
+                self.state.batch.size_scan = Some(crate::state::SizeScan::spawn(
+                    batch_id,
+                    operation.sources.clone(),
+                ));
+            }
 
             // Open Operations panel with focus on the new batch operation
             let _ = self.open_operations_panel_with_focus(batch_id);

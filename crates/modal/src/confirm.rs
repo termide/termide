@@ -9,6 +9,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use termide_config::constants::MODAL_BUTTON_SPACING;
 use termide_i18n as i18n;
@@ -59,9 +60,12 @@ impl ConfirmModal {
 
     /// Calculate dynamic modal width based on content
     fn calculate_modal_width(&self, screen_width: u16) -> u16 {
-        let title_width = self.title.len() as u16 + 2;
+        let title_width = self.title.width() as u16 + 2;
         let message_width = max_line_width(&self.message);
-        let buttons_width = 17u16; // "[ Yes ]    [ No ]"
+        let t = i18n::t();
+        // "[ Yes ]    [ No ]", as long as the language makes it.
+        let buttons_width =
+            (t.ui_yes().width() + t.ui_no().width() + 8) as u16 + MODAL_BUTTON_SPACING;
 
         calculate_modal_width(
             [title_width, message_width, buttons_width].into_iter(),
@@ -117,8 +121,7 @@ impl Modal for ConfirmModal {
             Span::styled(format!("[ {} ]", t.ui_no()), no_style),
         ]);
 
-        let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
-        buttons_paragraph.render(chunks[2], buf);
+        crate::base::render_centered_line(&buttons, chunks[2], buf);
 
         // Save buttons area for mouse handling
         self.last_buttons_area = Some(chunks[2]);
@@ -180,13 +183,13 @@ impl Modal for ConfirmModal {
         let t = i18n::t();
         let yes_text = format!("[ {} ]", t.ui_yes());
         let no_text = format!("[ {} ]", t.ui_no());
-        let total_text_width = yes_text.len() + MODAL_BUTTON_SPACING as usize + no_text.len();
+        let total_text_width = yes_text.width() + MODAL_BUTTON_SPACING as usize + no_text.width();
 
         let start_col =
             buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
-        let yes_end = start_col + yes_text.len() as u16;
+        let yes_end = start_col + yes_text.width() as u16;
         let no_start = yes_end + MODAL_BUTTON_SPACING;
-        let no_end = no_start + no_text.len() as u16;
+        let no_end = no_start + no_text.width() as u16;
 
         // Determine which button was clicked
         if mouse.column >= start_col && mouse.column < yes_end {

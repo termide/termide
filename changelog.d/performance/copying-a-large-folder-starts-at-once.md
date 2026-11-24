@@ -1,0 +1,1 @@
+- **Copying a large folder starts at once.** termide added up the size of everything being copied or moved before it showed the operation, and the interface stood still while it did. The size is added up in the background now; the progress bar takes it as soon as it is known.
