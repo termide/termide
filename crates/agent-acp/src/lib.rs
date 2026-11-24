@@ -32,14 +32,16 @@ use termide_agent_core::{
 use termide_agent_core::{
     expand_env, now_millis, AcpConfig, AcpFlavor, Agent, AgentCommand, AgentEvent,
     AssistantContent, AssistantMessage, Backend, BackendModel, BackendOption, BackendSetup,
-    BackgroundCall, CancelToken, DecidedBy, Decision, ExternalSessionRef, Failure, FailureKind,
-    ForkSource, Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote,
-    PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision,
-    ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION, RECAP_LIMIT,
+    BackgroundCall, CancelToken, ChoiceOutcome, DecidedBy, Decision, ExternalSessionRef, Failure,
+    FailureKind, ForkSource, Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks,
+    PermissionNote, PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext,
+    ToolDecision, ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION,
+    RECAP_LIMIT,
 };
 use termide_agent_core::{CommandDir, CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
 
+mod choices;
 mod provider;
 mod windows;
 pub use provider::{match_model, AcpProvider};
@@ -208,6 +210,8 @@ struct Shared {
     /// them, as the agent last stated them all: in the session's result, in a
     /// `session/set_config_option` reply or a `config_option_update`.
     options: Mutex<Vec<BackendOption>>,
+    /// The model and option changes asked for, sent one at a time.
+    choices: Mutex<choices::Choices>,
     /// The commands the agent offers, as it last listed them.
     commands: Mutex<Vec<AgentCommand>>,
     /// Which adapter this is.
@@ -559,6 +563,7 @@ impl AcpRuntime {
             current_model: Mutex::new(None),
             model_option: Mutex::new(None),
             options: Mutex::new(Vec::new()),
+            choices: Mutex::default(),
             commands: Mutex::new(Vec::new()),
             flavor,
             system_prompt: setup.system_prompt,
@@ -1024,27 +1029,28 @@ impl Backend for AcpRuntime {
     }
 
     /// Taken during a turn too: ACP lets a session's configuration change
-    /// at any time, and the agent applies it as soon as it can.
+    /// at any time, and the agent applies it as soon as it can. Waits its
+    /// turn behind the changes asked for before.
     fn select_model(&self, model_id: String) -> Result<(), String> {
-        self.shared.select_model(model_id)
+        self.shared
+            .pick_and_wait(MODEL_OPTION.to_string(), model_id)
     }
 
     /// Off the UI thread: each answer can take the agent seconds, and the
     /// panels of a project reopened at startup all ask on entering it.
     fn apply_choices(&self, choices: Vec<(String, String)>) {
-        let shared = Arc::clone(&self.shared);
-        std::thread::spawn(move || {
-            for (id, value) in choices {
-                let outcome = if id == MODEL_OPTION {
-                    shared.select_model(value.clone())
-                } else {
-                    shared.set_config_option(&id, &value)
-                };
-                if let Err(error) = outcome {
-                    log::warn!("cannot ask the agent for {id} = {value}: {error}");
-                }
-            }
-        });
+        self.shared.restore_choices(choices);
+    }
+
+    /// Off the UI thread too: the panel takes the outcome from
+    /// [`Backend::choice_outcomes`].
+    fn choose(&self, id: String, value: String) -> Option<Result<(), String>> {
+        self.shared.pick(id, value, None);
+        None
+    }
+
+    fn choice_outcomes(&self) -> Vec<ChoiceOutcome> {
+        self.shared.take_choice_outcomes()
     }
 
     fn config_options(&self) -> Vec<BackendOption> {
@@ -1065,7 +1071,7 @@ impl Backend for AcpRuntime {
     }
 
     fn set_option(&self, id: String, value: String) -> Result<(), String> {
-        self.shared.set_config_option(&id, &value)
+        self.shared.pick_and_wait(id, value)
     }
 
     fn awaits_recap(&self) -> bool {
@@ -1542,7 +1548,7 @@ impl Shared {
         }
         let (approval, collaboration) = codex_modes(mode);
         for (config_id, value) in [("mode", approval), ("collaboration_mode", collaboration)] {
-            if let Err(error) = self.set_config_option(config_id, value) {
+            if let Err(error) = self.set_config_option(config_id, value, None) {
                 log::warn!(
                     "acp {}: cannot set {config_id} to {value}: {error}",
                     self.name
@@ -1596,7 +1602,22 @@ impl Shared {
     /// the `select` ones are kept, the model's among them read as the list of
     /// models and the model in use.
     fn adopt_options(&self, options: &[Value]) {
-        let options: Vec<BackendOption> = options.iter().filter_map(option_of).collect();
+        self.adopt_options_keeping(options, &[]);
+    }
+
+    /// [`Self::adopt_options`], but the options `keep` names hold on to the
+    /// values they had: a restore's reply does not undo the user's picks
+    /// made while it waited, which go to the agent after it.
+    fn adopt_options_keeping(&self, options: &[Value], keep: &[String]) {
+        let mut options: Vec<BackendOption> = options.iter().filter_map(option_of).collect();
+        if !keep.is_empty() {
+            let old = self.options.lock().unwrap_or_else(PoisonError::into_inner);
+            for option in options.iter_mut().filter(|o| keep.contains(&o.id)) {
+                if let Some(was) = old.iter().find(|was| was.id == option.id) {
+                    option.current.clone_from(&was.current);
+                }
+            }
+        }
         let model = options
             .iter()
             .find(|option| option.is("model") || option.id == "model");
@@ -1606,10 +1627,12 @@ impl Shared {
                 .lock()
                 .unwrap_or_else(PoisonError::into_inner) = Some(model.id.clone());
             *self.models.lock().unwrap_or_else(PoisonError::into_inner) = model.values.clone();
-            *self
-                .current_model
-                .lock()
-                .unwrap_or_else(PoisonError::into_inner) = Some(model.current.clone());
+            if !keep.contains(&model.id) {
+                *self
+                    .current_model
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner) = Some(model.current.clone());
+            }
         }
         *self.options.lock().unwrap_or_else(PoisonError::into_inner) = options;
     }
@@ -1621,59 +1644,6 @@ impl Shared {
             Conn::Starting => Err("the agent is still starting".to_string()),
             Conn::Failed(error) => Err(error.clone()),
         }
-    }
-
-    /// Switch the session's model: through its config option when the
-    /// agent offers one, else through `session/set_model`.
-    fn select_model(&self, model_id: String) -> Result<(), String> {
-        let option = self
-            .model_option
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        match option {
-            Some(config_id) => self.set_config_option(&config_id, &model_id)?,
-            None => {
-                let session_id = self.session_id()?;
-                self.request(
-                    "session/set_model",
-                    json!({ "sessionId": session_id, "modelId": model_id }),
-                    Duration::from_secs(30),
-                )?;
-            }
-        }
-        *self
-            .current_model
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(model_id);
-        Ok(())
-    }
-
-    /// Set config option `id` to `value` and take the options the agent
-    /// replies with, which may change with it (the efforts a model offers);
-    /// an agent that replies with none has the one value changed.
-    fn set_config_option(&self, id: &str, value: &str) -> Result<(), String> {
-        let session_id = self.session_id()?;
-        let reply = self.request(
-            "session/set_config_option",
-            json!({ "sessionId": session_id, "configId": id, "value": value }),
-            Duration::from_secs(30),
-        )?;
-        match reply["configOptions"].as_array() {
-            Some(options) => self.adopt_options(options),
-            None => {
-                if let Some(option) = self
-                    .options
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .iter_mut()
-                    .find(|option| option.id == id)
-                {
-                    option.current = value.to_string();
-                }
-            }
-        }
-        Ok(())
     }
 
     fn adopt_model_list(&self, models: &Value) {

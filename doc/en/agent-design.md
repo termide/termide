@@ -1476,8 +1476,13 @@ the older `models`, feeds the Model chip, `thought_level` the Reasoning chip,
 and the rest an Options chip (the agent's own modes left out when termide maps
 its mode onto them). A pick is logged as an `agent_option` entry (the model
 under the key `model`) and asked for again once a reopened agent states its
-options; an `agent_option` does not void the agent's own session. The built-in
-loop matches it: a model or reasoning level picked during a run goes through
+options; an `agent_option` does not void the agent's own session. The changes
+go to the agent from one worker thread, in the order asked for, so the UI
+thread never waits on a reply: a restore sends the model first and judges
+each option against what the agent states after it, and a pick made while
+it waits supersedes the part not yet sent, and the restore's reply for that
+setting is not taken as the value in effect. A pick is shown and logged once
+the agent confirms it. The built-in loop matches it: a model or reasoning level picked during a run goes through
 `QueueHandle::set_next_model` and is taken at the next step boundary, as
 steering is, and before any later worker command, so a switch made between
 runs wins.

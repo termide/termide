@@ -112,6 +112,38 @@ impl BackendOption {
     }
 }
 
+/// Whether a restored setting is to be asked for: `id` (the model under
+/// [`crate::MODEL_OPTION`]) is offered with `value` among its values, and
+/// `value` is not already in effect. A value the agent no longer offers is
+/// left as the agent has it.
+#[must_use]
+pub fn choice_wanted(
+    id: &str,
+    value: &str,
+    models: &[BackendModel],
+    current_model: Option<&str>,
+    options: &[BackendOption],
+) -> bool {
+    if id == crate::MODEL_OPTION {
+        models.iter().any(|m| m.id == value) && current_model != Some(value)
+    } else {
+        options
+            .iter()
+            .find(|o| o.id == id)
+            .is_some_and(|o| o.current != value && o.values.iter().any(|v| v.id == value))
+    }
+}
+
+/// How a pick [`Backend::choose`] asked for off the caller's thread went:
+/// setting `id` (the model under [`crate::MODEL_OPTION`]) to `value`, or the
+/// agent's error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChoiceOutcome {
+    pub id: String,
+    pub value: String,
+    pub result: Result<(), String>,
+}
+
 /// A command an external agent offers (ACP's `available_commands_update`),
 /// run by sending `/<name> <input>` as a request.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -368,15 +400,28 @@ pub trait Backend: Send {
         Err("options are not supported".to_string())
     }
     /// Ask for a session's saved settings when it is restored: `(id, value)`
-    /// pairs, the model under [`crate::MODEL_OPTION`], each one offered and
-    /// not already in effect. The agent's answers can take seconds and
-    /// several panels restore at once, so a backend that waits on its agent
-    /// asks off the caller's thread; its [`Self::current_model`] and
+    /// pairs, the model under [`crate::MODEL_OPTION`]. The model goes first,
+    /// as the settings offered can change with it; each setting is then
+    /// asked for only when it is offered and not already in effect (see
+    /// [`choice_wanted`]). The agent's answers can take seconds and several
+    /// panels restore at once, so a backend that waits on its agent asks off
+    /// the caller's thread; its [`Self::current_model`] and
     /// [`Self::config_options`] show the settings once they are taken. A
     /// refusal is logged, as the user did not ask for it then. The default
     /// asks here, one after another.
-    fn apply_choices(&self, choices: Vec<(String, String)>) {
+    fn apply_choices(&self, mut choices: Vec<(String, String)>) {
+        choices.sort_by_key(|(id, _)| id != crate::MODEL_OPTION);
         for (id, value) in choices {
+            let current_model = self.current_model();
+            if !choice_wanted(
+                &id,
+                &value,
+                &self.available_models(),
+                current_model.as_deref(),
+                &self.config_options(),
+            ) {
+                continue;
+            }
             let outcome = if id == crate::MODEL_OPTION {
                 self.select_model(value.clone())
             } else {
@@ -386,6 +431,24 @@ pub trait Backend: Send {
                 log::warn!("cannot ask the agent for {id} = {value}: {error}");
             }
         }
+    }
+    /// Set `id` (the model under [`crate::MODEL_OPTION`]) to `value`, as the
+    /// user picked it. `Some` with the outcome when it was settled here;
+    /// `None` when the backend asks off the caller's thread and reports it
+    /// through [`Self::choice_outcomes`]. A pick goes to the agent after
+    /// whatever was asked before it, and a restored setting still waiting
+    /// (see [`Self::apply_choices`]) gives way to it. The default asks here.
+    fn choose(&self, id: String, value: String) -> Option<Result<(), String>> {
+        Some(if id == crate::MODEL_OPTION {
+            self.select_model(value)
+        } else {
+            self.set_option(id, value)
+        })
+    }
+    /// The picks of [`Self::choose`] settled off the caller's thread since
+    /// the last call, in the order they were made.
+    fn choice_outcomes(&self) -> Vec<ChoiceOutcome> {
+        Vec::new()
     }
     /// The calls the agent moved to the background that termide still runs
     /// for it, the longest-running first; none for the built-in loop, which
