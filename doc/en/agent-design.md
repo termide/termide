@@ -638,7 +638,7 @@ still fix it (`mode: plan` in its `AGENT.md`, which gives OpenCode's plan
 agent for free). The guard is `PlanGuard` in `permissions.rs`, first in the
 hook chain, so it also overrides a command hook's `allow`: in plan mode only
 the reading tools (`read`, `skill`, the web tools, `question`, `recall`),
-`task` (see below) and a shell command made of look-only parts without
+`start_session` starting a delegate (see below) and a shell command made of look-only parts without
 substitution pass; everything else is blocked with a fixed reason the model
 reads. Instructions come from `ai/system/plan.md`, appended to the system
 prompt while the mode is on (the panel updates the worker's prompt on the
@@ -660,7 +660,7 @@ session, not a file: the session log is the record, and the panel's `/undo`
 checkpoints cover the changes the accepted plan then makes. Not covered: MCP tools with
 a read-only annotation are blocked too, since annotations are not plumbed.
 
-`task` passes the guard as well: the subagent runs in plan mode whatever its
+`start_session` passes the guard as well, unless it forks into a panel: the subagent runs in plan mode whatever its
 `AGENT.md` names, behind a `PlanGuard` of its own, so delegation reads and
 never changes anything. That lets the planner hand fact-finding to a
 subagent, which the instructions below rely on.
@@ -733,7 +733,7 @@ prompter, so every rule, guard and hook keeps its place before it: a rule's
 `deny` refuses, its `ask` asks, `PlanGuard` and command hooks run first.
 `auto` counts the configured rules like `configured` less the broad `allow`
 ones (`broad_allow`: a whole tool, a wildcard after a delegating command, an
-`allow` for `task`), lets edits inside the project and web searches through,
+`allow` for `start_session`), lets edits inside the project and web searches through,
 and never hands the reviewer a removal of the root, the home or the working
 directory or above (`critical_removal`). A verdict that does not parse, a
 failed call or a session with nothing to judge against falls back to the
@@ -1205,7 +1205,7 @@ crate already depends on, so a tool reads its shipped text with
 that differs from the seed wraps the tool (`apply_tool_texts`) when the
 registry is finished — panel, subagent and headless alike — so tools need no
 access to the directories; `Tool::render_description` lets a tool fill its own
-placeholders (`task`'s `{{agents}}`) in either text. Parameter descriptions
+placeholders (`start_session`'s `{{agents}}`) in either text. Parameter descriptions
 in the JSON schemas and the wording of tool results stay in code: they
 describe the call's mechanics, not how the agent should use the tool. `/compact` is a built-in slash command
 next to the templates, a `Compact` worker command between runs.
@@ -1632,6 +1632,6 @@ message, 130 on abort. `--output json` prints one object instead of streaming
 consumer that parses rather than reads, and `--output stream-json` prints one
 object per line as the run unfolds (`tool_use`/`tool_result`/`message`, then a
 `result`), for one that follows it live. `--agent` picks the agent
-definition the run uses. Not done yet: delegation through the `task` tool, and
+definition the run uses. Not done yet: delegation through the `start_session` tool, and
 terminal sessions (headless carries the built-in tools and skills only, and
 `shell` without `session` and `background`).

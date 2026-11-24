@@ -1271,14 +1271,14 @@ and leaves the conversation as it is. See the git diff panel in
 The agent's built-in tools are listed below, plus those its MCP servers
 provide (see [MCP servers](#mcp-servers)). The panel's own agent, and Claude
 Code on termide's tools, also have **question**, **suggest_command**,
-**suggest_goal** and **suggest_loop**, described after the list, **agents**
-and **send_message** (see
-[Talking to other panels](#talking-to-other-panels)), **fork** (see
+**suggest_goal** and **suggest_loop**, described after the list,
+**sessions** and **send_message** (see
+[Talking to other panels](#talking-to-other-panels)), **start_session**,
+which hands work to a fresh agent or to a copy of the session (see
+[Starting sessions](#starting-sessions), [Subagents](#subagents) and
 [Forking part of the work](#forking-part-of-the-work)), **debug** (see
-[Debugging](#debugging)), and **task**, which hands a job to another agent,
-with **jobs**, which lists and stops what the agent set going (see
-[Subagents](#subagents) and
-[What the agent set going](#what-the-agent-set-going)). Every agent but a
+[Debugging](#debugging)), and **jobs**, which lists and stops what the agent
+set going (see [What the agent set going](#what-the-agent-set-going)). Every agent but a
 `termide --prompt` run, a subagent included, also has **checklist**, described
 after the list.
 

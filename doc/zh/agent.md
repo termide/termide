@@ -42,7 +42,23 @@ provider = "codex"                 # CLI 代理无需其他设置
 
 连接包含 `provider`、`base_url`、`model`、`api_key_env`、`context_window_fallback`、`context_window_limit`、`subagents`（见[子代理](#子代理)）、`reviewer`（见 [auto 模式](#auto-模式)）、`max_concurrent_requests`、`reasoning_budget` 和 `app_attribution`；省略的字段取其默认值。`max_concurrent_requests` 限制该连接在整个 termide 进程中同时处理的请求数——所有面板的代理、它们的子代理、`auto` 审查者以及其他附带调用；其余请求按先来先服务排队等待，`Esc` 可在等待中的请求发送之前停止它。本地服务器通常一次只运行一个请求（llama.cpp 运行的数量等于其 `--parallel` 槽数），超出的请求要么在服务器上等待，要么占用另一段对话所需提示缓存的槽；请把它设为服务器实际运行的数量。默认值 0 表示不限制。它按连接名称计数，因此指向同一服务器的两个连接分别计数，两个 termide 进程也不共享它。CLI 代理自己发送请求，因此没有该设置。`reasoning_budget` 限制单次模型调用可用于推理的 token 数，按流式推理内容以每 4 个字符一个 token 计算。接受思考预算的 Claude 模型还会被要求不超过这个数。超出预算的模型会在此处被截断，并立即在不推理的情况下再次询问，让它根据已知情况行动——与[循环](#服务提示词)之后相同；无法停止推理的模型则以其最低推理档位再次询问，仍受该预算约束。同一步中再次截断会停止本次运行。一些本地模型偶尔会一直推理到输出上限，而以本地服务器的速度，这意味着几分钟毫无结果；约为输出上限三分之一的预算可以截住这种浪费，又不妨碍正常推理。默认值 0 表示不限制。它只作用于 termide 自己的循环——CLI 代理在自己的循环中推理——已打开的会话从下一次调用起采用更改。除 hosted API 之外的每个服务器都会被请求提示词处理进度（`return_progress`）：llama.cpp 和 omlx（0.7.1 及以后）会报告它，其他服务器则忽略；拒绝该字段的服务器会立即收到去掉该字段的同一请求。`app_attribution` 向按应用程序记录用量的端点表明 termide 的身份——目前是 OpenRouter，它会把不带这些标头的请求归入 `Unknown`。开启后 termide 在那里报出自己的名称、地址与所属类别。这默认开启，因为 termide 本来就在 `User-Agent` 里向它交谈的每个端点报出自己的名字——这些标头只是让记录这一点的端点把它已经看到的内容归到名字之下，而不是 `Unknown`。连接页面只为会记录这些的端点显示这个开关——只要你在这类主机上离开基础 URL 字段，它就会出现，无需等待设置保存；URL 指向别处时它就消失。本地的 llama.cpp、vLLM 或 Ollama 没有按应用记录的概念，会忽略这些标头，也就无从切换。在起作用的地方，该地址对应的应用页面是所有发送它的用户共用的，用量会公开显示；关掉开关即不被归属。标头取自端点自身的条目，因此在开关仍开着时更换端点不会发送任何内容——单凭开关不会在任何地方报出 termide。TLS 会同时对照 termide 自带的证书和系统的信任存储进行验证，因此位于企业代理之后或使用自有证书颁发机构的端点，只要该机构在本机受信任即可使用。termide 环境中设置的 `SSL_CERT_FILE`（一个 PEM 文件）或 `SSL_CERT_DIR` 会以该文件或目录替代系统存储；自带的证书仍然生效。验证无法关闭。HTTP 方式的 MCP 服务器和 `fetch` 同样如此。`[ai]` 中的其他设置——输出上限、推理、权限、压缩等——无论会话使用哪个连接都生效。
 
-附带工作默认使用会话的模型，除非有键指定另一个；这些键形式相同——一个连接及其模型，连接留空即会话的连接，模型留空即该连接自己的模型：`[ai.auto_reviewer]`（`auto` 审查者，连接中的 `reviewer` 优先）、`[ai.subagents]`（委派的任务，连接中的 `subagents` 优先）、`[ai.goal_judge]`（`/goal` 的评判）、`[ai.handoff]`（`/handoff` 的交接摘要），以及 `[ai.recall]` 的 `connection`、`model`（`recall` 的求解器）。连接中的 `reviewer` 和 `subagents` 接受同样的表（`subagents = { connection = "local", model = "qwen3-coder" }`）或仅一个连接名。它们优先于同一项工作的 `[ai]` 键。压缩始终使用会话的模型，摘要必须放得进它的窗口。目标评判和交接摘要会读取整个记录，所选模型的窗口需不小于会话的窗口；它们只作用于 termide 自身的循环——Claude Code、Codex 和 Gemini CLI 自己保存对话并自行回答。
+附带工作默认使用会话的模型，除非有键指定另一个；这些键形式相同——一个连接及其模型，连接留空即会话的连接，模型留空即该连接自己的模型：
+
+| 键 | 在其上运行的工作 | 按连接设置的键 |
+|---|---|---|
+| `[ai.auto_reviewer]` | `auto` 模式的审查者——见 [auto 模式](#auto-模式) | `reviewer` |
+| `[ai.subagents]` | 委派的任务——见[子代理](#子代理) | `subagents` |
+| `[ai.goal_judge]` | `/goal` 的评判——见[服务提示词](#服务提示词) | — |
+| `[ai.handoff]` | `/handoff` 的交接摘要——见[服务提示词](#服务提示词) | — |
+| `[ai.recall]` 的 `connection`、`model` | `recall` 的求解器——见 [Recall](#recall) | — |
+
+```toml
+[ai.goal_judge]
+connection = "cloud"   # 连接名；留空：会话自己的连接
+model = "claude-opus-5"  # 该连接的模型；留空：连接自己的模型
+```
+
+连接中的 `reviewer` 和 `subagents` 接受同样的表（`subagents = { connection = "local", model = "qwen3-coder" }`）或仅一个连接名。它们优先于同一项工作的 `[ai]` 键。压缩始终使用会话的模型，摘要必须放得进它的窗口。目标评判和交接摘要会读取整个记录，所选模型的窗口需不小于会话的窗口；它们只作用于 termide 自身的循环——Claude Code、Codex 和 Gemini CLI 自己保存对话并自行回答。
 
 `reasoning` 是新会话请求的推理级别：`off`、`minimal`、`low`、`medium`、`high`（默认）、`xhigh` 或 `max`。每个模型只提供其 API 接受的级别，缺少的级别会落到它拥有的最接近的级别：Claude Opus 5.5 和 Fable 无法停止思考，因此 `off` 得到它们的最低努力程度；在上限为 `high` 的模型上，`max` 变为 `high`。在 Messages API 上由模型决定形式：Claude 4.6 及更新版本使用自适应思考及其努力程度（并请求推理摘要，否则较新的模型不会返回），Claude 4.5 及更早版本以及网关自己的模型使用思考预算。连接到 OpenAI、OpenRouter 或 Gemini API 的 OpenAI 兼容连接把级别放在 `reasoning_effort` 中（OpenAI 的模型有各自的取值集合，其他模型为 `low`、`medium` 和 `high`）。其他任何服务器——无论其地址如何：llama.cpp 运行在租用的服务器上与运行在家中同样常见——都会收到 `chat_template_kwargs.enable_thinking`，即 vLLM 或 llama.cpp 上 Qwen3、GLM 和 DeepSeek 聊天模板的开关，因此也有带 `off` 和 `high` 的 **Reasoning** 标签。旧的 `prefer_reasoning = true | false` 仍然可读，分别读作 `high` 或 `off`。
 
@@ -284,7 +300,7 @@ termide 中所有计时器——运行时钟、子代理、暂停、停止、文
 
 ## 工具
 
-代理的内置工具如下，另加其 MCP 服务器提供的工具（见 [MCP 服务器](#mcp-服务器)）。面板自己的代理以及使用 termide 工具的 Claude Code 还有列表之后介绍的 **question**、**suggest_command**、**suggest_goal** 和 **suggest_loop**、**agents** 和 **send_message**（见[与其他面板通信](#与其他面板通信)）、**fork**（见[把部分工作分叉出去](#把部分工作分叉出去)）、**debug**（见[调试](#调试)）、把任务交给另一个代理的 **task** 和列出并停止代理所启动工作的 **jobs**（见[子代理](#子代理)和[代理启动的工作](#代理启动的工作)）。除 `termide --prompt` 运行外，每个代理（包括子代理）还有列表之后介绍的 **checklist**。
+代理的内置工具如下，另加其 MCP 服务器提供的工具（见 [MCP 服务器](#mcp-服务器)）。面板自己的代理以及使用 termide 工具的 Claude Code 还有列表之后介绍的 **question**、**suggest_command**、**suggest_goal** 和 **suggest_loop**、**sessions** 和 **send_message**（见[与其他面板通信](#与其他面板通信)）、把工作交给新代理或会话副本的 **start_session**（见[启动会话](#启动会话)、[子代理](#子代理)和[把部分工作分叉出去](#把部分工作分叉出去)）、**debug**（见[调试](#调试)）以及列出并停止代理所启动工作的 **jobs**（见[代理启动的工作](#代理启动的工作)）。除 `termide --prompt` 运行外，每个代理（包括子代理）还有列表之后介绍的 **checklist**。
 
 模型在一次回复中请求的、不改变任何内容的调用——`read`、`recall`、`fetch`、`web_search`、`skill`、`sessions`、列出任务的 `jobs`、读取会话状态的 `debug`、查看会话的 `terminals`、只读的 `shell` 命令（如 `rg` 或 `git log`）——以及 `start_session` 委派（分叉到面板的除外）会并行运行；每个调用完成时即在对话记录中结束，模型按其请求的顺序得到结果。它们的权限决定仍依次进行，且在任何一个运行之前完成。其他调用单独运行：它开始时之前的调用都已结束，之后的调用等待它，因此更改与读取它的操作保持模型给出的顺序。MCP 工具也单独运行，因为 termide 无法判断其中哪些会改变内容。同时有多少个委派任务在思考，取决于它们所在连接的 `max_concurrent_requests`。
 
