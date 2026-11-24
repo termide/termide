@@ -11,6 +11,30 @@ use crate::PanelExt;
 use super::App;
 
 impl App {
+    /// Report the sources of moves from a remote that could not be deleted
+    /// there: the move then only copied, and the user must know it.
+    pub(super) fn check_remote_move_deletes(&mut self) {
+        if self.state.remote_move_deletes.is_empty() {
+            return;
+        }
+        let mut failed = Vec::new();
+        self.state
+            .remote_move_deletes
+            .retain(|(source, delete)| match delete.poll() {
+                None => true,
+                Some(Ok(())) => false,
+                Some(Err(error)) => {
+                    log::error!("Failed to delete remote source {source} after move: {error}");
+                    failed.push(format!("{source}: {error}"));
+                    false
+                }
+            });
+        for error in failed {
+            self.state.needs_redraw = true;
+            self.show_error_modal(termide_i18n::t().op_move_source_not_deleted_fmt(&error));
+        }
+    }
+
     /// Poll the unified operation manager for events (new file-ops system).
     /// This handles events from the centralized operation manager which will
     /// eventually replace the individual operation handles.
@@ -138,18 +162,15 @@ impl App {
                                 .then(|| self.state.batch.pending_delete.take())
                                 .flatten()
                             {
-                                // Start async delete operation (fire and forget)
+                                // Delete the source in the background;
+                                // `check_remote_move_deletes` reports one
+                                // that stays.
                                 let delete_op = pending_delete
                                     .vfs_manager
                                     .delete(&pending_delete.vfs_source);
-                                std::thread::spawn(move || {
-                                    if let Err(e) = delete_op.recv() {
-                                        log::error!(
-                                            "Failed to delete remote source after move: {}",
-                                            e
-                                        );
-                                    }
-                                });
+                                self.state
+                                    .remote_move_deletes
+                                    .push((pending_delete.vfs_source, delete_op));
                             }
 
                             // Handle pending editor download (open editor after remote file download)

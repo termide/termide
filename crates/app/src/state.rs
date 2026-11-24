@@ -159,6 +159,9 @@ pub struct AppState {
     /// Git commands started from the interface still running: commits,
     /// stash, stage and revert actions, the stash dropdown's list.
     pub git_jobs: Vec<GitJob>,
+    /// Sources of finished moves from a remote, still being deleted there:
+    /// a source that stays is reported, since the move then only copied.
+    pub remote_move_deletes: Vec<(termide_vfs::VfsPath, termide_vfs::VfsOperation<()>)>,
     /// SSH key passphrase entered for git network operations, cached in memory
     /// for the session so repeated push/fetch don't re-prompt. Never persisted.
     pub git_ssh_passphrase: Option<String>,
@@ -354,6 +357,7 @@ impl AppState {
             next_view_fetch_id: 0,
             git_operation_handle: None,
             git_jobs: Vec::new(),
+            remote_move_deletes: Vec::new(),
             git_ssh_passphrase: None,
             command_operation_handles: Vec::new(),
             bg_command_handles: Vec::new(),
