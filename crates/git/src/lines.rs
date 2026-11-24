@@ -178,6 +178,19 @@ impl Entry {
         String::from_utf8(out.stdout).ok()
     }
 
+    /// The index's version: `""` when the index has no entry for the file,
+    /// an error when it has one that cannot be read as text. A change made
+    /// against `""` in place of an unread version would take in the whole
+    /// file.
+    fn index_text(&self, mode: Option<&str>) -> Result<String, String> {
+        match mode {
+            None => Ok(String::new()),
+            Some(_) => self
+                .text_in("")
+                .ok_or_else(|| format!("cannot read the index's version of {}", self.name)),
+        }
+    }
+
     /// The mode a file new to the index gets.
     fn worktree_mode(&self) -> &'static str {
         #[cfg(unix)]
@@ -232,12 +245,20 @@ pub fn index_file_content(file: &Path) -> Option<String> {
     Entry::of(file).ok()?.text_in("")
 }
 
+/// The index's version of `file` to revert lines to: `""` when the index
+/// has no entry for it, an error when its entry cannot be read as text.
+pub fn index_version(file: &Path) -> Result<String, String> {
+    let entry = Entry::of(file)?;
+    let mode = entry.index_mode()?;
+    entry.index_text(mode.as_deref())
+}
+
 /// Stage the changes `text` (the file as the editor holds it) has against
 /// the index on `lines`. Returns whether there were any.
 pub fn stage_lines(file: &Path, text: &str, lines: RangeInclusive<usize>) -> Result<bool, String> {
     let entry = Entry::of(file)?;
     let mode = entry.index_mode()?;
-    let (index, crlf) = normalised(&entry.text_in("").unwrap_or_default());
+    let (index, crlf) = normalised(&entry.index_text(mode.as_deref())?);
     let (old, new) = (split(&index), split(text));
     let all = changes(&old, &new);
     if !all.iter().any(|change| change.touches(&lines)) {
@@ -263,7 +284,7 @@ pub fn unstage_lines(
     let Some(mode) = entry.index_mode()? else {
         return Ok(false);
     };
-    let (index, crlf) = normalised(&entry.text_in("").unwrap_or_default());
+    let (index, crlf) = normalised(&entry.index_text(Some(&mode))?);
     let head = entry.text_in("HEAD");
     let (head_text, _) = normalised(head.as_deref().unwrap_or_default());
     let (base, staged, worktree) = (split(&head_text), split(&index), split(text));

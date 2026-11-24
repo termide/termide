@@ -1,0 +1,1 @@
+- **A bookmark or command change that cannot be saved says so.** Renaming, moving or deleting a bookmark or a bookmark group, and renaming or deleting a command, showed the change even when its file could not be written, and it was gone at the next start. The status bar now reports the failure.

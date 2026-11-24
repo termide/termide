@@ -147,10 +147,8 @@ impl App {
             if let Some(ref proj) = self.state.project_bookmarks {
                 let proj_dir = self.state.project_root.join(".termide");
                 if let Err(e) = proj.save_to_dir(&proj_dir) {
-                    log::error!(
-                        "Failed to save project bookmarks to {}: {}",
-                        proj_dir.display(),
-                        e
+                    self.state.set_error(
+                        termide_i18n::t().bookmarks_save_project_failed_fmt(&e.to_string()),
                     );
                 }
             }

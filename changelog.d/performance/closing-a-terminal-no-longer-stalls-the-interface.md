@@ -1,0 +1,1 @@
+- **Closing a terminal no longer stalls the interface.** Closing a terminal panel, or a project with several, waited up to a fifth of a second for each one's program to end, and for good on a program stuck in the kernel. The signals after the hang-up and the wait now run in the background; quitting still gives them up to a second to finish.

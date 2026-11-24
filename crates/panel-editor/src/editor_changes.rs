@@ -133,7 +133,14 @@ impl Editor {
         let Some(path) = self.file_path().map(|path| path.to_path_buf()) else {
             return vec![];
         };
-        let index = termide_git::index_file_content(&path).unwrap_or_default();
+        let index = match termide_git::index_version(&path) {
+            Ok(index) => index,
+            Err(error) => {
+                return vec![PanelEvent::ShowMessage(
+                    t().editor_revert_failed_fmt(&error),
+                )]
+            }
+        };
         let text = self.buffer.to_string();
         let Some(revert) = termide_git::revert_lines(&index, &text, self.change_lines()) else {
             return vec![PanelEvent::ShowMessage(

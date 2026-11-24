@@ -1487,6 +1487,7 @@ git_diff_reject_both_confirm_fmt = "你也编辑过 {path}。连同你的修改�
 git_diff_reject_all_skipped_fmt = "保持不变（你也编辑过）：{count}"
 editor_stage_failed_fmt = "无法暂存：{error}"
 editor_unstage_failed_fmt = "无法取消暂存：{error}"
+editor_revert_failed_fmt = "无法还原：{error}"
 git_init_failed_fmt = "初始化失败: {error}"
 git_log_title_fmt = "Git日志: {repo} - {branch}"
 git_switched_to_fmt = "已切换到 {branch}"

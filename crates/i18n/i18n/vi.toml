@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "Bạn cũng đã sửa {path}. Từ chối c
 git_diff_reject_all_skipped_fmt = "Giữ nguyên, bạn cũng đã sửa: {count}"
 editor_stage_failed_fmt = "Không thể stage: {error}"
 editor_unstage_failed_fmt = "Không thể bỏ stage: {error}"
+editor_revert_failed_fmt = "Không thể hoàn tác: {error}"
 git_init_failed_fmt = "Khởi tạo thất bại: {error}"
 git_log_title_fmt = "Nhật ký Git: {repo} - {branch}"
 git_switched_to_fmt = "Đã chuyển sang {branch}"

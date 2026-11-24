@@ -269,6 +269,7 @@ pub trait Translation: Send + Sync {
     fn editor_no_changes(&self) -> &str;
     fn editor_stage_failed_fmt(&self, error: &str) -> String;
     fn editor_unstage_failed_fmt(&self, error: &str) -> String;
+    fn editor_revert_failed_fmt(&self, error: &str) -> String;
     fn debug_select_title(&self) -> &str;
     fn debug_no_native_debugger(&self) -> &str;
     fn debug_no_delve(&self) -> &str;

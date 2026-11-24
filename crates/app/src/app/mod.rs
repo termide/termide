@@ -1384,6 +1384,7 @@ impl App {
 
             // Poll unified operation manager for events (new system)
             self.poll_operation_manager();
+            self.check_remote_move_deletes();
 
             // Sync active operations data to the operations panel
             self.update_operations_panel();

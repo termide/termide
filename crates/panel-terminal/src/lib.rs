@@ -3,6 +3,7 @@
 
 pub mod agent_shell;
 mod clipboard;
+mod closing;
 mod commands;
 mod input_encoding;
 mod link_detection;
@@ -25,6 +26,8 @@ pub use shell_integration::set_shell_integration;
 pub use tap::{OutputTap, TapChunk};
 pub use terminal::set_scrollback_lines;
 pub use terminal_info::TerminalInfo;
+
+pub use closing::wait_for_closing_terminals;
 
 use anyhow::Result;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -1890,17 +1893,32 @@ impl Panel for Terminal {
                 if let Some(group) = foreground {
                     let _ = signal::killpg(Pid::from_raw(group), Signal::SIGHUP);
                 }
-                for _ in 0..10 {
-                    if self.has_exited() {
-                        return;
+                // The rest waits on the child: off the UI thread, which
+                // would otherwise stall for each terminal closed, and for
+                // good on a child stuck in the kernel.
+                let child = Arc::clone(&self.child);
+                let is_alive = Arc::clone(&self.is_alive);
+                closing::spawn(move || {
+                    let exited = || {
+                        child
+                            .lock()
+                            .map(|mut c| matches!(c.try_wait(), Ok(Some(_))))
+                            .unwrap_or(false)
+                    };
+                    for _ in 0..10 {
+                        if exited() {
+                            return;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
                     }
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                }
-                let _ = signal::killpg(pid, Signal::SIGTERM);
-                std::thread::sleep(std::time::Duration::from_millis(100));
-                if self.is_alive() || !self.has_exited() {
-                    let _ = signal::killpg(pid, Signal::SIGKILL);
-                }
+                    let _ = signal::killpg(pid, Signal::SIGTERM);
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    let alive = is_alive.lock().map(|alive| *alive).unwrap_or(false);
+                    if alive || !exited() {
+                        let _ = signal::killpg(pid, Signal::SIGKILL);
+                    }
+                    let _ = child.lock().map(|mut c| c.wait());
+                });
             }
 
             #[cfg(windows)]
@@ -1909,9 +1927,8 @@ impl Panel for Terminal {
                 let _ = std::process::Command::new("taskkill")
                     .args(["/PID", &pid.to_string(), "/T", "/F"])
                     .output();
+                let _ = self.child.lock().map(|mut c| c.wait());
             }
-
-            let _ = self.child.lock().map(|mut c| c.wait());
         }
     }
 }
@@ -2009,6 +2026,47 @@ mod device_tests {
             !*reader_alive.lock().unwrap(),
             "the reader outlived the panel"
         );
+    }
+
+    /// A program that ignores the hang-up keeps the closing panel waiting
+    /// for none of it: the later signals and the wait run on their own
+    /// thread, and the program still ends and is reaped.
+    #[test]
+    fn closing_waits_on_its_own_thread_for_a_program_ignoring_the_hang_up() {
+        let argv = [
+            "/bin/sh".to_string(),
+            "-c".into(),
+            "trap '' HUP; echo ready; sleep 999".into(),
+        ];
+        let Ok(term) = Terminal::new_with_program(10, 40, &argv, None, &[]) else {
+            return; // No PTY available.
+        };
+        let pid = Pid::from_raw(term.child_pid().unwrap() as i32);
+        // The trap is set once the program says so.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let first_line = |term: &Terminal| -> String {
+            term.screen
+                .read()
+                .unwrap()
+                .get_line_by_absolute(0)
+                .map(|cells| cells.iter().map(|c| c.ch).collect())
+                .unwrap_or_default()
+        };
+        while !first_line(&term).contains("ready") {
+            assert!(std::time::Instant::now() < deadline, "never started");
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+
+        let start = std::time::Instant::now();
+        drop(term);
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(50),
+            "closing waited for the program: {:?}",
+            start.elapsed()
+        );
+
+        wait_for_closing_terminals(std::time::Duration::from_secs(5));
+        assert_eq!(signal::kill(pid, None), Err(nix::errno::Errno::ESRCH));
     }
 
     /// A command line holding a control character is never typed, so a

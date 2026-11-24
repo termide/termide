@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "También editaste {path}. ¿Rechazar los cam
 git_diff_reject_all_skipped_fmt = "Sin tocar, editados también por ti: {count}"
 editor_stage_failed_fmt = "No se pudo preparar: {error}"
 editor_unstage_failed_fmt = "No se pudo quitar del índice: {error}"
+editor_revert_failed_fmt = "No se pudo revertir: {error}"
 git_init_failed_fmt = "Inicialización fallida: {error}"
 git_log_title_fmt = "Git Historial: {repo} - {branch}"
 git_switched_to_fmt = "Cambiado a {branch}"

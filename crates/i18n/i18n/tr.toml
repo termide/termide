@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "{path} dosyasını siz de düzenlediniz. Se�
 git_diff_reject_all_skipped_fmt = "Olduğu gibi bırakıldı, siz de düzenlediniz: {count}"
 editor_stage_failed_fmt = "Hazırlanamadı: {error}"
 editor_unstage_failed_fmt = "Hazırlıktan çıkarılamadı: {error}"
+editor_revert_failed_fmt = "Geri alınamadı: {error}"
 git_init_failed_fmt = "Başlatma başarısız: {error}"
 git_log_title_fmt = "Git Günlüğü: {repo} - {branch}"
 git_switched_to_fmt = "{branch} dalına geçildi"

@@ -123,6 +123,12 @@ pub struct FileManager {
     /// status bar: `(path, count)`. Avoids a `read_dir` on every redraw while
     /// the cursor stays on the same folder; refreshed when it moves.
     dir_item_count_memo: std::cell::RefCell<Option<(PathBuf, usize)>>,
+    /// Memo of what the status bar last read of a local file under the
+    /// cursor (`lstat`, `stat`, `readlink`, the owner's and group's names),
+    /// by path: each is a call that can hang on a stalled mount or a slow
+    /// directory service, and the bar is drawn every frame. Forgotten when
+    /// the listing is read again.
+    local_info_memo: std::cell::RefCell<Option<(PathBuf, Option<file_info::LocalInfo>)>>,
     /// Directories waiting for a bounded size walk, FIFO. Results land
     /// in the process-wide `utils::shared_dir_size_cache()`, not here.
     dir_size_queue: VecDeque<PathBuf>,
@@ -321,6 +327,7 @@ impl FileManager {
             git_status_receiver: None,
             dir_size_receiver: None,
             dir_item_count_memo: Default::default(),
+            local_info_memo: Default::default(),
             dir_size_queue: VecDeque::new(),
             dir_size_pending: None,
             dir_size_cache_generation: 0,
@@ -1273,6 +1280,30 @@ mod tests {
             .get_selected_paths()
             .iter()
             .all(|p| !p.ends_with("__loading__")));
+    }
+
+    /// The status bar is drawn every frame; what it shows of the file under
+    /// the cursor is read from the file system once, and again only with
+    /// the next listing.
+    #[test]
+    fn the_status_bar_reads_a_file_once_per_listing() {
+        let temp_dir = TempDir::new().unwrap();
+        let file = temp_dir.path().join("a.txt");
+        std::fs::write(&file, "x").unwrap();
+        let mut fm = FileManager::new_with_path(temp_dir.path().to_path_buf());
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("a.txt").unwrap();
+        let size = || fm.get_current_file_info().unwrap().size;
+        let first = size();
+
+        std::fs::write(&file, "x".repeat(4096)).unwrap();
+        assert_eq!(size(), first, "read again before the listing was");
+
+        fm.load_directory().unwrap();
+        wait_for_local_listing(&mut fm);
+        fm.selected = fm.find_entry_index("a.txt").unwrap();
+        assert_ne!(fm.get_current_file_info().unwrap().size, first);
     }
 
     fn wait_for_local_listing(fm: &mut FileManager) {

@@ -396,6 +396,8 @@ impl FileManager {
 
     /// Build top-level `tree_entries` from a sorted list of `FileEntry`.
     pub(crate) fn build_top_level_tree(&self, entries: Vec<FileEntry>) -> Vec<tree::TreeEntry> {
+        // A new listing: what the status bar read of a file may have changed.
+        self.forget_file_info_memo();
         entries
             .into_iter()
             .map(|fe| {

@@ -427,10 +427,18 @@ pub(super) fn worker_upload_file(
         }
     }
     if let Err(e) = rename(&part, remote) {
-        if let Some(aside) = &aside {
-            let _ = rename(aside, remote);
-        }
         let _ = remove(&part);
+        if let Some(aside) = &aside {
+            if let Err(back) = rename(aside, remote) {
+                // The original is not lost, only renamed: say where it is.
+                return Err(VfsError::RemoteError {
+                    message: format!(
+                        "{e}; the original is kept as {} (could not rename it back: {back})",
+                        aside.display()
+                    ),
+                });
+            }
+        }
         return Err(e);
     }
     if let Some(aside) = &aside {

@@ -504,6 +504,12 @@ pub struct VfsOperation<T> {
     receiver: mpsc::Receiver<VfsResult<T>>,
 }
 
+impl<T> std::fmt::Debug for VfsOperation<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("VfsOperation").finish_non_exhaustive()
+    }
+}
+
 impl<T> VfsOperation<T> {
     /// Create a new VFS operation from a receiver.
     pub fn new(receiver: mpsc::Receiver<VfsResult<T>>) -> Self {
@@ -525,6 +531,18 @@ impl<T> VfsOperation<T> {
     /// Try to receive the result without blocking.
     pub fn try_recv(&self) -> Option<VfsResult<T>> {
         self.receiver.try_recv().ok()
+    }
+
+    /// The result once it is there, without blocking: `None` while the
+    /// operation runs, an error when it ended without one.
+    pub fn poll(&self) -> Option<VfsResult<T>> {
+        match self.receiver.try_recv() {
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => Some(Err(VfsError::RemoteError {
+                message: "Operation channel closed".to_string(),
+            })),
+        }
     }
 
     /// Block until the result is available.

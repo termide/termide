@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "{path}은(는) 사용자도 편집했습니�
 git_diff_reject_all_skipped_fmt = "그대로 둔 파일(사용자도 편집): {count}"
 editor_stage_failed_fmt = "스테이지할 수 없음: {error}"
 editor_unstage_failed_fmt = "스테이지 해제할 수 없음: {error}"
+editor_revert_failed_fmt = "되돌릴 수 없음: {error}"
 git_init_failed_fmt = "초기화 실패: {error}"
 git_log_title_fmt = "Git 로그: {repo} - {branch}"
 git_switched_to_fmt = "{branch}(으)로 전환됨"

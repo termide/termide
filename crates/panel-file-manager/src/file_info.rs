@@ -21,7 +21,101 @@ pub struct FileInfo {
     pub target_is_dir: bool,
 }
 
+/// What the status bar reads of a local file from the file system.
+#[derive(Clone, Debug)]
+pub(crate) struct LocalInfo {
+    file_type: &'static str,
+    symlink_target: Option<String>,
+    /// Whether the effective target is a directory (follows symlinks)
+    target_is_dir: bool,
+    /// A file's size in bytes; `None` for a directory.
+    file_size: Option<u64>,
+    owner: String,
+    group: String,
+    mode: String,
+}
+
+impl LocalInfo {
+    /// Read `path`'s entry, following a symlink for size, owner and mode;
+    /// `None` when it cannot be read.
+    fn read(path: &std::path::Path) -> Option<Self> {
+        let symlink_metadata = fs::symlink_metadata(path).ok()?;
+
+        let file_type = if symlink_metadata.is_dir() {
+            "Directory"
+        } else if symlink_metadata.is_symlink() {
+            "Symlink"
+        } else {
+            "File"
+        };
+
+        let symlink_target = if symlink_metadata.is_symlink() {
+            fs::read_link(path)
+                .ok()
+                .map(|p| termide_core::util::shorten_home_path(&p.display().to_string()))
+        } else {
+            None
+        };
+
+        // For size/owner/group/mode, follow the symlink
+        let metadata = fs::metadata(path).unwrap_or(symlink_metadata);
+        let target_is_dir = metadata.is_dir();
+        let file_size = (!target_is_dir).then_some(metadata.len());
+
+        #[cfg(unix)]
+        let (owner, group, mode) = {
+            use std::os::unix::fs::MetadataExt;
+            (
+                utils::get_user_name(metadata.uid()),
+                utils::get_group_name(metadata.gid()),
+                format!("{:04o}", metadata.mode() & 0o7777),
+            )
+        };
+
+        #[cfg(not(unix))]
+        let (owner, group, mode) = {
+            let owner = std::env::var("USERNAME").unwrap_or_else(|_| "owner".to_string());
+            let mode = if metadata.permissions().readonly() {
+                "0444".to_string()
+            } else {
+                "0644".to_string()
+            };
+            (owner, String::new(), mode)
+        };
+
+        Some(Self {
+            file_type,
+            symlink_target,
+            target_is_dir,
+            file_size,
+            owner,
+            group,
+            mode,
+        })
+    }
+}
+
 impl FileManager {
+    /// What the status bar shows of the local `path`, read once while the
+    /// cursor stays on it and the listing is not read again.
+    fn local_info(&self, path: &std::path::Path) -> Option<LocalInfo> {
+        let mut memo = self.local_info_memo.borrow_mut();
+        match &*memo {
+            Some((memo_path, info)) if memo_path == path => info.clone(),
+            _ => {
+                let info = LocalInfo::read(path);
+                *memo = Some((path.to_path_buf(), info.clone()));
+                info
+            }
+        }
+    }
+
+    /// Forget what the status bar read of files, for a listing read again.
+    pub(crate) fn forget_file_info_memo(&self) {
+        self.local_info_memo.borrow_mut().take();
+        self.dir_item_count_memo.borrow_mut().take();
+    }
+
     /// Get information about the currently selected file
     pub fn get_current_file_info(&self) -> Option<FileInfo> {
         let te = self.entry_under_cursor()?;
@@ -90,57 +184,15 @@ impl FileManager {
             te.full_path.clone()
         };
 
-        let symlink_metadata = fs::symlink_metadata(&file_path).ok()?;
-
-        let file_type = if symlink_metadata.is_dir() {
-            "Directory"
-        } else if symlink_metadata.is_symlink() {
-            "Symlink"
-        } else {
-            "File"
-        };
-
-        let symlink_target = if symlink_metadata.is_symlink() {
-            fs::read_link(&file_path)
-                .ok()
-                .map(|p| termide_core::util::shorten_home_path(&p.display().to_string()))
-        } else {
-            None
-        };
-
-        // For size/owner/group/mode, follow the symlink
-        let metadata = fs::metadata(&file_path).unwrap_or(symlink_metadata);
-
-        let target_is_dir = metadata.is_dir();
-
-        // Files: formatted byte size. Directories: computed further below
-        // (recursive size from the shared cache + immediate child count).
-        let file_size = if target_is_dir {
-            None
-        } else {
-            Some(utils::format_size(metadata.len()))
-        };
-
-        #[cfg(unix)]
-        let (owner, group, mode) = {
-            use std::os::unix::fs::MetadataExt;
-            (
-                utils::get_user_name(metadata.uid()),
-                utils::get_group_name(metadata.gid()),
-                format!("{:04o}", metadata.mode() & 0o7777),
-            )
-        };
-
-        #[cfg(not(unix))]
-        let (owner, group, mode) = {
-            let owner = std::env::var("USERNAME").unwrap_or_else(|_| "owner".to_string());
-            let mode = if metadata.permissions().readonly() {
-                "0444".to_string()
-            } else {
-                "0644".to_string()
-            };
-            (owner, String::new(), mode)
-        };
+        let LocalInfo {
+            file_type,
+            symlink_target,
+            target_is_dir,
+            file_size,
+            owner,
+            group,
+            mode,
+        } = self.local_info(&file_path)?;
 
         let name = entry.name.clone();
 
@@ -168,7 +220,7 @@ impl FileManager {
             };
             format!("{} ({})", size_part, t.file_info_items(count))
         } else {
-            file_size.unwrap_or_default()
+            file_size.map(utils::format_size).unwrap_or_default()
         };
 
         Some(FileInfo {

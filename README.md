@@ -488,7 +488,9 @@ Termide follows the [XDG Base Directory Specification](https://specifications.fr
 - macOS: `~/Library/Application Support/termide/config.toml`
 - Windows: `%APPDATA%\termide\config.toml`
 
-A project can override any of it in `<project>/.termide/config.toml`. A setting
+A project can override most of it in `<project>/.termide/config.toml`; what
+termide starts, where it writes or sends a key, and the agent's permissions
+stay global ([Settings Modal](doc/en/ui.md#settings-modal)). A setting
 with a wrong type or value is ignored on its own and reported in the Journal;
 the rest of the file still applies. Since the next save from Settings rewrites
 the file without the ignored setting, the file as it was is first copied to

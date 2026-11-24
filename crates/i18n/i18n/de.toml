@@ -1471,6 +1471,7 @@ git_diff_reject_both_confirm_fmt = "Du hast {path} auch bearbeitet. Die ausgewä
 git_diff_reject_all_skipped_fmt = "Unverändert gelassen, auch von dir bearbeitet: {count}"
 editor_stage_failed_fmt = "Stagen nicht möglich: {error}"
 editor_unstage_failed_fmt = "Unstagen nicht möglich: {error}"
+editor_revert_failed_fmt = "Zurücksetzen nicht möglich: {error}"
 git_init_failed_fmt = "Initialisierung fehlgeschlagen: {error}"
 git_log_title_fmt = "Git-Verlauf: {repo} - {branch}"
 git_switched_to_fmt = "Gewechselt zu {branch}"

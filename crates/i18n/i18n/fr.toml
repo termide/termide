@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "Vous avez aussi modifié {path}. Rejeter les
 git_diff_reject_all_skipped_fmt = "Laissés tels quels, modifiés par vous aussi : {count}"
 editor_stage_failed_fmt = "Impossible d'indexer : {error}"
 editor_unstage_failed_fmt = "Impossible de désindexer : {error}"
+editor_revert_failed_fmt = "Impossible de rétablir : {error}"
 git_init_failed_fmt = "Échec de l'initialisation : {error}"
 git_log_title_fmt = "Journal Git : {repo} - {branch}"
 git_switched_to_fmt = "Basculé vers {branch}"

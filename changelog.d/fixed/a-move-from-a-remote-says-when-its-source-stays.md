@@ -1,0 +1,1 @@
+- **A move from a remote says when its source stays.** When the server refused to delete a moved file's source, the move had only copied it and nothing said so; it now shows an error naming the source. A failed SFTP upload that could not put the file it replaced back under its name says where that file is kept.

@@ -159,6 +159,9 @@ pub struct AppState {
     /// Git commands started from the interface still running: commits,
     /// stash, stage and revert actions, the stash dropdown's list.
     pub git_jobs: Vec<GitJob>,
+    /// Sources of finished moves from a remote, still being deleted there:
+    /// a source that stays is reported, since the move then only copied.
+    pub remote_move_deletes: Vec<(termide_vfs::VfsPath, termide_vfs::VfsOperation<()>)>,
     /// SSH key passphrase entered for git network operations, cached in memory
     /// for the session so repeated push/fetch don't re-prompt. Never persisted.
     pub git_ssh_passphrase: Option<String>,
@@ -354,6 +357,7 @@ impl AppState {
             next_view_fetch_id: 0,
             git_operation_handle: None,
             git_jobs: Vec::new(),
+            remote_move_deletes: Vec::new(),
             git_ssh_passphrase: None,
             command_operation_handles: Vec::new(),
             bg_command_handles: Vec::new(),
@@ -965,10 +969,11 @@ impl AppState {
         self.last_layout_save = Some(std::time::Instant::now());
     }
 
-    /// Save bookmarks to data directory
-    pub fn save_bookmarks(&self) {
+    /// Save bookmarks to data directory; a failure shows on the status bar,
+    /// since the change made in the menu is then gone at the next start.
+    pub fn save_bookmarks(&mut self) {
         if let Err(e) = self.bookmarks.save() {
-            log::error!("Failed to save bookmarks: {}", e);
+            self.set_error(termide_i18n::t().bookmarks_save_failed_fmt(&e.to_string()));
         }
     }
 
