@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "{path} को आपने भी संप�
 git_diff_reject_all_skipped_fmt = "जैसे थे वैसे छोड़े गए, आपने भी संपादित किए: {count}"
 editor_stage_failed_fmt = "स्टेज नहीं कर सके: {error}"
 editor_unstage_failed_fmt = "अनस्टेज नहीं कर सके: {error}"
+editor_revert_failed_fmt = "वापस नहीं ला सके: {error}"
 git_init_failed_fmt = "प्रारंभ विफल: {error}"
 git_log_title_fmt = "Git इतिहास: {repo} - {branch}"
 git_switched_to_fmt = "{branch} पर स्विच किया गया"

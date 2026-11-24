@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "คุณก็แก้ไข {path} ด้
 git_diff_reject_all_skipped_fmt = "คงไว้ตามเดิม คุณก็แก้ไขด้วย: {count}"
 editor_stage_failed_fmt = "Stage ไม่ได้: {error}"
 editor_unstage_failed_fmt = "Unstage ไม่ได้: {error}"
+editor_revert_failed_fmt = "ย้อนกลับไม่ได้: {error}"
 git_init_failed_fmt = "เริ่มต้นล้มเหลว: {error}"
 git_log_title_fmt = "Git ประวัติ: {repo} - {branch}"
 git_switched_to_fmt = "เปลี่ยนไปยัง {branch}"

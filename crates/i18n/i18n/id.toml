@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "Anda juga menyunting {path}. Tolak perubahan
 git_diff_reject_all_skipped_fmt = "Dibiarkan, juga Anda sunting: {count}"
 editor_stage_failed_fmt = "Tidak dapat stage: {error}"
 editor_unstage_failed_fmt = "Tidak dapat unstage: {error}"
+editor_revert_failed_fmt = "Tidak dapat mengembalikan: {error}"
 git_init_failed_fmt = "Inisialisasi gagal: {error}"
 git_log_title_fmt = "Log Git: {repo} - {branch}"
 git_switched_to_fmt = "Beralih ke {branch}"

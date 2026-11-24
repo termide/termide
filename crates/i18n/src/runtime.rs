@@ -3084,6 +3084,10 @@ impl Translation for RuntimeTranslation {
         self.format("editor_unstage_failed_fmt", &[("error", error)])
     }
 
+    fn editor_revert_failed_fmt(&self, error: &str) -> String {
+        self.format("editor_revert_failed_fmt", &[("error", error)])
+    }
+
     fn git_diff_reject_all_skipped_fmt(&self, count: usize) -> String {
         self.format(
             "git_diff_reject_all_skipped_fmt",

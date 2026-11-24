@@ -1506,6 +1506,7 @@ git_diff_reject_both_confirm_fmt = "You edited {path} too. Reject the selected c
 git_diff_reject_all_skipped_fmt = "Left as they are, edited by you too: {count}"
 editor_stage_failed_fmt = "Cannot stage: {error}"
 editor_unstage_failed_fmt = "Cannot unstage: {error}"
+editor_revert_failed_fmt = "Cannot revert: {error}"
 git_init_failed_fmt = "Init failed: {error}"
 git_log_title_fmt = "Git Log: {repo} - {branch}"
 git_switched_to_fmt = "Switched to {branch}"

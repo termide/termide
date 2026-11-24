@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "Você também editou {path}. Rejeitar as mud
 git_diff_reject_all_skipped_fmt = "Mantidos como estão, editados por você também: {count}"
 editor_stage_failed_fmt = "Não foi possível preparar: {error}"
 editor_unstage_failed_fmt = "Não foi possível remover do índice: {error}"
+editor_revert_failed_fmt = "Não foi possível reverter: {error}"
 git_init_failed_fmt = "Falha na inicialização: {error}"
 git_log_title_fmt = "Git Histórico: {repo} - {branch}"
 git_switched_to_fmt = "Mudou para {branch}"

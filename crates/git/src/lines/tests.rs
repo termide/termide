@@ -123,6 +123,36 @@ fn a_conflicted_file_is_refused() {
     );
     let error = stage_lines(&repo.join("f"), "x\n", 0..=0).unwrap_err();
     assert!(error.contains("merge conflict"), "{error}");
+    // A revert has no version to go back to either, not an empty one.
+    let error = index_version(&repo.join("f")).unwrap_err();
+    assert!(error.contains("merge conflict"), "{error}");
+}
+
+#[test]
+fn an_index_version_that_is_not_text_is_refused_not_taken_as_empty() {
+    let (_dir, repo) = repo();
+    let latin1 = repo.join("l");
+    std::fs::write(&latin1, b"caf\xe9\n").unwrap();
+    git(&repo, &["add", "l"]);
+    // Read as empty, every line of the file would be one change: a revert
+    // would remove them all, a stage would replace the index's bytes.
+    let error = index_version(&latin1).unwrap_err();
+    assert!(error.contains("cannot read"), "{error}");
+    assert!(stage_lines(&latin1, "café\nmore\n", 1..=1).is_err());
+    let staged = Command::new("git")
+        .args(["show", ":l"])
+        .current_dir(&repo)
+        .output()
+        .unwrap();
+    assert_eq!(staged.stdout, b"caf\xe9\n");
+}
+
+#[test]
+fn a_file_the_index_lacks_reverts_to_nothing() {
+    let (_dir, repo) = repo();
+    assert_eq!(index_version(&repo.join("f")).unwrap(), text(&[]));
+    std::fs::write(repo.join("g"), "a\n").unwrap();
+    assert_eq!(index_version(&repo.join("g")).unwrap(), "");
 }
 
 #[test]

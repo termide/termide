@@ -1470,6 +1470,7 @@ git_diff_reject_both_confirm_fmt = "{path} はあなたも編集しています�
 git_diff_reject_all_skipped_fmt = "そのまま残したファイル（あなたも編集）: {count}"
 editor_stage_failed_fmt = "ステージできません: {error}"
 editor_unstage_failed_fmt = "アンステージできません: {error}"
+editor_revert_failed_fmt = "元に戻せません: {error}"
 git_init_failed_fmt = "初期化に失敗: {error}"
 git_log_title_fmt = "Gitログ: {repo} - {branch}"
 git_switched_to_fmt = "{branch}に切り替えました"
