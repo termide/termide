@@ -19,7 +19,8 @@ wait "Want me to highlight" 20
 key Tab Up Up Up Up Up Up Up Up Up Up Up Up Down
 snapshot picked
 type "o"
-wait "picture-1.png"
+# Its file is named after its content.
+wait-re "[0-9a-f]{8}\.png"
 expect-not "message.txt"
 snapshot opened
 quit
