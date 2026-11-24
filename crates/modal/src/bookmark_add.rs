@@ -11,6 +11,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::base::{
     button_style, drag_field, field_box, press_field_box, render_modal_block, render_text_input,
@@ -119,10 +120,10 @@ impl BookmarkAddModal {
         let t = i18n::t();
 
         // Calculate width based on content
-        let title_width = t.bookmarks_add_title().len() as u16 + 4;
-        let path_label_width = t.bookmarks_add_path().len() as u16 + 2;
-        let desc_label_width = t.bookmarks_add_description().len() as u16 + 2;
-        let group_label_width = t.bookmarks_add_group().len() as u16 + 2;
+        let title_width = t.bookmarks_add_title().width() as u16 + 4;
+        let path_label_width = t.bookmarks_add_path().width() as u16 + 2;
+        let desc_label_width = t.bookmarks_add_description().width() as u16 + 2;
+        let group_label_width = t.bookmarks_add_group().width() as u16 + 2;
 
         let max_label_width = path_label_width
             .max(desc_label_width)
@@ -500,8 +501,7 @@ impl Modal for BookmarkAddModal {
             Span::styled(format!("[ {} ]", t.ui_cancel()), cancel_style),
         ]);
 
-        let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
-        buttons_paragraph.render(chunks[chunk_idx], buf);
+        crate::base::render_centered_line(&buttons, chunks[chunk_idx], buf);
 
         // Save buttons area for mouse handling
         self.last_buttons_area = Some(chunks[chunk_idx]);
@@ -790,13 +790,14 @@ impl Modal for BookmarkAddModal {
         let t = i18n::t();
         let ok_text = format!("[ {} ]", t.ui_ok());
         let cancel_text = format!("[ {} ]", t.ui_cancel());
-        let total_text_width = ok_text.len() + MODAL_BUTTON_SPACING as usize + cancel_text.len();
+        let total_text_width =
+            ok_text.width() + MODAL_BUTTON_SPACING as usize + cancel_text.width();
 
         let start_col =
             buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
-        let ok_end = start_col + ok_text.len() as u16;
+        let ok_end = start_col + ok_text.width() as u16;
         let cancel_start = ok_end + MODAL_BUTTON_SPACING;
-        let cancel_end = cancel_start + cancel_text.len() as u16;
+        let cancel_end = cancel_start + cancel_text.width() as u16;
 
         // Determine which button was clicked
         if mouse.column >= start_col && mouse.column < ok_end {

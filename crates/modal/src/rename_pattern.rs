@@ -6,11 +6,12 @@ use anyhow::Result;
 use crossterm::event::KeyCode;
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
+use unicode_width::UnicodeWidthStr;
 
 use crate::base::{
     button_style, drag_field, field_box, press_field_box, render_modal_block, render_text_input,
@@ -210,8 +211,7 @@ impl Modal for RenamePatternModal {
             Span::styled(format!("[ {} ]", t.ui_cancel()), cancel_style),
         ]);
 
-        let buttons_paragraph = Paragraph::new(buttons).alignment(Alignment::Center);
-        buttons_paragraph.render(chunks[6], buf);
+        crate::base::render_centered_line(&buttons, chunks[6], buf);
 
         // Save buttons area for mouse handling
         self.last_buttons_area = Some(chunks[6]);
@@ -351,13 +351,13 @@ impl Modal for RenamePatternModal {
         let t = i18n::t();
         let continue_text = format!("[ {} ]", t.ui_continue());
         let cancel_text = format!("[ {} ]", t.ui_cancel());
-        let total_text_width = continue_text.len() + 4 + cancel_text.len();
+        let total_text_width = continue_text.width() + 4 + cancel_text.width();
 
         let start_col =
             buttons_area.x + (buttons_area.width.saturating_sub(total_text_width as u16)) / 2;
-        let continue_end = start_col + continue_text.len() as u16;
+        let continue_end = start_col + continue_text.width() as u16;
         let cancel_start = continue_end + 4;
-        let cancel_end = cancel_start + cancel_text.len() as u16;
+        let cancel_end = cancel_start + cancel_text.width() as u16;
 
         // Determine which button was clicked
         if mouse.column >= start_col && mouse.column < continue_end {

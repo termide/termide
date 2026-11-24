@@ -10,7 +10,7 @@ use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Modifier, Style},
-    text::Span,
+    text::{Line, Span},
     widgets::{Block, Borders, Clear, Widget},
 };
 use termide_theme::Theme;
@@ -70,6 +70,20 @@ pub fn button_style(is_selected: bool, theme: &Theme) -> Style {
     } else {
         Style::default().fg(theme.fg)
     }
+}
+
+/// The column a row of buttons `width` columns wide starts at, centred in
+/// `area`: the column their mouse hit areas count from.
+pub fn centered_start(area: Rect, width: usize) -> u16 {
+    area.x + area.width.saturating_sub(width as u16) / 2
+}
+
+/// Draw a row of buttons centred in `area`, from [`centered_start`]: the
+/// hit areas then match it to the column, which ratatui's own centring,
+/// rounding the other way on an odd remainder, does not.
+pub fn render_centered_line(line: &Line, area: Rect, buf: &mut Buffer) {
+    let start = centered_start(area, line.width());
+    buf.set_line(start, area.y, line, area.right().saturating_sub(start));
 }
 
 /// Render a text input field with cursor and selection support.
