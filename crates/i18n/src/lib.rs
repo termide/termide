@@ -1408,8 +1408,9 @@ pub trait Translation: Send + Sync {
     fn agent_tool_recall(&self) -> &str;
     /// Agent transcript: the action words for a `skill` tool call.
     fn agent_tool_skill(&self) -> &str;
-    /// Agent transcript: the action words for a `task` call (a subagent).
-    fn agent_tool_task(&self) -> &str;
+    /// Agent transcript: the action words for a `start_session` call that
+    /// starts a fresh agent (a subagent), or for a legacy `task` call.
+    fn agent_tool_start_session(&self) -> &str;
     /// Agent transcript: the action words for a `checklist` call, before how
     /// far the list stands and its step at hand.
     fn agent_tool_checklist(&self) -> &str;
@@ -1419,9 +1420,10 @@ pub trait Translation: Send + Sync {
     /// Agent transcript: the action words for a `jobs` call stopping one of
     /// them, before its id.
     fn agent_tool_jobs_stop(&self) -> &str;
-    /// Agent transcript: the action words for a `fork` call, before the
-    /// first line of the part of the work it hands over.
-    fn agent_tool_fork(&self) -> &str;
+    /// Agent transcript: the action words for a `start_session` call with
+    /// `context` `fork` (or a legacy `fork` call), before the first line of
+    /// the part of the work it hands over.
+    fn agent_tool_start_session_fork(&self) -> &str;
     /// Agent transcript: the action words for a `terminals` call listing the
     /// session's terminals.
     fn agent_tool_terminals(&self) -> &str;
@@ -1559,7 +1561,7 @@ pub trait Translation: Send + Sync {
     /// one new sessions start on.
     fn settings_ai_connection_default(&self) -> &str;
     /// Settings modal: the connection the agents a connection's sessions
-    /// delegate to with `task` run on.
+    /// delegate to with `start_session` run on.
     fn settings_ai_connection_subagents(&self) -> &str;
     /// Settings modal: subagents left on the connection itself.
     fn settings_ai_connection_subagents_own(&self) -> &str;

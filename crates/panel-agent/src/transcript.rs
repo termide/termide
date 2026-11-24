@@ -2197,11 +2197,15 @@ fn tool_headline(
             let first = prompt.lines().find(|l| !l.trim().is_empty()).unwrap_or("");
             let forked = call.name == "fork" || arg("context") == "fork";
             if forked {
-                action("&", t.agent_tool_fork(), first.trim().to_string())
+                action(
+                    "&",
+                    t.agent_tool_start_session_fork(),
+                    first.trim().to_string(),
+                )
             } else {
                 action(
                     "&",
-                    t.agent_tool_task(),
+                    t.agent_tool_start_session(),
                     // A middle dot, not a colon: `default:` alone on a row read
                     // as a cut-off phrase.
                     format!("{} · {}", arg("agent"), first.trim()),

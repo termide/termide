@@ -1,6 +1,6 @@
 //! `debug`: drive the debugger the way the user does in the debug panel —
 //! start a launch, set breakpoints, step, read the stack and the variables,
-//! evaluate expressions. Like `task`, the tool holds no session machinery:
+//! evaluate expressions. Like `start_session`, the tool holds no session machinery:
 //! the app supplies the closure that reaches its debug session, and may
 //! supply one that refuses a launch bound to fail before anyone is asked.
 

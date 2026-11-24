@@ -197,8 +197,6 @@ winresource = "0.1"
 
 [dev-dependencies]
 tempfile.workspace = true
-# tests/grammar_loads.rs asserts every SUPPORTED_LANGUAGES grammar loads.
-termide-highlight = { path = "crates/highlight" }
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

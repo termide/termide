@@ -145,7 +145,7 @@ pub(crate) fn delegate_row(
     let t = termide_i18n::t();
     let (glyph, label) = match state {
         DelegateState::Parked { .. } => (crate::failure::WAIT_GLYPH, t.agent_parked_strip()),
-        _ => ("&", t.agent_tool_task()),
+        _ => ("&", t.agent_tool_start_session()),
     };
     let mut row = StripRow::new(glyph, label.to_string(), first_line(task), target);
     row.notes.push(agent);

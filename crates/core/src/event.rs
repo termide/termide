@@ -914,7 +914,7 @@ pub enum PanelEvent {
     OpenAgentTerminal { session: String, name: String },
     /// The user asked, from the panel that delegated them, to carry these
     /// unfinished delegated tasks on: each runs again out of sight on the
-    /// panel's own runner, under the `task` call that handed it over, and
+    /// panel's own runner, under the `start_session` call that handed it over, and
     /// answers back there as any background task does.
     RestartDelegates {
         panel: u64,
@@ -932,15 +932,15 @@ pub enum PanelEvent {
         text: String,
     },
 
-    /// Bring forward the agent panel following the task that the `task`
-    /// call `call` of the agent panel `panel` handed over, else open one on
+    /// Bring forward the agent panel following the task that the
+    /// `start_session` call `call` of the agent panel `panel` handed over, else open one on
     /// it while it runs. Emitted by the agent panel when its row for a
     /// running task is clicked, or `o` pressed on its block.
     FocusDelegate { panel: u64, call: String },
 
     /// Open an agent panel beside the others, without taking the focus, on
-    /// the task that the `task` call `call` of the agent panel `panel` asked
-    /// to show in one (`panel: true`): following it while it runs, else on
+    /// the task that the `start_session` call `call` of the agent panel
+    /// `panel` asked to show in one (`show` `panel`): following it while it runs, else on
     /// its `session` log. Emitted by the delegating panel on its tick.
     ShowDelegate {
         panel: u64,
@@ -999,7 +999,7 @@ pub struct DelegateRestart {
     pub agent: String,
     /// Its session log, which holds what it did before.
     pub session: PathBuf,
-    /// The id of the `task` call that handed it over.
+    /// The id of the `start_session` call that handed it over.
     pub call: String,
     /// The task as it was handed over, asked again and named in the answer.
     pub task: String,

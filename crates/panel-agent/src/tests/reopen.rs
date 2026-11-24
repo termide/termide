@@ -38,7 +38,7 @@ fn running_subagents_show_in_the_state_strip() {
     let first = text(&lines[0]);
     let head = format!(
         "& {} · search  find thing 7",
-        termide_i18n::t().agent_tool_task()
+        termide_i18n::t().agent_tool_start_session()
     );
     assert!(first.starts_with(&head), "{first}");
     // Its last step, then the time; no spinner, and no `✕` yet.
