@@ -818,7 +818,7 @@ leaves the actor free to serve other panels' metadata requests.
 - Permission checks before operations
 
 **Resource Limits:**
-- File size limit (100 MB) for editor
+- File size limit (50 MB) for editor
 - Scrollback buffer limit for terminal
 - A log file past 10 MB is set aside as `<name>.1` and begun afresh
 

@@ -448,7 +448,7 @@ Open with `Alt+L`:
 - Use async operations where appropriate
 - Implement debouncing for file system events
 - Limit directory traversal depth
-- Handle large files gracefully (100 MB limit)
+- Handle large files gracefully (50 MB limit)
 
 ### Terminal Operations
 

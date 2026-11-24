@@ -482,7 +482,7 @@ Termide 遵循 [XDG Base Directory 规范](https://specifications.freedesktop.or
 - macOS: `~/Library/Application Support/termide/config.toml`
 - Windows: `%APPDATA%\termide\config.toml`
 
-项目可以在 `<project>/.termide/config.toml` 中覆盖其中任何设置。类型或取值错误的设置会被单独忽略，并在日志（Journal）中报告；文件的其余部分照常生效。由于下一次从设置中保存会重写该文件、去掉被忽略的设置，原样的文件会先复制到同目录下的 `config.toml.bak`。`termide --diagnostics` 会列出同样的问题。
+项目可以在 `<project>/.termide/config.toml` 中覆盖其中大部分设置；termide 启动的程序、写入文件和发送密钥的位置以及代理的权限只能全局设置（[设置窗口](doc/zh/ui.md#设置模态框settings)）。类型或取值错误的设置会被单独忽略，并在日志（Journal）中报告；文件的其余部分照常生效。由于下一次从设置中保存会重写该文件、去掉被忽略的设置，原样的文件会先复制到同目录下的 `config.toml.bak`。`termide --diagnostics` 会列出同样的问题。
 
 **项目数据位置：**
 - Linux/BSD: `~/.local/share/termide/projects/`（或 `$XDG_DATA_HOME/termide/projects/`）

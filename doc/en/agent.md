@@ -1367,8 +1367,8 @@ question is answered. Waiting for an answer counts as the call's pause
 (`‖`), as a permission question does. Asking never needs a permission, in plan mode too.
 The panel's agent has this tool, Claude Code on termide's tools included, and
 so does a subagent it delegates to: its questions come to you in the panel
-that delegated the task. A `termide --prompt` run and its subagents have no one
-to ask and decide on their own. An agent whose `tools` list leaves out
+that delegated the task. A `termide --prompt` run has no one to ask and no
+`question` tool: it decides on its own. An agent whose `tools` list leaves out
 `question` does not ask either.
 
 **suggest_command** hands you a command instead of running it. The agent puts
@@ -2389,12 +2389,10 @@ in the panel that delegated the task, on the usual permission card headed
 decides those calls first, as for the panel's own agent. Delegates working
 side by side ask in turn: one card at a time, the next once it is
 answered. What you grant a delegate for the session holds for its task
-alone, not for the panel's agent, and "always" is not offered it. With no
-one to ask — a `termide --prompt` run — anything that would ask is refused
-with a reason the delegate reads. External agents (those with a `command`)
+alone, not for the panel's agent, and "always" is not offered it. External agents (those with a `command`)
 are delegates too: one runs its own program for the task, with its own
 tools, as it does in a panel, and its permission requests reach you the same
-way. A subagent gets no `start_session` of its own, so delegation does not nest. An agent whose `tools` list leaves out `start_session`
+way. A subagent gets no `start_session` of its own, so delegation does not nest; nor does a `termide --prompt` run, which delegates nothing. An agent whose `tools` list leaves out `start_session`
 cannot delegate. Besides its own tools, a built-in-loop delegate gets those of the MCP
 servers connected when its task starts — like the panel's agent, whatever
 its `tools` list says; a server still connecting then is left out of that
@@ -3337,8 +3335,8 @@ the panel is left out of the layout.
 
 `termide --prompt "<prompt>"` runs one agent task without opening the UI and
 prints the answer to stdout, then exits. It is the panel's agent — the same
-`ai` directory, agents, tools and permission rules — driven headless, for
-scripts, pipelines and CI.
+`ai` directory, agents and permission rules, and the tools that need no panel
+— driven headless, for scripts, pipelines and CI.
 
 ```
 termide --prompt "summarise what changed in src/main.rs"
@@ -3386,6 +3384,10 @@ looks and everything else is refused; its plan is the answer, with no one to
 accept it and have it carried out. There are no terminal sessions either:
 `shell` runs each command on its own, without `session` and `background`, and
 `terminals` is not offered; nor is `checklist`, which has no panel to show it.
+The tools that need a panel or someone to answer are left out too:
+`question`, the `suggest_*` tools, `start_session`, `sessions`,
+`send_message`, `jobs` and `debug`. A headless run hands no work to another
+session.
 
 On a CLI-agent connection (`claude_code`, `codex`, `gemini_cli`), or with an
 agent whose `AGENT.md` names a `command`, the task runs in that agent's own
