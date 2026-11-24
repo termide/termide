@@ -2326,6 +2326,219 @@ fn restored_choices_do_not_wait_for_the_agent() {
     }
 }
 
+/// An agent on model `m-a` of `m-a`, `m-b` and `m-c`, with an effort of
+/// `low`, `mid` and `high` at `mid`, that tells `seen` of each change it
+/// is asked for, as `model=<id>` or `<option>=<value>`, and answers it only
+/// once `release` lets it.
+fn gated_agent(dir: &Path) -> (AcpRuntime, mpsc::Receiver<String>, mpsc::Sender<()>) {
+    let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+    let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+    let (release, gate) = mpsc::channel::<()>();
+    let (seen_tx, seen) = mpsc::channel::<String>();
+    std::thread::spawn(move || {
+        let mut out = from_agent_tx;
+        let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+        let mut reader = BufReader::new(to_agent_rx).lines();
+        let effort = |current: &str| {
+            json!([{ "id": "effort", "name": "Effort", "category": "thought_level",
+                "type": "select", "currentValue": current,
+                "options": [{ "value": "low", "name": "Low" },
+                            { "value": "mid", "name": "Mid" },
+                            { "value": "high", "name": "High" }] }])
+        };
+        while let Some(Ok(line)) = reader.next() {
+            let message: Value = serde_json::from_str(&line).unwrap();
+            let id = message["id"].clone();
+            let params = &message["params"];
+            let result = match message["method"].as_str() {
+                Some("initialize") => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                Some("session/new") => json!({
+                    "sessionId": "s1",
+                    "models": {
+                        "availableModels": [
+                            { "modelId": "m-a", "name": "A" },
+                            { "modelId": "m-b", "name": "B" },
+                            { "modelId": "m-c", "name": "C" }
+                        ],
+                        "currentModelId": "m-a"
+                    },
+                    "configOptions": effort("mid")
+                }),
+                Some("session/set_model") => {
+                    let _ = seen_tx.send(format!("model={}", params["modelId"].as_str().unwrap()));
+                    gate.recv().unwrap();
+                    json!({})
+                }
+                Some("session/set_config_option") => {
+                    let value = params["value"].as_str().unwrap();
+                    let _ =
+                        seen_tx.send(format!("{}={value}", params["configId"].as_str().unwrap()));
+                    gate.recv().unwrap();
+                    json!({ "configOptions": effort(value) })
+                }
+                _ => continue,
+            };
+            send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        }
+    });
+    let cancel = CancelToken::new();
+    let (prompter, _permissions) = permission_channel(cancel.clone());
+    let runtime = AcpRuntime::from_streams(
+        "fake",
+        from_agent_rx,
+        to_agent_tx,
+        BackendSetup {
+            cwd: dir.to_path_buf(),
+            prompter,
+            cancel,
+            rules: PermissionRules::default(),
+            persist: None,
+            mode: ModeHandle::new(Mode::default()),
+            system_prompt: String::new(),
+            plan: PlanPrompt::default(),
+            plan_seen: false,
+            goal: GoalPrompt::default(),
+            handoff: HandoffPrompt::default(),
+            reviewer: ReviewerSetup::default(),
+            host_tools: None,
+            resume: None,
+            fork: None,
+            history: Vec::new(),
+        },
+        5,
+        AcpFlavor::Generic,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime.available_models().is_empty() {
+        assert!(Instant::now() < deadline, "models never arrived");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    (runtime, seen, release)
+}
+
+/// The change the agent is asked for next.
+fn next_seen(seen: &mpsc::Receiver<String>) -> String {
+    seen.recv_timeout(Duration::from_secs(5))
+        .expect("the agent was asked nothing")
+}
+
+/// Wait for `done` to hold of `runtime`.
+fn wait_until(runtime: &AcpRuntime, what: &str, done: impl Fn(&AcpRuntime) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !done(runtime) {
+        assert!(Instant::now() < deadline, "{what} never happened");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// A model the user picks while a restore's switch is on its way wins: the
+/// restore's reply, coming first, is not taken as the model in effect, and
+/// the pick goes to the agent after it, so the agent ends on it too.
+#[test]
+fn a_pick_during_a_restore_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let (runtime, seen, release) = gated_agent(dir.path());
+    runtime.apply_choices(vec![(MODEL_OPTION.to_string(), "m-b".to_string())]);
+    assert_eq!(next_seen(&seen), "model=m-b");
+
+    // Asked off the caller's thread: nothing settled yet.
+    assert_eq!(
+        runtime.choose(MODEL_OPTION.to_string(), "m-c".to_string()),
+        None
+    );
+    assert!(runtime.choice_outcomes().is_empty());
+
+    // The restore's reply lands; the pick is asked for only then.
+    release.send(()).unwrap();
+    assert_eq!(next_seen(&seen), "model=m-c");
+    assert_eq!(runtime.current_model().as_deref(), Some("m-a"));
+
+    release.send(()).unwrap();
+    wait_until(&runtime, "the pick's outcome", |r| {
+        r.current_model().as_deref() == Some("m-c")
+    });
+    let outcomes = runtime.choice_outcomes();
+    assert_eq!(
+        outcomes,
+        [ChoiceOutcome {
+            id: MODEL_OPTION.to_string(),
+            value: "m-c".to_string(),
+            result: Ok(()),
+        }]
+    );
+    assert!(runtime.choice_outcomes().is_empty(), "told once");
+}
+
+/// Changes reach the agent in the order they were asked for; a restored
+/// setting the user picked before the restore got to it is left to the
+/// pick, and the restore's model goes first, its settings judged by what
+/// the agent states after it.
+#[test]
+fn choices_reach_the_agent_in_order_and_a_pick_supersedes_the_rest_of_a_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let (runtime, seen, release) = gated_agent(dir.path());
+    // Saved effort first, model after: the model is asked for first.
+    runtime.apply_choices(vec![
+        ("effort".to_string(), "high".to_string()),
+        ("effort-gone".to_string(), "x".to_string()),
+        (MODEL_OPTION.to_string(), "m-b".to_string()),
+    ]);
+    assert_eq!(next_seen(&seen), "model=m-b");
+    // While it waits, the user picks the effort, then the model.
+    assert_eq!(
+        runtime.choose("effort".to_string(), "low".to_string()),
+        None
+    );
+    assert_eq!(
+        runtime.choose(MODEL_OPTION.to_string(), "m-c".to_string()),
+        None
+    );
+    release.send(()).unwrap();
+    // The restore's effort gives way to the pick; the picks go in order.
+    assert_eq!(next_seen(&seen), "effort=low");
+    release.send(()).unwrap();
+    assert_eq!(next_seen(&seen), "model=m-c");
+    release.send(()).unwrap();
+    wait_until(&runtime, "the model pick", |r| {
+        r.current_model().as_deref() == Some("m-c")
+    });
+    assert_eq!(runtime.config_options()[0].current, "low");
+    let outcomes: Vec<(String, String, bool)> = runtime
+        .choice_outcomes()
+        .into_iter()
+        .map(|o| (o.id, o.value, o.result.is_ok()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            ("effort".to_string(), "low".to_string(), true),
+            (MODEL_OPTION.to_string(), "m-c".to_string(), true),
+        ]
+    );
+    assert!(seen.try_recv().is_err(), "nothing else was asked");
+
+    // A restored setting already in effect is not asked for; one that is
+    // not is, after the model.
+    runtime.apply_choices(vec![
+        ("effort".to_string(), "high".to_string()),
+        (MODEL_OPTION.to_string(), "m-c".to_string()),
+    ]);
+    assert_eq!(next_seen(&seen), "effort=high");
+    release.send(()).unwrap();
+    wait_until(&runtime, "the restored effort", |r| {
+        r.config_options()[0].current == "high"
+    });
+    // A blocking pick waits its turn and is not told as an outcome.
+    let picker = std::thread::spawn({
+        let shared = Arc::clone(&runtime.shared);
+        move || shared.pick_and_wait("effort".to_string(), "mid".to_string())
+    });
+    assert_eq!(next_seen(&seen), "effort=mid");
+    release.send(()).unwrap();
+    assert_eq!(picker.join().unwrap(), Ok(()));
+    assert!(runtime.choice_outcomes().is_empty());
+}
+
 /// The config options as an agent states them, effort at `effort`.
 fn stated_options(effort: &str) -> Value {
     json!([

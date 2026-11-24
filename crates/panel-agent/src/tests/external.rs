@@ -590,6 +590,71 @@ fn an_external_agents_settings_change_during_a_run_and_outlive_a_reopen() {
     assert_eq!(panel.model.id, "m-slow");
 }
 
+/// A pick an agent settles off the UI thread changes the panel only once it
+/// is settled: the tick then shows it, records it in the session and says
+/// so, and asks for a redraw.
+#[test]
+fn an_external_agents_settings_picked_off_the_ui_thread_show_once_settled() {
+    let dir = tempfile::tempdir().unwrap();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let busy = Arc::new(AtomicBool::new(false));
+    let released = Arc::new(AtomicBool::new(false));
+    let (for_factory, busy_for_factory, released_for_factory) =
+        (Arc::clone(&asked), Arc::clone(&busy), Arc::clone(&released));
+    let mut panel = AgentPanel::new(AgentPanelSetup {
+        session_dir: Some(dir.path().to_path_buf()),
+        backend: Some(Arc::new(move |_setup: BackendSetup| {
+            let mut backend = OptionsBackend::new(&for_factory, &busy_for_factory);
+            backend.deferred = Some(Arc::clone(&released_for_factory));
+            Ok(Box::new(backend) as Box<dyn Backend>)
+        })),
+        ..setup(vec![])
+    });
+    panel.tick();
+    let notices = |panel: &AgentPanel| {
+        panel
+            .transcript
+            .items()
+            .iter()
+            .filter(|item| matches!(item, Item::Notice { .. }))
+            .count()
+    };
+    let before = notices(&panel);
+    panel.handle_status_action(REASONING_ACTION);
+    panel.handle_command(PanelCommand::SelectionMade {
+        action: REASONING_ACTION.to_string(),
+        index: 1,
+    });
+    panel.handle_status_action(MODEL_ACTION);
+    panel.handle_command(PanelCommand::SelectionMade {
+        action: MODEL_ACTION.to_string(),
+        index: 1,
+    });
+    // Held: nothing changed, nothing recorded, and a tick has nothing new.
+    assert!(asked.lock().unwrap().is_empty());
+    assert!(panel.tick().is_empty(), "no redraw for nothing new");
+    assert_eq!(chip(&panel, REASONING_ACTION), "Low");
+    assert_eq!(panel.model.id, "m-fast");
+    assert!(panel.session.as_ref().unwrap().agent_options().is_empty());
+    assert_eq!(notices(&panel), before);
+
+    // Settled: shown, recorded in the order picked, and told.
+    released.store(true, Ordering::SeqCst);
+    assert!(panel
+        .tick()
+        .iter()
+        .any(|e| matches!(e, PanelEvent::NeedsRedraw)));
+    assert_eq!(chip(&panel, REASONING_ACTION), "High");
+    assert_eq!(panel.model.id, "m-slow");
+    let picked = vec![
+        ("effort".to_string(), "high".to_string()),
+        (MODEL_OPTION.to_string(), "m-slow".to_string()),
+    ];
+    assert_eq!(*asked.lock().unwrap(), picked);
+    assert_eq!(panel.session.as_ref().unwrap().agent_options(), picked);
+    assert!(notices(&panel) > before);
+}
+
 #[test]
 fn an_external_agents_own_commands_are_offered_and_sent_as_typed() {
     let asked = Arc::new(Mutex::new(Vec::new()));

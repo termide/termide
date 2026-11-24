@@ -120,8 +120,20 @@ impl AgentPanel {
 
     /// Switch the external agent's model — during a run too, which the
     /// agent applies as soon as it can — and remember it in the session.
+    /// An agent that is waited on is asked off the UI thread: the tick takes
+    /// the outcome (see [`Self::take_choice_outcomes`]).
     pub(crate) fn select_acp_model(&mut self, id: &str) {
-        match self.runtime.select_model(id.to_string()) {
+        if let Some(result) = self
+            .runtime
+            .choose(MODEL_OPTION.to_string(), id.to_string())
+        {
+            self.acp_model_chosen(id, result);
+        }
+    }
+
+    /// The model `id` the user picked was taken, or refused.
+    fn acp_model_chosen(&mut self, id: &str, result: Result<(), String>) {
+        match result {
             Ok(()) => {
                 self.model.id = id.to_string();
                 self.record_agent_option(MODEL_OPTION, id);
@@ -219,12 +231,23 @@ impl AgentPanel {
     }
 
     /// Set the external agent's setting `id` to `value` — during a run too —
-    /// and remember it in the session.
+    /// and remember it in the session; asked off the UI thread as the model
+    /// is (see [`Self::select_acp_model`]).
     pub(crate) fn set_acp_option(&mut self, option: &BackendOption, value: &str) {
-        match self
-            .runtime
-            .set_option(option.id.clone(), value.to_string())
-        {
+        if let Some(result) = self.runtime.choose(option.id.clone(), value.to_string()) {
+            self.acp_option_chosen(option.clone(), value, result);
+        }
+    }
+
+    /// Setting `option` to `value`, as the user picked it, was taken, or
+    /// refused.
+    fn acp_option_chosen(
+        &mut self,
+        option: BackendOption,
+        value: &str,
+        result: Result<(), String>,
+    ) {
+        match result {
             Ok(()) => {
                 self.acp_options = self.runtime.config_options();
                 self.record_agent_option(&option.id, value);
@@ -245,6 +268,34 @@ impl AgentPanel {
         }
     }
 
+    /// Report the user's picks the agent settled since the last tick;
+    /// whether there were any, for a redraw.
+    pub(crate) fn take_choice_outcomes(&mut self) -> bool {
+        let outcomes = self.runtime.choice_outcomes();
+        for outcome in &outcomes {
+            if outcome.id == MODEL_OPTION {
+                self.acp_model_chosen(&outcome.value, outcome.result.clone());
+            } else {
+                // Named as the agent stated it when picked; the settings
+                // may since have changed with the reply.
+                let option = self
+                    .acp_options
+                    .iter()
+                    .find(|o| o.id == outcome.id)
+                    .cloned()
+                    .unwrap_or_else(|| BackendOption {
+                        id: outcome.id.clone(),
+                        name: outcome.id.clone(),
+                        category: None,
+                        current: String::new(),
+                        values: Vec::new(),
+                    });
+                self.acp_option_chosen(option, &outcome.value, outcome.result.clone());
+            }
+        }
+        !outcomes.is_empty()
+    }
+
     fn record_agent_option(&mut self, option: &str, value: &str) {
         if let Some(session) = &mut self.session {
             if let Err(error) = session.append_agent_option(option, value) {
@@ -254,27 +305,14 @@ impl AgentPanel {
     }
 
     /// Ask the external agent, once it stated its models and settings, for
-    /// those the session picked (or the configuration pre-selects); a value
-    /// it no longer offers is left as the agent has it. The backend asks
-    /// off the UI thread where the agent's answers are waited for; the tick
-    /// takes the model and the settings once they change.
+    /// those the session picked (or the configuration pre-selects). The
+    /// backend asks for the model first and judges each setting by what the
+    /// agent states after it, leaving a value it no longer offers as the
+    /// agent has it; where the agent's answers are waited for it asks off
+    /// the UI thread, and the tick takes the model and the settings once
+    /// they change.
     pub(crate) fn apply_acp_choices(&mut self) {
-        let models = self.runtime.available_models();
-        let options = self.runtime.config_options();
-        let current_model = self.runtime.current_model();
-        let choices: Vec<(String, String)> = std::mem::take(&mut self.pending_acp_choices)
-            .into_iter()
-            .filter(|(id, value)| {
-                if id == MODEL_OPTION {
-                    models.iter().any(|m| &m.id == value)
-                        && current_model.as_deref() != Some(value.as_str())
-                } else {
-                    options.iter().find(|o| &o.id == id).is_some_and(|o| {
-                        &o.current != value && o.values.iter().any(|v| &v.id == value)
-                    })
-                }
-            })
-            .collect();
+        let choices = std::mem::take(&mut self.pending_acp_choices);
         if !choices.is_empty() {
             self.runtime.apply_choices(choices);
         }

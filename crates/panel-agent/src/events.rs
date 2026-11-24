@@ -866,6 +866,9 @@ impl AgentPanel {
                 self.acp_has_models = true;
                 changed = true;
             }
+            // The user's picks the agent settled, told before the settings
+            // are taken anew so a setting is named as it was picked.
+            changed |= self.take_choice_outcomes();
             // The agent's settings may change on their own (a model it falls
             // back to, the efforts a new model offers).
             let options = self.runtime.config_options();

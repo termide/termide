@@ -1417,6 +1417,11 @@ struct OptionsBackend {
     asked: Arc<Mutex<Vec<(String, String)>>>,
     state: Mutex<(String, String, String)>,
     busy: Arc<AtomicBool>,
+    /// When set, the user's picks are held, as an agent waited on off the
+    /// UI thread holds them, until the flag is raised; the next
+    /// `choice_outcomes` then settles them.
+    deferred: Option<Arc<AtomicBool>>,
+    held: Mutex<Vec<(String, String)>>,
 }
 
 impl OptionsBackend {
@@ -1425,6 +1430,8 @@ impl OptionsBackend {
             asked: Arc::clone(asked),
             state: Mutex::new(("m-fast".into(), "low".into(), "off".into())),
             busy: Arc::clone(busy),
+            deferred: None,
+            held: Mutex::default(),
         }
     }
 }
@@ -1511,6 +1518,37 @@ impl Backend for OptionsBackend {
                 values: values(&[("off", "Off"), ("on", "On")]),
             },
         ]
+    }
+    fn choose(&self, id: String, value: String) -> Option<Result<(), String>> {
+        if self.deferred.is_some() {
+            self.held.lock().unwrap().push((id, value));
+            return None;
+        }
+        Some(if id == MODEL_OPTION {
+            self.select_model(value)
+        } else {
+            self.set_option(id, value)
+        })
+    }
+    fn choice_outcomes(&self) -> Vec<termide_agent_core::ChoiceOutcome> {
+        if !self
+            .deferred
+            .as_ref()
+            .is_some_and(|released| released.load(Ordering::SeqCst))
+        {
+            return Vec::new();
+        }
+        let held = std::mem::take(&mut *self.held.lock().unwrap());
+        held.into_iter()
+            .map(|(id, value)| {
+                let result = if id == MODEL_OPTION {
+                    self.select_model(value.clone())
+                } else {
+                    self.set_option(id.clone(), value.clone())
+                };
+                termide_agent_core::ChoiceOutcome { id, value, result }
+            })
+            .collect()
     }
     fn set_option(&self, id: String, value: String) -> Result<(), String> {
         self.asked.lock().unwrap().push((id.clone(), value.clone()));

@@ -125,8 +125,8 @@ pub use recall::{RecallPrompt, SEED_RECALL};
 pub use recap::{handoff, recap, RECAP_LIMIT};
 pub use refusals::{Refusals, SEED_PERMISSIONS};
 pub use runtime::{
-    AgentCommand, AgentRuntime, Backend, BackendModel, BackendOption, BackendSetup, BackgroundCall,
-    ForkSource, HostTools, PromptError,
+    choice_wanted, AgentCommand, AgentRuntime, Backend, BackendModel, BackendOption, BackendSetup,
+    BackgroundCall, ChoiceOutcome, ForkSource, HostTools, PromptError,
 };
 pub use session::{
     Autorun, Entry, EntryKind, ExternalSessionRef, GoalRecord, HistoryStep, LastRun, LoggedMessage,
