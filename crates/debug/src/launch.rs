@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result};
+use termide_config::Quoting;
 
 /// A breakpoint: a file and a 1-based line.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -88,11 +89,12 @@ pub struct Launch {
 
 impl Launch {
     /// The launch that needs no configuration for `file`: a Python script
-    /// under pdb, the Go package in the file's directory under Delve.
-    pub fn for_file(file: &Path) -> Option<Self> {
+    /// under pdb, the Go package in the file's directory under Delve; the
+    /// script's path is quoted for a shell `quoting` reads.
+    pub fn for_file(file: &Path, quoting: Quoting) -> Option<Self> {
         let ext = file.extension()?.to_str()?.to_ascii_lowercase();
         let (debugger, target) = match ext.as_str() {
-            "py" | "pyw" => (Debugger::Pdb, shell_quote(&file.to_string_lossy())),
+            "py" | "pyw" => (Debugger::Pdb, shell_quote(&file.to_string_lossy(), quoting)),
             "go" => (Debugger::Dlv, "debug".to_string()),
             _ => return None,
         };
@@ -106,9 +108,15 @@ impl Launch {
     }
 
     /// The shell line that starts the debugger on the target with
-    /// `breakpoints` set and runs it to the first one. lldb, gdb and Delve
-    /// read their commands from a script written into `script_dir`.
-    pub fn command_line(&self, breakpoints: &[Breakpoint], script_dir: &Path) -> Result<String> {
+    /// `breakpoints` set and runs it to the first one, quoted for a shell
+    /// `quoting` reads. lldb, gdb and Delve read their commands from a
+    /// script written into `script_dir`.
+    pub fn command_line(
+        &self,
+        breakpoints: &[Breakpoint],
+        script_dir: &Path,
+        quoting: Quoting,
+    ) -> Result<String> {
         let breakpoints: Vec<&Breakpoint> = breakpoints
             .iter()
             .filter(|b| self.debugger.accepts(&b.path))
@@ -116,10 +124,16 @@ impl Launch {
         let flags: String = self
             .debugger_args
             .iter()
-            .map(|arg| format!(" {}", shell_quote(arg)))
+            .map(|arg| format!(" {}", shell_quote(arg, quoting)))
             .collect();
         let program = |default: &str| match self.program.as_deref() {
-            Some(program) => shell_quote(program),
+            // PowerShell takes a quoted first word for a string to print.
+            Some(program) => match shell_quote(program, quoting) {
+                quoted if quoting == Quoting::PowerShell && quoted.starts_with('\'') => {
+                    format!("& {quoted}")
+                }
+                quoted => quoted,
+            },
             None => default.to_string(),
         };
         let debug = match self.debugger {
@@ -128,7 +142,7 @@ impl Launch {
                 for b in &breakpoints {
                     let command = format!("break {}:{}", b.path.display(), b.line);
                     line.push_str(" -c ");
-                    line.push_str(&shell_quote(&command));
+                    line.push_str(&shell_quote(&command, quoting));
                 }
                 line.push_str(" -c continue ");
                 line.push_str(&self.target);
@@ -136,7 +150,7 @@ impl Launch {
             }
             debugger => {
                 let script = write_script(debugger, &script(debugger, &breakpoints), script_dir)?;
-                let script = shell_quote(&script.to_string_lossy());
+                let script = shell_quote(&script.to_string_lossy(), quoting);
                 match debugger {
                     Debugger::Lldb => {
                         format!("{}{flags} -s {script} -- {}", program("lldb"), self.target)
@@ -205,16 +219,23 @@ fn dquote(s: &str) -> String {
     format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
 }
 
-/// `s` as one shell word: as it is when it holds only characters no shell
-/// treats specially, in single quotes otherwise.
-pub fn shell_quote(s: &str) -> String {
+/// `s` as one word of the command line of a shell `quoting` reads: as it
+/// is when it holds only characters that shell takes literally, quoted
+/// otherwise.
+pub fn shell_quote(s: &str, quoting: Quoting) -> String {
+    // cmd expands `%…%` and splits at `,` and `=`; PowerShell makes an
+    // array of `a,b` and splats `@a`.
+    let literal = match quoting {
+        Quoting::Posix | Quoting::Bash | Quoting::Fish => "/._-+:=,@%",
+        Quoting::Cmd | Quoting::PowerShell => "/._-:\\",
+    };
     let plain = !s.is_empty()
         && s.chars()
-            .all(|c| c.is_alphanumeric() || "/._-+:=,@%".contains(c));
+            .all(|c| c.is_alphanumeric() || literal.contains(c));
     if plain {
         s.to_string()
     } else {
-        format!("'{}'", s.replace('\'', "'\\''"))
+        quoting.quote(s)
     }
 }
 
@@ -246,7 +267,7 @@ mod tests {
             program: Some("/opt/my gdb/bin/gdb".into()),
             ..launch(Debugger::Gdb, "./app")
         }
-        .command_line(&[], dir.path())
+        .command_line(&[], dir.path(), Quoting::Bash)
         .unwrap();
         assert!(line.starts_with("'/opt/my gdb/bin/gdb' -q -x "), "{line}");
     }
@@ -259,20 +280,20 @@ mod tests {
             ..launch(debugger, target)
         };
         let line = with(Debugger::Gdb, "./app -v")
-            .command_line(&[], dir.path())
+            .command_line(&[], dir.path(), Quoting::Bash)
             .unwrap();
         assert!(line.starts_with("gdb -q --nx 'a b' -x "), "{line}");
         assert!(line.ends_with(" --args ./app -v"), "{line}");
         let line = with(Debugger::Lldb, "./app")
-            .command_line(&[], dir.path())
+            .command_line(&[], dir.path(), Quoting::Bash)
             .unwrap();
         assert!(line.starts_with("lldb --nx 'a b' -s "), "{line}");
         let line = with(Debugger::Pdb, "t.py")
-            .command_line(&[], dir.path())
+            .command_line(&[], dir.path(), Quoting::Bash)
             .unwrap();
         assert!(line.starts_with("python3 -m pdb --nx 'a b' -c "), "{line}");
         let line = with(Debugger::Dlv, "debug .")
-            .command_line(&[], dir.path())
+            .command_line(&[], dir.path(), Quoting::Bash)
             .unwrap();
         assert!(line.starts_with("dlv --nx 'a b' --init "), "{line}");
     }
@@ -290,7 +311,11 @@ mod tests {
     fn lldb_sets_the_breakpoints_and_runs() {
         let dir = tempfile::tempdir().unwrap();
         let line = launch(Debugger::Lldb, "target/debug/app --flag")
-            .command_line(&[bp("/p/src/main.rs", 10), bp("/p/tool.py", 3)], dir.path())
+            .command_line(
+                &[bp("/p/src/main.rs", 10), bp("/p/tool.py", 3)],
+                dir.path(),
+                Quoting::Bash,
+            )
             .unwrap();
         assert!(line.starts_with("lldb -s "), "{line}");
         assert!(line.ends_with(" -- target/debug/app --flag"), "{line}");
@@ -304,7 +329,7 @@ mod tests {
     fn gdb_quotes_a_path_with_a_space() {
         let dir = tempfile::tempdir().unwrap();
         let line = launch(Debugger::Gdb, "./a.out")
-            .command_line(&[bp("/my dir/a.c", 4)], dir.path())
+            .command_line(&[bp("/my dir/a.c", 4)], dir.path(), Quoting::Bash)
             .unwrap();
         assert!(line.contains("--args ./a.out"), "{line}");
         assert_eq!(
@@ -317,7 +342,11 @@ mod tests {
     fn delve_takes_only_go_files() {
         let dir = tempfile::tempdir().unwrap();
         let line = launch(Debugger::Dlv, "debug ./cmd/app")
-            .command_line(&[bp("/p/main.go", 7), bp("/p/x.rs", 1)], dir.path())
+            .command_line(
+                &[bp("/p/main.go", 7), bp("/p/x.rs", 1)],
+                dir.path(),
+                Quoting::Bash,
+            )
             .unwrap();
         assert!(line.ends_with(" debug ./cmd/app"), "{line}");
         assert_eq!(script_of(&line), "break /p/main.go:7\ncontinue\n");
@@ -327,7 +356,11 @@ mod tests {
     fn pdb_gets_its_breakpoints_as_arguments() {
         let dir = tempfile::tempdir().unwrap();
         let line = launch(Debugger::Pdb, "tool.py arg")
-            .command_line(&[bp("/p/my tool.py", 3), bp("/p/a.rs", 1)], dir.path())
+            .command_line(
+                &[bp("/p/my tool.py", 3), bp("/p/a.rs", 1)],
+                dir.path(),
+                Quoting::Bash,
+            )
             .unwrap();
         assert_eq!(
             line,
@@ -340,20 +373,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut l = launch(Debugger::Pdb, "t.py");
         l.build = Some("make".into());
-        let line = l.command_line(&[], dir.path()).unwrap();
+        let line = l.command_line(&[], dir.path(), Quoting::Bash).unwrap();
         assert_eq!(line, "make && python3 -m pdb -c continue t.py");
     }
 
     #[test]
     fn a_file_alone_picks_pdb_or_delve() {
-        let py = Launch::for_file(Path::new("/p/a b.py")).unwrap();
+        let py = Launch::for_file(Path::new("/p/a b.py"), Quoting::Bash).unwrap();
         assert_eq!(
             (py.debugger, py.target.as_str()),
             (Debugger::Pdb, "'/p/a b.py'")
         );
-        let go = Launch::for_file(Path::new("/p/main.go")).unwrap();
+        let go = Launch::for_file(Path::new("/p/main.go"), Quoting::Bash).unwrap();
         assert_eq!((go.debugger, go.target.as_str()), (Debugger::Dlv, "debug"));
-        assert!(Launch::for_file(Path::new("/p/main.rs")).is_none());
+        assert!(Launch::for_file(Path::new("/p/main.rs"), Quoting::Bash).is_none());
     }
 
     #[test]
@@ -364,8 +397,40 @@ mod tests {
 
     #[test]
     fn shell_quote_leaves_plain_words_alone() {
-        assert_eq!(shell_quote("/p/a.py"), "/p/a.py");
-        assert_eq!(shell_quote("it's"), "'it'\\''s'");
-        assert_eq!(shell_quote(""), "''");
+        assert_eq!(shell_quote("/p/a.py", Quoting::Bash), "/p/a.py");
+        assert_eq!(shell_quote("it's", Quoting::Bash), "'it'\\''s'");
+        assert_eq!(shell_quote("", Quoting::Bash), "''");
+    }
+
+    #[test]
+    fn a_word_is_quoted_for_the_shell_that_reads_it() {
+        let path = r"C:\my tools\a.py";
+        assert_eq!(shell_quote(path, Quoting::Cmd), r#""C:\my tools\a.py""#);
+        assert_eq!(
+            shell_quote(path, Quoting::PowerShell),
+            r"'C:\my tools\a.py'"
+        );
+        assert_eq!(
+            shell_quote(r"C:\tools\a.py", Quoting::Cmd),
+            r"C:\tools\a.py"
+        );
+        assert_eq!(shell_quote("%PATH%", Quoting::Cmd), r#""%PATH%""#);
+        assert_eq!(shell_quote("a,b", Quoting::PowerShell), "'a,b'");
+        assert_eq!(shell_quote(r"a\b c", Quoting::Fish), r"'a\\b c'");
+    }
+
+    #[test]
+    fn powershell_calls_a_quoted_debugger() {
+        let dir = tempfile::tempdir().unwrap();
+        let line = Launch {
+            program: Some(r"C:\Program Files\LLVM\bin\lldb.exe".into()),
+            ..launch(Debugger::Lldb, "app.exe")
+        }
+        .command_line(&[], dir.path(), Quoting::PowerShell)
+        .unwrap();
+        assert!(
+            line.starts_with(r"& 'C:\Program Files\LLVM\bin\lldb.exe' -s "),
+            "{line}"
+        );
     }
 }

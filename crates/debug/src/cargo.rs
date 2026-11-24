@@ -22,8 +22,9 @@ pub struct CargoBin {
 
 impl CargoBin {
     /// The command that builds this binary alone, run in `cwd`: outside the
-    /// workspace root it names the workspace's manifest.
-    pub fn build_command(&self, cwd: &Path) -> String {
+    /// workspace root it names the workspace's manifest, quoted for a shell
+    /// `quoting` reads.
+    pub fn build_command(&self, cwd: &Path, quoting: termide_config::Quoting) -> String {
         let manifest = if same_file(cwd, &self.workspace_root) {
             String::new()
         } else {
@@ -31,7 +32,7 @@ impl CargoBin {
             let path = path.strip_prefix(cwd).unwrap_or(&path);
             format!(
                 " --manifest-path {}",
-                crate::shell_quote(&path.to_string_lossy())
+                crate::shell_quote(&path.to_string_lossy(), quoting)
             )
         };
         format!(
@@ -179,7 +180,7 @@ mod tests {
         assert_eq!(names(&bins), ["tool"]);
         assert_eq!(bins[0].program, Path::new("/w/target/debug/tool"));
         assert_eq!(
-            bins[0].build_command(Path::new("/w")),
+            bins[0].build_command(Path::new("/w"), termide_config::Quoting::Bash),
             "cargo build -p app --bin tool"
         );
     }
@@ -188,7 +189,7 @@ mod tests {
     fn a_build_outside_the_workspace_names_its_manifest() {
         let bins = bins_in(&metadata(), Path::new("/w/src/bin/tool.rs"));
         assert_eq!(
-            bins[0].build_command(Path::new("/")),
+            bins[0].build_command(Path::new("/"), termide_config::Quoting::Bash),
             "cargo build --manifest-path w/Cargo.toml -p app --bin tool"
         );
     }

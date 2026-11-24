@@ -16,6 +16,16 @@ use termide_debug::{breakpoints, execution, Breakpoint, Debugger, Launch};
 use super::App;
 use crate::PanelExt;
 
+/// How the shell a debugger's terminal panel runs reads a command line,
+/// so a launch line and the paths in it are written for that shell.
+pub(super) fn shell_quoting() -> termide_config::Quoting {
+    static QUOTING: std::sync::OnceLock<termide_config::Quoting> = std::sync::OnceLock::new();
+    *QUOTING.get_or_init(|| {
+        use termide_panel_terminal::shell_utils::{detect_shell, ShellKind};
+        ShellKind::from_shell_path(&detect_shell()).quoting()
+    })
+}
+
 /// One entry of the debug launch list.
 #[derive(Debug, Clone)]
 pub(super) enum DebugChoice {
@@ -284,7 +294,7 @@ impl App {
         breakpoints::flush();
         let set = project_breakpoints(&breakpoints::store().all(), &self.project_root);
         let script_dir = std::env::temp_dir().join("termide-debug");
-        let line = match launch.command_line(&set, &script_dir) {
+        let line = match launch.command_line(&set, &script_dir, shell_quoting()) {
             Ok(line) => line,
             Err(e) => {
                 self.show_error_modal(termide_i18n::t().command_run_failed_fmt(&format!("{e:#}")));
@@ -303,7 +313,13 @@ impl App {
         let term_width = self.state.terminal.width.saturating_sub(2);
         match Terminal::new_with_cwd_env(term_height, term_width, Some(cwd), env) {
             Ok(mut terminal) => {
-                let _ = terminal.send_command(&line);
+                if let Err(e) = terminal.send_command(&line) {
+                    log::error!("Failed to start the debugger in its terminal: {e}");
+                    self.show_error_modal(
+                        termide_i18n::t().command_run_failed_fmt(&format!("{e:#}")),
+                    );
+                    return Ok(());
+                }
                 self.add_panel(Box::new(terminal));
                 self.auto_save_layout();
             }
@@ -335,7 +351,7 @@ impl App {
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| self.project_root.clone());
-        let Some(found) = Launch::for_file(file) else {
+        let Some(found) = Launch::for_file(file, shell_quoting()) else {
             return Ok(Vec::new());
         };
         let terminal = self.terminal_launch(found.debugger, found.target, found.build, &[]);
@@ -388,7 +404,7 @@ impl App {
             .into_iter()
             .map(|bin| {
                 let cwd = bin.workspace_root.clone();
-                let build = bin.build_command(&cwd);
+                let build = bin.build_command(&cwd, shell_quoting());
                 let program = bin.program.to_string_lossy().into_owned();
                 match debugger {
                     NativeDebugger::Adapter(adapter) => DebugChoice::Dap(LaunchSpec {
@@ -408,7 +424,7 @@ impl App {
                         label: t.debug_current_file_fmt(&bin.name, debugger.as_str()),
                         launch: self.terminal_launch(
                             debugger,
-                            termide_debug::shell_quote(&program),
+                            termide_debug::shell_quote(&program, shell_quoting()),
                             Some(build),
                             &[],
                         ),

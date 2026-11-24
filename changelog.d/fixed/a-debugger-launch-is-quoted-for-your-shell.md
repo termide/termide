@@ -1,0 +1,1 @@
+- **A debugger launch is quoted for your shell.** The line that starts a command-line debugger in a terminal, and the paths a new debug launch writes, were always quoted for sh; they are quoted for the shell termide runs now, cmd, PowerShell and fish included. A launch line the terminal cannot take is reported instead of leaving an idle terminal.
