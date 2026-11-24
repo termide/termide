@@ -9,6 +9,7 @@ run "printf '#!/bin/sh\nsleep 3\n' > .git/hooks/pre-commit && chmod +x .git/hook
 run "echo b > a.txt && git add a.txt"
 key Alt+G
 wait "a.txt"
+wait "[Push]"
 # With only staged changes the buttons read Unstage all, Revert all, Log,
 # Diff, Push (a repository without upstream counts its commits ahead),
 # Commit: Shift+Tab to them and Right to Commit.

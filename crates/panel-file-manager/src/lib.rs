@@ -838,8 +838,11 @@ impl Panel for FileManager {
             PanelCommand::RefreshIfStale => {
                 if self.is_stale {
                     self.is_stale = false;
-                    let _ = self.reload_directory();
-                    // Only refresh git status for local panels
+                    // The watcher's reload: the listing is read on a worker,
+                    // and one too soon after the last is retried once the
+                    // debounce passes instead of being dropped. A remote
+                    // panel is never marked stale.
+                    self.start_async_reload();
                     if !self.vfs.is_remote() {
                         self.refresh_git_status();
                     }
@@ -2400,6 +2403,33 @@ mod tests {
         fm.on_tick();
         assert!(fm.dir_size_pending.is_none());
         assert!(fm.dir_size_queue.is_empty());
+    }
+
+    /// A panel marked stale while collapsed or in a parked project re-reads
+    /// its directory on return even right after another reload: the
+    /// debounce defers that read instead of dropping it.
+    #[test]
+    fn refresh_if_stale_reloads_despite_a_recent_reload() {
+        let (mut fm, temp_dir) = create_file_manager_in_temp();
+        let root = canonical_temp_path(&temp_dir);
+        wait_for_local_listing(&mut fm);
+        assert!(fm.handle_command(PanelCommand::MarkStale).needs_redraw());
+        std::fs::write(root.join("added.txt"), "x").unwrap();
+
+        fm.navigation.last_reload_time = Some(std::time::Instant::now());
+        assert!(fm
+            .handle_command(PanelCommand::RefreshIfStale)
+            .needs_redraw());
+        assert!(!fm.is_stale);
+        assert!(fm.reload_dirty, "the debounced read waits for a retry");
+
+        fm.navigation.last_reload_time = None;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !names(&fm).iter().any(|name| name == "added.txt") {
+            assert!(std::time::Instant::now() < deadline, "never re-read");
+            fm.check_async_reload();
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
     }
 
     /// Going to a file (Go to path, a search result) lands the cursor on it

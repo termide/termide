@@ -8,7 +8,7 @@ use termide_modal::{ActionButton, ActiveModal, InfoActionModal};
 use termide_state::PendingAction;
 use termide_system_monitor::format_bytes;
 
-use crate::types::{Button, Selection};
+use crate::types::{Button, Section, Selection};
 use crate::GitStatusPanel;
 
 impl GitStatusPanel {
@@ -407,6 +407,22 @@ impl GitStatusPanel {
         buttons
     }
 
+    /// Keep the selection on `held`, the button selected before the row
+    /// changed, wherever it now stands while the buttons have the focus;
+    /// otherwise, or when it is gone, on the nearest place still in the row,
+    /// so the selection never points past its end.
+    pub(crate) fn keep_button(&mut self, held: Option<Button>) {
+        let buttons = self.get_visible_buttons();
+        let focused = self.current_section == Section::Buttons;
+        let same = held.filter(|_| focused).and_then(|held| {
+            buttons
+                .iter()
+                .position(|b| std::mem::discriminant(b) == std::mem::discriminant(&held))
+        });
+        self.selected_button =
+            same.unwrap_or_else(|| self.selected_button.min(buttons.len().saturating_sub(1)));
+    }
+
     /// Execute button action
     pub(crate) fn execute_button(&mut self) -> Vec<PanelEvent> {
         let buttons = self.get_visible_buttons();
@@ -713,5 +729,90 @@ mod tests {
 
         settle(&mut panel);
         assert!(panel.title().contains("*1 "), "{}", panel.title());
+    }
+
+    /// The background pass `MarkStale` starts brings what the panel missed,
+    /// so the return to it (`RefreshIfStale`) runs git no second time.
+    #[test]
+    fn a_landed_stale_refresh_is_not_repeated_on_return() {
+        use termide_core::PanelCommand;
+        let (_root, repo, _worktree) = repo();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone(), None);
+        settle(&mut panel);
+        std::fs::write(repo.join("new.txt"), "x").unwrap();
+
+        panel.handle_command(PanelCommand::MarkStale);
+        assert!(panel.is_stale);
+        settle(&mut panel);
+        assert!(!panel.is_stale, "the landed pass left the panel stale");
+        assert_eq!(panel.unstaged_files.len(), 1);
+
+        let result = panel.handle_command(PanelCommand::RefreshIfStale);
+        assert!(!result.needs_redraw());
+        assert!(panel.refresh_rx.is_none(), "refreshed again on return");
+        assert!(!panel.is_loading);
+    }
+
+    /// A `MarkStale` arriving while a refresh runs queues a pass as quiet as
+    /// its own, whatever the running one shows, and the panel stays stale
+    /// until that pass, the one started after it, lands. Returning meanwhile
+    /// waits for it rather than starting another, with the spinner shown.
+    #[test]
+    fn a_stale_mark_during_a_refresh_queues_a_quiet_pass() {
+        use termide_core::PanelCommand;
+        let (_root, repo, _worktree) = repo();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone(), None);
+        settle(&mut panel);
+
+        panel.refresh();
+        panel.handle_command(PanelCommand::MarkStale);
+        assert!(panel.refresh_pending);
+        assert!(!panel.refresh_pending_loud);
+        while panel.refresh_pending {
+            panel.poll_refresh();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(panel.refresh_rx.is_some(), "the queued pass runs");
+        assert!(!panel.is_loading, "the queued pass shows a spinner");
+        assert!(panel.is_stale, "cleared by a pass that predates the mark");
+
+        let result = panel.handle_command(PanelCommand::RefreshIfStale);
+        assert!(result.needs_redraw());
+        assert!(panel.is_loading);
+        assert!(!panel.refresh_pending, "a second pass queued on return");
+        settle(&mut panel);
+        assert!(!panel.is_loading);
+        assert!(!panel.is_stale);
+    }
+
+    /// When the button row changes under a refresh, the selection stays on
+    /// its button, or on one still in the row when that one is gone.
+    #[test]
+    fn the_selected_button_follows_a_changed_row() {
+        let (_root, repo, _worktree) = repo();
+        std::fs::write(repo.join("new.txt"), "x").unwrap();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone(), None);
+        settle(&mut panel);
+        panel.current_section = crate::Section::Buttons;
+        let buttons = panel.get_visible_buttons();
+        panel.selected_button = buttons.iter().position(|b| *b == Button::Log).unwrap();
+        let last = buttons.len() - 1;
+
+        std::fs::remove_file(repo.join("new.txt")).unwrap();
+        panel.refresh();
+        settle(&mut panel);
+        assert_eq!(
+            panel.get_visible_buttons()[panel.selected_button],
+            Button::Log
+        );
+
+        std::fs::write(repo.join("new.txt"), "x").unwrap();
+        panel.refresh();
+        settle(&mut panel);
+        panel.selected_button = last;
+        std::fs::remove_file(repo.join("new.txt")).unwrap();
+        panel.refresh();
+        settle(&mut panel);
+        assert!(panel.selected_button < panel.get_visible_buttons().len());
     }
 }

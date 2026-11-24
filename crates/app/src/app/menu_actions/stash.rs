@@ -172,14 +172,33 @@ impl App {
         Ok(())
     }
 
-    /// Open the InfoActionModal for a specific stash entry
+    /// Read a stash entry's details in the background; its window opens
+    /// when they come.
     fn open_stash_info_modal(&mut self, stash_index: usize) {
         let repo_path = match &self.state.stash.repo_path {
             Some(p) => p.clone(),
             None => return,
         };
+        let kind = crate::state::GitJobKind::StashInfo {
+            index: stash_index,
+            project_root: self.project_root.clone(),
+        };
+        self.spawn_git_job(&repo_path, kind, move |repo| {
+            Ok(crate::state::GitJobOutput::StashDetails(
+                termide_git::stash_info(repo, stash_index),
+            ))
+        });
+    }
 
-        if let Some(info) = termide_git::stash_info(&repo_path, stash_index) {
+    /// Open the InfoActionModal on the details `info` of stash entry
+    /// `stash_index`.
+    pub(in crate::app) fn show_stash_info_modal(
+        &mut self,
+        repo_path: std::path::PathBuf,
+        stash_index: usize,
+        info: termide_git::StashInfo,
+    ) {
+        {
             let t = termide_i18n::t();
             let title = &info.message;
 

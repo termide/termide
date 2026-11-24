@@ -1,0 +1,35 @@
+# A stash made and popped from the git status panel's Stash dropdown: the
+# list behind the dropdown, the stash and the pop all run git in the
+# background, and each still ends in its notice with the panel refreshed.
+project empty
+start
+run "git init -q && echo a > a.txt && git add a.txt && git commit -qm init"
+run "echo b > a.txt"
+key Alt+G
+wait "a.txt"
+wait "[Push]"
+# With one unstaged change the buttons read Stage all, Revert all, Log,
+# Diff, Push (no upstream counts the commit ahead), Stash.
+key Shift+Tab Right Right Right Right Right Enter
+wait "New stash..."
+key Down Enter
+wait "Include untracked files"
+type "work in progress"
+key Enter
+wait "Stash created"
+wait "Stash (1)"
+run "git stash list | grep -q 'work in progress'"
+run "grep -qx a a.txt"
+# Only Log, Push and Stash are left, the buttons still focused, and the
+# choice is still on Stash.
+key Enter
+wait "work in progress"
+key Down Enter
+wait "Pop"
+# The details window opens on Close: Pop is three to its left.
+key Left Left Left Enter
+wait "Popped stash@{0}"
+wait "a.txt"
+run "grep -qx b a.txt && test -z \"$(git stash list)\""
+snapshot popped
+quit --force
