@@ -9,7 +9,7 @@ A tool reaches the model, the permission checks, the transcript and, through
 the MCP server, Claude Code. Each has its own table keyed by the tool's name,
 and a name missing from one fails quietly: a call that asks when it should
 not, a headline with no glyph, a description that is empty. Reference
-commits: `f1b4bb90` (`jobs`) and `cb125881` (`fork`).
+commits: `f1b4bb90` (`jobs`) and `1f8a3a6e` (`start_session`).
 
 ## 1. The description — `crates/agent-core/assets/tools/<name>.md`
 
@@ -26,19 +26,21 @@ Implement `termide_agent_core::Tool` (`name`, `description`, `parameters`
 as JSON schema, `prompt_snippet`, `prompt_guidelines`, `check`, `execute`),
 following a tool of the same kind (`jobs.rs` for one that acts on the
 panel, `read.rs` for one on files). What the tool needs from the app comes
-in as a trait object (`OwnTasks`, `ForkSession`), not as a dependency on
-`termide-app` — crate boundaries go one way. `mod` and `pub use` it in
-`crates/agent-tools/src/lib.rs`.
+in as a trait object or a closure (`OwnTasks`, `StartSession`), not as a
+dependency on `termide-app` — crate boundaries go one way. `mod` and
+`pub use` it in `crates/agent-tools/src/lib.rs`.
 
 ## 3. Registration — `crates/app/src/app/agent_panel.rs`
 
 Insert it where the agent's registry is built. `base_tools` gives every
-agent on termide's own loop its tools; the block under `if backend.is_none()`
-adds those that need someone watching the panel (`question`, the `suggest_*`
-cards, `fork`, `debug`), which a subagent and a headless run do not get.
-Pick the place by who may call it. Mind `restrict_tools`: an agent's
-`tools:` list removes every tool it does not name, unless the tool comes
-with another (as `jobs` with `task`).
+agent its tools — a panel's, a subagent's (`toolset`) and, through the same
+function, a headless run's. The panel's profile then adds those that need
+someone watching it (`question`, the `suggest_*` cards, the peer tools,
+`debug`, `start_session`, `jobs`), which a subagent does not get, but for
+`question` when its parent has a user to ask (`toolset`'s `asks`). Pick the
+place by who may call it. Mind `restrict_tools`: an agent's `tools:` list
+removes every tool it does not name, unless the tool comes with another (as
+`jobs` with `start_session`); an external agent's list is ignored.
 
 ## 4. Permissions — `crates/agent-core/src/permissions.rs`
 
