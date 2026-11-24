@@ -1,0 +1,1 @@
+- **The file manager's status bar reads a file once.** It looked up the file under the cursor, its link target and its owner's and group's names on every redraw, so a stalled network mount or a slow directory service froze drawing. It now reads them when the cursor reaches the file and again when the listing is read again.
