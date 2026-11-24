@@ -863,10 +863,12 @@ fn main() -> Result<()> {
         }
         (None, Ok(())) => None,
     };
+    // Stop the shells and language servers the panels own (`exit` runs no
+    // destructors), and give the closed terminals' programs their last
+    // signals, which wait on threads of their own.
+    drop(app);
+    termide_app::wait_for_closing_terminals(std::time::Duration::from_secs(1));
     if let Some(status) = status {
-        // `exit` runs no destructors: stop the shells and language servers
-        // the panels own first.
-        drop(app);
         std::process::exit(status);
     }
 

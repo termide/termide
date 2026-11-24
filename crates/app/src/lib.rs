@@ -25,6 +25,7 @@ pub use app::App;
 pub use layout_store::LayoutPersistence;
 pub use panel_ext::PanelExt;
 pub use state::AppState;
+pub use termide_panel_terminal::wait_for_closing_terminals;
 
 // Note: anyhow::Result is available through re-exports if needed
 
