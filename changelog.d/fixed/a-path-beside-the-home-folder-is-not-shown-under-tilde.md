@@ -1,0 +1,1 @@
+- **A path beside the home folder is not shown under `~`.** With the home folder `/home/al`, a path such as `/home/alice/x` showed as `~ice/x` in titles, the status bar and lists. Only the home folder and what lies under it are shortened now. The agent panel's banner cuts a long directory by the columns it takes, so a path in Chinese, Japanese or Korean no longer overflows it.

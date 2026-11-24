@@ -1120,3 +1120,14 @@ fn a_notice_above_the_scrolled_banner_list_keeps_the_list_in_place() {
         "{after:#?}"
     );
 }
+
+/// The banner's directory is cut to its columns: a wide character takes
+/// two, so a path in CJK keeps within the width it is given.
+#[test]
+fn a_long_banner_path_is_cut_by_columns() {
+    let path = Path::new("/srv/项目/文档/资料");
+    let cut = shorten_path(path, 9);
+    assert_eq!(cut, "…档/资料");
+    assert!(termide_ui::str_display_width(&cut) <= 9);
+    assert_eq!(shorten_path(Path::new("/srv/abc"), 20), "/srv/abc");
+}
