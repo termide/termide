@@ -969,10 +969,11 @@ impl AppState {
         self.last_layout_save = Some(std::time::Instant::now());
     }
 
-    /// Save bookmarks to data directory
-    pub fn save_bookmarks(&self) {
+    /// Save bookmarks to data directory; a failure shows on the status bar,
+    /// since the change made in the menu is then gone at the next start.
+    pub fn save_bookmarks(&mut self) {
         if let Err(e) = self.bookmarks.save() {
-            log::error!("Failed to save bookmarks: {}", e);
+            self.set_error(termide_i18n::t().bookmarks_save_failed_fmt(&e.to_string()));
         }
     }
 
