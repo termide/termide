@@ -1,0 +1,1 @@
+- **The git status buttons keep their choice when the row changes.** After a stash, a commit or any change that added or removed buttons, the chosen button could point past the end of the row, so `Enter` did nothing until an arrow key brought it back, or it slid onto a neighbour. The choice now stays on its button, or on the nearest one left.

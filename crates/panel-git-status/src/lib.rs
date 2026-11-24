@@ -133,7 +133,8 @@ pub struct GitStatusPanel {
     initial_paths: Vec<PathBuf>,
     /// Cached vim_mode setting for keyboard handling
     vim_mode: bool,
-    /// Whether panel missed updates while collapsed (stale-on-collapse)
+    /// Whether the panel missed updates while collapsed or parked with its
+    /// project, until a refresh started after the last of them lands.
     is_stale: bool,
     /// Watched root registered with the watcher (None = not yet registered)
     watched_root: Option<PathBuf>,
@@ -158,6 +159,9 @@ pub struct GitStatusPanel {
     /// single follow-up pass runs once it lands instead of stacking threads
     /// (and git subprocesses) per watcher event during a `.git` storm.
     refresh_pending: bool,
+    /// Whether that follow-up pass shows the loading spinner: only when a
+    /// visible refresh asked for it, not when only `MarkStale` did.
+    refresh_pending_loud: bool,
 }
 
 /// Build HotkeyTable for the git status panel.
@@ -255,6 +259,7 @@ impl GitStatusPanel {
             last_config: termide_core::SeenArc::default(),
             refresh_rx: None,
             refresh_pending: false,
+            refresh_pending_loud: false,
         };
 
         panel.refresh();
@@ -490,7 +495,8 @@ impl Panel for GitStatusPanel {
                 self.is_stale = true;
                 // The title's counts, from a worker: this comes to every
                 // panel of a project being left and to a collapsed panel on
-                // each watcher batch. `tick` asks to redraw once they land.
+                // each watcher batch. `tick` asks to redraw once they land,
+                // and their landing clears `is_stale`.
                 self.refresh_quietly();
                 CommandResult::None
             }
@@ -501,7 +507,15 @@ impl Panel for GitStatusPanel {
             PanelCommand::RefreshIfStale => {
                 if self.is_stale {
                     self.is_stale = false;
-                    self.refresh();
+                    if self.refresh_rx.is_some() {
+                        // `MarkStale`'s background pass, or the one queued
+                        // after it, is still running: it brings the changes,
+                        // shown loading now that the panel is.
+                        self.is_loading = true;
+                        self.refresh_pending_loud |= self.refresh_pending;
+                    } else {
+                        self.refresh();
+                    }
                     CommandResult::NeedsRedraw(true)
                 } else {
                     CommandResult::None

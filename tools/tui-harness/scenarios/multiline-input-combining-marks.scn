@@ -28,6 +28,7 @@ wait-gone "cayfx"
 # The commit message window of the git status panel.
 key Alt+G
 wait "a.txt"
+wait "[Push]"
 key Shift+Tab Right Right Right Right Right Enter
 wait "Commit 1"
 type "caféx"

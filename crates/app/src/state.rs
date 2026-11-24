@@ -52,13 +52,59 @@ pub(crate) fn ai_sessions_root() -> Option<PathBuf> {
     })
 }
 
-/// A `git commit` from the commit window in flight: its hooks may run for
-/// minutes, so it runs on a worker thread that answers with the new commit's
-/// short hash or git's message.
+/// What a git job started from the interface does, which decides how its end
+/// is reported.
+#[derive(Debug, Clone, PartialEq)]
+pub enum GitJobKind {
+    /// A commit from the commit window; answers with the new short hash.
+    Commit,
+    StashPush,
+    StashPop(usize),
+    StashApply(usize),
+    StashDrop(usize),
+    StashRename,
+    Stage,
+    Unstage,
+    /// One file's changes reverted.
+    Revert,
+    /// Every change unstaged and reverted.
+    RevertAll,
+    /// The stash list for the stash dropdown, which opens when it answers
+    /// if the project it was asked in is still the one shown.
+    StashList {
+        button_area: ratatui::layout::Rect,
+        has_changes: bool,
+        project_root: PathBuf,
+    },
+    /// The details of stash `index` for its window, which opens when they
+    /// come if the stash dropdown is still open on the project it was asked
+    /// in.
+    StashInfo {
+        index: usize,
+        project_root: PathBuf,
+    },
+}
+
+/// What a git job answers with when it succeeds.
 #[derive(Debug)]
-pub struct GitCommitJob {
-    pub repo_path: std::path::PathBuf,
-    pub receiver: mpsc::Receiver<Result<String, String>>,
+pub enum GitJobOutput {
+    Done,
+    /// The new commit's short hash.
+    Committed(String),
+    Stashes(Vec<termide_git::StashEntry>),
+    /// A stash's details; `None` when git could not tell them.
+    StashDetails(Option<termide_git::StashInfo>),
+}
+
+/// A git command started from the interface, in flight: a commit's hooks may
+/// run for minutes and any command can wait on a slow disk or a large
+/// repository, so it runs on a worker thread that answers with its output or
+/// the message to show for its failure, already worded.
+#[derive(Debug)]
+pub struct GitJob {
+    pub repo_path: PathBuf,
+    pub kind: GitJobKind,
+    pub receiver: mpsc::Receiver<Result<GitJobOutput, String>>,
 }
 
 /// A viewer URL fetch in flight: the id its viewer waits under and the channel
@@ -110,8 +156,9 @@ pub struct AppState {
     pub next_view_fetch_id: u64,
     /// Handle for background git operation (allows cancellation)
     pub git_operation_handle: Option<GitOperationHandle>,
-    /// Commits from the commit window still running their hooks.
-    pub git_commits: Vec<GitCommitJob>,
+    /// Git commands started from the interface still running: commits,
+    /// stash, stage and revert actions, the stash dropdown's list.
+    pub git_jobs: Vec<GitJob>,
     /// SSH key passphrase entered for git network operations, cached in memory
     /// for the session so repeated push/fetch don't re-prompt. Never persisted.
     pub git_ssh_passphrase: Option<String>,
@@ -306,7 +353,7 @@ impl AppState {
             view_fetches: Vec::new(),
             next_view_fetch_id: 0,
             git_operation_handle: None,
-            git_commits: Vec::new(),
+            git_jobs: Vec::new(),
             git_ssh_passphrase: None,
             command_operation_handles: Vec::new(),
             bg_command_handles: Vec::new(),

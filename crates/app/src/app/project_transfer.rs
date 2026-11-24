@@ -553,11 +553,18 @@ fn relocate_breakpoints(from: &Path, to: &Path) {
 }
 
 /// Mend the links between a repository moved to `root` and its worktrees,
-/// which name each other by absolute path.
+/// which name each other by absolute path. Runs on a worker thread: it
+/// touches only git's files, not the state the project claim guards, and its
+/// outcome is only logged.
 fn repair_git_worktrees(root: &Path) {
     if !root.join(".git").exists() {
         return;
     }
+    let root = root.to_path_buf();
+    std::thread::spawn(move || run_git_worktree_repair(&root));
+}
+
+fn run_git_worktree_repair(root: &Path) {
     match std::process::Command::new("git")
         .arg("-C")
         .arg(root)

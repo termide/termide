@@ -1024,19 +1024,12 @@ impl App {
                     if let Some(new_message) = value.get::<String>() {
                         let new_message = new_message.trim();
                         if !new_message.is_empty() {
-                            match termide_git::stash_rename(&repo_path, index, new_message) {
-                                Ok(()) => {
-                                    self.state.set_info(
-                                        termide_i18n::t().git_stash_renamed().to_string(),
-                                    );
-                                    self.send_git_update(&repo_path);
-                                }
-                                Err(e) => {
-                                    self.show_error_modal(
-                                        termide_i18n::t().git_stash_failed_fmt(&e.to_string()),
-                                    );
-                                }
-                            }
+                            let new_message = new_message.to_string();
+                            self.spawn_git_command(
+                                &repo_path,
+                                crate::state::GitJobKind::StashRename,
+                                move |repo| termide_git::stash_rename(repo, index, &new_message),
+                            );
                         }
                     }
                 }

@@ -332,20 +332,7 @@ impl App {
                 button_area,
                 has_changes,
             } => {
-                // Toggle: if already open, close
-                if self.state.ui.stash_submenu.open {
-                    self.state.ui.stash_submenu.close();
-                    self.state.needs_redraw = true;
-                } else {
-                    // Load stash entries and open dropdown
-                    let entries = termide_git::stash_list(&repo_path);
-                    self.state.stash.entries = entries;
-                    self.state.ui.stash_button_area = Some(button_area);
-                    self.state.stash.repo_path = Some(repo_path);
-                    self.state.stash.has_changes = has_changes;
-                    self.state.ui.stash_submenu.open_unchosen();
-                    self.state.needs_redraw = true;
-                }
+                self.toggle_stash_dropdown(repo_path, button_area, has_changes);
             }
 
             // === Operations panel ===

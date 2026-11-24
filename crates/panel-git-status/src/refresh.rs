@@ -85,6 +85,7 @@ impl GitStatusPanel {
         // fresh batch of git subprocesses) for every queued event.
         if self.refresh_rx.is_some() {
             self.refresh_pending = true;
+            self.refresh_pending_loud |= show_loading;
             return;
         }
         self.is_loading = show_loading;
@@ -179,10 +180,15 @@ impl GitStatusPanel {
         // working copy.
         if result.requested != self.viewed {
             self.refresh_pending = false;
-            self.refresh();
+            let loud = std::mem::take(&mut self.refresh_pending_loud) || self.is_loading;
+            self.start_refresh(loud);
             return false;
         }
 
+        let held = self
+            .get_visible_buttons()
+            .get(self.selected_button)
+            .copied();
         self.branch = result.branch;
         self.branches = result.branches;
         self.viewed = result.viewed;
@@ -194,6 +200,7 @@ impl GitStatusPanel {
         self.stash_count = result.stash_count;
 
         self.rebuild_trees();
+        self.keep_button(held);
 
         // Adjust cursor to stay within bounds (cursor is virtual line)
         let max_cursor = self.total_virtual_lines().saturating_sub(1);
@@ -205,16 +212,23 @@ impl GitStatusPanel {
         }
 
         self.is_loading = false;
+        // Without a pass queued, none was asked for since this one started:
+        // what the panel missed while stale is in.
+        if !self.refresh_pending {
+            self.is_stale = false;
+        }
         self.run_pending_refresh();
         true
     }
 
     /// If a refresh was requested while a worker was in flight, run the single
-    /// coalesced follow-up pass now that the receiver is free.
+    /// coalesced follow-up pass now that the receiver is free, quiet unless a
+    /// visible refresh asked for it.
     fn run_pending_refresh(&mut self) {
         if self.refresh_pending {
             self.refresh_pending = false;
-            self.refresh();
+            let loud = std::mem::take(&mut self.refresh_pending_loud);
+            self.start_refresh(loud);
         }
     }
 
