@@ -762,6 +762,13 @@ fn main() -> Result<()> {
     let width = size.width.max(20);
     let height = size.height.max(5);
 
+    // Compiling the highlight queries of every language takes a few hundred
+    // milliseconds; done lazily, it fell on the frame that first drew a code
+    // block in an editor or an agent's transcript.
+    std::thread::spawn(|| {
+        termide_highlight::global_highlighter();
+    });
+
     let config_restores_projects = config.general.restore_projects;
     // Create application with pre-loaded config (avoids double config loading)
     let mut app = App::new_with_config(

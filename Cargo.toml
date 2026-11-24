@@ -180,6 +180,7 @@ termide-config = { path = "crates/config" }
 termide-core = { path = "crates/core" }
 termide-detach = { path = "crates/detach" }
 termide-git = { path = "crates/git" }
+termide-highlight = { path = "crates/highlight" }
 termide-i18n = { path = "crates/i18n" }
 termide-keyboard = { path = "crates/keyboard" }
 termide-layout = { path = "crates/layout" }

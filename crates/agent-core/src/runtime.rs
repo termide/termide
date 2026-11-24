@@ -367,6 +367,26 @@ pub trait Backend: Send {
     fn set_option(&self, _id: String, _value: String) -> Result<(), String> {
         Err("options are not supported".to_string())
     }
+    /// Ask for a session's saved settings when it is restored: `(id, value)`
+    /// pairs, the model under [`crate::MODEL_OPTION`], each one offered and
+    /// not already in effect. The agent's answers can take seconds and
+    /// several panels restore at once, so a backend that waits on its agent
+    /// asks off the caller's thread; its [`Self::current_model`] and
+    /// [`Self::config_options`] show the settings once they are taken. A
+    /// refusal is logged, as the user did not ask for it then. The default
+    /// asks here, one after another.
+    fn apply_choices(&self, choices: Vec<(String, String)>) {
+        for (id, value) in choices {
+            let outcome = if id == crate::MODEL_OPTION {
+                self.select_model(value.clone())
+            } else {
+                self.set_option(id.clone(), value.clone())
+            };
+            if let Err(error) = outcome {
+                log::warn!("cannot ask the agent for {id} = {value}: {error}");
+            }
+        }
+    }
     /// The calls the agent moved to the background that termide still runs
     /// for it, the longest-running first; none for the built-in loop, which
     /// waits on every call it makes.

@@ -69,6 +69,17 @@ impl GitStatusPanel {
     }
 
     pub fn refresh(&mut self) {
+        self.start_refresh(true);
+    }
+
+    /// [`Self::refresh`] without the loading spinner in the title: for a
+    /// panel collapsed to its title or parked with its project, whose counts
+    /// catch up on their own.
+    pub(crate) fn refresh_quietly(&mut self) {
+        self.start_refresh(false);
+    }
+
+    fn start_refresh(&mut self, show_loading: bool) {
         // Coalesce: a worker is already running, so mark that one more pass is
         // needed when it finishes rather than spawning a parallel worker (and a
         // fresh batch of git subprocesses) for every queued event.
@@ -76,7 +87,7 @@ impl GitStatusPanel {
             self.refresh_pending = true;
             return;
         }
-        self.is_loading = true;
+        self.is_loading = show_loading;
 
         let repo = match self.repo_manager.current() {
             Some(r) => r.to_path_buf(),
@@ -205,24 +216,6 @@ impl GitStatusPanel {
             self.refresh_pending = false;
             self.refresh();
         }
-    }
-
-    /// Lightweight refresh of only the data used by `title()`.
-    /// Skips branch listing, sorting, and cursor adjustment.
-    pub(crate) fn refresh_title_data(&mut self) {
-        let Some(repo) = self.repo_manager.current().map(Path::to_path_buf) else {
-            return;
-        };
-        self.branch = git::get_current_branch(&repo);
-        // A branch checked out nowhere has no working copy to count.
-        let Some(dir) = self.work_dir() else {
-            return;
-        };
-        let (ahead, behind) = git::get_ahead_behind(&dir);
-        self.ahead = ahead;
-        self.behind = behind;
-        self.unstaged_files = git::get_unstaged_files(&dir);
-        self.staged_files = git::get_staged_files(&dir);
     }
 
     /// Build the node list of a section tree from file entries.

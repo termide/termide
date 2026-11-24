@@ -255,35 +255,28 @@ impl AgentPanel {
 
     /// Ask the external agent, once it stated its models and settings, for
     /// those the session picked (or the configuration pre-selects); a value
-    /// it no longer offers is left as the agent has it.
+    /// it no longer offers is left as the agent has it. The backend asks
+    /// off the UI thread where the agent's answers are waited for; the tick
+    /// takes the model and the settings once they change.
     pub(crate) fn apply_acp_choices(&mut self) {
         let models = self.runtime.available_models();
         let options = self.runtime.config_options();
-        for (id, value) in std::mem::take(&mut self.pending_acp_choices) {
-            let outcome = if id == MODEL_OPTION {
-                if !models.iter().any(|m| m.id == value)
-                    || self.runtime.current_model().as_deref() == Some(value.as_str())
-                {
-                    continue;
+        let current_model = self.runtime.current_model();
+        let choices: Vec<(String, String)> = std::mem::take(&mut self.pending_acp_choices)
+            .into_iter()
+            .filter(|(id, value)| {
+                if id == MODEL_OPTION {
+                    models.iter().any(|m| &m.id == value)
+                        && current_model.as_deref() != Some(value.as_str())
+                } else {
+                    options.iter().find(|o| &o.id == id).is_some_and(|o| {
+                        &o.current != value && o.values.iter().any(|v| &v.id == value)
+                    })
                 }
-                let outcome = self.runtime.select_model(value.clone());
-                if outcome.is_ok() {
-                    self.model.id = value.clone();
-                }
-                outcome
-            } else {
-                let offered = options
-                    .iter()
-                    .find(|o| o.id == id)
-                    .is_some_and(|o| o.current != value && o.values.iter().any(|v| v.id == value));
-                if !offered {
-                    continue;
-                }
-                self.runtime.set_option(id.clone(), value.clone())
-            };
-            if let Err(error) = outcome {
-                log::warn!("cannot ask the agent for {id} = {value}: {error}");
-            }
+            })
+            .collect();
+        if !choices.is_empty() {
+            self.runtime.apply_choices(choices);
         }
         self.acp_options = self.runtime.config_options();
     }

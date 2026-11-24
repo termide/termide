@@ -2244,6 +2244,88 @@ fn models_are_read_from_the_session_and_switched_over_acp() {
     }
 }
 
+/// A restored session's settings are asked for off the caller's thread:
+/// the panels of a project ask on entering it, on the UI thread, and an
+/// agent may take seconds to answer each one.
+#[test]
+fn restored_choices_do_not_wait_for_the_agent() {
+    let dir = tempfile::tempdir().unwrap();
+    let (to_agent_rx, to_agent_tx) = pipe().unwrap();
+    let (from_agent_rx, from_agent_tx) = pipe().unwrap();
+    let (release, gate) = mpsc::channel::<()>();
+    std::thread::spawn(move || {
+        let mut out = from_agent_tx;
+        let mut send = |value: Value| writeln!(out, "{value}").unwrap();
+        let mut reader = BufReader::new(to_agent_rx).lines();
+        while let Some(Ok(line)) = reader.next() {
+            let message: Value = serde_json::from_str(&line).unwrap();
+            let id = message["id"].clone();
+            let result = match message["method"].as_str() {
+                Some("initialize") => json!({ "protocolVersion": 1, "agentCapabilities": {} }),
+                Some("session/new") => json!({
+                    "sessionId": "s1",
+                    "models": {
+                        "availableModels": [
+                            { "modelId": "m-fast", "name": "Fast" },
+                            { "modelId": "m-slow", "name": "Slow" }
+                        ],
+                        "currentModelId": "m-fast"
+                    }
+                }),
+                // Held until the test lets it through.
+                Some("session/set_model") => {
+                    gate.recv().unwrap();
+                    json!({})
+                }
+                _ => continue,
+            };
+            send(json!({ "jsonrpc": "2.0", "id": id, "result": result }));
+        }
+    });
+    let cancel = CancelToken::new();
+    let (prompter, _permissions) = permission_channel(cancel.clone());
+    let runtime = AcpRuntime::from_streams(
+        "fake",
+        from_agent_rx,
+        to_agent_tx,
+        BackendSetup {
+            cwd: dir.path().to_path_buf(),
+            prompter,
+            cancel,
+            rules: PermissionRules::default(),
+            persist: None,
+            mode: ModeHandle::new(Mode::default()),
+            system_prompt: String::new(),
+            plan: PlanPrompt::default(),
+            plan_seen: false,
+            goal: GoalPrompt::default(),
+            handoff: HandoffPrompt::default(),
+            reviewer: ReviewerSetup::default(),
+            host_tools: None,
+            resume: None,
+            fork: None,
+            history: Vec::new(),
+        },
+        5,
+        AcpFlavor::Generic,
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime.available_models().is_empty() {
+        assert!(Instant::now() < deadline, "models never arrived");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    runtime.apply_choices(vec![(MODEL_OPTION.to_string(), "m-slow".to_string())]);
+    assert_eq!(runtime.current_model(), Some("m-fast".to_string()));
+
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while runtime.current_model().as_deref() != Some("m-slow") {
+        assert!(Instant::now() < deadline, "the model was never switched");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
 /// The config options as an agent states them, effort at `effort`.
 fn stated_options(effort: &str) -> Value {
     json!([

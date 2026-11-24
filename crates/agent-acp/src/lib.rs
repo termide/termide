@@ -35,7 +35,7 @@ use termide_agent_core::{
     BackgroundCall, CancelToken, DecidedBy, Decision, ExternalSessionRef, Failure, FailureKind,
     ForkSource, Hooks, HostTools, Message, Mode, ModeHandle, PermissionHooks, PermissionNote,
     PlanPrompt, PromptError, StopReason, StreamEvent, ToolCall, ToolContext, ToolDecision,
-    ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, RECAP_LIMIT,
+    ToolRegistry, ToolResultMessage, Usage, UserMessage, ACP_PROVIDER, MODEL_OPTION, RECAP_LIMIT,
 };
 use termide_agent_core::{CommandDir, CompactionCall, CompactionReason, SHELL_TOOL};
 use termide_agent_mcp::{McpServer, SERVER_NAME};
@@ -1026,29 +1026,25 @@ impl Backend for AcpRuntime {
     /// Taken during a turn too: ACP lets a session's configuration change
     /// at any time, and the agent applies it as soon as it can.
     fn select_model(&self, model_id: String) -> Result<(), String> {
-        let option = self
-            .shared
-            .model_option
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone();
-        match option {
-            Some(config_id) => self.shared.set_config_option(&config_id, &model_id)?,
-            None => {
-                let session_id = self.shared.session_id()?;
-                self.shared.request(
-                    "session/set_model",
-                    json!({ "sessionId": session_id, "modelId": model_id }),
-                    Duration::from_secs(30),
-                )?;
+        self.shared.select_model(model_id)
+    }
+
+    /// Off the UI thread: each answer can take the agent seconds, and the
+    /// panels of a project reopened at startup all ask on entering it.
+    fn apply_choices(&self, choices: Vec<(String, String)>) {
+        let shared = Arc::clone(&self.shared);
+        std::thread::spawn(move || {
+            for (id, value) in choices {
+                let outcome = if id == MODEL_OPTION {
+                    shared.select_model(value.clone())
+                } else {
+                    shared.set_config_option(&id, &value)
+                };
+                if let Err(error) = outcome {
+                    log::warn!("cannot ask the agent for {id} = {value}: {error}");
+                }
             }
-        }
-        *self
-            .shared
-            .current_model
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = Some(model_id);
-        Ok(())
+        });
     }
 
     fn config_options(&self) -> Vec<BackendOption> {
@@ -1625,6 +1621,32 @@ impl Shared {
             Conn::Starting => Err("the agent is still starting".to_string()),
             Conn::Failed(error) => Err(error.clone()),
         }
+    }
+
+    /// Switch the session's model: through its config option when the
+    /// agent offers one, else through `session/set_model`.
+    fn select_model(&self, model_id: String) -> Result<(), String> {
+        let option = self
+            .model_option
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone();
+        match option {
+            Some(config_id) => self.set_config_option(&config_id, &model_id)?,
+            None => {
+                let session_id = self.session_id()?;
+                self.request(
+                    "session/set_model",
+                    json!({ "sessionId": session_id, "modelId": model_id }),
+                    Duration::from_secs(30),
+                )?;
+            }
+        }
+        *self
+            .current_model
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(model_id);
+        Ok(())
     }
 
     /// Set config option `id` to `value` and take the options the agent

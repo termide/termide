@@ -488,8 +488,11 @@ impl Panel for GitStatusPanel {
             }
             PanelCommand::MarkStale => {
                 self.is_stale = true;
-                self.refresh_title_data();
-                CommandResult::NeedsRedraw(true)
+                // The title's counts, from a worker: this comes to every
+                // panel of a project being left and to a collapsed panel on
+                // each watcher batch. `tick` asks to redraw once they land.
+                self.refresh_quietly();
+                CommandResult::None
             }
             PanelCommand::Reload => {
                 self.refresh();

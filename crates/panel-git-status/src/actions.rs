@@ -694,4 +694,24 @@ mod tests {
             Some("main")
         );
     }
+
+    /// `MarkStale` comes to every panel of a project being left, and to a
+    /// panel collapsed to its title on each watcher batch: it runs no git on
+    /// the UI thread. The title's counts catch up from a background refresh
+    /// that shows no loading spinner.
+    #[test]
+    fn mark_stale_refreshes_the_title_in_the_background() {
+        let (_root, repo, _worktree) = repo();
+        let mut panel = GitStatusPanel::new_for_repo(repo.clone(), None);
+        settle(&mut panel);
+        assert!(panel.unstaged_files.is_empty());
+        std::fs::write(repo.join("new.txt"), "x").unwrap();
+
+        panel.handle_command(termide_core::PanelCommand::MarkStale);
+        assert!(panel.unstaged_files.is_empty(), "git ran on the UI thread");
+        assert!(!panel.is_loading, "the title shows a spinner");
+
+        settle(&mut panel);
+        assert!(panel.title().contains("*1 "), "{}", panel.title());
+    }
 }
