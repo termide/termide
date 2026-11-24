@@ -35,6 +35,25 @@ impl App {
         }
     }
 
+    /// Give a batch the size of its local sources once the walk adding it
+    /// up is done; its sub-operations' own totals only ever raise it.
+    pub(super) fn check_batch_size_scan(&mut self) {
+        let Some(scan) = &self.state.batch.size_scan else {
+            return;
+        };
+        let Some(total) = scan.poll() else {
+            return;
+        };
+        let batch_id = scan.batch_id;
+        self.state.batch.size_scan = None;
+        if let Some(op) = self.state.active_operations.get_mut(&batch_id) {
+            if total > op.progress.total_bytes {
+                op.progress.total_bytes = total;
+                self.state.needs_redraw = true;
+            }
+        }
+    }
+
     /// Poll the unified operation manager for events (new file-ops system).
     /// This handles events from the centralized operation manager which will
     /// eventually replace the individual operation handles.

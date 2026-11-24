@@ -37,7 +37,7 @@ pub use crate::state_types::{
     kill_process_tree, BatchOperationState, CacheState, CommandOperationHandle,
     CommandOperationResult, EditorUpload, GitOperationHandle, GitOperationResult,
     PendingBatchUpload, PendingCommandLaunch, PendingEditorDownload, PendingRemoteDelete,
-    ResourceModalKind, ScrollBarDrag, StashState,
+    ResourceModalKind, ScrollBarDrag, SizeScan, StashState,
 };
 
 /// The key prefix of a Sessions row in the AI menu, before the directory

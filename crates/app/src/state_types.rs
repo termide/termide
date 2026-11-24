@@ -191,6 +191,94 @@ pub struct BatchOperationState {
     pub sub_operation_id: Option<termide_file_ops::OperationId>,
     /// Counter for generating synthetic batch `OperationId`s.
     pub id_counter: u64,
+    /// The size of the batch's local sources, being added up off the UI
+    /// thread for the batch's progress bar.
+    pub size_scan: Option<SizeScan>,
+}
+
+/// The total size of local files and folders, added up on a thread of its
+/// own; dropping it stops the walk.
+#[derive(Debug)]
+pub struct SizeScan {
+    /// The batch whose progress takes the total.
+    pub batch_id: termide_file_ops::OperationId,
+    total: std::sync::mpsc::Receiver<u64>,
+    stop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl SizeScan {
+    pub fn spawn(
+        batch_id: termide_file_ops::OperationId,
+        sources: Vec<std::path::PathBuf>,
+    ) -> Self {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let (tx, total) = std::sync::mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopped = Arc::clone(&stop);
+        let spawned = std::thread::Builder::new()
+            .name("batch-size-scan".into())
+            .spawn(move || {
+                let total = total_size(&sources, &|| stopped.load(Ordering::Relaxed));
+                let _ = tx.send(total);
+            });
+        if let Err(e) = spawned {
+            log::warn!("Failed to start the size scan of a batch: {e}");
+        }
+        Self {
+            batch_id,
+            total,
+            stop,
+        }
+    }
+
+    /// The total, once the walk has finished; 0 when it never will.
+    pub fn poll(&self) -> Option<u64> {
+        match self.total.try_recv() {
+            Ok(total) => Some(total),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => Some(0),
+        }
+    }
+}
+
+impl Drop for SizeScan {
+    fn drop(&mut self) {
+        self.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+/// The size of the files under `sources`, folders walked down, until
+/// `stopped` says so.
+pub fn total_size(sources: &[std::path::PathBuf], stopped: &dyn Fn() -> bool) -> u64 {
+    fn dir_size(path: &std::path::Path, stopped: &dyn Fn() -> bool) -> u64 {
+        let mut total = 0u64;
+        let Ok(entries) = std::fs::read_dir(path) else {
+            return 0;
+        };
+        for entry in entries.flatten() {
+            if stopped() {
+                break;
+            }
+            // Not followed: a link to a folder is copied as a link.
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                total += dir_size(&entry.path(), stopped);
+            } else {
+                total += meta.len();
+            }
+        }
+        total
+    }
+    let mut total = 0u64;
+    for source in sources {
+        match std::fs::metadata(source) {
+            Ok(meta) if meta.is_dir() => total += dir_size(source, stopped),
+            Ok(meta) => total += meta.len(),
+            Err(_) => {}
+        }
+    }
+    total
 }
 
 pub struct PendingRemoteDelete {
@@ -299,4 +387,29 @@ pub struct ScrollBarDrag {
     /// Where inside the thumb the grab happened, so the thumb does not jump
     /// under the cursor on the first drag event.
     pub grab_offset: u16,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_size_scan_adds_up_files_and_folders_off_the_ui_thread() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a"), [0u8; 3]).unwrap();
+        std::fs::create_dir(dir.path().join("d")).unwrap();
+        std::fs::write(dir.path().join("d/b"), [0u8; 4]).unwrap();
+        let sources = vec![dir.path().join("a"), dir.path().join("d")];
+        let scan = SizeScan::spawn(termide_file_ops::OperationId::new(1), sources.clone());
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let total = loop {
+            if let Some(total) = scan.poll() {
+                break total;
+            }
+            assert!(std::time::Instant::now() < deadline, "the scan never ended");
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        };
+        assert_eq!(total, 7);
+        assert_eq!(total_size(&sources[1..], &|| true), 0, "a stopped walk");
+    }
 }
