@@ -15,11 +15,13 @@ crossterm.workspace = true
 log.workspace = true
 ratatui.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 
 # Workspace crates
 termide-agent-core = { path = "../agent-core" }
 termide-config = { path = "../config" }
 termide-core = { path = "../core" }
+termide-fsutil = { path = "../fsutil" }
 termide-git = { path = "../git" }
 termide-i18n = { path = "../i18n" }
 termide-panel-image = { path = "../panel-image" }

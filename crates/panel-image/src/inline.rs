@@ -138,6 +138,24 @@ pub fn picture_bytes(data: &str) -> Option<Vec<u8>> {
     base64::engine::general_purpose::STANDARD.decode(data).ok()
 }
 
+/// The file extension for picture `bytes`, read from the format they are
+/// in, when that is one the image panel opens: a raster image, never a
+/// vector or document format, whatever media type came with the bytes.
+#[must_use]
+pub fn picture_extension(bytes: &[u8]) -> Option<&'static str> {
+    use image::ImageFormat;
+    Some(match image::guess_format(bytes).ok()? {
+        ImageFormat::Png => "png",
+        ImageFormat::Jpeg => "jpg",
+        ImageFormat::Gif => "gif",
+        ImageFormat::WebP => "webp",
+        ImageFormat::Bmp => "bmp",
+        ImageFormat::Ico => "ico",
+        ImageFormat::Tiff => "tiff",
+        _ => return None,
+    })
+}
+
 fn decode_bytes(data: &str) -> Option<Vec<u8>> {
     picture_bytes(data)
 }
@@ -264,6 +282,21 @@ mod tests {
     fn the_size_comes_from_the_header() {
         assert_eq!(picture_size(&png(30, 20)), Some((30, 20)));
         assert_eq!(picture_size("not base64!"), None);
+    }
+
+    /// The extension follows the bytes, and only a raster format the image
+    /// panel opens gets one.
+    #[test]
+    fn the_extension_comes_from_the_bytes() {
+        let bytes = picture_bytes(&png(3, 2)).unwrap();
+        assert_eq!(picture_extension(&bytes), Some("png"));
+        assert_eq!(picture_extension(b"GIF89a\x01\x00\x01\x00"), Some("gif"));
+        assert_eq!(picture_extension(b"\xff\xd8\xff\xe0"), Some("jpg"));
+        assert_eq!(picture_extension(b"<svg xmlns=\"x\"></svg>"), None);
+        assert_eq!(picture_extension(b"<!DOCTYPE html><html>"), None);
+        // A format `image` knows but the image panel does not open.
+        assert_eq!(picture_extension(b"qoif\x00\x00\x00\x01"), None);
+        assert_eq!(picture_extension(b""), None);
     }
 
     #[test]

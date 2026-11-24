@@ -2,7 +2,7 @@
 //! history, completion of slash commands and `@` mentions, and scrolling.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use termide_agent_core::{now_millis, CommandScript, ToolResultMessage, UserMessage};
+use termide_agent_core::{CommandScript, ToolResultMessage, UserMessage};
 use termide_core::{
     AgentSnippet, KeyChord, LinkTarget, Panel, PanelEvent, SnippetSource, SnippetWanted,
     TerminalPart,
@@ -814,9 +814,12 @@ impl AgentPanel {
                 }
             })
             .collect();
-        let path = std::env::temp_dir().join(format!("termide-agent-{}-{safe}", now_millis()));
-        match std::fs::write(&path, content) {
-            Ok(()) => vec![PanelEvent::ViewFile(path), PanelEvent::NeedsRedraw],
+        let written = termide_fsutil::private_temp_dir("blocks").and_then(|dir| {
+            let bytes = content.as_bytes();
+            write_content_file(&dir, &format!("{}-{safe}", content_digest(bytes)), bytes)
+        });
+        match written {
+            Ok(path) => vec![PanelEvent::ViewFile(path), PanelEvent::NeedsRedraw],
             Err(error) => {
                 self.notice(
                     termide_i18n::t().agent_notice_cannot_open_block_fmt(&error.to_string()),
@@ -878,9 +881,9 @@ impl AgentPanel {
 
     /// A file holding picture `ordinal` of item `item`: the image `read`
     /// returned it from while that is still there, or else its data written
-    /// to a temporary file.
+    /// to a temporary file ([`write_picture`]).
     fn picture_file(&self, item: usize, ordinal: usize) -> std::io::Result<std::path::PathBuf> {
-        let (media_type, data) = self
+        let (_, data) = self
             .transcript
             .picture(item, ordinal)
             .ok_or(std::io::ErrorKind::NotFound)?;
@@ -898,24 +901,7 @@ impl AgentPanel {
         }
         let bytes = termide_panel_image::inline::picture_bytes(data)
             .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::InvalidData))?;
-        // `image/png` is a `.png` (`image/svg+xml` a `.svg`), so the panel
-        // its extension opens takes it.
-        let subtype = media_type.rsplit('/').next().unwrap_or_default();
-        let ext: String = subtype
-            .split('+')
-            .next()
-            .unwrap_or_default()
-            .chars()
-            .filter(char::is_ascii_alphanumeric)
-            .collect();
-        let ext = if ext.is_empty() { "png".into() } else { ext };
-        let path = std::env::temp_dir().join(format!(
-            "termide-agent-{}-picture-{}.{ext}",
-            now_millis(),
-            ordinal + 1
-        ));
-        std::fs::write(&path, bytes)?;
-        Ok(path)
+        write_picture(&termide_fsutil::private_temp_dir("pictures")?, &bytes)
     }
 
     /// The `@`-file mention under the cursor: the span from the `@` to the
@@ -1989,6 +1975,136 @@ impl AgentPanel {
             _ => return vec![],
         }
         vec![PanelEvent::NeedsRedraw]
+    }
+}
+
+/// Write picture `bytes` into `dir` for opening, and return its path. The
+/// extension comes from the format the bytes are in, not from the media type
+/// the agent claimed, and only a raster format the image panel opens gets
+/// its own (anything else is a `.png`), so the system's default application
+/// for it is an image viewer. The name comes from the content, so opening the
+/// same picture again reuses its file instead of adding one per open. The
+/// file is created afresh, never written through a link left at its name.
+fn write_picture(dir: &std::path::Path, bytes: &[u8]) -> std::io::Result<std::path::PathBuf> {
+    let ext = termide_panel_image::inline::picture_extension(bytes).unwrap_or("png");
+    write_content_file(
+        dir,
+        &format!("picture-{}.{ext}", content_digest(bytes)),
+        bytes,
+    )
+}
+
+/// The first 128 bits of `bytes`' SHA-256, in hex: a file name that stays
+/// the same for the same content.
+fn content_digest(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes)
+        .iter()
+        .take(16)
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// Write `bytes` to `dir/name`, a name derived from the content, without
+/// following a link at it: a plain file already holding them is reused, and
+/// anything else there is replaced.
+fn write_content_file(
+    dir: &std::path::Path,
+    name: &str,
+    bytes: &[u8],
+) -> std::io::Result<std::path::PathBuf> {
+    use std::io::Write;
+    let path = dir.join(name);
+    // Two rounds: the second follows removing a stale file at the name.
+    for _ in 0..2 {
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(bytes) {
+                    let _ = std::fs::remove_file(&path);
+                    return Err(error);
+                }
+                return Ok(path);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                // Written by an earlier open: reuse it when it is a plain
+                // file holding these bytes, replace it when it is not (cut
+                // short, say).
+                let meta = std::fs::symlink_metadata(&path)?;
+                if meta.is_file()
+                    && meta.len() == bytes.len() as u64
+                    && std::fs::read(&path)? == bytes
+                {
+                    return Ok(path);
+                }
+                std::fs::remove_file(&path)?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
+}
+
+#[cfg(test)]
+mod write_picture_tests {
+    use super::write_picture;
+
+    const GIF: &[u8] = b"GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;";
+
+    /// The extension is the format's, whatever type the agent named.
+    #[test]
+    fn the_extension_follows_the_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let gif = write_picture(dir.path(), GIF).unwrap();
+        assert_eq!(gif.extension().and_then(|e| e.to_str()), Some("gif"));
+        assert_eq!(std::fs::read(&gif).unwrap(), GIF);
+        // Bytes that are no raster image — a page, a vector drawing — open
+        // as a `.png`, never as what they are.
+        for bytes in [&b"<html><script>x</script>"[..], b"<svg/>", b"#!/bin/sh\n"] {
+            let path = write_picture(dir.path(), bytes).unwrap();
+            assert_eq!(path.extension().and_then(|e| e.to_str()), Some("png"));
+        }
+    }
+
+    /// Opening the same picture again reuses its file; another picture gets
+    /// its own.
+    #[test]
+    fn the_same_picture_reuses_its_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = write_picture(dir.path(), GIF).unwrap();
+        assert_eq!(write_picture(dir.path(), GIF).unwrap(), first);
+        let other = write_picture(dir.path(), b"other").unwrap();
+        assert_ne!(other, first);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 2);
+    }
+
+    /// A file cut short at the name is written over; a link there is
+    /// replaced, not written through.
+    #[test]
+    fn a_stale_file_or_a_link_at_the_name_is_replaced() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_picture(dir.path(), GIF).unwrap();
+        std::fs::write(&path, &GIF[..6]).unwrap();
+        assert_eq!(write_picture(dir.path(), GIF).unwrap(), path);
+        assert_eq!(std::fs::read(&path).unwrap(), GIF);
+
+        #[cfg(unix)]
+        {
+            let target = dir.path().join("target");
+            std::fs::write(&target, "kept").unwrap();
+            std::fs::remove_file(&path).unwrap();
+            std::os::unix::fs::symlink(&target, &path).unwrap();
+            assert_eq!(write_picture(dir.path(), GIF).unwrap(), path);
+            assert_eq!(std::fs::read_to_string(&target).unwrap(), "kept");
+            assert!(!std::fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink());
+            assert_eq!(std::fs::read(&path).unwrap(), GIF);
+        }
     }
 }
 
