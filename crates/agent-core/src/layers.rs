@@ -387,6 +387,11 @@ fn dot_new(path: &Path) -> PathBuf {
 ///   default written beside it as `<file>.new` for the user to merge;
 /// - otherwise untouched.
 ///
+/// A file termide has retired ([`RETIRED_ASSETS`], such as the text of a
+/// removed tool) is deleted while it is as termide wrote it and left when
+/// edited; either way `.seeds.toml` forgets it. Any other entry there, such
+/// as one a newer termide sharing the configuration recorded, is kept.
+///
 /// Safe to call on every start.
 pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
     for dir in [
@@ -467,20 +472,37 @@ pub fn ensure_global_layout(global: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
-/// Forget the assets `manifest` records that termide no longer ships, such as
-/// the text of a tool since removed. A file still as termide wrote it is
-/// deleted, with a `.new` sidecar still holding that version; one the user
-/// edited stays theirs. Returns whether `manifest` changed.
+/// Shipped assets an earlier termide seeded and this one no longer ships, as
+/// paths relative to the `ai` directory. Only these are retired: a manifest
+/// entry this binary does not know may be a file a newer termide sharing the
+/// configuration ships, and deleting it would have the two undo each other on
+/// every start. Add a path here when an asset is removed; never one that is
+/// still shipped.
+const RETIRED_ASSETS: &[&str] = &[
+    // Renamed `shell` (0.49.0).
+    "tools/bash.md",
+    // Replaced by `start_session`.
+    "tools/task.md",
+    "tools/fork.md",
+    // Renamed `sessions`.
+    "tools/agents.md",
+];
+
+/// Forget the [`RETIRED_ASSETS`] `manifest` records. A file still as termide
+/// wrote it is deleted, with a `.new` sidecar still holding that version; one
+/// the user edited stays theirs. Entries not on that list are left alone.
+/// Returns whether `manifest` changed.
 fn retire_unshipped_assets(global: &Path, manifest: &mut BTreeMap<String, String>) -> bool {
     let shipped: BTreeSet<String> = shipped_assets().into_iter().map(|(rel, _)| rel).collect();
-    let retired: Vec<(String, String)> = manifest
+    let retired: Vec<(&str, String)> = RETIRED_ASSETS
         .iter()
-        .filter(|(relative, _)| !shipped.contains(*relative))
-        .map(|(relative, hash)| (relative.clone(), hash.clone()))
+        .filter(|relative| !shipped.contains(**relative))
+        .filter_map(|relative| Some((*relative, manifest.get(*relative)?.clone())))
         .collect();
     let mut changed = false;
     for (relative, last) in retired {
-        let path = global.join(&relative);
+        // Joined from the list above, never from the manifest's own keys.
+        let path = global.join(relative);
         let untouched = |path: &Path| match std::fs::read_to_string(path) {
             Ok(current) => Some(seed_hash(&current) == last),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Some(false),
@@ -499,7 +521,7 @@ fn retire_unshipped_assets(global: &Path, manifest: &mut BTreeMap<String, String
         if untouched(&dot_new(&path)) == Some(true) {
             let _ = std::fs::remove_file(dot_new(&path));
         }
-        manifest.remove(&relative);
+        manifest.remove(relative);
         changed = true;
     }
     changed
@@ -1969,6 +1991,54 @@ mod tests {
         // What is still shipped stays.
         assert!(tools.join("start_session.md").exists());
         assert!(text.contains("tools/start_session.md"));
+    }
+
+    /// A file a newer termide sharing the configuration recorded is not this
+    /// one's to retire, however untouched: removing it would have the two
+    /// delete and rewrite it on every start.
+    #[test]
+    fn an_unknown_recorded_asset_is_left_alone() {
+        let tmp = tempfile::tempdir().unwrap();
+        let global = tmp.path().join("ai");
+        ensure_global_layout(&global).unwrap();
+        let tools = global.join(TOOLS_DIR);
+        let newer = "A tool of a newer termide.\n";
+        std::fs::write(tools.join("future_tool.md"), newer).unwrap();
+        // Nor is a key reaching outside `ai` ever joined to it.
+        let outside = tmp.path().join("outside.md");
+        std::fs::write(&outside, newer).unwrap();
+        let manifest = global.join(SEEDS_MANIFEST);
+        let mut text = std::fs::read_to_string(&manifest).unwrap();
+        for name in ["tools/future_tool.md", "../outside.md"] {
+            text.push_str(&format!("\"{name}\" = \"{}\"\n", seed_hash(newer)));
+        }
+        std::fs::write(&manifest, text).unwrap();
+
+        ensure_global_layout(&global).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(tools.join("future_tool.md")).unwrap(),
+            newer
+        );
+        assert!(outside.exists());
+        let text = std::fs::read_to_string(&manifest).unwrap();
+        assert!(text.contains("tools/future_tool.md"));
+        assert!(text.contains("../outside.md"));
+    }
+
+    /// The retired list names plain relative paths inside `ai`, none of them
+    /// still shipped, so retiring cannot reach outside it or fight a seed.
+    #[test]
+    fn retired_assets_are_relative_and_not_shipped() {
+        let shipped: BTreeSet<String> = shipped_assets().into_iter().map(|(rel, _)| rel).collect();
+        for relative in RETIRED_ASSETS {
+            assert!(!shipped.contains(*relative), "{relative} is still shipped");
+            assert!(
+                Path::new(relative)
+                    .components()
+                    .all(|c| matches!(c, std::path::Component::Normal(_))),
+                "{relative}"
+            );
+        }
     }
 
     /// A seed file that exists but cannot be read as text is the user's; it
