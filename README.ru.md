@@ -8,7 +8,7 @@
 
 Терминальное рабочее место «всё в одном» для рабочей машины и серверов: редактор кода с LSP, двухпанельный файловый менеджер с SFTP/FTP, терминал, git, просмотр баз данных и агент для кода — в одном статическом бинарнике на Rust без настройки.
 
-**[Сайт](https://termide.github.io)** | **[Документация](doc/ru/README.md)** | **[Релизы](https://github.com/termide/termide/releases)** | **[Скриншоты](https://termide.github.io/ru/#screenshots)** | **[Telegram](https://t.me/termide_news)**
+**[Сайт](https://termide.github.io)** | **[Документация](doc/ru/README.md)** | **[Релизы](https://github.com/termide/termide/releases)** | **[Скриншоты](https://termide.github.io/ru/#screenshots)** | **[Telegram](https://t.me/termide_news)** | **[Политика подписи кода (Code signing policy)](doc/ru/code-signing.md)**
 
 <p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="Termide — редактор, файловый менеджер, терминал и просмотрщики в одном TUI" width="900"></p>
 
@@ -207,6 +207,8 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 На ARM64 Windows 11 сборка x64 работает через эмуляцию.
 
 **Вручную:** скачайте `termide-0.50.0-x86_64-pc-windows-msvc.zip` с [GitHub Releases](https://github.com/termide/termide/releases), распакуйте и запустите `termide.exe`.
+
+Сборки для Windows подписываются через SignPath Foundation: см. [Code signing policy](doc/ru/code-signing.md).
 
 Конфигурация, раскладки проектов и логи хранятся в `%APPDATA%\termide\`.
 

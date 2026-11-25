@@ -359,6 +359,8 @@ jobs:
           fi
           # Write to file to preserve newlines
           echo "$BODY" > release_notes.md
+          # SignPath Foundation asks for the policy on every download page.
+          printf '\n---\n\n[Code signing policy](https://github.com/termide/termide/blob/main/doc/en/code-signing.md): Windows binaries are signed through SignPath Foundation.\n' >> release_notes.md
 
       # The packages only: the unsigned exe and SignPath's input are not
       # named termide-*.

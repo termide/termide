@@ -8,7 +8,7 @@
 
 一站式终端工作台，适用于你的工作站和服务器：带 LSP 的代码编辑器、支持 SFTP/FTP 的双栏文件管理器、终端、git、数据库查看器和编程智能体 —— 全部集成在一个零配置、使用 Rust 编写的静态二进制文件中。
 
-**[网站](https://termide.github.io)** | **[文档](doc/zh/README.md)** | **[版本发布](https://github.com/termide/termide/releases)** | **[截图](https://termide.github.io/zh/#screenshots)** | **[Telegram](https://t.me/termide_news)**
+**[网站](https://termide.github.io)** | **[文档](doc/zh/README.md)** | **[版本发布](https://github.com/termide/termide/releases)** | **[截图](https://termide.github.io/zh/#screenshots)** | **[Telegram](https://t.me/termide_news)** | **[代码签名政策 (Code signing policy)](doc/zh/code-signing.md)**
 
 <p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="Termide — 编辑器、文件管理器、终端和查看器合为一个 TUI" width="900"></p>
 
@@ -208,6 +208,8 @@ irm https://raw.githubusercontent.com/termide/termide/main/install.ps1 | iex
 在 ARM64 Windows 11 上，x64 版本通过模拟运行。
 
 **手动安装：** 从 [GitHub Releases](https://github.com/termide/termide/releases) 下载 `termide-0.50.0-x86_64-pc-windows-msvc.zip`，解压后运行 `termide.exe`。
+
+Windows 二进制文件通过 SignPath Foundation 签名：参见 [Code signing policy](doc/zh/code-signing.md)。
 
 配置、项目布局和日志均位于 `%APPDATA%\termide\`。
 

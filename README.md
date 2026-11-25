@@ -8,7 +8,7 @@
 
 An all-in-one terminal workspace for your workstation and your servers: code editor with LSP, dual-pane file manager with SFTP/FTP, terminal, git, database viewer and a coding agent — one zero-config static binary written in Rust.
 
-**[Website](https://termide.github.io)** | **[Documentation](doc/en/README.md)** | **[Releases](https://github.com/termide/termide/releases)** | **[Screenshots](https://termide.github.io/#screenshots)** | **[Telegram](https://t.me/termide_news)**
+**[Website](https://termide.github.io)** | **[Documentation](doc/en/README.md)** | **[Releases](https://github.com/termide/termide/releases)** | **[Screenshots](https://termide.github.io/#screenshots)** | **[Telegram](https://t.me/termide_news)** | **[Code signing policy](doc/en/code-signing.md)**
 
 <p align="center"><img src="https://termide.github.io/assets/screenshots/tour.gif" alt="Termide — editor, file manager, terminal and viewers in one TUI" width="900"></p>
 
@@ -208,6 +208,8 @@ Installs to `%LOCALAPPDATA%\Programs\termide` and adds it to PATH.
 On ARM64 Windows 11, the x64 build runs under emulation.
 
 **Manual:** download `termide-0.50.0-x86_64-pc-windows-msvc.zip` from [GitHub Releases](https://github.com/termide/termide/releases), extract and run `termide.exe`.
+
+Windows binaries are signed through SignPath Foundation: see the [Code signing policy](doc/en/code-signing.md).
 
 Configuration, project layouts and logs live under `%APPDATA%\termide\`.
 
